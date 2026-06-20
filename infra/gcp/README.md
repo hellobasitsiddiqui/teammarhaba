@@ -10,7 +10,7 @@ seam build on. Config of record: [`config.yaml`](./config.yaml).
 | **Display name** | TeamMarhaba |
 | **Default region** | `europe-west2` |
 | **Billing** | linked (`01D78A-BEFF21-4B5232`) |
-| **Plan** | Spark (upgrade to Blaze when Cloud SQL / Cloud Run land) |
+| **Plan** | Blaze (required once Cloud SQL / paid resources landed — TM-63) |
 
 ## How it was provisioned (reproducible — `gcloud`)
 
@@ -45,10 +45,12 @@ Both are verified via the Firebase Management + Identity Toolkit APIs (project
 returns `ACTIVE`; `defaultSupportedIdpConfigs` shows `google.com` enabled).
 
 ## Related
+- **Deploy auth — GitHub OIDC / Workload Identity Federation** (TM-67): [`deploy-auth.md`](./deploy-auth.md)
 - **Cloud SQL Postgres** (TM-63): [`cloud-sql.md`](./cloud-sql.md)
+- **Artifact Registry — container images** (TM-55): [`artifact-registry.md`](./artifact-registry.md)
+- **Firebase Hosting — web CD** (TM-61): [`firebase-hosting.md`](./firebase-hosting.md)
 
 ## Out of scope (later tickets)
 
-- Service account + GitHub OIDC (TM-67 / 1.5.2)
-- Cloud Run / Firebase Hosting deploys (TM-60 / TM-61)
-- Terraform (this is documented `gcloud`; IaC can replace it later)
+- Backend Cloud Run deploy (TM-60) — in progress; will be linked here once it lands.
+- Terraform (this is documented `gcloud`; IaC can replace it later).
