@@ -19,8 +19,8 @@
 ### 2026-06-20 — Docker: works ✅
 - Docker is available on the host — TM-51 built and ran the nginx image fine (~41m incl. build). No Docker gap.
 
-### 2026-06-20 — GCP billing: PENDING ⛔ (cloud tasks held)
-- TM-66/63/67 are **held** (assigned to Basit, flagged Impediment) until billing is confirmed/linked (TM-84). Don't attempt cloud/paid-resource tasks until released. gcloud auth is done; billing is the last cloud prereq.
+### 2026-06-20 — GCP billing: RESOLVED ✅ (cloud track released)
+- Billing is confirmed/linked (TM-84 Done). TM-66/63/67 are **released** (unassigned, un-flagged) — **claimable now**. gcloud auth + billing are both done, so cloud / paid-resource tasks can proceed. Start with **TM-66** (create the project); TM-63 + TM-67 unlock once it's Done.
 
 ---
 
