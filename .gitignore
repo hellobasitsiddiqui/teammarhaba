@@ -29,6 +29,8 @@ captures/
 # Env / secrets
 .env
 .env.*
+# but keep the committed env contract (TM-62); real .env files stay ignored
+!.env.example
 *.local
 
 # Credential files — never commit (project uses keyless OIDC, so these shouldn't exist; defense-in-depth)

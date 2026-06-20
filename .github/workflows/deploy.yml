@@ -102,7 +102,14 @@ jobs:
       # Deploy the immutable SHA-tagged image. Probes hit /health so a revision only
       # takes traffic once healthy (startup probe gates traffic; liveness restarts a
       # wedged container). Scale-to-zero (min-instances 0) for dev cost; cpu-boost
-      # softens the cold start. Cloud SQL + secret/env are pre-wired for the data layer.
+      # softens the cold start.
+      #
+      # Secrets/env (TM-62): the full required-var set is documented in .env.example
+      # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
+      # passed as plain --set-env-vars; the only sensitive value (DB_PASSWORD) is a
+      # Secret Manager reference via --set-secrets — its value never touches CI, the
+      # repo, or the logs (we pass the secret *name*, not the value, so there is
+      # nothing for the runner to mask).
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "${SERVICE}" \
@@ -114,7 +121,7 @@ jobs:
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
             --set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest \
-            --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL} \
+            --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT} \
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
             --quiet

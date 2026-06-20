@@ -49,8 +49,9 @@ returns `ACTIVE`; `defaultSupportedIdpConfigs` shows `google.com` enabled).
 - **Cloud SQL Postgres** (TM-63): [`cloud-sql.md`](./cloud-sql.md)
 - **Artifact Registry — container images** (TM-55): [`artifact-registry.md`](./artifact-registry.md)
 - **Firebase Hosting — web CD** (TM-61): [`firebase-hosting.md`](./firebase-hosting.md)
+- **Cloud Run — backend CD** (TM-60): [`cloud-run.md`](./cloud-run.md)
+- **Secrets & environment delivery** (TM-62): [`secrets-env.md`](./secrets-env.md)
 
 ## Out of scope (later tickets)
 
-- Backend Cloud Run deploy (TM-60) — in progress; will be linked here once it lands.
 - Terraform (this is documented `gcloud`; IaC can replace it later).
