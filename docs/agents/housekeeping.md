@@ -29,9 +29,9 @@ A ready Jira ticket **always wins** over housekeeping — don't start a chore if
 - [ ] Audit & convert remaining historical Jira comments from wiki markup to GitHub-flavored markdown
   (repo convention). Known offenders: TM-81 (evidence + finding comments), TM-66 (finding comment),
   TM-80 (finding comments). _(agent-A already fixed TM-84's two comments, 2026-06-20.)_
-- [ ] Verify all `docs/agents/*` and `CLAUDE.md` cross-links resolve; fix any stale paths.
-- [ ] Ensure `.gitignore` covers Gradle artifacts (`.gradle/`, `build/`) ahead of the Gradle redo (ADR-0001).
+- [x] Verify all `docs/agents/*` and `CLAUDE.md` cross-links resolve; fix any stale paths. — verified clean across all 24 md files (only hit was the literal `[text](url)` example in CLAUDE.md). agent-B 2026-06-20
+- [x] Ensure `.gitignore` covers Gradle artifacts (`.gradle/`, `build/`) ahead of the Gradle redo (ADR-0001). — already satisfied (`build/`, `.gradle/`, `!gradle/wrapper/gradle-wrapper.jar` present); no change needed. agent-B 2026-06-20
 - [x] Add `docs/decisions/README.md` indexing the ADRs (currently just ADR-0001). — done agent-A 2026-06-20 (branch `chore/adr-decisions-index`)
-- [ ] Spell/format pass over `README.md` + the surface stub READMEs for consistency.
+- [x] Spell/format pass over `README.md` + the surface stub READMEs for consistency. — reviewed root + all 6 surface READMEs; consistent, no typos. Refreshed the stale `infra/gcp/README.md` index (Related/out-of-scope) + removed the throwaway `.merge-to-done-test.md` instead. agent-B 2026-06-20 (branch `chore/gcp-docs-index-refresh`)
 
 _Seeded by agent-A, 2026-06-20. Extend freely._
