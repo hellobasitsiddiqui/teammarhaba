@@ -12,6 +12,11 @@
 
 ## Environment & toolchain (known state)
 
+### 2026-06-20 23:35 agent-A — ⚠ CD was fully RED: `iamcredentials.googleapis.com` was disabled (now fixed)
+- **Symptom:** every keyless deploy + the CI `backend-image` push failed; Artifact Registry `containers/backend` was **empty**. Errors: `PERMISSION_DENIED / SERVICE_DISABLED` on `google-github-actions/auth`, and `firebase-tools` "Failed to authenticate, have you run firebase login?".
+- **Cause:** WIF impersonation needs the **IAM Service Account Credentials API**; it was never enabled (missing from TM-66/TM-67's API set + `config.yaml`).
+- **Fix (applied):** `gcloud services enable iamcredentials.googleapis.com --project=teammarhaba` (live, verified) + added to `config.yaml`/`deploy-auth.md` in PR #25. If you deploy and see PERMISSION_DENIED again, give IAM a few minutes to propagate, then re-run.
+
 ### 2026-06-20 — gcloud: installed + authed ✅ (but Homebrew cask is broken on this host)
 - gcloud SDK **573.0.0** is installed and on PATH; `gcloud auth login` + `gcloud auth application-default login` are **done** (account `basit@10xai.co.uk`, ADC token verified). Only `gcloud config set project` remains, deferred until the project exists (TM-66).
 - **Gotcha:** `brew install --cask google-cloud-sdk` extracts the SDK then fails its `virtualenv` postflight and rolls back. The SDK files survive and run fine. **Working installs:** symlink the survivors — `ln -sf /opt/homebrew/share/google-cloud-sdk/bin/{gcloud,gsutil,bq} /opt/homebrew/bin/` — or use Google's official tarball (no virtualenv postflight). Tracked on TM-81.
