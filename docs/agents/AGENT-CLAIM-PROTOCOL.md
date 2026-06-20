@@ -89,6 +89,8 @@ Execute the task's **pinned Agent execution prompt**. **As soon as you open the 
 
 When the PR **merges to `main`**, `transition t -> Done`. That Done flips every dependent whose last blocker was `t` into *ready* — the next poll picks them up automatically. This is the whole unlock mechanism. (A task only ever reaches Done from In Review via a merge, or directly for no-PR tasks.)
 
+> **Automated since TM-86:** the `Jira merge → Done` GitHub Action (`.github/workflows/jira-merge-to-done.yml`) does this `In Review -> Done` step for you — on merge to `main` it reads the `TM-NNN` key from the branch (or PR title) and transitions that issue to Done. It fails soft (a missing key or unavailable transition never blocks the merge), and requires the one-time repo secrets `JIRA_BASE_URL` / `JIRA_USER_EMAIL` / `JIRA_API_TOKEN`. Agents may still transition manually as a fallback if the secrets aren't configured.
+
 ---
 
 ## Failure handling (matters at 20 agents)
