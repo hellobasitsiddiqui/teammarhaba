@@ -17,6 +17,7 @@ enabled_apis:
   - artifactregistry.googleapis.com # Artifact Registry (images)
   - firebase.googleapis.com       # Firebase platform
   - identitytoolkit.googleapis.com # Firebase Authentication
+  - iamcredentials.googleapis.com # IAM SA Credentials — WIF impersonation (generateAccessToken) for keyless CI/CD
 
 # Artifact Registry (TM-55). Docker repo CI pushes images to and Cloud Run pulls
 # from; keyless via WIF + the deploy SA's artifactregistry.writer. See

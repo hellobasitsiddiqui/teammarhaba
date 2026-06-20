@@ -27,6 +27,12 @@ PN=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
 SA="gha-deployer@${PROJECT}.iam.gserviceaccount.com"
 REPO="hellobasitsiddiqui/teammarhaba"
 
+# REQUIRED: the IAM Service Account Credentials API backs the impersonation
+# (generateAccessToken) that WIF performs to act as the deploy SA. Without it,
+# every keyless auth fails with PERMISSION_DENIED / SERVICE_DISABLED — which silently
+# breaks CI image push *and* both deploys. (Missed on the first pass; see config.yaml.)
+gcloud services enable iamcredentials.googleapis.com --project="$PROJECT"
+
 # Pool + GitHub OIDC provider (trust scoped to the org)
 gcloud iam workload-identity-pools create github-pool \
   --project="$PROJECT" --location=global --display-name="GitHub Actions pool"
