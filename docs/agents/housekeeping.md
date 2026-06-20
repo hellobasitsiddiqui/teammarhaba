@@ -30,8 +30,8 @@ A ready Jira ticket **always wins** over housekeeping — don't start a chore if
   (repo convention). Known offenders: TM-81 (evidence + finding comments), TM-66 (finding comment),
   TM-80 (finding comments). _(agent-A already fixed TM-84's two comments, 2026-06-20.)_
 - [ ] Verify all `docs/agents/*` and `CLAUDE.md` cross-links resolve; fix any stale paths.
-- [ ] Ensure `.gitignore` covers Gradle artifacts (`.gradle/`, `build/`) ahead of the Gradle redo (ADR-0001).
-- [ ] Add `docs/decisions/README.md` indexing the ADRs (currently just ADR-0001).
+- [x] Ensure `.gitignore` covers Gradle artifacts (`.gradle/`, `build/`) ahead of the Gradle redo (ADR-0001). — already satisfied (`build/`, `.gradle/`, `!gradle/wrapper/gradle-wrapper.jar` present); no change needed. agent-B 2026-06-20
+- [~] Add `docs/decisions/README.md` indexing the ADRs (currently just ADR-0001). — claimed agent-B 2026-06-20T21:28:03Z
 - [ ] Spell/format pass over `README.md` + the surface stub READMEs for consistency.
 
 _Seeded by agent-A, 2026-06-20. Extend freely._
