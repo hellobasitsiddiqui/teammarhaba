@@ -22,6 +22,10 @@
 ### 2026-06-20 — GCP billing: RESOLVED ✅ (cloud track released)
 - Billing is confirmed/linked (TM-84 Done). TM-66/63/67 are **released** (unassigned, un-flagged) — **claimable now**. gcloud auth + billing are both done, so cloud / paid-resource tasks can proceed. Start with **TM-66** (create the project); TM-63 + TM-67 unlock once it's Done.
 
+### 2026-06-20 22:18 agent-B — Artifact Registry repo exists now (created in TM-55)
+- The Docker repo **`containers`** (region `europe-west2`) now exists. Backend image path: **`europe-west2-docker.pkg.dev/teammarhaba/containers/backend:<sha>`** (+`:latest`). Doc: `infra/gcp/artifact-registry.md`; machine-readable in `infra/gcp/config.yaml` → `artifact_registry`. **TM-60 (Cloud Run deploy) should pull this exact path** — read it from `config.yaml`, don't re-hardcode.
+- **DAG gap (logged on TM-55):** TM-66 (1.5.1) enabled the AR *API* but no ticket created the *repo*; the TM-55 prompt calls repo provisioning "out of scope (1.5.1)" but 1.5.1=TM-66 didn't do it. I folded the one-line `gcloud artifacts repositories create` into TM-55 to keep the push functional. On replay, give the AR repo its own provisioning ticket (or extend TM-66) so it isn't a side effect of the CI ticket.
+
 ---
 
 ## Conventions reminders (full versions in the skills/docs)

@@ -49,3 +49,57 @@ jobs:
         with:
           report_paths: backend/target/surefire-reports/TEST-*.xml
           check_name: Backend test report
+
+  backend-image:
+    name: Backend image (build; push to Artifact Registry on main)
+    needs: backend            # only build/push an image that passed build + tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write         # keyless OIDC token for GCP (used only on the main push)
+    env:
+      # Artifact Registry repo `containers` (region europe-west2), provisioned for TM-55.
+      # Single source of truth: infra/gcp/artifact-registry.md + infra/gcp/config.yaml.
+      IMAGE: europe-west2-docker.pkg.dev/teammarhaba/containers/backend
+      # True only on a real merge to main — gates the push (PRs build but never push).
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Keyless auth (Workload Identity Federation, TM-67) — only when we will push.
+      # token_format=access_token lets us log into Artifact Registry without a JSON key.
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        if: ${{ env.PUSH == 'true' }}
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+          token_format: access_token
+
+      - name: Log in to Artifact Registry
+        if: ${{ env.PUSH == 'true' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: europe-west2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      # On main: build + push :<sha> and :latest. On PRs: build only (push=false).
+      - name: Build backend image (push on main)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: ${{ env.PUSH == 'true' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false

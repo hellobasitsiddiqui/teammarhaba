@@ -18,6 +18,15 @@ enabled_apis:
   - firebase.googleapis.com       # Firebase platform
   - identitytoolkit.googleapis.com # Firebase Authentication
 
+# Artifact Registry (TM-55). Docker repo CI pushes images to and Cloud Run pulls
+# from; keyless via WIF + the deploy SA's artifactregistry.writer. See
+# artifact-registry.md. (TM-66 enabled the API; the repo itself was created in TM-55.)
+artifact_registry:
+  repository: containers
+  location: europe-west2
+  host: europe-west2-docker.pkg.dev
+  backend_image: europe-west2-docker.pkg.dev/teammarhaba/containers/backend
+
 # Firebase Authentication providers (TM-66). Google = the chosen social login.
 auth:
   providers:
