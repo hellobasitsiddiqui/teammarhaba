@@ -36,6 +36,14 @@ assigned. Follow `.claude/skills/jira-task-claim` for the full protocol. In shor
 Some tasks are console/settings changes with **no PR** (e.g. create the GCP project): skip
 In Review, post a one-line evidence note, and go straight to Done.
 
+## Conventions (current — newer than the numbered steps above)
+- **Branch naming:** `<type>/TM-XX-short-kebab-desc` — `feature` (app code), `chore` (infra/CI/cloud/docs/config), `fix` (bug). e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`.
+- **Read the blackboard after you claim:** `docs/agents/blackboard.md` — append-only shared operational notes (env quirks, workarounds, "main red"). Append cross-cutting findings there so no agent rediscovers them.
+- **Board fields / time tracking:** on **claim** set Start date (`customfield_10015`); on **PR/In Review** log a **worklog** of actual elapsed (`addWorklogToJiraIssue`) + set Due date (`duedate`) if unset; if **blocked/held** set Flagged = Impediment (`customfield_10021`). Story points = the estimate. See `jira-mcp-gotchas` → Time tracking.
+- **Hit a wall? Log it — never fail silently:** comment the blocker + a `[finding → future improvement]` note; for human-only steps (interactive auth, console, secrets) raise a `human-in-the-loop` ticket and link it as a blocker.
+- **Build tool = Gradle (Kotlin DSL)** for the backend going forward — unifies with the Gradle-native Android (TM-88). (The initial backend is still Maven; throwaway on the redo.)
+- **Merged → Done is being automated** (GitHub Action, TM-86): on PR merge the ticket auto-transitions to Done. Until it lands, whoever merges moves the ticket to Done (step 6).
+
 ## Definition of Done
 **Merged to `main`.** (No-PR tasks: the change is applied and evidenced on the ticket.)
 
@@ -45,3 +53,4 @@ In Review, post a one-line evidence note, and go straight to Done.
 - `docs/agents/SPRINTS.md` — sprint naming scheme and what each sprint contains.
 - `.claude/skills/jira-mcp-gotchas` — Jira/connector quirks (read before bulk Jira create/edit/link ops).
 - `.claude/skills/` also has `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`.
+- `docs/agents/blackboard.md` — shared operational notes; **read after each claim**, append cross-cutting findings.

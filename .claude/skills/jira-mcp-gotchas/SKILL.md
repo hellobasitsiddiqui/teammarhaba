@@ -26,9 +26,18 @@ Hard-won quirks of the Atlassian MCP connector against 10xai Jira (project key *
 - **No create/start-sprint tool.** Creating a sprint and **starting** it (activating + dates) is UI-only. You can pre-fill a `future` sprint with issues via the field above, then the user clicks Start.
 
 ## Field ids (project TM)
-- Story point estimate: **`customfield_10016`** (number).
+- Story point estimate: **`customfield_10016`** (number) — used as the **estimate** (Original Estimate isn't on the Task screen; see Time tracking).
 - Sprint: **`customfield_10020`**.
+- **Start date: `customfield_10015`** (date `"YYYY-MM-DD"`) — set when work begins (claim / In Progress).
+- **Due date: `duedate`** (system, date `"YYYY-MM-DD"`) — target / sprint end.
+- **Flagged (Impediment): `customfield_10021`** — set `[{"value": "Impediment"}]` to flag a blocked ticket; `[]` to clear. (Only allowed value: "Impediment".)
+- Priority: `priority` (`{"name": "High"}`; Highest/High/Medium/Low/Lowest).
 - Set via `additional_fields` on create, or `fields` on edit. Labels via the `labels` array.
+
+## Time tracking
+- **Worklogs WORK** via `addWorklogToJiraIssue` (`timeSpent: "41m"`, optional `started` ISO-8601, `commentBody`) → rolls up to **Time Spent**. This is how to "log working time". For AI agents `timeSpent` is **wall-clock** (minutes), far below a human estimate — expected.
+- **Original/Remaining Estimate are NOT settable via the API** — the Time Tracking field isn't on the Task screen (absent from `getJiraIssueTypeMetaWithFields`). Enabling it is a one-time **UI admin** step (add Time Tracking to the issue screen). Until then **story points = the estimate**, worklogs = actuals.
+- Resolution date (actual completion) is set **automatically** on transition to Done.
 
 ## Issue-type ids (project TM)
 - Epic `10001`, Sub-task `10002`, Task `10003`, Story `10004`, Bug `10007`.
