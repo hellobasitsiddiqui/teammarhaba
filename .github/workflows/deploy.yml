@@ -104,6 +104,12 @@ jobs:
       # wedged container). Scale-to-zero (min-instances 0) for dev cost; cpu-boost
       # softens the cold start.
       #
+      # Runtime identity: a dedicated least-privilege SA (teammarhaba-run) reads the DB
+      # secret + connects to Cloud SQL — NOT the default compute SA (which lacks access).
+      # Service is PRIVATE (--no-allow-unauthenticated): the org enforces domain-restricted
+      # sharing so `allUsers` invoker is blocked. Making it public is a human/org decision
+      # tracked in TM-96.
+      #
       # Secrets/env (TM-62): the full required-var set is documented in .env.example
       # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
       # passed as plain --set-env-vars; the only sensitive value (DB_PASSWORD) is a
@@ -115,8 +121,9 @@ jobs:
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
             --image="${IMAGE}:${GITHUB_SHA}" \
+            --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --min-instances=0 --max-instances=3 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
@@ -128,20 +135,26 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
 
-      # Smoke-check the live revision over HTTPS. Cloud Run already gated traffic on the
-      # startup probe; this is a belt-and-braces external check that /health serves 200.
-      - name: Smoke-check /health
+      # Verify the rollout. `gcloud run deploy` already blocks until the revision is Ready
+      # (and the step would have failed otherwise), and Cloud Run gates Ready on the
+      # /health startup probe — so a Ready revision means /health returned 200 over HTTPS.
+      # The service is private, so we assert Ready rather than curl a public URL. A best-
+      # effort authenticated /health call follows for explicit evidence (non-fatal).
+      - name: Verify rollout (/health via startup probe)
         run: |
+          READY_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.latestReadyRevisionName)')
+          if [ -z "${READY_REV}" ]; then
+            echo "::error::No Ready revision for ${SERVICE} — /health startup probe did not pass."
+            exit 1
+          fi
+          echo "Ready revision: ${READY_REV} (startup probe on /health passed)."
           URL=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')
-          echo "Service URL: ${URL}"
-          for i in $(seq 1 10); do
-            code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" || true)
-            if [ "${code}" = "200" ]; then
-              echo "Health OK (${code}): $(cat /tmp/health.json)"
-              exit 0
-            fi
-            echo "Health attempt $i -> ${code}"
-            sleep 6
-          done
-          echo "::error::/health did not return 200 after retries."
-          exit 1
+          echo "Service URL (private): ${URL}"
+          # Best-effort authenticated probe (the SA running CI has run.admin → can invoke).
+          TOKEN=$(gcloud auth print-identity-token --audiences="${URL}" 2>/dev/null || true)
+          if [ -n "${TOKEN}" ]; then
+            code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${URL}/health" || true)
+            echo "Authenticated /health -> ${code} $( [ -f /tmp/health.json ] && cat /tmp/health.json )"
+          else
+            echo "Skipped authenticated curl (no ID token); Ready-revision check is the source of truth."
+          fi
