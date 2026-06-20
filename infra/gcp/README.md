@@ -44,9 +44,11 @@ org policy / console-only consent). So these two were done in the Firebase conso
 Both are verified via the Firebase Management + Identity Toolkit APIs (project
 returns `ACTIVE`; `defaultSupportedIdpConfigs` shows `google.com` enabled).
 
+## Related
+- **Cloud SQL Postgres** (TM-63): [`cloud-sql.md`](./cloud-sql.md)
+
 ## Out of scope (later tickets)
 
 - Service account + GitHub OIDC (TM-67 / 1.5.2)
-- Cloud SQL instance + connector + Secret Manager wiring (TM-63 / 1.4.4)
 - Cloud Run / Firebase Hosting deploys (TM-60 / TM-61)
 - Terraform (this is documented `gcloud`; IaC can replace it later)
