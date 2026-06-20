@@ -22,6 +22,7 @@ Notes:
 - "BONES" is deliberately *not* a separate phase — a skeleton already is bones, so it would overlap. **SPINE** covers the structural-backbone phase instead.
 - To collapse the early game: merge SPINE + FLESH into **FLESH & BONES**.
 - **Every project starts with a short, LINEAR Bootstrap** (create repo → seed agent operating instructions → minimal protection) *before* the themed phases — it primes the repo so agents self-host. **Future projects: make it an explicit first epic (a "Sprint 0 / Genesis").** TeamMarhaba folded it into SKELETON 1 inline (`TM-44 → TM-80`).
+- **Each sprint also carries human tasks** (start/close the sprint, review + merge PRs, billing/credentials, UI deletes) — tracked as `human`-labelled tickets assigned to a person, so the board shows *all* the work, not just the agent slice. Agents skip them (`labels != "human"` + they're assigned). See `AGENT-CLAIM-PROTOCOL.md` → "Human tasks".
 
 ---
 
@@ -50,6 +51,15 @@ First sprint of the SKELETON phase: the opening foundation slice. Bones that sta
 | TM-50 | 1.2.2 multi-stage backend Dockerfile | 2 |
 | TM-53 | 1.3.1 PR CI (lint + test + build) | 2 |
 
+**Human tasks in this sprint** — `human`-labelled, assigned to a person, excluded from the agent pool (see `AGENT-CLAIM-PROTOCOL.md` → "Human tasks").
+| Key | Human task | Status |
+|---|---|---|
+| TM-82 | Start the sprint (UI — no API) | ✅ Done |
+| TM-83 | Review + merge agent PRs → `main` (the In Review → Done gate) | ongoing |
+| TM-84 | Confirm GCP billing linked (prereq for TM-66 / TM-63) | To Do |
+
+(One-off `TM-85` "delete dropped TM-47" sits in the **backlog**, not the sprint — pure admin.)
+
 **Definition of done — demoable at review**
 - Fresh clone → run locally → `GET /health` → 200.
 - Backend **and** web both build as Docker images.
@@ -58,7 +68,7 @@ First sprint of the SKELETON phase: the opening foundation slice. Bones that sta
 
 **Not in this sprint** — deploying to Cloud Run (still part of the SKELETON phase, but a later sprint). The bones stand and CI is green; motion comes next.
 
-**Status:** ✅ **ACTIVE** — "Sprint 1 - The Skeleton" (id 1), 2026-06-20 → 2026-06-24, **9 tasks** in scope. Next: run the **linear bootstrap** (TM-44 → TM-80) in one window, then launch agents A + B.
+**Status:** ✅ **ACTIVE** — "Sprint 1 - The Skeleton" (id 1), 2026-06-20 → 2026-06-24. **Bootstrap DONE** (`TM-44` + `TM-80` merged); scope = **9 agent tasks** + **3 human tasks** (`TM-82/83/84`). **Agent A running**; Agent B not yet launched. Agents self-host from the repo (clone `hellobasitsiddiqui/teammarhaba` → auto-load `CLAUDE.md` + `.claude/skills` → pull). Ready roots when A/B poll: `TM-66`, `TM-49`, `TM-51`.
 
 ---
 
@@ -68,6 +78,7 @@ First sprint of the SKELETON phase: the opening foundation slice. Bones that sta
 - **Creating + starting a sprint is UI-only** — no API for the sprint lifecycle (activate + dates + name + goal). Do that on the board.
 - Optional alternative grouping: a `sprint-<name>` **label** (e.g. `sprint-skeleton`) is queryable even before a real sprint exists — but with the Sprint field working, prefer the real field.
 - Tasks already carry `wave-N` topological labels (`wave-0` = roots that block everything); use those + `DEPENDENCY-DAG.md` to pick a **dependency-closed** slice into each sprint (never sprint a task whose blocker is still in the backlog).
+- **Board fields for a functional sprint:** each worked ticket gets a **Start date** (`customfield_10015`, set on claim), **Due date** (`duedate`, = sprint end), **story points** (estimate), and a **worklog** of actual time (`addWorklogToJiraIssue`) on PR; blocked tickets get **Flagged = Impediment** (`customfield_10021`). Original Estimate needs a one-time UI admin toggle (not on the Task screen) — story points stand in. Full table: `AGENT-CLAIM-PROTOCOL.md` → "Board fields & time logging".
 
 ---
 

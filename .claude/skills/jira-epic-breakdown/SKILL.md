@@ -23,6 +23,13 @@ Drive the Bootstrap with **hand-fed starter prompts + user-level skills** (nothi
 - Express the old "story" groupings as **labels** `group-1.1`, `group-1.2`, … (filter/group the backlog by these). Standard Jira can't make three levels all pickable, so the middle grouping becomes a label.
 - If a single Task later needs breakdown, it can spawn its own Sub-tasks — giving an `Epic → Task → Sub-task` shape with the Task still pickable.
 
+## Human tasks (track them too)
+
+Not all work is automatable. Track human-only steps as **ordinary Tasks** with a **`human`** label, **assigned to a person** (never unassigned): start/close the sprint, review + merge PRs, provision billing/credentials, UI-only deletes or branch-protection. This keeps the board honest — it shows *all* the work, not just the agent slice. Two rules:
+- Agents exclude them via `AND labels != "human"` in the find-ready query (and they're assigned, so `assignee is EMPTY` already hides them).
+- **Don't wire a human task as a DAG blocker** of agent tasks (it stalls the fleet waiting on a person); note a genuine prerequisite (e.g. billing before the GCP-project task) in the description instead.
+- The **Bootstrap epic is itself largely human** (create repo, set branch protection, start the sprint) — its steps are the canonical human tasks; give them the `human` label too.
+
 ## Write each ticket
 
 Use the `jira-ticket-writer` skill for the Standard/Human description + pinned Agent prompt. Create as `Task`, parent = the epic key.
