@@ -1,0 +1,15 @@
+# Build output
+target/
+
+# VCS
+.git/
+.gitignore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Docs / local
+*.md
+.DS_Store
