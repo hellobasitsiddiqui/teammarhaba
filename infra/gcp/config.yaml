@@ -22,3 +22,19 @@ enabled_apis:
 auth:
   providers:
     - google.com   # enabled
+
+# Cloud SQL Postgres (TM-63). Dev uses public-IP + Cloud SQL Auth Proxy (no
+# authorized networks); private-IP/VPC-connector hardening is deferred to TM-95.
+cloud_sql:
+  instance: teammarhaba-pg
+  connection_name: teammarhaba:europe-west2:teammarhaba-pg
+  region: europe-west2
+  database_version: POSTGRES_16
+  edition: enterprise
+  tier: db-f1-micro          # smallest shared-core; stoppable to save cost in dev
+  storage: { type: HDD, size_gb: 10 }
+  public_ip: true            # no authorized networks; reached only via Auth Proxy
+  database: teammarhaba
+  user: app
+  password_secret: teammarhaba-db-app-password   # Secret Manager; never committed
+
