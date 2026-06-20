@@ -1,0 +1,38 @@
+name: OIDC smoke (deploy auth)
+
+# Proves GitHub Actions can authenticate to GCP via Workload Identity Federation
+# (keyless — no service-account JSON key) and act as the least-privilege deploy SA.
+# Set up in TM-67. The real deploy workflows live in TM-55 / TM-60 / TM-61.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for the OIDC token
+
+jobs:
+  oidc-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Verify keyless identity + act within granted scope
+        run: |
+          echo "Active identity (expect the deploy SA, no key):"
+          gcloud auth list --filter=status:ACTIVE --format='value(account)'
+          echo "List Cloud Run services (exercises run.admin; empty is fine):"
+          gcloud run services list --region=europe-west2 --format='value(metadata.name)' || true
