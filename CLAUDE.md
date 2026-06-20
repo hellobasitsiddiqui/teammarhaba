@@ -54,3 +54,8 @@ In Review, post a one-line evidence note, and go straight to Done.
 - `.claude/skills/jira-mcp-gotchas` — Jira/connector quirks (read before bulk Jira create/edit/link ops).
 - `.claude/skills/` also has `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`.
 - `docs/agents/blackboard.md` — shared operational notes; **read after each claim**, append cross-cutting findings.
+
+## Live operational notes (auto-loaded)
+The blackboard is imported below, so every agent has it in context from startup. **Still re-read it after each claim** (loop step 4) for notes other agents appended mid-run, and append your own cross-cutting findings. Keep it small.
+
+@docs/agents/blackboard.md
