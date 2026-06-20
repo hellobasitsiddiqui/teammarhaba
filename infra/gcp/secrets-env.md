@@ -30,8 +30,9 @@ validator's required set.
 
 - **Non-sensitive config** → `gcloud run deploy --set-env-vars=...` (plain values).
 - **Sensitive values** → `--set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest`.
-  Cloud Run reads the secret from Secret Manager at runtime using the service's
-  runtime service account; the deploy passes only the secret **name**, never the value.
+  Cloud Run reads the secret from Secret Manager at runtime using the service's dedicated
+  **runtime SA** `teammarhaba-run@` (granted `secretmanager.secretAccessor` on just that
+  secret — see `cloud-run.md`); the deploy passes only the secret **name**, never the value.
 - **Deploy-time auth** → keyless Workload Identity Federation (TM-67). There is **no
   service-account key** and there are currently **no GitHub Actions secrets** required
   for the deploy.

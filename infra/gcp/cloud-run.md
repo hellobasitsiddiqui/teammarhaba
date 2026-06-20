@@ -10,19 +10,25 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 | **Image** | `europe-west2-docker.pkg.dev/teammarhaba/containers/backend:<sha>` (from TM-55) |
 | **Port** | 8080 (Spring binds Cloud Run's `PORT`) |
 | **Scaling** | min `0` (scale-to-zero) · max `3` · startup CPU boost on |
-| **Auth** | public (`--allow-unauthenticated`) — it's the app's API surface |
+| **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client`) |
+| **Auth** | **private** (`--no-allow-unauthenticated`) — public `allUsers` is blocked by the org's domain-restricted-sharing policy; going public is tracked in **TM-96** |
 
 ## How it deploys
 
 `.github/workflows/deploy.yml` (job `backend`) runs on `push` to `main`:
 
-1. **Auth** — keyless WIF (TM-67), impersonating `gha-deployer` (`roles/run.admin`,
-   `secretmanager.secretAccessor`, `iam.serviceAccountUser`). No JSON key.
+1. **Auth (deploy-time)** — keyless WIF (TM-67), impersonating `gha-deployer`
+   (`roles/run.admin`, `iam.serviceAccountUser` to act-as the runtime SA). No JSON key.
 2. **Wait for image** — CI's `backend-image` job (`ci.yml`) pushes `:<sha>` on the
    same merge event, so the deploy polls Artifact Registry until that immutable tag
    exists (≈10 min cap) before deploying. If CI fails, the deploy times out and fails.
-3. **Deploy** — `gcloud run deploy` of the SHA-tagged image with the config below.
-4. **Smoke-check** — `GET <url>/health` expects `200` over HTTPS.
+3. **Deploy** — `gcloud run deploy` of the SHA-tagged image, running as the dedicated
+   **runtime SA** `teammarhaba-run` (so the container — not the deploy SA — is what
+   reads the DB secret / connects to Cloud SQL). Config below.
+4. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
+   only marks a revision Ready after the `/health` **startup probe** passes, so a Ready
+   revision *is* the proof `/health` serves `200`. (The service is private, so we assert
+   Ready rather than curl a public URL; an authenticated `/health` call runs best-effort.)
 
 ### Health probes (`/health`)
 
@@ -47,6 +53,30 @@ The Cloud SQL Auth Proxy socket is mounted at `/cloudsql/<connection_name>`. The
 does not consume the datasource yet (web-only skeleton, no JDBC driver); this wiring
 is in place so the data-layer ticket only adds the driver + datasource URL. See
 `backend/src/main/resources/application-prod.properties`.
+
+### Runtime service account (least privilege)
+
+The service runs as a dedicated SA — **not** the broadly-privileged default compute SA,
+which also lacks access to the DB secret. Reproduce (`gcloud`):
+
+```bash
+PROJECT=teammarhaba
+RUN_SA="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com"
+
+gcloud iam service-accounts create teammarhaba-run --project="$PROJECT" \
+  --display-name="TeamMarhaba Cloud Run runtime"
+
+# Read just the DB secret (scoped to the secret, not project-wide)
+gcloud secrets add-iam-policy-binding teammarhaba-db-app-password --project="$PROJECT" \
+  --member="serviceAccount:${RUN_SA}" --role="roles/secretmanager.secretAccessor"
+
+# Connect to Cloud SQL (for the data layer, later)
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${RUN_SA}" --role="roles/cloudsql.client" --condition=None
+```
+
+The deploy SA `gha-deployer` already holds project-level `roles/iam.serviceAccountUser`,
+which lets it act-as (`--service-account`) this runtime SA at deploy time.
 
 ## Cold-start upgrade
 
@@ -77,4 +107,6 @@ Or `git revert <bad-merge> && git push` to roll forward with the repo matching p
 ## Out of scope
 - App-side JDBC datasource / Flyway migrations (data-layer ticket) — the app has no DB driver yet.
 - Per-PR Cloud Run preview revisions (TM-65 / 1.4.6).
-- Locking the service down behind auth (currently public) — a later hardening ticket.
+- **Public access** for the service (`allUsers` invoker) — blocked by the org's
+  domain-restricted-sharing policy; the decision + org-policy exception is **TM-96**
+  (human-in-the-loop). Until then the service is private.
