@@ -1,8 +1,9 @@
 name: Deploy
 
-# Continuous delivery on merge to main. Each surface has its own job.
-# This file currently carries the web → Firebase Hosting deploy (TM-61 / 1.4.2).
-# Backend → Cloud Run (TM-60 / 1.4.1) adds its own job here later.
+# Continuous delivery on merge to main. Each surface has its own job; web and
+# backend are independent and run in parallel:
+#   web     -> Firebase Hosting   (TM-61 / 1.4.2)
+#   backend -> Cloud Run          (TM-60 / 1.4.1)
 
 on:
   push:
@@ -54,3 +55,86 @@ jobs:
 
       - name: Deploy to Firebase Hosting (live channel)
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
+
+  backend:
+    name: Deploy backend to Cloud Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless WIF auth
+    env:
+      PROJECT: teammarhaba
+      REGION: europe-west2
+      SERVICE: teammarhaba-backend
+      IMAGE: europe-west2-docker.pkg.dev/teammarhaba/containers/backend
+      CLOUDSQL: teammarhaba:europe-west2:teammarhaba-pg
+    steps:
+      # Keyless: WIF -> impersonate gha-deployer (roles/run.admin, cloudsql client via
+      # the deploy, secretmanager.secretAccessor, iam.serviceAccountUser). No JSON key.
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      # CI's backend-image job (ci.yml) pushes :${SHA} on the same merge event, so this
+      # deploy races it. Wait for the immutable SHA tag to exist before deploying.
+      # If CI fails (image never pushed), this times out and the deploy fails loudly.
+      - name: Wait for the SHA-tagged image
+        run: |
+          for i in $(seq 1 40); do
+            if gcloud artifacts docker images describe "${IMAGE}:${GITHUB_SHA}" --quiet >/dev/null 2>&1; then
+              echo "Image ${IMAGE}:${GITHUB_SHA} is available."
+              exit 0
+            fi
+            echo "Waiting for ${IMAGE}:${GITHUB_SHA} (attempt $i/40)..."
+            sleep 15
+          done
+          echo "::error::Image ${IMAGE}:${GITHUB_SHA} not found after ~10m (did CI build/push fail?)."
+          exit 1
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+
+      # Deploy the immutable SHA-tagged image. Probes hit /health so a revision only
+      # takes traffic once healthy (startup probe gates traffic; liveness restarts a
+      # wedged container). Scale-to-zero (min-instances 0) for dev cost; cpu-boost
+      # softens the cold start. Cloud SQL + secret/env are pre-wired for the data layer.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --project="${PROJECT}" --region="${REGION}" --platform=managed \
+            --image="${IMAGE}:${GITHUB_SHA}" \
+            --port=8080 \
+            --allow-unauthenticated \
+            --min-instances=0 --max-instances=3 \
+            --cpu=1 --memory=512Mi --cpu-boost \
+            --add-cloudsql-instances="${CLOUDSQL}" \
+            --set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest \
+            --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL} \
+            --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
+            --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
+            --quiet
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+
+      # Smoke-check the live revision over HTTPS. Cloud Run already gated traffic on the
+      # startup probe; this is a belt-and-braces external check that /health serves 200.
+      - name: Smoke-check /health
+        run: |
+          URL=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          for i in $(seq 1 10); do
+            code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" || true)
+            if [ "${code}" = "200" ]; then
+              echo "Health OK (${code}): $(cat /tmp/health.json)"
+              exit 0
+            fi
+            echo "Health attempt $i -> ${code}"
+            sleep 6
+          done
+          echo "::error::/health did not return 200 after retries."
+          exit 1
