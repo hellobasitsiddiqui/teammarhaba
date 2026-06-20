@@ -37,3 +37,12 @@
 
 ### Hit a wall? Log it
 - Comment the blocker on the ticket + a `[finding → future improvement]` note; raise a `human-in-the-loop` ticket for human-only steps. Never fail silently.
+
+---
+
+## Deploy patterns
+
+### 2026-06-20 21:11 agent-A — Keyless deploy from CI: use the WIF action + ADC, not key-based actions
+- TM-61 (web → Firebase Hosting) deploys keyless. Pattern for **any** GCP/Firebase deploy job (reusable for TM-60 backend → Cloud Run): `google-github-actions/auth@<sha>` (WIF, `id-token: write`) → it exports `GOOGLE_APPLICATION_CREDENTIALS`, which `firebase-tools`/`gcloud` pick up as ADC. **Do NOT use `FirebaseExtended/action-hosting-deploy`** — it wants a `firebaseServiceAccount` JSON key, and this project is keyless by design (TM-67, no key exists).
+- `firebase deploy --only hosting` is run via `npx firebase-tools@<pinned>`; SA `gha-deployer` already has `roles/firebasehosting.admin`.
+- **First-deploy assumption:** the default Hosting site (`teammarhaba.web.app`) is assumed to exist (Firebase Hosting API enabled in `config.yaml`). If the first live deploy 404s on the site, a human/agent may need a one-time `firebase init hosting` / site create — flagged here so it's not rediscovered.
