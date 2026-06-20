@@ -31,6 +31,15 @@ captures/
 .env.*
 *.local
 
+# Credential files — never commit (project uses keyless OIDC, so these shouldn't exist; defense-in-depth)
+*-key.json
+*-credentials.json
+service-account*.json
+application_default_credentials.json
+gha-creds-*.json
+*.pem
+*.p12
+
 # IDE
 .idea/
 *.iml
