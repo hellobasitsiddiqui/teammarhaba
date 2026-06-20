@@ -24,8 +24,13 @@ docker run --rm -p 8080:8080 teammarhaba-web
 The container listens on port **8080**. Deep links / hard refreshes on a
 sub-path fall back to `index.html` (SPA routing).
 
+## Deploy
+
+Merges to `main` deploy this app to Firebase Hosting (live channel) via
+`.github/workflows/deploy.yml`. See `infra/gcp/firebase-hosting.md` for the
+build seam, keyless auth, and rollback.
+
 ## Out of scope (later tickets)
 
-- Firebase Hosting deploy (TM-61 / 1.4.2)
 - The native WebView wrapper (surface epic)
 - A real JS bundler / framework

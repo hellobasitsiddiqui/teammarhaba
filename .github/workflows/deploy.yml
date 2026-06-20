@@ -1,0 +1,56 @@
+name: Deploy
+
+# Continuous delivery on merge to main. Each surface has its own job.
+# This file currently carries the web → Firebase Hosting deploy (TM-61 / 1.4.2).
+# Backend → Cloud Run (TM-60 / 1.4.1) adds its own job here later.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel a superseded deploy if main moves again before this finishes.
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Deploy web to Firebase Hosting (live)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for keyless WIF auth
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Build seam: mirrors web/Dockerfile's build stage (src/ -> dist/). Today a
+      # plain copy; a real bundler (Vite/esbuild) drops in here without changing
+      # the deploy. firebase.json serves web/dist.
+      - name: Build web assets
+        run: |
+          rm -rf web/dist
+          mkdir -p web/dist
+          cp -r web/src/. web/dist/
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      # Keyless: WIF -> impersonate gha-deployer (has roles/firebasehosting.admin).
+      # The action writes a credentials file and exports GOOGLE_APPLICATION_CREDENTIALS,
+      # which firebase-tools picks up as Application Default Credentials. No JSON key.
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Deploy to Firebase Hosting (live channel)
+        run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
