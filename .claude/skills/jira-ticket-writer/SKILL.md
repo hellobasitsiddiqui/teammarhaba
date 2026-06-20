@@ -69,6 +69,16 @@ Produce a TeamMarhaba Jira ticket that a human can read and an agent can execute
 
 ## Markdown rendering rules (this connector) — IMPORTANT
 
+**Write GitHub-flavored MARKDOWN, never Jira wiki markup.** This connector posts `contentFormat: "markdown"`, so Jira wiki syntax renders **literally / broken** — in **descriptions AND every comment** (evidence, findings, claims). LLMs default to Jira wiki markup for Jira; don't.
+
+| Don't (Jira wiki) | Do (markdown) |
+|---|---|
+| `h3. Title` / `h4.` | `### Title` / `####` |
+| `{{inline}}` | `` `inline` `` |
+| `{code}…{code}` / `{code:bash}` | fenced ` ``` ` blocks |
+| `[text\|https://url]` | `[text](https://url)` |
+| `*bold*` (wiki) | `**bold**` |
+
 - Renders fine: headings, **bold**, `inline code`, tables, bullet/numbered lists, fenced code blocks.
 - Does **NOT** render: blockquotes (`>`) and task-list checkboxes (`- [ ]`) — they print literally. Use **plain bullets** for ACs and **bold labels** instead of blockquotes.
 - **Never HTML-escape** `&` `<` `>` — write them literally (escaping shows `&amp;`, especially in summaries).

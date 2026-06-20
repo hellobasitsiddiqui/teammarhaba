@@ -43,6 +43,7 @@ In Review, post a one-line evidence note, and go straight to Done.
 - **Hit a wall? Log it — never fail silently:** comment the blocker + a `[finding → future improvement]` note; for human-only steps (interactive auth, console, secrets) raise a `human-in-the-loop` ticket and link it as a blocker.
 - **Build tool = Gradle (Kotlin DSL)** for the backend going forward — unifies with the Gradle-native Android (TM-88). (The initial backend is still Maven; throwaway on the redo.)
 - **Merged → Done is being automated** (GitHub Action, TM-86): on PR merge the ticket auto-transitions to Done. Until it lands, whoever merges moves the ticket to Done (step 6).
+- **All Jira text = GitHub-flavored markdown, NEVER Jira wiki markup.** The connector renders markdown; wiki syntax (`h3.`, `{code}`, `{{...}}`, `[text|url]`, `*bold*`) shows up broken. Use `###`, fenced ` ``` `, `` `code` ``, `[text](url)`, `**bold**`. **Applies to comments too** (evidence, findings, claims), not just descriptions. See `jira-ticket-writer`.
 
 ## Definition of Done
 **Merged to `main`.** (No-PR tasks: the change is applied and evidenced on the ticket.)
@@ -54,3 +55,8 @@ In Review, post a one-line evidence note, and go straight to Done.
 - `.claude/skills/jira-mcp-gotchas` — Jira/connector quirks (read before bulk Jira create/edit/link ops).
 - `.claude/skills/` also has `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`.
 - `docs/agents/blackboard.md` — shared operational notes; **read after each claim**, append cross-cutting findings.
+
+## Live operational notes (auto-loaded)
+The blackboard is imported below, so every agent has it in context from startup. **Still re-read it after each claim** (loop step 4) for notes other agents appended mid-run, and append your own cross-cutting findings. Keep it small.
+
+@docs/agents/blackboard.md

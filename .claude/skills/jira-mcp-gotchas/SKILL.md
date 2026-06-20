@@ -9,6 +9,7 @@ Hard-won quirks of the Atlassian MCP connector against 10xai Jira (project key *
 
 ## Content / markdown
 - `createJiraIssue` / `editJiraIssue` / `addCommentToJiraIssue` accept **markdown** via `contentFormat: "markdown"` (the default).
+- **Never use Jira wiki markup** (`h3.`, `{code}`, `{{...}}`, `[text|url]`, `*bold*`) — it renders **literally/broken**. Use markdown: `###`, fenced ` ``` `, `` `code` ``, `[text](url)`, `**bold**`. Applies to **comments too**, not just descriptions (LLMs default to wiki markup for Jira — don't).
 - **Renders:** headings, **bold**, `inline code`, tables, bullet/numbered lists, fenced code blocks.
 - **Does NOT render:** blockquotes (`>`) and task-list checkboxes (`- [ ]`) → they appear as literal `>` / `[ ]`. Use bold labels + plain bullets.
 - **Never HTML-escape** `&` `<` `>` — pass them literally. Escaping renders as `&amp;` etc. (very visible in summaries).
