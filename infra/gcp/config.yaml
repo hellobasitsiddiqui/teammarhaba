@@ -1,0 +1,24 @@
+# TeamMarhaba — GCP/Firebase project configuration (single source of truth).
+# Consumed by deploy workflows and app config; never hardcode these in app code.
+project_id: teammarhaba
+project_number: "58443206078"
+display_name: TeamMarhaba
+# Default region for regional resources (Cloud Run, Cloud SQL). The project,
+# Firebase, and Auth are not themselves regional.
+default_region: europe-west2
+billing_account: 01D78A-BEFF21-4B5232
+
+# APIs enabled on the project (TM-66).
+enabled_apis:
+  - run.googleapis.com            # Cloud Run (backend deploy)
+  - sqladmin.googleapis.com       # Cloud SQL Admin (Postgres)
+  - firebasehosting.googleapis.com # Firebase Hosting (web)
+  - secretmanager.googleapis.com  # Secret Manager
+  - artifactregistry.googleapis.com # Artifact Registry (images)
+  - firebase.googleapis.com       # Firebase platform
+  - identitytoolkit.googleapis.com # Firebase Authentication
+
+# Firebase Authentication providers (TM-66). Google = the chosen social login.
+auth:
+  providers:
+    - google.com   # enabled
