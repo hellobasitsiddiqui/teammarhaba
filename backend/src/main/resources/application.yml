@@ -1,0 +1,13 @@
+# Base config shared by all profiles; profile-specific values live in
+# application-{dev,test,prod}.yml. Profile selection via SPRING_PROFILES_ACTIVE:
+# unset -> `dev` (zero-setup local runs), CI/tests use `test`, the Cloud Run
+# deploy sets `prod`.
+spring:
+  application:
+    name: backend
+  profiles:
+    default: dev
+
+# 12-factor: bind to the platform-provided port (Cloud Run sets PORT), default 8080 locally.
+server:
+  port: ${PORT:8080}

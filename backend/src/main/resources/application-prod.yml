@@ -1,0 +1,17 @@
+# Production (Cloud Run -> Cloud SQL). Every value is REQUIRED from the environment,
+# with NO silent defaults: a missing var fails startup (placeholder resolution) and a
+# blank value fails Bean Validation (@NotBlank in AppProperties). Injected by the deploy
+# (.github/workflows/deploy.yml) as plain env + Secret Manager; the required set is the
+# .env.example contract (TM-62) and is enforced further by the fail-loud validator (TM-64).
+#
+# The JDBC DataSource itself — driver + spring.datasource.url over the Cloud SQL Auth
+# Proxy socket /cloudsql/${INSTANCE_CONNECTION_NAME} — lands with the data layer (TM-71);
+# the backend has no DB driver yet, so these are the validated connection contract only.
+app:
+  db:
+    name: ${DB_NAME}
+    user: ${DB_USER}
+    password: ${DB_PASSWORD}
+    instance-connection-name: ${INSTANCE_CONNECTION_NAME}
+  firebase:
+    project-id: ${FIREBASE_PROJECT_ID}

@@ -1,0 +1,9 @@
+# Local development (docker-compose Postgres, TM-52). Safe defaults — zero setup.
+app:
+  db:
+    name: teammarhaba
+    user: app
+    password: devpassword
+    instance-connection-name: local
+  firebase:
+    project-id: teammarhaba
