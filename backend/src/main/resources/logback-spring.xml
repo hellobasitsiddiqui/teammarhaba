@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging config (TM-73). prod emits structured JSON (Cloud Run -> Cloud Logging) so logs are
+  searchable; dev/test stay human-readable. Every line carries the MDC `traceId` set per request
+  by CorrelationIdFilter, so all logs for one request share an id. Never log tokens/secrets.
+-->
+<configuration>
+
+    <!-- Human-readable console for local dev/test and the default profile. -->
+    <springProfile name="dev,test,default">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %-5level [%X{traceId:-no-trace}] %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- Structured JSON for prod. logback 1.5's built-in JsonEncoder includes the MDC, so
+         `traceId` is a searchable field on every line — and it needs no extra dependency. -->
+    <springProfile name="prod">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+</configuration>
