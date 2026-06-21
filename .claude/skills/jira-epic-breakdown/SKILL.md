@@ -59,7 +59,7 @@ wave(t) = 0 if t has no blockers
 
 ## Recommended process
 
-1. Decompose into items; assign each: points, category label, `group-1.x`.
+1. Decompose into items; assign each: points, category label, `group-1.x`, **and exactly one of `replay` / `no-replay`** (build ticket → `replay`; human/HITL/dropped/throwaway/meta-folded-into-GENESIS → `no-replay`; **human tasks are always `no-replay`**). The source-rebuild runs `labels = replay`, so every ticket must carry one.
 2. Create the Epic, then all Tasks (batch). Capture the returned keys → build a `WBS → key` map.
 3. **Pilot first:** create one ticket, check the rendered result, fix formatting, then batch the rest.
 4. Pass 2: create the `is blocked by` links (correct direction) + apply `wave-N` labels.
