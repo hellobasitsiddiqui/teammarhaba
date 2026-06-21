@@ -1,0 +1,90 @@
+name: nightly canary
+
+# Nightly health + drift check on `main` (TM-118): a fresh-clone full build + test, plus a
+# smoke check that the live backend (Cloud Run Ready revision) and web (Firebase Hosting) are
+# up. Catches overnight drift / new transitive deps that incremental PR CI misses, and confirms
+# main is still deployable & serving. Green is silent (Actions record only); a failure opens an
+# issue. Run manually any time via workflow_dispatch.
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: teammarhaba
+  REGION: europe-west2
+  SERVICE: teammarhaba-backend
+  WEB_URL: https://teammarhaba.web.app
+
+jobs:
+  canary:
+    name: Nightly canary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # keyless WIF for the gcloud health check
+      issues: write     # open an issue on failure
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21 (Temurin) + Maven cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Fresh build + full test (Spotless, tests, JaCoCo gate, SBOM)
+        working-directory: backend
+        run: ./mvnw -B -ntp clean verify
+
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Backend live health (Cloud Run Ready revision)
+        run: |
+          rev="$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" --format='value(status.latestReadyRevisionName)')"
+          echo "latestReadyRevision: ${rev:-<none>}"
+          [ -n "$rev" ] || { echo "::error::backend has no Ready revision — main not deployable/healthy"; exit 1; }
+
+      - name: Web live health (Firebase Hosting)
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "$WEB_URL")"
+          echo "web $WEB_URL -> HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::web not healthy (HTTP $code)"; exit 1; }
+
+      - name: Run summary
+        if: always()
+        run: |
+          {
+            echo "## 🌙 Nightly canary — ${{ job.status }}"
+            echo ""
+            echo "- Fresh build + full test (\`mvnw clean verify\`)"
+            echo "- Backend: Cloud Run Ready revision"
+            echo "- Web: ${WEB_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const today = new Date().toISOString().slice(0, 10);
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🌙 Nightly canary failed — ${today}`,
+              body: `The nightly canary on \`main\` failed.\n\n**Run:** ${run}\n\nCheck which step went red: fresh build/test, backend Ready-revision, or web health.`,
+            });
