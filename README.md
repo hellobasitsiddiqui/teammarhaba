@@ -37,6 +37,26 @@ All ports bind to `127.0.0.1` only. Config comes from your `.env` (the contract 
 fails loudly rather than silently defaulting. Stop with `docker compose down` (add
 `-v` to also wipe the database volume).
 
+## Common commands
+
+A [`Makefile`](./Makefile) is the single entry point for the whole mono-repo — thin wrappers
+over Docker Compose and the backend's Maven wrapper, so you don't need to learn each surface's
+tooling. Run `make` (or `make help`) to list everything.
+
+| Command | What it does |
+| --- | --- |
+| `make up` | Build + start the full stack (postgres, backend, web) in the background |
+| `make down` | Stop the stack (keeps the DB volume; `make down-v` also wipes it) |
+| `make logs` / `make ps` | Tail logs / show container status |
+| `make build` | Build all surfaces: backend jar + container images |
+| `make test` | Run the backend test suite + checks (`./mvnw verify`) |
+| `make run` | Run the backend app on the host (Spring Boot, port 8080) |
+| `make lint` / `make fmt` | Check / auto-apply formatting (Spotless — same check as CI) |
+
+**Prerequisites:** Docker + Docker Compose v2 for the stack targets; JDK 21 for the host-side
+backend targets (`test`/`lint`/`fmt`/`run`) — the backend uses the bundled `./mvnw`, so no
+system Maven is needed. `make test` boots Testcontainers, so Docker must be running for it too.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch, commit, and PR conventions. In
