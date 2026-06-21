@@ -8,6 +8,25 @@ Pairs with `DEPENDENCY-DAG.md` (the graph + priority order).
 >
 > **For TeamMarhaba this is DONE** — `TM-44` (mono-repo) + `TM-80` (seed agent instructions) have landed, so agents now **clone `hellobasitsiddiqui/teammarhaba`, auto-load its `CLAUDE.md` + `.claude/skills`, and self-host**. The kickoff prompt is one line: agentId + "clone the repo and follow its CLAUDE.md / jira-task-claim". (Branch convention `<type>/TM-XX-short-desc` post-dates the seeded copy — carry it in the kickoff until a `chore` PR syncs it into the repo.)
 
+> **Prerequisite — each agent gets its OWN working tree (git worktree or clone). REQUIRED.**
+> The Jira claim lock coordinates *who owns a ticket*, but it does **not** isolate the filesystem.
+> Two agents sharing one working directory **will corrupt each other**: one agent's `git checkout`
+> silently switches the other's branch mid-build, and uncommitted files from one appear in the
+> other's tree — leading to duplicated work and broken commits. *(This actually happened: two
+> agents in one clone caused a mid-build branch switch and a duplicate `TM-105` implementation.)*
+>
+> So **every agent works in its own isolated working tree**, sharing the one remote:
+> ```bash
+> # from the shared clone, one linked worktree per agent — lighter than a second full clone,
+> # and git refuses to check out the same branch in two worktrees (extra anti-collision).
+> git worktree add ../tm-<agentId> main      # e.g. ../tm-agentA, ../tm-agentB
+> # then each agent runs the claim loop entirely inside its own worktree dir.
+> ```
+> Worktree over clone: one `.git`/object store (one fetch, less disk) but fully independent
+> working files, index, `HEAD`, and `target/` build output. Use **distinct branch-name prefixes
+> per agent** if you want belt-and-braces on top of the Jira lock. The kickoff prompt should put
+> each agent in its own worktree before it starts pulling tickets.
+
 ---
 
 ## State model (encoded in Jira, no extra infrastructure)
