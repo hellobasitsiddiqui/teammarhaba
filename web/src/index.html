@@ -7,6 +7,15 @@
     <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
+    <!-- Auth-aware nav (TM-109). guard.js toggles these on auth state and wires sign-out. -->
+    <nav class="topnav" aria-label="Primary">
+        <span class="brand">TeamMarhaba</span>
+        <span class="nav-auth">
+            <span id="nav-user" class="nav-user"></span>
+            <button id="nav-signout" type="button" hidden>Sign out</button>
+            <a id="nav-signin" class="nav-signin" href="/login" hidden>Sign in</a>
+        </span>
+    </nav>
     <main class="app">
         <h1>TeamMarhaba</h1>
         <p class="tagline">Walking skeleton — web surface.</p>
@@ -50,5 +59,8 @@
     <!-- Authenticated API client demo (TM-108): calls GET /api/v1/me and renders the
          verified caller into #me. api.js attaches the Bearer token to every API call. -->
     <script type="module" src="/assets/me.js"></script>
+    <!-- Route guard + auth-aware nav (TM-109): protects routes, redirects signed-out users to
+         /login?redirect=<path> and returns them after sign-in, and drives the nav. -->
+    <script type="module" src="/assets/guard.js"></script>
 </body>
 </html>

@@ -128,3 +128,49 @@ body {
     font-size: 0.85rem;
     font-weight: 600;
 }
+
+/* Auth-aware nav (TM-109) — fixed bar so it doesn't disturb the centered .app. */
+.topnav {
+    position: fixed;
+    inset: 0 0 auto 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    background: #fff;
+    border-bottom: 1px solid rgba(26, 26, 46, 0.1);
+}
+
+.topnav .brand {
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.nav-auth {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+}
+
+.nav-user {
+    opacity: 0.75;
+}
+
+.topnav button,
+.topnav .nav-signin {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.topnav button:hover,
+.topnav .nav-signin:hover {
+    filter: brightness(0.96);
+}
