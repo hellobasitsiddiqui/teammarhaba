@@ -21,3 +21,28 @@ spring:
 # 12-factor: bind to the platform-provided port (Cloud Run sets PORT), default 8080 locally.
 server:
   port: ${PORT:8080}
+
+# Actuator (TM-74). Expose health/info/metrics over HTTP. SecurityConfig keeps
+# /actuator/health public (probes) and requires auth for info/metrics. Health detail is
+# shown only to authorized callers so internals never leak to anonymous probes; the
+# liveness/readiness groups are enabled for orchestration. Micrometer ships /metrics here;
+# exporting it to Cloud Monitoring is TM-75.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+
+# Populates /actuator/info (authenticated). Static, non-sensitive identity.
+info:
+  app:
+    name: TeamMarhaba backend
+    description: TeamMarhaba backend API service
