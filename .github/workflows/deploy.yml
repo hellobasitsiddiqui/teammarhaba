@@ -106,9 +106,13 @@ jobs:
       #
       # Runtime identity: a dedicated least-privilege SA (teammarhaba-run) reads the DB
       # secret + connects to Cloud SQL — NOT the default compute SA (which lacks access).
-      # Service is PRIVATE (--no-allow-unauthenticated): the org enforces domain-restricted
-      # sharing so `allUsers` invoker is blocked. Making it public is a human/org decision
-      # tracked in TM-96.
+      # Service is PUBLIC (--allow-unauthenticated): web/mobile clients call the API
+      # directly. The org enforces domain-restricted sharing (iam.allowedPolicyMemberDomains),
+      # which normally blocks `allUsers`; TM-96 added a conditional org-policy exception that
+      # permits `allUsers` ONLY for resources tagged `allUsersIngress=True`, and this service
+      # carries that tag. So --allow-unauthenticated succeeds here while DRS stays enforced
+      # everywhere else. Auth is still required by the app (Firebase Bearer token); only
+      # /health is unauthenticated. See infra/gcp/cloud-run.md + TM-96 for the full setup.
       #
       # Secrets/env (TM-62): the full required-var set is documented in .env.example
       # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
@@ -123,7 +127,7 @@ jobs:
             --image="${IMAGE}:${GITHUB_SHA}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
-            --no-allow-unauthenticated \
+            --allow-unauthenticated \
             --min-instances=0 --max-instances=3 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
@@ -138,9 +142,9 @@ jobs:
       # Verify the rollout. `gcloud run deploy` already blocks until the revision is Ready
       # (and the step would have failed otherwise), and Cloud Run gates Ready on the
       # /health startup probe — so a Ready revision means /health returned 200 over HTTPS.
-      # The service is private, so we assert Ready rather than curl a public URL. A best-
-      # effort authenticated /health call follows for explicit evidence (non-fatal).
-      - name: Verify rollout (/health via startup probe)
+      # The service is public (TM-96), so we additionally assert an UNAUTHENTICATED curl of
+      # /health returns 200 — this proves the allUsers invoker binding survived the deploy.
+      - name: Verify rollout (/health, public)
         run: |
           READY_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.latestReadyRevisionName)')
           if [ -z "${READY_REV}" ]; then
@@ -149,12 +153,11 @@ jobs:
           fi
           echo "Ready revision: ${READY_REV} (startup probe on /health passed)."
           URL=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')
-          echo "Service URL (private): ${URL}"
-          # Best-effort authenticated probe (the SA running CI has run.admin → can invoke).
-          TOKEN=$(gcloud auth print-identity-token --audiences="${URL}" 2>/dev/null || true)
-          if [ -n "${TOKEN}" ]; then
-            code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" "${URL}/health" || true)
-            echo "Authenticated /health -> ${code} $( [ -f /tmp/health.json ] && cat /tmp/health.json )"
-          else
-            echo "Skipped authenticated curl (no ID token); Ready-revision check is the source of truth."
+          echo "Service URL (public): ${URL}"
+          # Unauthenticated probe — must be 200, otherwise the public binding was lost.
+          code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" || true)
+          echo "Public /health -> ${code} $( [ -f /tmp/health.json ] && cat /tmp/health.json )"
+          if [ "${code}" != "200" ]; then
+            echo "::error::Public /health returned ${code} (expected 200) — allUsers invoker binding may be missing."
+            exit 1
           fi
