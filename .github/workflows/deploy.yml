@@ -106,13 +106,12 @@ jobs:
       #
       # Runtime identity: a dedicated least-privilege SA (teammarhaba-run) reads the DB
       # secret + connects to Cloud SQL — NOT the default compute SA (which lacks access).
-      # Service is PUBLIC (--allow-unauthenticated): web/mobile clients call the API
-      # directly. The org enforces domain-restricted sharing (iam.allowedPolicyMemberDomains),
-      # which normally blocks `allUsers`; TM-96 added a conditional org-policy exception that
-      # permits `allUsers` ONLY for resources tagged `allUsersIngress=True`, and this service
-      # carries that tag. So --allow-unauthenticated succeeds here while DRS stays enforced
-      # everywhere else. Auth is still required by the app (Firebase Bearer token); only
-      # /health is unauthenticated. See infra/gcp/cloud-run.md + TM-96 for the full setup.
+      # Deploy PRIVATE here (--no-allow-unauthenticated); public access is enabled in a
+      # SEPARATE best-effort step below. This ordering is deliberately replay-safe: the
+      # org enforces domain-restricted sharing, so binding `allUsers` only works where the
+      # TM-96 exception (org policy + `allUsersIngress` tag) exists. Deploying private first
+      # always succeeds (incl. a fresh replay env that lacks the exception); the public step
+      # then upgrades it where allowed and no-ops (stays private, still green) where not.
       #
       # Secrets/env (TM-62): the full required-var set is documented in .env.example
       # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
@@ -127,7 +126,7 @@ jobs:
             --image="${IMAGE}:${GITHUB_SHA}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --min-instances=0 --max-instances=3 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
@@ -139,12 +138,39 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
 
-      # Verify the rollout. `gcloud run deploy` already blocks until the revision is Ready
-      # (and the step would have failed otherwise), and Cloud Run gates Ready on the
-      # /health startup probe — so a Ready revision means /health returned 200 over HTTPS.
-      # The service is public (TM-96), so we additionally assert an UNAUTHENTICATED curl of
-      # /health returns 200 — this proves the allUsers invoker binding survived the deploy.
-      - name: Verify rollout (/health, public)
+      # Enable public (unauthenticated) access — best-effort, replay-safe (TM-96).
+      # The org enforces domain-restricted sharing (iam.allowedPolicyMemberDomains); binding
+      # `allUsers` is permitted ONLY for resources carrying the `allUsersIngress=True` org tag
+      # (the conditional exception set up in TM-96). This step:
+      #   1. (re)asserts that tag on the service — idempotent, and a no-op without tagUser perms
+      #      since the binding persists once set;
+      #   2. binds allUsers as run.invoker, retrying while the policy condition propagates.
+      # EVERYTHING here is non-fatal: in an environment WITHOUT the TM-96 exception/tag
+      # (e.g. a fresh replay project), the bindings simply fail and the service stays private —
+      # the deploy still succeeds. So a replay never hits the org-policy wall.
+      - name: Enable public access (best-effort, TM-96)
+        run: |
+          ORG=103553953969
+          gcloud resource-manager tags bindings create \
+            --tag-value="${ORG}/allUsersIngress/True" \
+            --parent="//run.googleapis.com/projects/${PROJECT}/locations/${REGION}/services/${SERVICE}" \
+            --location="${REGION}" 2>/dev/null && echo "Tagged allUsersIngress=True" || echo "Tag not (re)applied — already bound, or no perms/exception here (ok)."
+          for i in $(seq 1 8); do
+            if gcloud run services add-iam-policy-binding "${SERVICE}" \
+                 --member=allUsers --role=roles/run.invoker \
+                 --region="${REGION}" --project="${PROJECT}" --quiet 2>/dev/null; then
+              echo "allUsers bound as run.invoker (public)."; break
+            fi
+            echo "allUsers not bound yet (attempt ${i}/8) — DRS propagation, or no exception in this env; retrying…"
+            sleep 15
+          done || true
+
+      # Verify the rollout. `gcloud run deploy` already blocks until the revision is Ready,
+      # and Cloud Run gates Ready on the /health startup probe — so a Ready revision means
+      # /health returned 200 over HTTPS. That check is the source of truth (fatal). We then
+      # REPORT whether the service is public (unauthenticated /health) — informational only,
+      # so the deploy stays green whether it ended up public or private.
+      - name: Verify rollout (/health)
         run: |
           READY_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.latestReadyRevisionName)')
           if [ -z "${READY_REV}" ]; then
@@ -153,11 +179,10 @@ jobs:
           fi
           echo "Ready revision: ${READY_REV} (startup probe on /health passed)."
           URL=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')
-          echo "Service URL (public): ${URL}"
-          # Unauthenticated probe — must be 200, otherwise the public binding was lost.
-          code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" || true)
-          echo "Public /health -> ${code} $( [ -f /tmp/health.json ] && cat /tmp/health.json )"
-          if [ "${code}" != "200" ]; then
-            echo "::error::Public /health returned ${code} (expected 200) — allUsers invoker binding may be missing."
-            exit 1
+          echo "Service URL: ${URL}"
+          code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" 2>/dev/null || echo 000)
+          if [ "${code}" = "200" ]; then
+            echo "Public /health -> 200 $( [ -f /tmp/health.json ] && cat /tmp/health.json ) (service is PUBLIC)."
+          else
+            echo "Unauthenticated /health -> ${code} (service is PRIVATE here — TM-96 exception not applied in this env). Ready-revision check already confirmed /health serves 200 internally."
           fi

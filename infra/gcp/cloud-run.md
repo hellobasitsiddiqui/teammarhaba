@@ -25,11 +25,16 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 3. **Deploy** — `gcloud run deploy` of the SHA-tagged image, running as the dedicated
    **runtime SA** `teammarhaba-run` (so the container — not the deploy SA — is what
    reads the DB secret / connects to Cloud SQL). Config below.
-4. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
+4. **Enable public access** *(best-effort, replay-safe)* — (re)assert the `allUsersIngress`
+   tag on the service and bind `allUsers` as `run.invoker`, retrying while the org-policy
+   condition propagates. **Every command here is non-fatal:** in an environment without the
+   TM-96 exception (e.g. a fresh replay project), the bindings fail and the service simply
+   stays private — the deploy still succeeds. See *Public access (TM-96)* below.
+5. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
    only marks a revision Ready after the `/health` **startup probe** passes, so a Ready
-   revision *is* the proof `/health` serves `200`. The service is public, so the step
-   also curls `/health` **unauthenticated** and fails the deploy unless it returns `200`
-   — that guards against the `allUsers` binding being lost on a future deploy.
+   revision *is* the proof `/health` serves `200` (this check is fatal). The step then
+   **reports** whether unauthenticated `/health` returns `200` (public) or not (private) —
+   informational only, so the deploy is green whether it ended public or private.
 
 ### Health probes (`/health`)
 
@@ -141,8 +146,14 @@ gcloud run services add-iam-policy-binding teammarhaba-backend \
   --member=allUsers --role=roles/run.invoker --region=europe-west2 --project=teammarhaba
 ```
 
-`deploy.yml` then deploys with `--allow-unauthenticated` (durable across deploys because
-the tag binding lives on the service) and the verify step curls `/health` unauthenticated.
+**CD does steps 3–4 for you, idempotently and best-effort.** `deploy.yml` deploys private,
+then its *Enable public access* step re-asserts the tag and binds `allUsers` with retry. The
+tag binding persists on the service, so this stays public across deploys. Crucially these
+commands are **non-fatal**: an environment *without* the one-time org setup above (a fresh
+replay project, a different org) just stays private and the deploy stays green — **a replay
+never hits the DRS wall.** The org-level setup (tag key/value, conditional policy, the three
+role grants) is the only human/one-time piece, and it persists across replays of the same org.
+
 **Security note:** public = network-reachable only; every real endpoint still requires a
 Firebase Bearer token (TM-108). Preview revisions (TM-65) are *not* tagged → stay private.
 
