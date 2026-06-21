@@ -148,6 +148,29 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
 
+            <!-- Supply-chain SBOM (TM-59): emit a CycloneDX SBOM (target/bom.json) listing every
+                 dependency, so the build can answer "what's in it?" / CVE exposure. Bound to the
+                 package phase, so `./mvnw verify` (CI) always produces it. Not in the Boot BOM. -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>2.9.1</version>
+                <executions>
+                    <execution>
+                        <id>sbom</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>makeBom</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <outputFormat>json</outputFormat>
+                    <outputName>bom</outputName>
+                    <schemaVersion>1.5</schemaVersion>
+                </configuration>
+            </plugin>
+
             <!-- Format/lint gate. Style-preserving rules only (no indent reformat),
                  bound to verify so CI and local `./mvnw verify` enforce the same thing. -->
             <plugin>
