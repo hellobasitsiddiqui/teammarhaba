@@ -2,6 +2,13 @@
 # Free on private repos (unlike CodeQL / dependency-review, which need GitHub Advanced
 # Security). Only ecosystems with a manifest in the repo are listed; add Gradle for
 # /android once it has a build.gradle (it's a stub today).
+#
+# Routine minor/patch bumps are grouped into one PR per ecosystem (low-noise, safe to
+# merge when green). MAJOR bumps are treated as framework migrations, not chores:
+#  - Maven majors are ignored here (Spring Boot 4 / springdoc 3 broke main once, #56) —
+#    do them deliberately by hand.
+#  - Any major that still opens (actions/docker) is tagged `semver-major` by
+#    .github/workflows/dependabot-auto-label.yml so it isn't mistaken for a safe chore.
 version: 2
 updates:
   # Backend Java dependencies (Maven).
@@ -16,6 +23,17 @@ updates:
       - backend
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      backend-minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Major bumps for backend Java deps are framework migrations (Spring Boot 4,
+      # springdoc 3, …), not safe chores — bump them deliberately, not via auto-PRs.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   # GitHub Actions used by our workflows — keeps the SHA pins current (pairs with the
   # supply-chain SHA-pinning policy, TM-59 / docs/supply-chain.md).
@@ -30,6 +48,11 @@ updates:
       - ci
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
 
   # Backend container base image.
   - package-ecosystem: docker
@@ -43,3 +66,8 @@ updates:
       - docker
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch
