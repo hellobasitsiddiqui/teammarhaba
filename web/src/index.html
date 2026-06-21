@@ -12,7 +12,14 @@
         <p class="tagline">Walking skeleton — web surface.</p>
         <p id="status" class="status">loading…</p>
 
-        <!-- Auth UI (TM-106). login.js toggles these two panels on auth state. -->
+        <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out. -->
+        <nav class="app-nav" aria-label="Account">
+            <a id="nav-signin" href="#/login" hidden>Sign in</a>
+            <button id="signout-btn" type="button" hidden>Sign out</button>
+        </nav>
+
+        <!-- Auth views (TM-106 panels, routed by TM-109): #auth-signed-out = #/login,
+             #auth-signed-in = #/home. router.js owns their visibility. -->
         <section class="auth" aria-label="Account">
             <form class="auth-card" id="auth-signed-out" novalidate>
                 <h2>Sign in</h2>
@@ -37,7 +44,6 @@
                 <p>You are signed in as <strong id="user-email"></strong>.</p>
                 <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client (TM-108). -->
                 <p id="me" class="status"></p>
-                <button id="signout-btn" type="button">Sign out</button>
             </div>
         </section>
     </main>
@@ -50,5 +56,8 @@
     <!-- Authenticated API client demo (TM-108): calls GET /api/v1/me and renders the
          verified caller into #me. api.js attaches the Bearer token to every API call. -->
     <script type="module" src="/assets/me.js"></script>
+    <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
+         signed-out users to #/login and returns them after sign-in, drives the nav. -->
+    <script type="module" src="/assets/router.js"></script>
 </body>
 </html>

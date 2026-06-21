@@ -74,12 +74,12 @@ els.signUp?.addEventListener("click", () =>
 els.google?.addEventListener("click", () => run(() => signInWithGoogle()));
 els.signOut?.addEventListener("click", () => run(() => signOut()));
 
-// Reflect signed-in / signed-out state (also restores it across reloads).
+// Reflect identity / reset on auth change. View visibility (which panel shows) is owned by
+// the router/guard (TM-109) so there's a single controller — this only updates the form's
+// own concerns: the displayed email, clearing errors, and resetting fields on sign-out.
 onAuthChanged((user) => {
   showError(null);
   const signedIn = Boolean(user);
-  if (els.signedOut) els.signedOut.hidden = signedIn;
-  if (els.signedIn) els.signedIn.hidden = !signedIn;
   if (signedIn && els.userEmail) {
     els.userEmail.textContent = user.email ?? user.displayName ?? user.uid;
   }
