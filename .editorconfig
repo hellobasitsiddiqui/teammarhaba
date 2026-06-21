@@ -1,0 +1,36 @@
+# EditorConfig — consistent editor settings across the repo and across editors.
+# https://editorconfig.org  (most editors support it natively or via a plugin)
+root = true
+
+# Defaults for every file.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Java (backend) — 4-space indent, matching the existing code and the Spotless gate.
+[*.java]
+indent_size = 4
+
+# Maven / XML.
+[*.{xml,pom}]
+indent_size = 4
+
+# Web (HTML/CSS/JS) and config formats keep the 2-space default.
+[*.{html,css,js,ts,json,yml,yaml}]
+indent_size = 2
+
+# Markdown: two trailing spaces are a hard line break, so don't strip them.
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require real tabs.
+[Makefile]
+indent_style = tab
+
+# Shell scripts.
+[*.sh]
+indent_size = 2
