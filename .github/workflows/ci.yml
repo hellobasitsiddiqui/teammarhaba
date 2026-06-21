@@ -60,6 +60,17 @@ jobs:
           path: backend/target/bom.json
           if-no-files-found: warn
 
+      # Coverage report (TM-54). The JaCoCo gate runs inside the `verify` above (the build fails
+      # if coverage drops below LINE 0.85 / BRANCH 0.70); this publishes the HTML/XML report for
+      # inspection. Uploaded even on failure so a gate breach is diagnosable.
+      - name: Upload JaCoCo coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: backend-coverage
+          path: backend/target/site/jacoco
+          if-no-files-found: warn
+
   backend-image:
     name: Backend image (build; push to Artifact Registry on main)
     needs: backend            # only build/push an image that passed build + tests

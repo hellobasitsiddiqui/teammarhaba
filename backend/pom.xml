@@ -19,6 +19,9 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Extra JVM args appended to the surefire fork (see maven-surefire-plugin config).
+             Empty by default so CI behaviour is unchanged; overridable locally for Docker quirks. -->
+        <surefire.extraArgs/>
     </properties>
 
     <dependencies>
@@ -168,6 +171,77 @@
                     <outputFormat>json</outputFormat>
                     <outputName>bom</outputName>
                     <schemaVersion>1.5</schemaVersion>
+                </configuration>
+            </plugin>
+
+            <!-- Coverage gate (TM-54). prepare-agent instruments the test JVM; report writes
+                 target/site/jacoco (uploaded by CI); check FAILS `verify` if bundle coverage drops
+                 below LINE 0.85 / BRANCH 0.70. The whole suite (incl. the Testcontainers integration
+                 tests, which run in CI) feeds coverage; a future external e2e suite is tagged `e2e`
+                 and excluded via surefire excludedGroups so the gate never needs that infra. The
+                 Application bootstrap (public static void main) is excluded — it's framework wiring,
+                 not logic worth gating on. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/Application.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals><goal>prepare-agent</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals><goal>report</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.70</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Surefire argLine bridge: @{argLine} preserves the JaCoCo agent that prepare-agent
+                 injects (replacing argLine wholesale would silently disable coverage), while
+                 ${surefire.extraArgs} (empty by default, so CI is unaffected) lets a developer pass
+                 a local-only JVM arg, e.g. the Testcontainers Docker API pin on machines that need it:
+                   ./mvnw verify -Dsurefire.extraArgs="-Dapi.version=1.44" -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>@{argLine} ${surefire.extraArgs}</argLine>
+                    <!-- Keep genuinely-external e2e suites (browser/deployed-env) out of the
+                         coverage-gate build: tag such a test @Tag("e2e") and it won't run here.
+                         The Testcontainers integration tests are NOT e2e — they run in CI and
+                         feed the coverage gate. No test is tagged e2e today. -->
+                    <excludedGroups>e2e</excludedGroups>
                 </configuration>
             </plugin>
 
