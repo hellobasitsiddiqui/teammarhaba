@@ -1,0 +1,37 @@
+package com.teammarhaba.backend.web;
+
+import java.net.URI;
+import java.time.Instant;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+
+/**
+ * Factory for RFC 7807 {@link ProblemDetail} responses with a consistent shape
+ * (stable {@code type} URI, {@code title}, {@code status}, {@code detail}, and a
+ * {@code timestamp}). Centralised so every error — and the auth entry point that
+ * lands in TM-79 (1.6.10) — produces the same contract.
+ */
+public final class Problems {
+
+    /** Base URI for problem {@code type} links (need not resolve to a live page). */
+    public static final URI TYPE_BASE = URI.create("https://teammarhaba.app/problems/");
+
+    private Problems() {}
+
+    /** Build a ProblemDetail for the given status with a human-readable title + detail. */
+    public static ProblemDetail of(HttpStatus status, String title, String detail) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setTitle(title);
+        problem.setType(TYPE_BASE.resolve(String.valueOf(status.value())));
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Reusable {@code 401 Unauthorized} shape for the auth filter / entry point
+     * (TM-79). Kept here so authentication failures match every other error.
+     */
+    public static ProblemDetail unauthorized(String detail) {
+        return of(HttpStatus.UNAUTHORIZED, "Unauthorized", detail);
+    }
+}
