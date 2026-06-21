@@ -20,22 +20,28 @@ Each directory has its own README. Most are stubs at this stage — the foundati
 
 ## Local development
 
-Run the whole stack — backend + web + Postgres — with one command via
-[`docker-compose.yml`](./docker-compose.yml):
+Run the whole stack — backend + web + Postgres — with one command. From a fresh
+clone, no manual setup is needed:
 
 ```bash
-cp .env.example .env     # then set DB_PASSWORD (and any blanks) for local dev
-docker compose up --build
+make up                  # writes a working local-dev .env if absent, then builds + starts
 ```
 
 - Backend: <http://127.0.0.1:8080/health>
 - Web: <http://127.0.0.1:8081>
 - Postgres: `127.0.0.1:5432` (data persists in the `pgdata` volume across restarts)
 
-All ports bind to `127.0.0.1` only. Config comes from your `.env` (the contract in
-[`.env.example`](./.env.example)); compose uses bare `${VAR}` refs, so a missing var
-fails loudly rather than silently defaulting. Stop with `docker compose down` (add
-`-v` to also wipe the database volume).
+`make up` runs `make setup` first, which generates a git-ignored `.env` with throwaway
+local-dev defaults (it never overwrites an existing `.env`). Edit that `.env` if you need
+different local values. All ports bind to `127.0.0.1` only.
+
+> The committed [`.env.example`](./.env.example) is the **production** contract (profile
+> `prod`, a blank secret `DB_PASSWORD`) — it is the source of truth for *which* vars exist,
+> not a runnable local config. Copying it would not boot locally, which is why `make setup`
+> exists. Compose uses bare `${VAR}` refs with no defaults, so a missing var fails loudly
+> rather than silently defaulting.
+
+Stop the stack with `make down` (add `make down-v` to also wipe the database volume).
 
 ## Common commands
 
@@ -45,7 +51,8 @@ tooling. Run `make` (or `make help`) to list everything.
 
 | Command | What it does |
 | --- | --- |
-| `make up` | Build + start the full stack (postgres, backend, web) in the background |
+| `make setup` | Write a working local-dev `.env` if absent (idempotent; never clobbers yours) |
+| `make up` | Bootstrap `.env` (via `setup`) then build + start the full stack in the background |
 | `make down` | Stop the stack (keeps the DB volume; `make down-v` also wipes it) |
 | `make logs` / `make ps` | Tail logs / show container status |
 | `make build` | Build all surfaces: backend jar + container images |
