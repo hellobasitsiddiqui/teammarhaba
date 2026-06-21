@@ -35,6 +35,8 @@
             <div class="auth-card" id="auth-signed-in" hidden>
                 <h2>Signed in</h2>
                 <p>You are signed in as <strong id="user-email"></strong>.</p>
+                <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client (TM-108). -->
+                <p id="me" class="status"></p>
                 <button id="signout-btn" type="button">Sign out</button>
             </div>
         </section>
@@ -45,5 +47,8 @@
     <!-- Auth UI controller (TM-106). -->
     <script type="module" src="/assets/login.js"></script>
     <script src="/assets/app.js"></script>
+    <!-- Authenticated API client demo (TM-108): calls GET /api/v1/me and renders the
+         verified caller into #me. api.js attaches the Bearer token to every API call. -->
+    <script type="module" src="/assets/me.js"></script>
 </body>
 </html>
