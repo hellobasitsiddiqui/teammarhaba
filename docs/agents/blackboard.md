@@ -41,8 +41,8 @@
 - If **blocked/held**: set **Flagged = Impediment** (`customfield_10021` = `[{"value":"Impediment"}]`); clear when unblocked.
 - Story points = the estimate (Original Estimate isn't on the Task screen — UI-admin toggle needed). See `jira-mcp-gotchas` → Time tracking.
 
-### createIssueLink direction — VERIFY by read-back
-- To express "X is blocked by Y": `type:"Blocks"`, `inwardIssue: X` (blocked), `outwardIssue: Y` (blocker). When you read an issue, **your blocker shows as `outwardIssue`**. An agent got this backwards once (TM-81→TM-66) — **always create one link and read it back** before trusting the direction.
+### createIssueLink direction — VERIFY by read-back (and against the UI)
+- To create "X is blocked by Y" (Y blocks X): `type:"Blocks"`, `inwardIssue: Y` (the **blocker**), `outwardIssue: X` (the **blocked**). On read-back, the blocker shows as **`inwardIssue`** ("is blocked by") on the blocked issue; things it blocks show as `outwardIssue` ("blocks"). So **a task's blockers = its `inwardIssue` links.** ⚠️ An earlier version of this note had it reversed (said blocker = `outwardIssue`) — it cost a whole Epic-2 DAG inversion + 10 links a human had to delete by hand. Always read back one link **and** check the UI "blocks / is blocked by" heading.
 
 ### Hit a wall? Log it
 - Comment the blocker on the ticket + a `[finding → future improvement]` note; raise a `human-in-the-loop` ticket for human-only steps. Never fail silently.
