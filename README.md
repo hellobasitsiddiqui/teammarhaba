@@ -13,6 +13,8 @@ A multi-surface application: a one-page **web** app, a **WebView** wrapper, a na
 | `/webview` | Shared WebView assets/wrapper for the native shells |
 | `/android` | Native Android app |
 | `/infra` | Infrastructure & deployment config (GCP, CI/CD) |
+| `/scripts` | Developer & automation scripts |
+| `/docs` | Architecture, decision records (ADRs), and agent operating docs |
 
 Each directory has its own README. Most are stubs at this stage — the foundation tickets fill them in.
 
@@ -34,3 +36,15 @@ All ports bind to `127.0.0.1` only. Config comes from your `.env` (the contract 
 [`.env.example`](./.env.example)); compose uses bare `${VAR}` refs, so a missing var
 fails loudly rather than silently defaulting. Stop with `docker compose down` (add
 `-v` to also wipe the database volume).
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch, commit, and PR conventions. In
+short: branch off `main` as `<type>/TM-<id>-<slug>`, lead commits with the Jira key
+(`TM-<id> …`), open a PR using the template, and make sure CI is green before review.
+Supply-chain conventions (SHA-pinned Actions, SBOM) are in
+[`docs/supply-chain.md`](./docs/supply-chain.md).
+
+## License
+
+Proprietary — © 2026 10xai, all rights reserved. See [`LICENSE`](./LICENSE).
