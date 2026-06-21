@@ -7,7 +7,8 @@
 #   - Docker + Docker Compose v2   (for up/down/build/run-the-stack)
 #   - JDK 21                        (only for the host-side backend targets: test/lint/fmt/run)
 #                                    the backend uses the bundled Maven wrapper (./mvnw) — no system Maven
-#   - cp .env.example .env          (set DB_PASSWORD for local dev; see README)
+#   - no manual .env step           `make up` runs `make setup` first, which writes a working
+#                                    local-dev .env if one is absent — a fresh clone just works.
 #
 # Run `make` or `make help` to list targets.
 
@@ -23,8 +24,12 @@ MVNW := ./mvnw -B
 
 ## --- Stack (Docker Compose) ---
 
+.PHONY: setup
+setup: ## Write a working local-dev .env if absent (idempotent; never clobbers an existing one)
+	@bash scripts/setup-env.sh
+
 .PHONY: up
-up: ## Build + start the full stack (postgres, backend, web) in the background
+up: setup ## Build + start the full stack (postgres, backend, web) in the background
 	$(COMPOSE) up --build -d
 	@echo ""
 	@echo "Stack up:"

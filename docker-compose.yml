@@ -3,13 +3,16 @@
 # Runs the whole TeamMarhaba system locally with one command:
 #   backend (Spring Boot) + web (nginx) + Postgres.
 #
-# Usage:
-#   cp .env.example .env      # then set DB_PASSWORD (and any blanks) for local dev
-#   docker compose up --build
+# Usage (preferred — bootstraps a working local .env automatically):
+#   make up                   # runs `make setup` first, then compose up --build -d
 #   # backend  -> http://127.0.0.1:8080/health
 #   # web      -> http://127.0.0.1:8081
 #
-# Env is read from ./.env (the same contract as .env.example). There are NO ":-default"
+# `.env.example` is the PRODUCTION contract (profile prod, blank secret DB_PASSWORD) — it
+# is NOT a runnable local config, so don't `cp .env.example .env`. `make setup`
+# (scripts/setup-env.sh, TM-127) writes a git-ignored `.env` with local-dev defaults.
+#
+# Env is read from ./.env (the same var contract as .env.example). There are NO ":-default"
 # fallbacks; the required vars use the ":?" *required* operator, so `docker compose up`
 # without a populated .env fails loudly and immediately (TM-64 / 1.4.5) instead of
 # silently substituting blanks. All host ports bind to 127.0.0.1 only (never exposed
@@ -20,9 +23,9 @@ services:
   postgres:
     image: postgres:16-alpine            # matches Cloud SQL POSTGRES_16 (config.yaml)
     environment:
-      POSTGRES_DB: ${DB_NAME:?DB_NAME is required - copy .env.example to .env and set it}
-      POSTGRES_USER: ${DB_USER:?DB_USER is required - copy .env.example to .env and set it}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required - copy .env.example to .env and set it}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required - run `make setup` (or `make up`) to generate a local .env}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required - run `make setup` (or `make up`) to generate a local .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required - run `make setup` (or `make up`) to generate a local .env}
     ports:
       - "127.0.0.1:5432:5432"            # loopback only
     volumes:
@@ -45,7 +48,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required - copy .env.example to .env and set it}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required - run `make setup` (or `make up`) to generate a local .env}
     ports:
       - "127.0.0.1:8080:8080"            # loopback only; Spring binds ${PORT:8080}
     depends_on:
