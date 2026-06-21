@@ -1,0 +1,27 @@
+# Code ownership — who is auto-requested for review on changed paths.
+# Matched bottom-to-top: the LAST matching pattern wins, so the catch-all is first
+# and more specific directory rules override it below.
+# Docs: https://docs.github.com/en/repositories/managing-your-repos-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything not matched by a more specific rule below.
+*                       @hellobasitsiddiqui
+
+# --- Application surfaces ---
+/backend/               @hellobasitsiddiqui
+/web/                   @hellobasitsiddiqui
+/webview/               @hellobasitsiddiqui
+/android/               @hellobasitsiddiqui
+
+# --- Infrastructure, CI/CD, automation ---
+/infra/                 @hellobasitsiddiqui
+/scripts/               @hellobasitsiddiqui
+/.github/               @hellobasitsiddiqui
+
+# --- Docs & agent operating instructions ---
+/docs/                  @hellobasitsiddiqui
+
+# --- Repo-root config & contracts (license, env contract, build, tooling) ---
+/LICENSE                @hellobasitsiddiqui
+/CONTRIBUTING.md        @hellobasitsiddiqui
+/.env.example           @hellobasitsiddiqui
+/CLAUDE.md              @hellobasitsiddiqui
