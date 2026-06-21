@@ -69,6 +69,23 @@ identity with a **Firebase ID token** sent as `Authorization: Bearer <token>`.
 The permit-list and stateless/CSRF-off config live in `security.SecurityConfig`. **Out of scope:**
 login UI, the user/role model, and per-surface client SDKs.
 
+## API docs — OpenAPI / Swagger UI (TM-76)
+
+springdoc generates the OpenAPI spec from the live controllers, so every endpoint is documented
+and explorable without hand-maintained docs:
+
+| Surface | Path |
+| --- | --- |
+| OpenAPI JSON | `/v3/api-docs` |
+| Swagger UI | `/swagger-ui` |
+
+**Prod exposure:** both are **disabled on `prod`** (`application-prod.yml`) so the API's shape
+isn't published on the public surface; they're enabled in dev/test. Re-enable behind auth later
+if an internal docs surface is wanted. The endpoints are unauthenticated where enabled — when the
+auth seam (TM-79) tightens access, keep `/v3/api-docs` and `/swagger-ui/**` permit-listed in
+non-prod. Title/version metadata lives in `api.OpenApiConfig`. The OpenAPI drift-check CI job is
+deferred to Epic 2 (it needs a real API surface).
+
 ## Security headers (TM-78)
 
 Every response carries a baseline set of security headers, emitted by
