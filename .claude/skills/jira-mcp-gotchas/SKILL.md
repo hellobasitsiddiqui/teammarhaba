@@ -14,11 +14,11 @@ Hard-won quirks of the Atlassian MCP connector against 10xai Jira (project key *
 - **Does NOT render:** blockquotes (`>`) and task-list checkboxes (`- [ ]`) → they appear as literal `>` / `[ ]`. Use bold labels + plain bullets.
 - **Never HTML-escape** `&` `<` `>` — pass them literally. Escaping renders as `&amp;` etc. (very visible in summaries).
 
-## Issue links (`createIssueLink`) — direction is inverted vs the tool docs
-- To express **"X is blocked by Y"** (Y blocks X): `type: "Blocks"`, `inwardIssue: X` (blocked), `outwardIssue: Y` (blocker).
-- Rationale: the `Blocks` link type defines `inward = "is blocked by"`, `outward = "blocks"`. The **inward** issue is the blocked one.
-- ⚠️ The tool's **own inline param docs say the opposite** (`inwardIssue = blocker`). They are wrong — trust the line above (verified by read-back: the blocker comes back as `outwardIssue` on the blocked issue).
-- **Always create one link, then read it back** and confirm before bulk-creating — this is non-negotiable. Cost of skipping it: the Epic-2 breakdown (TM-103…TM-114) created **all 10** Blocks links inverted by following the tool's inline docs, so every wave-0 root looked "blocked by" its own descendants and the whole sprint read as zero-ready. And **there is no delete-link tool (UI-only)** — fixing it meant a human deleting 10 links by hand while the agent recreated them. One read-back would have caught it.
+## Issue links (`createIssueLink`) — get the direction right, then read it back
+- The `Blocks` link type: `outward = "blocks"`, `inward = "is blocked by"`.
+- **Create** "X is blocked by Y" (Y is the prerequisite that blocks X): `type: "Blocks"`, `inwardIssue: Y` (the **blocker**), `outwardIssue: X` (the **blocked**). The tool's inline param hint is correct — `inwardIssue` is the issue that blocks.
+- **Read back / readiness:** on a viewed issue the API returns the *far* end of each link — `inwardIssue: Z` means "this **is blocked by** Z" (Z is a **blocker** / upstream, shown under "is blocked by" in the UI); `outwardIssue: Z` means "this **blocks** Z" (Z is a downstream **dependent**, shown under "blocks"). So a task's blockers are its **`inwardIssue`** links; it's *ready* when all of those are Done.
+- **Verify on ONE link before bulk-creating, and cross-check the UI "blocks / is blocked by" heading.** An earlier version of this note had the direction reversed (it claimed the blocker is `outwardIssue`). Trusting it made a whole epic's DAG read as inverted — wave-0 roots looked "blocked by" their own descendants — and an agent then created 10 reversed links that a human had to delete by hand. There is **no delete-link tool (UI-only)**, so a wrong bulk-create is expensive. One read-back (+ a glance at the UI) catches it.
 - Identical duplicate links: usually deduped/harmless; a timed-out call may or may not have created the link — verify or accept a possible dup.
 
 ## Missing tools (UI-only operations)
