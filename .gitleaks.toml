@@ -1,0 +1,16 @@
+# gitleaks config (TM-58 backstop). Extends the default ruleset; only adds an allowlist
+# for values that are public by design and must ship in client code.
+title = "TeamMarhaba gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Firebase WEB config is public (a client-side project identifier, not a secret) — TM-105. Security is enforced server-side via Firebase ID-token verification + Auth rules, not by hiding this key."
+paths = [
+  '''web/src/assets/firebase-config\.js''',
+]
+# Belt-and-braces: also allow the specific web apiKey wherever it appears.
+regexes = [
+  '''AIzaSyA9ldUUFAXiB1bS5p9yzclnqSjCwRCvNy4''',
+]
