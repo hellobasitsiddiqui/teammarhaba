@@ -33,11 +33,31 @@ infrastructure, not the versioned API surface.
 `com.teammarhaba.backend.api.v2` package with `/api/v2`, and add v2 controllers there. `/api/v1`
 keeps serving in parallel, so a breaking change never disrupts existing clients.
 
+## Observability — Actuator (TM-74)
+
+Spring Boot Actuator exposes the operational surface over HTTP, split by sensitivity:
+
+| Endpoint | Access | Notes |
+| --- | --- | --- |
+| `/actuator/health` | **public** | Liveness/readiness for orchestration. `show-details: when-authorized`, so anonymous callers see only `{"status":"UP"}` — never component internals (DB, disk, …). Liveness/readiness groups at `/actuator/health/{liveness,readiness}`. |
+| `/actuator/info` | **authenticated** | Static app identity (`info.app.*`). |
+| `/actuator/metrics` | **authenticated** | Micrometer metrics. Exporting them to Cloud Monitoring is TM-75. |
+
+`/health` (the bare, unversioned controller) stays the lightweight probe the Cloud Run
+deploy targets — kept separate from Actuator so changing the probe path never means changing
+the deploy. Both report `UP`.
+
+The public/authenticated split is enforced by `security.SecurityConfig` (the permit-list);
+the Firebase ID-token auth that backs the *authenticated* half is layered on in TM-79.
+
 ## Security headers (TM-78)
 
 Every response carries a baseline set of security headers, emitted by
-`SecurityHeadersFilter` (a plain servlet filter — no Spring Security / auth machinery
-is on the classpath yet):
+`SecurityHeadersFilter` (a plain servlet filter). It stays a filter rather than Spring
+Security header-writing even though Spring Security is now on the classpath (added in TM-74
+for Actuator authorization): headers are a cross-cutting concern, and keeping them in one
+filter means a single source of truth — Spring Security's own header writer is disabled in
+`SecurityConfig` to avoid duplication. The headers:
 
 | Header | Value | Notes |
 | --- | --- | --- |

@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * carries the baseline headers (not just the filter in isolation).
  */
 @WebMvcTest(HealthController.class)
-@Import(SecurityHeadersFilter.class)
+@Import({SecurityHeadersFilter.class, SecurityConfig.class})
 class SecurityHeadersWiringTest {
 
     @Autowired

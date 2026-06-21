@@ -80,3 +80,9 @@
 - **Cause:** this host's Docker Desktop is API **1.52 (min 1.44)**; the docker-java bundled via the Spring Boot/Testcontainers BOM negotiates **1.32**. `DOCKER_API_VERSION` env is **not** honored by the surefire-forked client.
 - **Local workaround (host-only, NEVER commit):** `TESTCONTAINERS_RYUK_DISABLED=true ./mvnw -DargLine="-Dapi.version=1.44" verify` — docker-java reads the `api.version` **system property** in the forked test JVM. With it, the full suite is green (20/20), Flyway applies, container is shared across ITs.
 - **CI is unaffected** (GitHub runners' Docker is compatible) — these tests pass there unchanged, so this is purely a local-run convenience. If it becomes a recurring dev-time pain, the real fix is bumping the Testcontainers/docker-java version in `backend/pom.xml` (separate ticket — don't fold into a test ticket).
+
+### 2026-06-21 02:05 agent-B — Spring Security is now on the classpath (TM-74); actuator authz seam for TM-79
+- TM-74 added `spring-boot-starter-security` + `spring-boot-starter-actuator`. `security.SecurityConfig` is the single `SecurityFilterChain`: **/actuator/health public, other /actuator/** authenticated, everything else permitAll** (httpBasic so anon → 401 not a 302; CSRF off; stateless; SS header-writing disabled so `SecurityHeadersFilter`/TM-78 stays the one header source).
+- **TM-79 (Firebase Auth) extends this chain** — fill in the `authenticated()` half with ID-token verification; don't add a second chain.
+- **Gotcha for any future `@WebMvcTest`:** with Spring Security on the classpath, a slice defaults to **deny-all (401)**. Fix = `@Import(SecurityConfig.class)` (the chain permits non-actuator paths; CSRF-off lets POST slices through). Done already for HealthControllerTest, SecurityHeadersWiringTest, GlobalExceptionHandlerTest.
+- `/health` (skeleton controller) is intentionally kept separate from `/actuator/health` — the Cloud Run deploy probes `/health`, so don't repoint/remove it.

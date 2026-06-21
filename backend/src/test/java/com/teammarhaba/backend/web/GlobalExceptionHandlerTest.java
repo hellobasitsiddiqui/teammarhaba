@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.teammarhaba.backend.security.SecurityConfig;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
@@ -24,10 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Verifies the global RFC 7807 mappings: validation -> 400, not-found -> 404,
  * conflict -> 409, and an unmapped exception -> a generic 500 that never leaks the
- * underlying message or a stack trace.
+ * underlying message or a stack trace. Imports {@link SecurityConfig} so the slice's
+ * authorization (permit-all for non-actuator paths, CSRF disabled) lets the test endpoints
+ * through rather than Spring Security's default deny-all.
  */
 @WebMvcTest
-@Import(GlobalExceptionHandlerTest.TestController.class)
+@Import({GlobalExceptionHandlerTest.TestController.class, SecurityConfig.class})
 class GlobalExceptionHandlerTest {
 
     @Autowired
