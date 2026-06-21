@@ -40,6 +40,13 @@ management:
   info:
     env:
       enabled: true
+  # Micrometer -> Cloud Monitoring export (TM-75). Off by default, so dev/test are a no-op
+  # and never reach for GCP credentials; prod turns it on (application-prod.yml). JVM + HTTP
+  # server metrics are collected regardless and exposed at /actuator/metrics.
+  stackdriver:
+    metrics:
+      export:
+        enabled: false
 
 # OpenAPI docs (TM-76). Spec at /v3/api-docs, Swagger UI at /swagger-ui. Enabled here
 # (dev/test); prod disables both (application-prod.yml) to keep the API shape off the

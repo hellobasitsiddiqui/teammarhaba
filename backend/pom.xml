@@ -43,6 +43,14 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Micrometer -> Google Cloud Monitoring (TM-75). Version managed by the Boot/
+             Micrometer BOM. Export is enabled only under prod (application-prod.yml) and uses
+             the runtime service account (ADC) — no key. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-stackdriver</artifactId>
+        </dependency>
+
         <!-- Spring Security (TM-74): the SecurityFilterChain that keeps /actuator/health
              public while requiring auth for info/metrics. The permit-list lives here; the
              Firebase token auth that fills in the "authenticated" half is TM-79. -->
