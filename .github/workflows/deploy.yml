@@ -53,6 +53,21 @@ jobs:
           workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
           service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
 
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      # Inject the live backend URL into the BUILT config.js so the web app calls the real
+      # (public, TM-96) Cloud Run backend — not the 127.0.0.1 dev default, which on the live
+      # site triggers Chrome's Private Network Access prompt and breaks /api/v1/me (TM-128).
+      # Resolved at deploy time via gcloud — never hardcoded — so a rename/new project just works.
+      - name: Inject backend API base URL into config.js
+        run: |
+          URL=$(gcloud run services describe teammarhaba-backend --project=teammarhaba --region=europe-west2 --format='value(status.url)')
+          if [ -z "$URL" ]; then echo "::error::could not resolve backend Cloud Run URL"; exit 1; fi
+          echo "Backend URL: $URL"
+          sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
+          grep apiBaseUrl web/dist/assets/config.js
+
       - name: Deploy to Firebase Hosting (live channel)
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 
