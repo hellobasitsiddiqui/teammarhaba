@@ -50,6 +50,25 @@ the deploy. Both report `UP`.
 The public/authenticated split is enforced by `security.SecurityConfig` (the permit-list);
 the Firebase ID-token auth that backs the *authenticated* half is layered on in TM-79.
 
+## Authentication — Firebase ID tokens (TM-79)
+
+The API is **default-deny**: every route requires an authenticated caller except a small
+permit-list (`/health`, `/actuator/health`, and the OpenAPI docs in non-prod). Callers prove
+identity with a **Firebase ID token** sent as `Authorization: Bearer <token>`.
+
+- `auth.FirebaseAuthenticationFilter` verifies the token with the Firebase Admin SDK and, on
+  success, sets a `VerifiedUser` (uid + email) as the security principal — read it in a handler
+  with `@AuthenticationPrincipal VerifiedUser` (see `api.PingController`, `GET /api/v1/ping`).
+- A missing or invalid token yields a uniform RFC 7807 **`401`** from `auth.RestAuthenticationEntryPoint`
+  (same `application/problem+json` shape as every other error — TM-72).
+- `auth.FirebaseConfig` initialises the Admin SDK from **Application Default Credentials** — the
+  Cloud Run runtime service account in prod, `gcloud auth application-default login` locally.
+  **No service-account key is committed.** The `FirebaseAuth` bean is lazy, so token-free requests
+  (and the whole dev/test/CI boot, which has no credentials) never trigger initialisation.
+
+The permit-list and stateless/CSRF-off config live in `security.SecurityConfig`. **Out of scope:**
+login UI, the user/role model, and per-surface client SDKs.
+
 ## Security headers (TM-78)
 
 Every response carries a baseline set of security headers, emitted by

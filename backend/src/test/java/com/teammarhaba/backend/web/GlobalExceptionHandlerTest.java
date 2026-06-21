@@ -6,11 +6,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.teammarhaba.backend.security.SecurityConfig;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -25,12 +25,13 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Verifies the global RFC 7807 mappings: validation -> 400, not-found -> 404,
  * conflict -> 409, and an unmapped exception -> a generic 500 that never leaks the
- * underlying message or a stack trace. Imports {@link SecurityConfig} so the slice's
- * authorization (permit-all for non-actuator paths, CSRF disabled) lets the test endpoints
- * through rather than Spring Security's default deny-all.
+ * underlying message or a stack trace. Security filters are disabled
+ * ({@code addFilters = false}) so the test exercises the error model directly, not the
+ * default-deny auth chain (TM-79) — these test routes aren't part of the permit-list.
  */
 @WebMvcTest
-@Import({GlobalExceptionHandlerTest.TestController.class, SecurityConfig.class})
+@AutoConfigureMockMvc(addFilters = false)
+@Import(GlobalExceptionHandlerTest.TestController.class)
 class GlobalExceptionHandlerTest {
 
     @Autowired
