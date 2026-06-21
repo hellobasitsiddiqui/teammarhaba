@@ -1,19 +1,13 @@
 package com.teammarhaba.backend;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.ActiveProfiles;
 
 /**
  * Smoke test: the Spring application context starts cleanly under the {@code test} profile
  * (proves the profile + validated {@code AppProperties} boot, the Testcontainers Postgres
- * connects, and Flyway migrations apply).
+ * connects, and Flyway migrations apply). Uses the shared integration-test harness.
  */
-@SpringBootTest
-@ActiveProfiles("test")
-@Import(TestcontainersConfiguration.class)
-class ContextLoadsTest {
+class ContextLoadsTest extends AbstractIntegrationTest {
 
     @Test
     void contextLoads() {
