@@ -15,6 +15,11 @@ import {
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -51,10 +56,39 @@ export function onAuthChanged(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-// Bridge for the framework-free page (classic scripts can't `import`). Lets TM-106's
-// sign-in UI and ad-hoc console checks reach the helpers without a bundler.
+/** Create a new account with email + password (signs the user in on success). */
+export function signUp(email, password) {
+  return createUserWithEmailAndPassword(auth, email, password);
+}
+
+/** Sign in with an existing email + password. */
+export function signIn(email, password) {
+  return signInWithEmailAndPassword(auth, email, password);
+}
+
+/** Sign in with Google (popup). Requires the Google provider enabled in the Firebase console. */
+export function signInWithGoogle() {
+  return signInWithPopup(auth, new GoogleAuthProvider());
+}
+
+/** Sign the current user out. */
+export function signOut() {
+  return firebaseSignOut(auth);
+}
+
+// Bridge for the framework-free page (classic scripts can't `import`). Lets the sign-in UI
+// and ad-hoc console checks reach the helpers without a bundler.
 if (typeof window !== "undefined") {
-  window.tmAuth = { auth, currentUser, getIdToken, onAuthChanged };
+  window.tmAuth = {
+    auth,
+    currentUser,
+    getIdToken,
+    onAuthChanged,
+    signUp,
+    signIn,
+    signInWithGoogle,
+    signOut,
+  };
 }
 
 export { auth };

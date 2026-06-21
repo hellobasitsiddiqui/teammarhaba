@@ -38,3 +38,93 @@ body {
     font-variant-numeric: tabular-nums;
     font-weight: 600;
 }
+
+/* Auth UI (TM-106) */
+.auth {
+    margin: 1.75rem auto 0;
+    max-width: 22rem;
+    text-align: left;
+}
+
+.auth-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    background: #fff;
+    border: 1px solid rgba(26, 26, 46, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(26, 26, 46, 0.08);
+}
+
+.auth-card h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.field input {
+    padding: 0.55rem 0.7rem;
+    font-size: 1rem;
+    border: 1px solid rgba(26, 26, 46, 0.2);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--fg);
+}
+
+.field input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.auth-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.auth button {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.auth button.secondary {
+    color: var(--accent);
+    background: transparent;
+}
+
+.auth button.google {
+    width: 100%;
+    color: var(--fg);
+    background: #fff;
+    border-color: rgba(26, 26, 46, 0.25);
+}
+
+.auth button:hover:not(:disabled) {
+    filter: brightness(0.96);
+}
+
+.auth button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.auth-error {
+    margin: 0;
+    color: #b00020;
+    font-size: 0.85rem;
+    font-weight: 600;
+}

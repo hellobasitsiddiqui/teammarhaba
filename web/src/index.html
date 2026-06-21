@@ -11,11 +11,39 @@
         <h1>TeamMarhaba</h1>
         <p class="tagline">Walking skeleton — web surface.</p>
         <p id="status" class="status">loading…</p>
+
+        <!-- Auth UI (TM-106). login.js toggles these two panels on auth state. -->
+        <section class="auth" aria-label="Account">
+            <form class="auth-card" id="auth-signed-out" novalidate>
+                <h2>Sign in</h2>
+                <label class="field">
+                    <span>Email</span>
+                    <input id="email" type="email" autocomplete="email" required />
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input id="password" type="password" autocomplete="current-password" required minlength="6" />
+                </label>
+                <p id="auth-error" class="auth-error" role="alert" hidden></p>
+                <div class="auth-actions">
+                    <button id="signin-btn" type="submit" form="auth-signed-out">Sign in</button>
+                    <button id="signup-btn" type="button" class="secondary">Sign up</button>
+                </div>
+                <button id="google-btn" type="button" class="google">Continue with Google</button>
+            </form>
+
+            <div class="auth-card" id="auth-signed-in" hidden>
+                <h2>Signed in</h2>
+                <p>You are signed in as <strong id="user-email"></strong>.</p>
+                <button id="signout-btn" type="button">Sign out</button>
+            </div>
+        </section>
     </main>
     <script src="/assets/config.js"></script>
-    <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase on load and
-         exposes window.tmAuth; the sign-in UI lands in TM-106. -->
+    <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase + exposes window.tmAuth. -->
     <script type="module" src="/assets/auth.js"></script>
+    <!-- Auth UI controller (TM-106). -->
+    <script type="module" src="/assets/login.js"></script>
     <script src="/assets/app.js"></script>
 </body>
 </html>
