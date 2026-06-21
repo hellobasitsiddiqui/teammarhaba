@@ -24,6 +24,15 @@ docker run --rm -p 8080:8080 teammarhaba-web
 The container listens on port **8080**. Deep links / hard refreshes on a
 sub-path fall back to `index.html` (SPA routing).
 
+## Auth (TM-105)
+
+Firebase Auth is initialised by `src/assets/auth.js` (ES module, Firebase JS SDK from the
+gstatic CDN — no bundler). It exposes `getIdToken()`, `onAuthChanged()`, and `currentUser`
+(also mirrored on `window.tmAuth` for the framework-free page). The public web config lives
+in `src/assets/firebase-config.js` (the Firebase web `apiKey` is a public project identifier,
+not a secret — see `/.gitleaks.toml`). The sign-in UI (TM-106) and Bearer-token wiring
+(TM-108) build on this.
+
 ## Deploy
 
 Merges to `main` deploy this app to Firebase Hosting (live channel) via

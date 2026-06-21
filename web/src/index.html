@@ -13,6 +13,9 @@
         <p id="status" class="status">loading…</p>
     </main>
     <script src="/assets/config.js"></script>
+    <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase on load and
+         exposes window.tmAuth; the sign-in UI lands in TM-106. -->
+    <script type="module" src="/assets/auth.js"></script>
     <script src="/assets/app.js"></script>
 </body>
 </html>
