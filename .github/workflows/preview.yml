@@ -1,6 +1,6 @@
 name: PR preview
 
-# Per-PR live preview (TM-65): every PR gets a Firebase Hosting preview channel for the web
+# Opt-in PR live preview (TM-65; gated by the `preview` label — TM-117): a PR labelled `preview` gets a Firebase Hosting preview channel for the web
 # and a tagged, NO-TRAFFIC Cloud Run revision for the backend, with both URLs posted as a PR
 # comment. Torn down when the PR closes/merges. Keyless throughout (WIF -> gha-deployer, the
 # same identity as the production deploy); no JSON key. Previews never take production traffic.
@@ -12,7 +12,7 @@ name: PR preview
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, labeled, unlabeled, synchronize, reopened, closed]
 
 # One preview per PR; a new push supersedes the in-flight preview deploy.
 concurrency:
@@ -35,7 +35,7 @@ jobs:
   # ---- Deploy preview (PR opened / updated / reopened) ----
   deploy:
     name: Deploy preview
-    if: ${{ github.event.action != 'closed' }}
+    if: ${{ github.event.action != 'closed' && github.event.action != 'unlabeled' && contains(github.event.pull_request.labels.*.name, 'preview') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -177,7 +177,7 @@ jobs:
   # ---- Tear down preview (PR closed / merged) ----
   cleanup:
     name: Tear down preview
-    if: ${{ github.event.action == 'closed' }}
+    if: ${{ github.event.action == 'closed' || (github.event.action == 'unlabeled' && github.event.label.name == 'preview') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
