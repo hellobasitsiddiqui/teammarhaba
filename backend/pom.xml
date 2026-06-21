@@ -66,6 +66,15 @@
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
 
+        <!-- OpenAPI docs + Swagger UI (TM-76). Not in the Spring Boot BOM, so pinned.
+             Serves /v3/api-docs + /swagger-ui in non-prod; disabled on prod (see
+             application-prod.yml) to keep the API's shape off the public surface. -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
+        </dependency>
+
         <!-- Flyway: versioned schema migrations, run on startup; Hibernate only validates. -->
         <dependency>
             <groupId>org.flywaydb</groupId>

@@ -41,6 +41,13 @@ management:
     env:
       enabled: true
 
+# OpenAPI docs (TM-76). Spec at /v3/api-docs, Swagger UI at /swagger-ui. Enabled here
+# (dev/test); prod disables both (application-prod.yml) to keep the API shape off the
+# public surface. When auth tightens (TM-79), these paths must stay permit-listed in non-prod.
+springdoc:
+  swagger-ui:
+    path: /swagger-ui
+
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:
   app:
