@@ -1,0 +1,71 @@
+# docker-compose.yml — local dev stack (TM-52 / 1.2.4)
+#
+# Runs the whole TeamMarhaba system locally with one command:
+#   backend (Spring Boot) + web (nginx) + Postgres.
+#
+# Usage:
+#   cp .env.example .env      # then set DB_PASSWORD (and any blanks) for local dev
+#   docker compose up --build
+#   # backend  -> http://127.0.0.1:8080/health
+#   # web      -> http://127.0.0.1:8081
+#
+# Env is read from ./.env (the same contract as .env.example). Compose interpolates
+# bare ${VAR} references with NO ":-default" fallbacks — a missing var fails loudly,
+# pairing with the fail-loud validator (TM-64 / 1.4.5). All host ports bind to
+# 127.0.0.1 only (never exposed beyond the loopback interface).
+name: teammarhaba
+
+services:
+  postgres:
+    image: postgres:16-alpine            # matches Cloud SQL POSTGRES_16 (config.yaml)
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"            # loopback only
+    volumes:
+      - pgdata:/var/lib/postgresql/data  # named volume — data survives restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend                 # multi-stage Dockerfile from TM-50
+    environment:
+      SPRING_PROFILES_ACTIVE: dev         # local profile (Postgres via this compose)
+      # Datasource wiring against the compose Postgres. Spring relaxed-binding env
+      # names, so this activates automatically once the JDBC driver + datasource land
+      # (TM-70 profiles / TM-71 Flyway); today the web-only skeleton ignores it.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+    ports:
+      - "127.0.0.1:8080:8080"            # loopback only; Spring binds ${PORT:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy        # wait for Postgres to accept connections
+    healthcheck:
+      # No curl/wget assumed in the slim JRE image — check the port is listening
+      # via bash's /dev/tcp (present on the temurin jammy base).
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8080' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web                      # static bundle -> nginx (TM-51)
+    ports:
+      - "127.0.0.1:8081:8080"            # nginx listens on 8080; host 8081 avoids the backend clash
+    restart: unless-stopped
+
+volumes:
+  pgdata:

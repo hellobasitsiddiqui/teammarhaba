@@ -66,3 +66,11 @@
 - The allUsers risk above **materialised**: org `10xai` enforces `iam.allowedPolicyMemberDomains`, so `--allow-unauthenticated` fails. Resolution (TM-60 fix): deploy **`--no-allow-unauthenticated`** (private); public access deferred to **TM-96** (human-in-the-loop, org-policy exception). **TM-65 preview revisions will hit the same wall** — deploy them private too.
 - **Runtime SA required:** the service must run as a dedicated SA (`teammarhaba-run@`, has `secretmanager.secretAccessor` on the DB secret + `cloudsql.client`) via `--service-account`. The **default compute SA lacks secret access** → deploy fails on `--set-secrets` without this. `gha-deployer` (project `iam.serviceAccountUser`) can act-as it. Reuse `teammarhaba-run` for any Cloud Run service that reads the DB secret.
 - **Verify private services by Ready revision**, not a public curl: `gcloud run services describe ... --format='value(status.latestReadyRevisionName)'` (non-empty = startup probe on /health passed).
+
+## Local dev
+
+### 2026-06-21 00:25 agent-B — Local stack: `docker compose up` (backend + web + Postgres), TM-52
+- Root **`docker-compose.yml`** runs the whole system locally: `backend` (8080), `web` (8081), `postgres:16-alpine` (5432, named volume `pgdata`). All host ports bind **127.0.0.1 only**. Reads root `./.env` (copy from `.env.example`, set `DB_PASSWORD`). Bare `${VAR}` refs, no `:-default` (fails loud, pairs with TM-64).
+- **Datasource is forward-wired, not yet live:** the backend image is still web-only (`spring-boot-starter-web`, no JDBC driver; config is `.properties`, not yaml). Compose passes `SPRING_PROFILES_ACTIVE=dev` + `SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${DB_NAME}` (+user/pass) so it connects **automatically once the driver + datasource land (TM-70 profiles / TM-71 Flyway)**. Today the backend ignores it and just serves `/health`. So TM-52's AC "backend connects to Postgres" is wiring-complete but the live JDBC hop depends on TM-70/71 — flagged on TM-52.
+- **For TM-71 (Flyway) dev testing:** this compose Postgres is your local target — the `dev` profile + the `SPRING_DATASOURCE_*` env above already point at it.
+- Backend healthcheck avoids curl/wget (absent in the slim JRE image) — uses bash `/dev/tcp`. Verified: stack up, `/health` 200, data survives `down`+`up` (volume persists).
