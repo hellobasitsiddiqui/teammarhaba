@@ -1,0 +1,38 @@
+# Pre-commit hooks — fast local checks that run on staged files before each commit, so
+# style/hygiene violations are caught before they reach CI. Install once per clone:
+#
+#     pip install pre-commit      # or: brew install pre-commit
+#     pre-commit install          # wire it into .git/hooks/pre-commit
+#
+# Run on demand:  pre-commit run --all-files
+#
+# The backend formatter hook below runs the SAME Spotless check as CI (`./mvnw spotless:check`
+# in .github/workflows/ci.yml), so hooks and CI agree — a clean tree passes both, and the same
+# violation fails both.
+repos:
+  # Generic hygiene — operate on staged files only, so they're fast.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'        # Markdown line breaks rely on trailing spaces (see .editorconfig)
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: detect-private-key   # belt-and-braces against committing a key (pairs with gitleaks/TM-58)
+
+  # Backend formatter — identical to the CI gate. Only fires when a backend Java file is staged;
+  # delegates to Spotless via the Maven wrapper so the config is the single source of truth.
+  - repo: local
+    hooks:
+      - id: spotless-backend
+        name: Spotless format check (backend Java)
+        entry: bash -c 'cd backend && ./mvnw -B spotless:check'
+        language: system
+        files: '^backend/.*\.java$'
+        pass_filenames: false
