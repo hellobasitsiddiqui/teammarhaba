@@ -19,7 +19,7 @@ Drive the Bootstrap with **hand-fed starter prompts + user-level skills** (nothi
 ## The model (Shape A: Epic → Task)
 
 - **One Epic** per program area (e.g. "Foundation & DevOps").
-- The granular work items become **Tasks** parented to the Epic. **Use Task, NOT Sub-task** — Jira sub-tasks (level −1) do **not** appear in the Backlog/Board independently and can't be sprinted alone. Only Epic + Story/Task (level 0) are independently pickable.
+- The granular work items become **Tasks** parented to the Epic. **Use Task, NOT Sub-task** — Jira sub-tasks (level −1) do **not** appear in the Backlog/Board independently and can't be sprinted alone. Only Epic + Story/Task (level 0) are independently pickable. **A defect is a `Bug`** (type id `10007` — also level-0/pickable), never a Task with a `[bug]` title prefix.
 - Express the old "story" groupings as **labels** `group-1.1`, `group-1.2`, … (filter/group the backlog by these). Standard Jira can't make three levels all pickable, so the middle grouping becomes a label.
 - If a single Task later needs breakdown, it can spawn its own Sub-tasks — giving an `Epic → Task → Sub-task` shape with the Task still pickable.
 

@@ -7,6 +7,8 @@ description: Write a well-structured TeamMarhaba Jira ticket — a Standard sect
 
 Produce a TeamMarhaba Jira ticket that a human can read and an agent can execute. The ticket is a **Task** (level-0, so it is independently pickable from the backlog — never a Sub-task; see `jira-epic-breakdown`).
 
+> **A defect is a `Bug`, not a Task.** File defects with `issueTypeName: "Bug"` (id `10007`) — it's also level-0/pickable, parents to the relevant Epic, and carries the usual labels + `replay`/`no-replay`. **Never** signal a bug with a `[bug]` prefix in a Task summary; use the real type so it's filterable/reportable.
+
 ## Anatomy
 
 1. **Description** (markdown) = two sections:
