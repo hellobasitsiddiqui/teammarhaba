@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: JDK 21 + Maven wrapper ----
-FROM eclipse-temurin:21-jdk-jammy AS build
+FROM eclipse-temurin:25-jdk-jammy AS build
 WORKDIR /app
 
 # Resolve dependencies first (cached layer when pom is unchanged)
@@ -14,7 +14,7 @@ COPY src/ src/
 RUN ./mvnw -q -B -DskipTests package
 
 # ---- Runtime stage: slim JRE, non-root ----
-FROM eclipse-temurin:21-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy AS runtime
 WORKDIR /app
 
 # Non-root runtime user
