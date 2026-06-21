@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.api;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,7 +17,9 @@ import org.springframework.test.web.servlet.MockMvc;
 /**
  * Verifies the {@code /api/v1} versioning convention: application endpoints are served
  * under {@code /api/v1}, the bare (unprefixed) path is not, and the {@code /health} probe
- * stays unversioned so the Cloud Run deploy probes keep working.
+ * stays unversioned so the Cloud Run deploy probes keep working. The {@code /api/v1} surface is
+ * auth-protected (TM-79), so an authenticated user is supplied for those requests; this test is
+ * about routing, not auth.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -29,14 +32,14 @@ class ApiVersioningTest {
 
     @Test
     void apiEndpointsAreServedUnderApiV1() throws Exception {
-        mockMvc.perform(get("/api/v1/meta"))
+        mockMvc.perform(get("/api/v1/meta").with(user("test")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value("v1"));
     }
 
     @Test
     void unprefixedApiPathIsNotMapped() throws Exception {
-        mockMvc.perform(get("/meta")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/meta").with(user("test"))).andExpect(status().isNotFound());
     }
 
     @Test

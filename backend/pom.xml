@@ -51,6 +51,14 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
+        <!-- Firebase Admin SDK (TM-79): verifies caller ID tokens. Not in the Boot BOM, so
+             pinned. No service-account key — initialised with Application Default Credentials. -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.4.1</version>
+        </dependency>
+
         <!-- Data layer (TM-71): JPA/Hibernate + JDBC + Spring's DAO exception hierarchy
              (DataIntegrityViolationException -> 409, used by the TM-72 error model). -->
         <dependency>
@@ -86,6 +94,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Spring Security test support (TM-79): MockMvc auth (e.g. .with(user(...))). -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
 

@@ -1,47 +1,57 @@
 package com.teammarhaba.backend.security;
 
-import static org.springframework.security.config.Customizer.withDefaults;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.firebase.auth.FirebaseAuth;
+import com.teammarhaba.backend.auth.FirebaseAuthenticationFilter;
+import com.teammarhaba.backend.auth.RestAuthenticationEntryPoint;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Web authorization for the base. Today it does exactly what TM-74 needs and no more: keep
- * the operational health surface public while requiring authentication for the
- * internals-revealing actuator endpoints.
+ * Web authorization for the API — <strong>default-deny</strong> (TM-79, extending the TM-74
+ * actuator split). Every route requires an authenticated caller except an explicit permit-list:
  *
  * <ul>
- *   <li><b>{@code /actuator/health}</b> (and its {@code liveness}/{@code readiness} groups) —
- *       {@code permitAll}, so Cloud Run probes and load balancers reach it anonymously.</li>
- *   <li><b>every other {@code /actuator/**}</b> ({@code /info}, {@code /metrics}, …) —
- *       {@code authenticated}, so internals aren't exposed to anonymous callers.</li>
- *   <li><b>everything else</b> (the {@code /api/v1} surface, {@code /health}) — {@code permitAll}
- *       for now; real caller authentication (Firebase ID-token verification) is layered on in
- *       TM-79, which extends this chain.</li>
+ *   <li><b>{@code /health}</b> — the Cloud Run liveness probe.</li>
+ *   <li><b>{@code /actuator/health}</b> (+ {@code liveness}/{@code readiness} groups) — orchestration probes.</li>
+ *   <li><b>{@code /v3/api-docs/**}, {@code /swagger-ui/**}</b> — the OpenAPI docs (TM-76; non-prod only, disabled in prod).</li>
  * </ul>
  *
- * <p>HTTP Basic is the challenge mechanism so an anonymous hit on a protected endpoint gets a
- * clean {@code 401} (not a {@code 302} to a login page). CSRF is disabled and sessions are
- * stateless — this is a token-style JSON API, not a browser form app. Response security headers
- * stay owned by {@link SecurityHeadersFilter} (TM-78), so Spring Security's own header writer is
- * disabled to keep a single source of truth.
+ * <p>Everything else — the whole {@code /api/v1} surface and the rest of {@code /actuator/**}
+ * ({@code /info}, {@code /metrics}) — is {@code authenticated}. Authentication is established by
+ * {@link FirebaseAuthenticationFilter} (verifies the {@code Bearer} Firebase ID token); an
+ * unauthenticated request to a protected route gets a uniform RFC 7807 {@code 401} from
+ * {@link RestAuthenticationEntryPoint}.
+ *
+ * <p>Sessions are stateless and CSRF is off — this is a token API, not a browser form app.
+ * Response security headers stay owned by {@link SecurityHeadersFilter} (TM-78), so Spring
+ * Security's own header writer is disabled to keep a single source of truth.
  */
 @Configuration
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.authorizeHttpRequests(auth ->
-                        auth.requestMatchers("/actuator/health", "/actuator/health/**")
-                                .permitAll()
-                                .requestMatchers("/actuator/**")
-                                .authenticated()
-                                .anyRequest()
-                                .permitAll())
-                .httpBasic(withDefaults())
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http, ObjectProvider<FirebaseAuth> firebaseAuth, ObjectMapper objectMapper)
+            throws Exception {
+        http.authorizeHttpRequests(auth -> auth.requestMatchers(
+                                "/health",
+                                "/actuator/health",
+                                "/actuator/health/**",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**")
+                        .permitAll()
+                        .anyRequest()
+                        .authenticated())
+                .addFilterBefore(
+                        new FirebaseAuthenticationFilter(firebaseAuth),
+                        UsernamePasswordAuthenticationFilter.class)
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper)))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(headers -> headers.disable());
