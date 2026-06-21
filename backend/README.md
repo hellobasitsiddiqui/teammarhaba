@@ -41,7 +41,7 @@ Spring Boot Actuator exposes the operational surface over HTTP, split by sensiti
 | --- | --- | --- |
 | `/actuator/health` | **public** | Liveness/readiness for orchestration. `show-details: when-authorized`, so anonymous callers see only `{"status":"UP"}` — never component internals (DB, disk, …). Liveness/readiness groups at `/actuator/health/{liveness,readiness}`. |
 | `/actuator/info` | **authenticated** | Static app identity (`info.app.*`). |
-| `/actuator/metrics` | **authenticated** | Micrometer metrics. Exporting them to Cloud Monitoring is TM-75. |
+| `/actuator/metrics` | **authenticated** | Micrometer metrics — JVM, HTTP server, and a sample custom `teammarhaba.app.info` (`config.MetricsConfig`). Exported to **Google Cloud Monitoring under prod** via the Stackdriver registry (off in dev/test); export uses the Cloud Run runtime SA — no key (TM-75). |
 
 `/health` (the bare, unversioned controller) stays the lightweight probe the Cloud Run
 deploy targets — kept separate from Actuator so changing the probe path never means changing

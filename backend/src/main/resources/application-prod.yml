@@ -31,3 +31,14 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+# Micrometer -> Cloud Monitoring (TM-75): export ON in prod, using the Cloud Run runtime
+# service account (Application Default Credentials) — no extra key. project-id is the GCP
+# project (also the Firebase project); on Cloud Run it can be auto-detected, set explicitly
+# for clarity.
+management:
+  stackdriver:
+    metrics:
+      export:
+        enabled: true
+        project-id: teammarhaba
