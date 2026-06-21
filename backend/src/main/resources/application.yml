@@ -8,6 +8,16 @@ spring:
   profiles:
     default: dev
 
+  # Flyway owns the schema (versioned migrations in classpath:db/migration, applied on
+  # startup); Hibernate only validates its entities against the migrated schema and never
+  # generates DDL. Applies to every profile — dev/test/prod all migrate the same way.
+  flyway:
+    enabled: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
 # 12-factor: bind to the platform-provided port (Cloud Run sets PORT), default 8080 locally.
 server:
   port: ${PORT:8080}
