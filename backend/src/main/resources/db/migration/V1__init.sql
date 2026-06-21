@@ -1,0 +1,11 @@
+-- V1__init — baseline migration (TM-71 / 1.6.2)
+--
+-- Establishes the Flyway migration baseline for the TeamMarhaba schema. The backend is
+-- still a walking skeleton with no domain entities, so there are no application tables
+-- yet — feature epics add them as V2__*, V3__*, … (one migration per change, never edited
+-- once applied). Flyway records this baseline in flyway_schema_history on first run.
+--
+-- Hibernate runs with ddl-auto=validate (never generates DDL), so any future @Entity must
+-- have a matching migration here or startup fails — keeping schema and entities in lockstep.
+
+-- (no schema objects in the baseline)

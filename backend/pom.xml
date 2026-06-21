@@ -35,16 +35,60 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- Spring DAO exception hierarchy (DataIntegrityViolationException -> 409).
-             Part of Spring core; the data layer (TM-71) uses it too. -->
+        <!-- Data layer (TM-71): JPA/Hibernate + JDBC + Spring's DAO exception hierarchy
+             (DataIntegrityViolationException -> 409, used by the TM-72 error model). -->
         <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-tx</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- Flyway: versioned schema migrations, run on startup; Hibernate only validates. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Postgres JDBC driver (dev compose Postgres / test Testcontainers / prod Cloud SQL). -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Cloud SQL connector — prod connects to Cloud SQL Postgres over the IAM-gated
+             Auth Proxy socket (see application-prod.yml). Not Spring-managed, so pinned. -->
+        <dependency>
+            <groupId>com.google.cloud.sql</groupId>
+            <artifactId>postgres-socket-factory</artifactId>
+            <version>1.28.4</version>
         </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Testcontainers: integration tests boot against an ephemeral Postgres so Flyway
+             migrations are verified on a real DB. (The full harness is TM-57; this is the
+             minimal wiring TM-71 needs to verify itself — see the finding on the ticket.) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

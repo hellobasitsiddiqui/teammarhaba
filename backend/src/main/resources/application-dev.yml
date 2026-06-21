@@ -1,4 +1,12 @@
 # Local development (docker-compose Postgres, TM-52). Safe defaults — zero setup.
+# Datasource defaults target a host-side Postgres on localhost; `docker compose up`
+# overrides SPRING_DATASOURCE_URL to the in-network `postgres` host (see docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${DB_NAME:teammarhaba}
+    username: ${DB_USER:app}
+    password: ${DB_PASSWORD:devpassword}
+
 app:
   db:
     name: teammarhaba
