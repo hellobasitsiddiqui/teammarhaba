@@ -72,6 +72,56 @@ First sprint of the SKELETON phase: the opening foundation slice. Bones that sta
 
 ---
 
+## Sprints 2–4 — rest of Epic 1 (summary; inline log wasn't kept)
+
+Sprints 2–4 carried the remainder of Epic 1 to Done: the CI image build/push + Cloud Run / Firebase Hosting deploys (groups 1.3/1.4), the data layer (Cloud SQL wiring, Flyway migrations, Testcontainers harness — 1.2/1.3/1.6), and the backend "wakes up" internals — Spring profiles + validation, RFC 7807 errors, `/api/v1` versioning, security headers, full Actuator, structured JSON logging, OpenAPI/Swagger, Firebase ID-token auth (default-deny), and Micrometer → Cloud Monitoring (group 1.6). **Sprint 4 = "Sprint 4 - Wakes Up".** As of **2026-06-21** all of these are merged to `main`.
+
+---
+
+## Sprint 5 — FOUNDATION FINISH (last Epic-1 slice) — PLANNED
+
+Completes **Epic 1 (Foundation)**: the CI/security-hardening, repo-hygiene, and dev-experience tasks left after the deploy + backend work landed. After this, the foundation epic is 100% done and feature epics (Epic 2+) can begin.
+
+- **Length:** 4 days
+- **Agents:** 2 (`agent-A`, `agent-B`) via `/jira-task-claim`
+- **Goal:** Harden and finish the foundation — a coverage-gated, security-scanned, supply-chain-hardened CI; protected `main`; clean repo hygiene + decision/architecture/security docs; and a zero-friction dev loop (pre-commit + a command runner). No new product features.
+
+**Scope — 10 agent Tasks (20 pts), dependency-closed (every blocker is Done or in-sprint):**
+
+| Key | Pts | Task | Ready? |
+|---|:--:|---|---|
+| TM-46 | 2 | 1.1.3 Repo hygiene (README, LICENSE, CODEOWNERS, templates, .env.example) | ✅ ready |
+| TM-48 | 2 | 1.1.5 Decision records + architecture + security docs | ✅ ready |
+| TM-58 | 1 | 1.3.6 Secret scanning + push protection | ✅ ready |
+| TM-54 | 2 | 1.3.2 JaCoCo coverage gate (merge-blocking) | ✅ ready → unblocks TM-45 |
+| TM-56 | 2 | 1.3.4 Security scanning: CodeQL + dependency-review / Dependabot | ✅ ready |
+| TM-59 | 2 | 1.3.7 Supply-chain hardening: SHA-pinned Actions + CycloneDX SBOM | ✅ ready |
+| TM-68 | 2 | 1.5.3 Linter/formatter + pre-commit hooks | ✅ ready |
+| TM-69 | 2 | 1.5.4 Dev command runner (Makefile/Taskfile + scripts) | ✅ ready |
+| TM-65 | 3 | 1.4.6 PR preview environments (Firebase preview + per-PR Cloud Run revision) | ✅ ready |
+| TM-45 | 2 | 1.1.2 Branch strategy + protection | ⛓ after TM-54 (in-sprint); enforcement needs TM-97 |
+
+**Human / HITL (assign to a person; agents skip — `human` label):**
+
+| Key | Task | Note |
+|---|---|---|
+| TM-97 | Upgrade to GitHub Pro to enable branch protection on `main` | **Do first** — gates TM-45's protection rules on a private repo |
+| TM-85 | Delete dropped task TM-47 (UI cleanup) | admin |
+| TM-96 | Decide + enable public (allUsers) access for backend Cloud Run | prod-readiness; optional this sprint |
+
+**Definition of done — demoable at review**
+- A PR is blocked when coverage drops below the JaCoCo gate, and when CodeQL / dependency-review flags an issue; a CycloneDX SBOM is produced by the build.
+- Secret scanning + push protection on; pushing a secret is rejected.
+- `main` has branch protection (required checks, no direct push) — assuming TM-97 done.
+- Fresh clone → one command (the dev runner) builds/tests; pre-commit hooks install cleanly.
+- README / LICENSE / CODEOWNERS / PR + issue templates present; ADRs + architecture + security docs in `docs/`.
+
+**Not in this sprint:** product features (Epic 2+); the pre-prod Cloud SQL private-IP hardening (TM-95) and the allUsers/org-policy decision (TM-96) belong to a later **prod-readiness** slice.
+
+**To start it (human, UI):** create the sprint on the board (e.g. `Sprint 5 - Foundation Finish`, 4-day window), then either drag the 10 agent tickets in, or share the sprint id and an agent can bulk-set `customfield_10020` on them via the API. Then **Start sprint**.
+
+---
+
 ## Mechanics (read before creating sprints)
 
 - **Adding tickets to a sprint works via the API** — set `customfield_10020 = <sprintId>` on each issue. The connector has no list-sprints tool, so discover the id by reading the field off an issue already in a sprint, or probe (`SCRUM Sprint 1` = **id 1** here).
