@@ -108,8 +108,14 @@ jobs:
       # Deploy a tagged revision with NO traffic — production keeps serving its live revision;
       # the preview is reachable only at the tag URL (pr-N---<service>-...run.app). Same runtime
       # SA / Cloud SQL / secrets as prod so the revision actually boots and serves /health.
+      #
+      # ADVISORY (continue-on-error): a preview is a DX aid, not a merge gate. If the preview
+      # revision can't come up, we still post the web preview + a clear "backend unavailable"
+      # note rather than red-failing the PR. A generous startup budget (failureThreshold 12 ≈
+      # 130s) absorbs the slower cold start of a no-traffic preview (DB connect + Flyway).
       - name: Deploy backend preview revision (tagged, no traffic)
         id: backend
+        continue-on-error: true
         run: |
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
@@ -123,7 +129,7 @@ jobs:
             --add-cloudsql-instances="${CLOUDSQL}" \
             --set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest \
             --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT} \
-            --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
+            --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=12 \
             --quiet
           # Pull the tag URL back out of the service's traffic targets.
           url=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
@@ -135,12 +141,17 @@ jobs:
         env:
           WEB_URL: ${{ steps.web.outputs.url }}
           BACKEND_URL: ${{ steps.backend.outputs.url }}
+          BACKEND_OUTCOME: ${{ steps.backend.outcome }}
           PREVIEW: ${{ env.PREVIEW }}
         with:
           script: |
             const marker = '<!-- pr-preview -->';
             const web = process.env.WEB_URL || '(web preview unavailable)';
-            const backend = process.env.BACKEND_URL || '(backend preview unavailable)';
+            // Backend preview is advisory; report its real status rather than failing silently.
+            const backend = process.env.BACKEND_URL
+              || (process.env.BACKEND_OUTCOME === 'failure'
+                    ? '⚠️ failed to start — see the workflow logs'
+                    : '(backend preview unavailable)');
             const preview = process.env.PREVIEW;
             const body = [
               marker,
