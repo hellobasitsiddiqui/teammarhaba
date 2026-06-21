@@ -2,15 +2,27 @@
 # Free on private repos (unlike CodeQL / dependency-review, which need GitHub Advanced
 # Security). Only ecosystems with a manifest in the repo are listed; add Gradle for
 # /android once it has a build.gradle (it's a stub today).
+#
+# Grouped updates (TM-100) — the industry standard to keep PR volume sane:
+#   * low-risk bumps (minor + patch) batch into ONE PR per ecosystem
+#   * MAJOR version bumps stay as their own PRs — they're the ones likely to break, so
+#     they deserve individual review/testing rather than riding along with safe patches
+# Net effect: ~one PR per ecosystem per week instead of one-per-dependency.
 version: 2
 updates:
-  # Backend Java dependencies (Maven).
+  # Backend Java dependencies (Maven). Minor/patch grouped; majors land separately.
   - package-ecosystem: maven
     directory: /backend
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      backend-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
     labels:
       - dependencies
       - backend
@@ -18,26 +30,35 @@ updates:
       prefix: "chore(deps)"
 
   # GitHub Actions used by our workflows — keeps the SHA pins current (pairs with the
-  # supply-chain SHA-pinning policy, TM-59 / docs/supply-chain.md).
+  # supply-chain SHA-pinning policy, TM-59 / docs/supply-chain.md). Low-risk + SHA-pinned,
+  # so group everything (incl. majors) into one PR.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - ci
     commit-message:
       prefix: "chore(deps)"
 
-  # Backend container base image.
+  # Backend container base image — group into one PR.
   - package-ecosystem: docker
     directory: /backend
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      docker:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - docker
