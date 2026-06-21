@@ -8,6 +8,12 @@
 #   # backend  -> http://127.0.0.1:8080/health
 #   # web      -> http://127.0.0.1:8081
 #
+# To exercise *authenticated* endpoints locally (sign-in → GET /api/v1/me), the backend
+# needs Google Application Default Credentials to verify Firebase ID tokens. Run
+# `gcloud auth application-default login` once on the host; the backend service mounts that
+# ADC read-only (see GOOGLE_APPLICATION_CREDENTIALS below). Without it, auth calls 401 and
+# the web shows "could not load profile" (TM-130).
+#
 # `.env.example` is the PRODUCTION contract (profile prod, blank secret DB_PASSWORD) — it
 # is NOT a runnable local config, so don't `cp .env.example .env`. `make setup`
 # (scripts/setup-env.sh, TM-127) writes a git-ignored `.env` with local-dev defaults.
@@ -49,8 +55,19 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required - run `make setup` (or `make up`) to generate a local .env}
+      # The backend verifies caller Firebase ID tokens via the Admin SDK, which reads
+      # Application Default Credentials (TM-79). The image is keyless (no committed SA key),
+      # so locally we point it at the host ADC mounted below. WITHOUT this, every
+      # authenticated request 401s and the web app shows "could not load profile" (TM-130).
+      GOOGLE_APPLICATION_CREDENTIALS: /gcp/adc.json
     ports:
       - "127.0.0.1:8080:8080"            # loopback only; Spring binds ${PORT:8080}
+    volumes:
+      # Mount the developer's host ADC (`gcloud auth application-default login`) read-only so
+      # the backend can verify Firebase tokens locally — keyless, no SA key (TM-130 / TM-79).
+      # Token verification only needs Google's public certs + the project id, so a user-type
+      # ADC is enough. Override the host path with GOOGLE_ADC_PATH if your ADC lives elsewhere.
+      - ${GOOGLE_ADC_PATH:-${HOME}/.config/gcloud/application_default_credentials.json}:/gcp/adc.json:ro
     depends_on:
       postgres:
         condition: service_healthy        # wait for Postgres to accept connections
