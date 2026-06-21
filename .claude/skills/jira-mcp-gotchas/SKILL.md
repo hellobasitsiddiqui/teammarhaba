@@ -17,7 +17,8 @@ Hard-won quirks of the Atlassian MCP connector against 10xai Jira (project key *
 ## Issue links (`createIssueLink`) — direction is inverted vs the tool docs
 - To express **"X is blocked by Y"** (Y blocks X): `type: "Blocks"`, `inwardIssue: X` (blocked), `outwardIssue: Y` (blocker).
 - Rationale: the `Blocks` link type defines `inward = "is blocked by"`, `outward = "blocks"`. The **inward** issue is the blocked one.
-- **Always create one link, then read it back** and confirm before bulk-creating 50.
+- ⚠️ The tool's **own inline param docs say the opposite** (`inwardIssue = blocker`). They are wrong — trust the line above (verified by read-back: the blocker comes back as `outwardIssue` on the blocked issue).
+- **Always create one link, then read it back** and confirm before bulk-creating — this is non-negotiable. Cost of skipping it: the Epic-2 breakdown (TM-103…TM-114) created **all 10** Blocks links inverted by following the tool's inline docs, so every wave-0 root looked "blocked by" its own descendants and the whole sprint read as zero-ready. And **there is no delete-link tool (UI-only)** — fixing it meant a human deleting 10 links by hand while the agent recreated them. One read-back would have caught it.
 - Identical duplicate links: usually deduped/harmless; a timed-out call may or may not have created the link — verify or accept a possible dup.
 
 ## Missing tools (UI-only operations)
