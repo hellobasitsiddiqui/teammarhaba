@@ -1,0 +1,10 @@
+# Automated tests — isolated, no external services. Defaults keep the context
+# bootable; the Testcontainers Postgres harness lands in TM-57.
+app:
+  db:
+    name: teammarhaba_test
+    user: test
+    password: test
+    instance-connection-name: test
+  firebase:
+    project-id: teammarhaba-test
