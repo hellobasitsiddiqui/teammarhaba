@@ -1,0 +1,43 @@
+name: CodeQL
+
+# SAST for the backend (TM-56). Runs on PRs and a weekly schedule; results report to the
+# Security tab. CodeQL code scanning on a PRIVATE repo requires GitHub Advanced Security, so
+# this workflow is GATED behind the `SECURITY_SCANS_ENABLED` repo variable: until a maintainer
+# enables GHAS and sets that variable to `true` (see HITL ticket TM-98), the job is skipped —
+# keeping PRs clean rather than red. Advisory by design: it never gates merges.
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '37 3 * * 1'   # Mondays 03:37 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL analyze (java-kotlin)
+    # Inert until GHAS is enabled and the variable is flipped (TM-98).
+    if: ${{ vars.SECURITY_SCANS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload results to the Security tab
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # build-mode: none analyses source directly — no compile needed, so the analysis
+      # doesn't depend on the Maven build (or Docker/Testcontainers).
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          languages: java-kotlin
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          category: "/language:java-kotlin"

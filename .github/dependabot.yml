@@ -1,0 +1,45 @@
+# Dependabot (TM-56) — keeps dependencies patched by opening weekly update PRs.
+# Free on private repos (unlike CodeQL / dependency-review, which need GitHub Advanced
+# Security). Only ecosystems with a manifest in the repo are listed; add Gradle for
+# /android once it has a build.gradle (it's a stub today).
+version: 2
+updates:
+  # Backend Java dependencies (Maven).
+  - package-ecosystem: maven
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions used by our workflows — keeps the SHA pins current (pairs with the
+  # supply-chain SHA-pinning policy, TM-59 / docs/supply-chain.md).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Backend container base image.
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "chore(deps)"
