@@ -35,6 +35,22 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- Actuator (TM-74): /actuator/health (public, for probes), /info + /metrics
+             (authenticated). Bundles Micrometer for /metrics; the Cloud Monitoring export
+             is TM-75. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Spring Security (TM-74): the SecurityFilterChain that keeps /actuator/health
+             public while requiring auth for info/metrics. The permit-list lives here; the
+             Firebase token auth that fills in the "authenticated" half is TM-79. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
         <!-- Data layer (TM-71): JPA/Hibernate + JDBC + Spring's DAO exception hierarchy
              (DataIntegrityViolationException -> 409, used by the TM-72 error model). -->
         <dependency>
