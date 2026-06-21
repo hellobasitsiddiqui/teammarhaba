@@ -64,7 +64,7 @@
         <dependency>
             <groupId>com.google.firebase</groupId>
             <artifactId>firebase-admin</artifactId>
-            <version>9.4.1</version>
+            <version>9.9.0</version>
         </dependency>
 
         <!-- Data layer (TM-71): JPA/Hibernate + JDBC + Spring's DAO exception hierarchy
