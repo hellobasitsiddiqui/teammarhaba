@@ -1,0 +1,43 @@
+name: auto-merge docs-only PRs
+
+# Docs-only PRs (every changed file is *.md) auto-merge once CI passes — a deliberate,
+# narrow carve-out from the manual-merge policy for low-risk documentation changes.
+# Fires when the CI workflow completes on a PR; merges (squash) only if the PR touches
+# nothing but Markdown. Uses the built-in GITHUB_TOKEN — no PAT, no secrets.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge if every changed file is Markdown
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -o pipefail
+          PR="$(gh pr list -R "$REPO" --head "$BRANCH" --state open --json number -q '.[0].number')"
+          if [ -z "$PR" ]; then echo "No open PR for branch '$BRANCH' — nothing to do."; exit 0; fi
+
+          files="$(gh pr view "$PR" -R "$REPO" --json files -q '.files[].path')"
+          echo "Changed files in PR #$PR:"; echo "$files"
+          if [ -z "$files" ]; then echo "No files listed — skip."; exit 0; fi
+          if printf '%s\n' "$files" | grep -qvE '\.md$'; then
+            echo "Non-Markdown file(s) present — leaving for manual merge."; exit 0
+          fi
+
+          mergeable="$(gh pr view "$PR" -R "$REPO" --json mergeable -q '.mergeable')"
+          if [ "$mergeable" = "CONFLICTING" ]; then echo "PR #$PR is conflicting — skip."; exit 0; fi
+
+          echo "Docs-only PR #$PR — squash-merging."
+          gh pr merge "$PR" -R "$REPO" --squash --delete-branch \
+            || echo "::warning::merge did not complete (not mergeable yet?) — leaving for manual merge."
