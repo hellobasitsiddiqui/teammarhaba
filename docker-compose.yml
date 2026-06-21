@@ -9,19 +9,20 @@
 #   # backend  -> http://127.0.0.1:8080/health
 #   # web      -> http://127.0.0.1:8081
 #
-# Env is read from ./.env (the same contract as .env.example). Compose interpolates
-# bare ${VAR} references with NO ":-default" fallbacks — a missing var fails loudly,
-# pairing with the fail-loud validator (TM-64 / 1.4.5). All host ports bind to
-# 127.0.0.1 only (never exposed beyond the loopback interface).
+# Env is read from ./.env (the same contract as .env.example). There are NO ":-default"
+# fallbacks; the required vars use the ":?" *required* operator, so `docker compose up`
+# without a populated .env fails loudly and immediately (TM-64 / 1.4.5) instead of
+# silently substituting blanks. All host ports bind to 127.0.0.1 only (never exposed
+# beyond the loopback interface).
 name: teammarhaba
 
 services:
   postgres:
     image: postgres:16-alpine            # matches Cloud SQL POSTGRES_16 (config.yaml)
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required - copy .env.example to .env and set it}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required - copy .env.example to .env and set it}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required - copy .env.example to .env and set it}
     ports:
       - "127.0.0.1:5432:5432"            # loopback only
     volumes:
@@ -44,7 +45,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required - copy .env.example to .env and set it}
     ports:
       - "127.0.0.1:8080:8080"            # loopback only; Spring binds ${PORT:8080}
     depends_on:
