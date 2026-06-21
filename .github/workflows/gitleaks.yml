@@ -1,0 +1,35 @@
+name: Secret scan (gitleaks)
+
+# Advisory backstop for committed secrets (TM-58). The PRIMARY, blocking control is
+# GitHub-native secret scanning + push protection (GitHub Advanced Security) — enabling
+# that is a repo-settings/billing step tracked separately (see the TM-58 HITL ticket).
+# This job is the defence-in-depth backstop and is intentionally NON-BLOCKING: it surfaces
+# findings on the PR without failing the build, so a false positive can't wedge the queue.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Least privilege.
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      # Full history so gitleaks scans every commit on the branch, not just the tip.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      # Advisory: continue-on-error keeps a finding (or a false positive) from failing CI.
+      # Review the step's annotations/log; real leaks are remediated per the runbook
+      # (docs/secret-leak-runbook.md). gitleaks-action is free for personal-account repos.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
