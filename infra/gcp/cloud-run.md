@@ -11,7 +11,7 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 | **Port** | 8080 (Spring binds Cloud Run's `PORT`) |
 | **Scaling** | min `0` (scale-to-zero) · max `3` · startup CPU boost on |
 | **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client`) |
-| **Auth** | **private** (`--no-allow-unauthenticated`) — public `allUsers` is blocked by the org's domain-restricted-sharing policy; going public is tracked in **TM-96** |
+| **Auth** | **public** (`--allow-unauthenticated`) — `allUsers` has `roles/run.invoker`. The org enforces domain-restricted sharing, so this is permitted via a scoped exception (see **Public access** below / **TM-96**). The app still requires a Firebase Bearer token; only `/health` is open. |
 
 ## How it deploys
 
@@ -25,10 +25,16 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 3. **Deploy** — `gcloud run deploy` of the SHA-tagged image, running as the dedicated
    **runtime SA** `teammarhaba-run` (so the container — not the deploy SA — is what
    reads the DB secret / connects to Cloud SQL). Config below.
-4. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
+4. **Enable public access** *(best-effort, replay-safe)* — (re)assert the `allUsersIngress`
+   tag on the service and bind `allUsers` as `run.invoker`, retrying while the org-policy
+   condition propagates. **Every command here is non-fatal:** in an environment without the
+   TM-96 exception (e.g. a fresh replay project), the bindings fail and the service simply
+   stays private — the deploy still succeeds. See *Public access (TM-96)* below.
+5. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
    only marks a revision Ready after the `/health` **startup probe** passes, so a Ready
-   revision *is* the proof `/health` serves `200`. (The service is private, so we assert
-   Ready rather than curl a public URL; an authenticated `/health` call runs best-effort.)
+   revision *is* the proof `/health` serves `200` (this check is fatal). The step then
+   **reports** whether unauthenticated `/health` returns `200` (public) or not (private) —
+   informational only, so the deploy is green whether it ended public or private.
 
 ### Health probes (`/health`)
 
@@ -104,9 +110,53 @@ gcloud run services update-traffic teammarhaba-backend --project=teammarhaba --r
 
 Or `git revert <bad-merge> && git push` to roll forward with the repo matching prod.
 
+## Public access (TM-96) — DRS exception via resource tag
+
+The service is **public** (`allUsers` → `roles/run.invoker`). The org `10xai`
+(`103553953969`) enforces domain-restricted sharing (`iam.allowedPolicyMemberDomains`,
+default allowed value = the Workspace customer `C0427lbt2`), which normally rejects
+`allUsers`. Rather than open `allUsers` org- or project-wide, we added a **conditional
+exception scoped to a resource tag**, so only explicitly-tagged services can go public.
+
+One-time org setup (needs `roles/orgpolicy.policyAdmin` + `roles/resourcemanager.tagAdmin`
++ `roles/resourcemanager.tagUser` — org-owner-granted; **persists across replays**):
+
+```bash
+# 1. Org tag that marks "this resource may bind allUsers"
+gcloud resource-manager tags keys   create allUsersIngress --parent=organizations/103553953969
+gcloud resource-manager tags values create True --parent=103553953969/allUsersIngress
+
+# 2. Conditional DRS policy: keep the domain restriction, allow ALL only for tagged resources
+#    (organizations/103553953969/policies/iam.allowedPolicyMemberDomains)
+#    rule A: allowedValues=[C0427lbt2]   rule B: allowAll=true WHEN matchTag(allUsersIngress=True)
+gcloud org-policies set-policy drs-policy.yaml
+```
+
+Per-service (a replay re-does these for a freshly-created service):
+
+```bash
+# 3. Tag the Cloud Run service
+gcloud resource-manager tags bindings create \
+  --tag-value=103553953969/allUsersIngress/True \
+  --parent=//run.googleapis.com/projects/teammarhaba/locations/europe-west2/services/teammarhaba-backend \
+  --location=europe-west2
+
+# 4. Bind allUsers (now permitted by the tagged exception; allow ~60-90s for policy propagation)
+gcloud run services add-iam-policy-binding teammarhaba-backend \
+  --member=allUsers --role=roles/run.invoker --region=europe-west2 --project=teammarhaba
+```
+
+**CD does steps 3–4 for you, idempotently and best-effort.** `deploy.yml` deploys private,
+then its *Enable public access* step re-asserts the tag and binds `allUsers` with retry. The
+tag binding persists on the service, so this stays public across deploys. Crucially these
+commands are **non-fatal**: an environment *without* the one-time org setup above (a fresh
+replay project, a different org) just stays private and the deploy stays green — **a replay
+never hits the DRS wall.** The org-level setup (tag key/value, conditional policy, the three
+role grants) is the only human/one-time piece, and it persists across replays of the same org.
+
+**Security note:** public = network-reachable only; every real endpoint still requires a
+Firebase Bearer token (TM-108). Preview revisions (TM-65) are *not* tagged → stay private.
+
 ## Out of scope
 - App-side JDBC datasource / Flyway migrations (data-layer ticket) — the app has no DB driver yet.
-- Per-PR Cloud Run preview revisions (TM-65 / 1.4.6).
-- **Public access** for the service (`allUsers` invoker) — blocked by the org's
-  domain-restricted-sharing policy; the decision + org-policy exception is **TM-96**
-  (human-in-the-loop). Until then the service is private.
+- Per-PR Cloud Run preview revisions (TM-65 / 1.4.6) — intentionally remain private.
