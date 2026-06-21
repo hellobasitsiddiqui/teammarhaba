@@ -26,9 +26,12 @@ A ready Jira ticket **always wins** over housekeeping — don't start a chore if
   replay also belongs in a Jira ticket or `REPLAY.md`. See the redo keep-list.
 
 ## Backlog
-- [ ] Audit & convert remaining historical Jira comments from wiki markup to GitHub-flavored markdown
+- [x] Audit & convert remaining historical Jira comments from wiki markup to GitHub-flavored markdown
   (repo convention). Known offenders: TM-81 (evidence + finding comments), TM-66 (finding comment),
-  TM-80 (finding comments). _(agent-A already fixed TM-84's two comments, 2026-06-20.)_
+  TM-80 (finding comments). _(agent-A already fixed TM-84's two comments, 2026-06-20.)_ — done agent-C
+  2026-06-21: TM-81 already converted by agent-A (all comments marked "Reposted as markdown"); TM-80
+  already markdown (no wiki markup); TM-66 comment 10078 still had `{{...}}` wiki inline-code — converted
+  to backticks. All three named offenders now clean.
 - [x] Verify all `docs/agents/*` and `CLAUDE.md` cross-links resolve; fix any stale paths. — verified clean across all 24 md files (only hit was the literal `[text](url)` example in CLAUDE.md). agent-B 2026-06-20
 - [x] Ensure `.gitignore` covers Gradle artifacts (`.gradle/`, `build/`) ahead of the Gradle redo (ADR-0001). — already satisfied (`build/`, `.gradle/`, `!gradle/wrapper/gradle-wrapper.jar` present); no change needed. agent-B 2026-06-20
 - [x] Add `docs/decisions/README.md` indexing the ADRs (currently just ADR-0001). — done agent-A 2026-06-20 (branch `chore/adr-decisions-index`)
