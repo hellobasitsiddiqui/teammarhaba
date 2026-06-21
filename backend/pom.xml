@@ -28,10 +28,18 @@
         </dependency>
 
         <!-- Bean Validation (Hibernate Validator) — validates @ConfigurationProperties
-             so bad/missing config fails startup loudly (TM-70). -->
+             at startup so bad/missing config fails loudly (TM-70), and powers @Valid
+             request bodies that the global advice maps to RFC 7807 400s (TM-72). -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Spring DAO exception hierarchy (DataIntegrityViolationException -> 409).
+             Part of Spring core; the data layer (TM-71) uses it too. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
         </dependency>
 
         <dependency>
