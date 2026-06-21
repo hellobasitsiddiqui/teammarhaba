@@ -1,0 +1,30 @@
+name: Dependency review
+
+# Flags newly-introduced vulnerable dependencies on PRs (TM-56). dependency-review needs the
+# GitHub dependency graph, which on a PRIVATE repo requires GitHub Advanced Security — so this
+# job is GATED behind the `SECURITY_SCANS_ENABLED` repo variable (set it once GHAS is on; see
+# HITL ticket TM-98). Advisory: `continue-on-error` keeps a finding (or a scanner flake) from
+# blocking merges — only the JaCoCo coverage gate (TM-54) blocks.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review (advisory)
+    if: ${{ vars.SECURITY_SCANS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        continue-on-error: true   # advisory — report, never block
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
