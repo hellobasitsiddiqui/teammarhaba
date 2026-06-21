@@ -50,6 +50,16 @@ jobs:
           report_paths: backend/target/surefire-reports/TEST-*.xml
           check_name: Backend test report
 
+      # Supply-chain SBOM (TM-59) — the cyclonedx-maven-plugin writes target/bom.json during the
+      # verify build above; publish it as a build artifact for CVE-exposure / provenance checks.
+      - name: Upload CycloneDX SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: backend-sbom
+          path: backend/target/bom.json
+          if-no-files-found: warn
+
   backend-image:
     name: Backend image (build; push to Artifact Registry on main)
     needs: backend            # only build/push an image that passed build + tests
