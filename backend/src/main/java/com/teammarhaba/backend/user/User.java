@@ -68,6 +68,11 @@ public class User {
         return displayName;
     }
 
+    /** Profile update (TM-112). Identity fields (uid/email) come from the token, not the client. */
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
     public Role getRole() {
         return role;
     }

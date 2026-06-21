@@ -1,28 +1,50 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserService;
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code GET /api/v1/me} — returns the verified caller (the prefix is applied by
- * {@link ApiV1Config}). It's the web app's "who am I" check that proves end-to-end auth:
- * reaching it requires a valid Firebase {@code Bearer} token, and an anonymous/invalid token
- * gets the uniform RFC 7807 {@code 401} from the security chain (default-deny).
+ * The caller's own account under {@code /api/v1/me} (the prefix is applied by {@link ApiV1Config}).
+ * Reaching it requires a valid Firebase {@code Bearer} token; an anonymous/invalid token gets the
+ * uniform RFC 7807 {@code 401} from the security chain (default-deny).
  *
- * <p>Identity comes straight from the {@link VerifiedUser} principal established by the Epic-1
- * auth filter (TM-79) — no new auth mechanics. {@code displayName} is filled from the persisted
- * profile (TM-112) and {@code role} from the Firebase custom claim (TM-110); until those land it
- * returns {@code null} / {@code "USER"}.
+ * <ul>
+ *   <li>{@code GET} — returns the persisted profile, <strong>provisioning</strong> the account on
+ *       first sight (TM-112) from the verified {@link VerifiedUser} principal.</li>
+ *   <li>{@code PATCH} — updates the user-editable profile ({@code displayName}).</li>
+ * </ul>
+ *
+ * <p>Identity ({@code uid}/{@code email}) always comes from the verified token, never the client.
+ * {@code role} reflects the stored role (the Firebase custom-claim wiring is TM-110).
  */
 @RestController
 public class MeController {
 
-    private static final String DEFAULT_ROLE = "USER";
+    private final UserService userService;
+
+    MeController(UserService userService) {
+        this.userService = userService;
+    }
 
     @GetMapping("/me")
-    MeResponse me(@AuthenticationPrincipal VerifiedUser user) {
-        return new MeResponse(user.uid(), user.email(), null, DEFAULT_ROLE);
+    MeResponse me(@AuthenticationPrincipal VerifiedUser caller) {
+        return toResponse(userService.provision(caller));
+    }
+
+    @PatchMapping("/me")
+    MeResponse updateMe(@AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid UpdateMeRequest request) {
+        return toResponse(userService.updateDisplayName(caller, request.displayName()));
+    }
+
+    private static MeResponse toResponse(User user) {
+        return new MeResponse(
+                user.getFirebaseUid(), user.getEmail(), user.getDisplayName(), user.getRole().name());
     }
 }
