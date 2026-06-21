@@ -22,6 +22,10 @@ app:
     instance-connection-name: ${INSTANCE_CONNECTION_NAME}
   firebase:
     project-id: ${FIREBASE_PROJECT_ID}
+  # CORS allow-list for the deployed web app (Firebase Hosting). TM-104. Overridable via
+  # APP_CORS_ALLOWED_ORIGINS (comma-separated) if a custom domain is added later.
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:https://teammarhaba.web.app,https://teammarhaba.firebaseapp.com}
 
 # OpenAPI docs are disabled in production (TM-76): the interactive UI + spec endpoint
 # would expose the API's shape publicly. Re-enable behind auth later if an internal

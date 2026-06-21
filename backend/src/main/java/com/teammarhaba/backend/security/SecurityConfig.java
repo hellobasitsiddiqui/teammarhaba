@@ -11,6 +11,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
  * Web authorization for the API — <strong>default-deny</strong> (TM-79, extending the TM-74
@@ -37,7 +38,10 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(
-            HttpSecurity http, ObjectProvider<FirebaseAuth> firebaseAuth, ObjectMapper objectMapper)
+            HttpSecurity http,
+            ObjectProvider<FirebaseAuth> firebaseAuth,
+            ObjectMapper objectMapper,
+            CorsConfigurationSource corsConfigurationSource)
             throws Exception {
         http.authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/health",
@@ -48,6 +52,9 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
+                // CORS for the browser SPA (TM-104). The CorsFilter runs ahead of auth so the
+                // preflight OPTIONS is answered without a token; the allow-list lives in CorsConfig.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .addFilterBefore(
                         new FirebaseAuthenticationFilter(firebaseAuth),
                         UsernamePasswordAuthenticationFilter.class)
