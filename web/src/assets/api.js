@@ -15,11 +15,12 @@
 
 import { getIdToken } from "./auth.js";
 
-// Where to send the user when authentication can't be established. The actual login
-// route/view is owned by the sign-in UI (TM-106) and route guards (TM-109); this is the
-// single seam they can repoint or replace. Kept as a path (not a full URL) so it works on
-// any host.
-export const LOGIN_PATH = "/login";
+// Where to send the user when authentication can't be established. The login view is the
+// `#/login` hash route owned by the guard/router (TM-109); this is the single seam. Kept as
+// a hash route so it needs no server rewrite on the static host.
+export const LOGIN_PATH = "#/login";
+// Shared with router.js: remembers the protected route to return to after sign-in.
+const INTENDED_KEY = "tm.intendedRoute";
 
 /** The configured backend API base URL (TM-104), trailing slashes trimmed. */
 function apiBaseUrl() {
@@ -39,8 +40,17 @@ function resolveUrl(path) {
  */
 export function redirectToLogin() {
   if (typeof window === "undefined") return;
-  const here = window.location.pathname + window.location.search;
-  window.location.assign(`${LOGIN_PATH}?redirect=${encodeURIComponent(here)}`);
+  // Remember the current route (if it isn't already login) so the guard returns the user
+  // there after they sign in — mirrors router.js's deep-link handling.
+  const here = window.location.hash;
+  if (here && here !== LOGIN_PATH) {
+    try {
+      window.sessionStorage.setItem(INTENDED_KEY, here);
+    } catch {
+      /* sessionStorage may be unavailable (private mode) — non-fatal, just skip the return. */
+    }
+  }
+  window.location.hash = LOGIN_PATH;
 }
 
 /**
