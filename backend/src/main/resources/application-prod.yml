@@ -26,6 +26,11 @@ app:
   # APP_CORS_ALLOWED_ORIGINS (comma-separated) if a custom domain is added later.
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:https://teammarhaba.web.app,https://teammarhaba.firebaseapp.com}
+  # First-admin bootstrap (TM-110). OPTIONAL: when ADMIN_BOOTSTRAP_EMAIL is set, that Firebase
+  # account is promoted to ADMIN on startup so the admin surface is reachable. Empty default =
+  # no bootstrap (the account must have signed in once before it can be promoted).
+  admin:
+    bootstrap-email: ${ADMIN_BOOTSTRAP_EMAIL:}
 
 # OpenAPI docs are disabled in production (TM-76): the interactive UI + spec endpoint
 # would expose the API's shape publicly. Re-enable behind auth later if an internal
