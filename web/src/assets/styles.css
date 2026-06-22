@@ -605,3 +605,150 @@ body {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+
+/* ===== Onboarding product tour (TM-135) ===== */
+
+.app-nav #nav-help {
+    cursor: pointer;
+}
+
+/* Full-screen tour layer. Only the blocker + callout capture pointer events. */
+.tm-tour {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    pointer-events: none;
+}
+
+.tm-tour-blocker {
+    position: fixed;
+    inset: 0;
+    pointer-events: auto;
+    background: transparent;
+}
+
+/* Targetless cards dim the whole screen (no spotlight to do it). */
+.tm-tour-dim .tm-tour-blocker {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+/* The spotlight: a transparent box over the target whose huge box-shadow dims everything else. */
+.tm-tour-spotlight {
+    position: fixed;
+    border-radius: 8px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+
+.tm-tour-callout {
+    position: fixed;
+    width: min(20rem, calc(100vw - 2rem));
+    padding: 1rem 1.1rem;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    pointer-events: auto;
+    transition: top 0.2s ease, left 0.2s ease;
+}
+
+.tm-tour-callout-center {
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%);
+    text-align: center;
+}
+
+/* Reduced motion: no sliding. */
+.tm-tour-reduced .tm-tour-spotlight,
+.tm-tour-reduced .tm-tour-callout {
+    transition: none;
+}
+
+.tm-tour-close {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.5rem;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tm-tour-title {
+    margin: 0 1.2rem 0.4rem 0;
+    font-size: 1.05rem;
+}
+
+.tm-tour-body {
+    margin: 0 0 0.9rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--fg);
+}
+
+.tm-tour-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.tm-tour-callout-center .tm-tour-foot {
+    justify-content: center;
+}
+
+.tm-tour-progress {
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-tour-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tm-tour-link {
+    font: inherit;
+    font-size: 0.82rem;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+/* Help replay menu */
+.tm-help-menu {
+    position: fixed;
+    z-index: 2100;
+    display: flex;
+    flex-direction: column;
+    min-width: 12rem;
+    padding: 0.3rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.tm-help-item {
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    text-align: left;
+    color: var(--fg);
+    background: none;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.tm-help-item:hover {
+    background: var(--surface-2);
+}
