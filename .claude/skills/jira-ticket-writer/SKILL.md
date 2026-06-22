@@ -9,6 +9,8 @@ Produce a TeamMarhaba Jira ticket that a human can read and an agent can execute
 
 > **A defect is a `Bug`, not a Task.** File defects with `issueTypeName: "Bug"` (id `10007`) — it's also level-0/pickable, parents to the relevant Epic, and carries the usual labels + `replay`/`no-replay`. **Never** signal a bug with a `[bug]` prefix in a Task summary; use the real type so it's filterable/reportable.
 
+> **The summary is the work, not metadata.** Write an action-focused title; **never prefix it with metadata that a label or the issue-type already carries** — no `[human-in-the-loop]`, `[human]`, `Human:`, `[bug]`, `Chore:`, `Tooling:`, etc. Flag those with labels (`human`, a category) or the right issue-type (`Bug`). Prefixes are redundant, drift into inconsistent styles, and break at-a-glance board scanning (see TM-132). Example: `[human-in-the-loop] Decide & enable public access` → summary `Decide & enable public access for backend Cloud Run` + label `human`.
+
 ## Anatomy
 
 1. **Description** (markdown) = two sections:
@@ -90,6 +92,7 @@ Produce a TeamMarhaba Jira ticket that a human can read and an agent can execute
 
 - **Story points:** Fibonacci (1/2/3/5/8) sized to effort.
 - **Labels:** always `foundation`; plus a category (`backend`, `ci`, `cd`, `docker`, `gcp`, `security`, `auth`, `observability`, `database`, `docs`, `devex`, `testing`, `supply-chain`, `preview-env`, `repo`); plus an area `group-1.x`; plus a `wave-N` (added in the dependency pass).
+- **Summary line — no metadata prefixes.** Action-focused description of the work; metadata lives in labels/issue-type, never a bracketed `[...]` or `Word:` prefix (`[human-in-the-loop]`, `[human]`, `Human:`, `[bug]`, `Chore:`, `Tooling:`, …). Human-only tickets carry the **`human` label only** — see `jira-epic-breakdown` → Human tasks.
 - **Replay classification (REQUIRED — every ticket gets exactly one):** `replay` or `no-replay`. `replay` = a foundation/feature **build** ticket (code, CI, infra-as-code, config) that re-executes on the source-rebuild. `no-replay` = human/HITL, dropped, throwaway, or meta/process work folded into GENESIS/Sprint-0 seed (doesn't re-run as a ticket). The rebuild scope is `labels = replay`, so an unclassified ticket silently falls out of the replay — never leave it off.
 - ACs must be **observable/testable** so QA/an agent can verify them.
 - Keep "Out of scope" explicit — it prevents scope creep across tickets.

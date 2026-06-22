@@ -26,6 +26,7 @@ Drive the Bootstrap with **hand-fed starter prompts + user-level skills** (nothi
 ## Human tasks (track them too)
 
 Not all work is automatable. Track human-only steps as **ordinary Tasks** with a **`human`** label, **assigned to a person** (never unassigned): start/close the sprint, review + merge PRs, provision billing/credentials, UI-only deletes or branch-protection. This keeps the board honest — it shows *all* the work, not just the agent slice. Two rules:
+- **Flag with the `human` label only — never a summary prefix.** Don't put `[human-in-the-loop]`/`[human]`/`Human:` in the title, and don't use a competing `human-in-the-loop` label: the find-ready filter is exactly `labels != "human"`, so any *other* marker silently fails to exclude the ticket. The summary stays action-focused (see `jira-ticket-writer` → "The summary is the work, not metadata").
 - Agents exclude them via `AND labels != "human"` in the find-ready query (and they're assigned, so `assignee is EMPTY` already hides them).
 - **Don't wire a human task as a DAG blocker** of agent tasks (it stalls the fleet waiting on a person); note a genuine prerequisite (e.g. billing before the GCP-project task) in the description instead.
 - The **Bootstrap epic is itself largely human** (create repo, set branch protection, start the sprint) — its steps are the canonical human tasks; give them the `human` label too.
