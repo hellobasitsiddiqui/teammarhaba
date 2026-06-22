@@ -18,11 +18,13 @@
         </root>
     </springProfile>
 
-    <!-- Structured JSON for prod. logback 1.5's built-in JsonEncoder includes the MDC, so
-         `traceId` is a searchable field on every line — and it needs no extra dependency. -->
+    <!-- Structured JSON for prod via LogstashEncoder (TM-73; fix TM-140). It emits the FORMATTED
+         message (SLF4J `{}` args substituted — logback's built-in JsonEncoder did NOT, so prod logs
+         showed literal `{}`) and lifts MDC entries (the per-request `traceId` from CorrelationIdFilter)
+         to top-level fields, so logs stay searchable + correlatable in Cloud Logging. -->
     <springProfile name="prod">
         <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
-            <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
         </appender>
         <root level="INFO">
             <appender-ref ref="JSON"/>

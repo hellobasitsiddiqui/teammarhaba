@@ -83,6 +83,18 @@ public class UserService {
         return user;
     }
 
+    /**
+     * Mirror an assigned role onto the persisted row (TM-140). The Firebase custom claim is the
+     * authorization source of truth (TM-110); keeping {@code users.role} in step is what makes
+     * {@code GET /api/v1/me} reflect the role. Called by {@link com.teammarhaba.backend.auth.RoleService}
+     * on every assignment. A no-op when no active account exists yet for the uid — the row is created
+     * lazily on first sign-in (the claim still applies; the row syncs on the next assignment).
+     */
+    @Transactional
+    public void syncRole(String firebaseUid, Role role) {
+        users.findByFirebaseUid(firebaseUid).ifPresent(user -> user.setRole(role));
+    }
+
     /** Soft-delete an active account: it is then hidden from normal queries but recoverable. */
     @Transactional
     public User softDelete(String firebaseUid) {

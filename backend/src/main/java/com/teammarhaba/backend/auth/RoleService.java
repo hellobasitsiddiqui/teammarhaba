@@ -3,6 +3,7 @@ package com.teammarhaba.backend.auth;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.user.Role;
+import com.teammarhaba.backend.user.UserService;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,20 +32,25 @@ public class RoleService {
     private static final Logger log = LoggerFactory.getLogger(RoleService.class);
 
     private final ObjectProvider<FirebaseAuth> firebaseAuth;
+    private final UserService userService;
 
-    public RoleService(ObjectProvider<FirebaseAuth> firebaseAuth) {
+    public RoleService(ObjectProvider<FirebaseAuth> firebaseAuth, UserService userService) {
         this.firebaseAuth = firebaseAuth;
+        this.userService = userService;
     }
 
     /**
-     * Assign {@code role} to the account identified by {@code uid}, writing it as the {@code role}
-     * custom claim. Idempotent from the caller's perspective — re-assigning the same role is a no-op
-     * in effect.
+     * Assign {@code role} to the account identified by {@code uid}: write the {@code role} custom
+     * claim (the authorization source of truth) <em>and</em> mirror it onto the {@code users} row, so
+     * {@code GET /api/v1/me} reflects it (TM-140 — previously only the claim was written, leaving
+     * {@code /me} showing a stale {@code USER}). The claim is written first; if it fails, the row is
+     * left untouched. Idempotent — re-assigning the same role is a no-op in effect.
      *
      * @throws FirebaseAuthException if the user does not exist or the Admin SDK call fails
      */
     public void assignRole(String uid, Role role) throws FirebaseAuthException {
         firebaseAuth.getObject().setCustomUserClaims(uid, Map.of(RoleClaims.CLAIM, role.name()));
-        log.info("Assigned role {} to uid {} (effective after the user's next token refresh).", role, uid);
+        userService.syncRole(uid, role);
+        log.info("Assigned role {} to uid {} (claim + DB row; effective on the user's next token refresh).", role, uid);
     }
 }
