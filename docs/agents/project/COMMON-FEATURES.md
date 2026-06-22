@@ -75,7 +75,7 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 | Format drift — Spotless `spotless:check` | ✅ | Epic 1 CI |
 | Browser e2e (Playwright) — UI-regression guard | 🔜 | TM-134 (runs on `main`, off the PR gate) |
 | `.env.example` contract — fail-loud secrets/env validator | ✅ | TM-64 |
-| **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | 🔜 | TM-135 |
+| **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | ✅ | TM-135 |
 | CD "new revision is actually serving" verify | ✅ | TM-60 (post TM-131) |
 | Docs-only auto-merge / no-untracked-PR guards | ✅ | automerge-docs / claim protocol |
 

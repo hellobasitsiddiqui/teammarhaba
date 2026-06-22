@@ -68,6 +68,19 @@ cd backend && ./mvnw -B verify
 
 This runs Spotless (format gate), the test suite, and produces the CycloneDX SBOM.
 
+## API contract (OpenAPI drift check)
+
+The REST API is pinned by a committed spec, `backend/openapi.json`, guarded by `OpenApiDriftTest`
+(part of `verify`, so it runs in CI on every PR — TM-135). **Changed a controller / request /
+response?** Regenerate the spec and commit it, or the build fails:
+
+```bash
+cd backend && ./mvnw -Dtest=OpenApiDriftTest -Dopenapi.generate=true -Dspotless.check.skip=true test
+git add openapi.json
+```
+
+This keeps every API change intentional, reviewable in the diff, and impossible to ship by accident.
+
 ## Conventions reference
 
 - **Code style** is enforced by Spotless (backend) — CI fails on violations, so format
