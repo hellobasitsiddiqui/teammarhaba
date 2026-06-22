@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.web;
 
+import com.teammarhaba.backend.common.InvalidListQueryException;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -25,8 +26,10 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * <p>Extending {@link ResponseEntityExceptionHandler} means the framework's own MVC
  * exceptions (unreadable body, missing params, 404/405/415, …) also return ProblemDetail.
  *
- * <p>Out of scope (no list endpoints / Spring Data yet): the allow-listed sort guard and
- * {@code PropertyReferenceException -> 400} land with the first paginated endpoint (TM-71+).
+ * <p>The list conventions (TM-115) guard sorting at the source:
+ * {@link com.teammarhaba.backend.common.PageRequests} allow-lists sort properties and raises
+ * {@link InvalidListQueryException} (→ 400 below), so a bad {@code sort} never reaches Spring Data
+ * as a {@code PropertyReferenceException}.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -53,6 +56,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
         return Problems.of(HttpStatus.NOT_FOUND, "Resource not found", ex.getMessage());
+    }
+
+    /** Bad list query (e.g. an un-allow-listed {@code sort} property) -> 400. */
+    @ExceptionHandler(InvalidListQueryException.class)
+    public ProblemDetail handleInvalidListQuery(InvalidListQueryException ex) {
+        return Problems.of(HttpStatus.BAD_REQUEST, "Invalid request", ex.getMessage());
     }
 
     /** DB / state conflict (e.g. unique-constraint violation) -> 409. */
