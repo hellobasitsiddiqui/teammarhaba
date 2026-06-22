@@ -47,4 +47,45 @@ Kept on replay. **Append a dated lesson whenever the fleet teaches you one**, so
 - **No untracked PRs.** Every change traces to a ticket; idle agents raise a `chore` ticket *before* doing housekeeping.
 - **Blackboard = per-run scratch; this file + tickets + `REPLAY.md` = anything that must survive a replay.**
 
+## Runbook — orchestrator conflict sweep (working the merge gate)
+
+The orchestrator's job while a wave has open PRs: keep them mergeable and surface what's ready — **without ever merging** (only docs-only `*.md` PRs auto-merge; everything else is the human's manual merge).
+
+### Each sweep
+1. `git fetch origin`
+2. `gh pr list --state open --json number,title,mergeable,mergeStateStatus,headRefName`
+3. JQL the active tickets for `status` + `assignee` (claims, In Review, cascade unblocks).
+4. Act per the checks below; report **one line per PR** + anything resolved. Adjust cadence (see below).
+
+### Reading `mergeStateStatus`
+- `CLEAN` — mergeable + checks passed → **READY for the human's manual merge.**
+- `UNSTABLE` — mergeable but a non-required/pending check (often path-skipped jobs) — usually fine; recheck.
+- `DIRTY` / `CONFLICTING` — needs a rebase (below).
+- `UNKNOWN` — GitHub still computing; recheck next sweep.
+
+### Resolve a conflicting code PR (never merge)
+```
+git checkout <feature-branch>
+git rebase origin/main
+#   resolve — conflicts are almost always additive (keep BOTH sides) → git add → git rebase --continue
+git push --force-with-lease         # FEATURE branch only — NEVER main
+```
+CI re-runs; report it back to ready. (The PR updates in place.)
+
+### Predict conflicts before they bite — diff the open PRs
+- **Hot-file overlap:** `comm -12 <(gh pr diff A --name-only|sort) <(gh pr diff B --name-only|sort)`. Any shared file → once one merges, the other goes CONFLICTING. Pre-warn; rebase the loser the moment the first merges. (Sprint 7: #109 & #110 shared `GlobalExceptionHandler.java`.)
+- **Flyway version clash — git WON'T catch it.** Two migrations with the same `Vn` but different filenames are git-CLEAN yet fail Flyway at boot ("more than one migration with version n"); only CI (Testcontainers) catches it. `gh pr diff <n> --name-only | grep migration` and ensure each new migration takes the next free `Vn` across *all* open PRs **+ main**.
+- **Shared-concept duplication — also git-clean.** Parallel tickets can each invent the same type in different files (Sprint 7: TM-111 and TM-115 each made a `PagedResponse`). No conflict, but a real divergence → raise a small **dedupe chore**; don't block the merge.
+
+### Merge-order guidance (minimize churn + keep the cascade moving)
+- Merge **independent** PRs first (no shared files, no shared migration).
+- For PRs sharing a hot file: merge **one**, let the orchestrator rebase the other, **then** merge it — don't merge both blind.
+- Land **convention/dependency** PRs before their consumers, so the consumer builds on the real thing (merge list-conventions/audit before the admin console that uses them).
+- A PR that's a **blocker** (e.g. TM-111 → TM-133) unblocks the next wave — sequence it so the cascade resumes promptly.
+
+### Cadence
+- **~2 min** while PRs are landing/merging (the post-merge conflict window is time-sensitive).
+- **~4–5 min** when agents are mid-build with no PRs (cuts noise; still inside the prompt-cache window).
+- **Pause** when the fleet is idle by design (sprint not started / nothing claimable) — polling buys nothing.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
