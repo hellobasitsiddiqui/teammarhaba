@@ -45,7 +45,7 @@
 - To create "X is blocked by Y" (Y blocks X): `type:"Blocks"`, `inwardIssue: Y` (the **blocker**), `outwardIssue: X` (the **blocked**). On read-back, the blocker shows as **`inwardIssue`** ("is blocked by") on the blocked issue; things it blocks show as `outwardIssue` ("blocks"). So **a task's blockers = its `inwardIssue` links.** ⚠️ An earlier version of this note had it reversed (said blocker = `outwardIssue`) — it cost a whole Epic-2 DAG inversion + 10 links a human had to delete by hand. Always read back one link **and** check the UI "blocks / is blocked by" heading.
 
 ### Hit a wall? Log it
-- Comment the blocker on the ticket + a `[finding → future improvement]` note; raise a `human-in-the-loop` ticket for human-only steps. Never fail silently.
+- Comment the blocker on the ticket + a `[finding → future improvement]` note; raise a human-only ticket (labelled `human`) for human-only steps. Never fail silently.
 
 ---
 
