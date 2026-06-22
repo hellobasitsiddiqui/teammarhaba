@@ -1,8 +1,11 @@
 package com.teammarhaba.backend.user;
 
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
+import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,10 +26,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UserService {
 
-    private final UserRepository users;
+    /** Audit {@code target_type} for account events. */
+    private static final String TARGET_USER = "User";
 
-    public UserService(UserRepository users) {
+    private final UserRepository users;
+    private final AuditService audit;
+
+    public UserService(UserRepository users, AuditService audit) {
         this.users = users;
+        this.audit = audit;
     }
 
     /** Find the caller's account, creating (or reactivating) it on first sight. Concurrency-safe. */
@@ -41,6 +49,12 @@ public class UserService {
         User user = provision(caller);
         if (displayName != null) {
             user.setDisplayName(displayName); // dirty-checking flushes on commit
+            audit.record(
+                    caller.uid(),
+                    AuditAction.PROFILE_UPDATED,
+                    TARGET_USER,
+                    caller.uid(),
+                    Map.of("field", "displayName"));
         }
         return user;
     }
@@ -51,6 +65,7 @@ public class UserService {
         User user = users.findByFirebaseUid(firebaseUid)
                 .orElseThrow(() -> new ResourceNotFoundException("No active account for uid " + firebaseUid));
         user.markDeleted(Instant.now()); // dirty-checking flushes on commit
+        audit.record(firebaseUid, AuditAction.ACCOUNT_SOFT_DELETED, TARGET_USER, firebaseUid);
         return user;
     }
 
@@ -59,7 +74,11 @@ public class UserService {
     public User restore(String firebaseUid) {
         User user = users.findAnyByFirebaseUid(firebaseUid)
                 .orElseThrow(() -> new ResourceNotFoundException("No account for uid " + firebaseUid));
+        boolean wasDeleted = user.isDeleted();
         user.restore();
+        if (wasDeleted) { // only an actual restore is auditable; an already-active no-op isn't
+            audit.record(firebaseUid, AuditAction.ACCOUNT_RESTORED, TARGET_USER, firebaseUid);
+        }
         return user;
     }
 
@@ -68,6 +87,7 @@ public class UserService {
         return users.findAnyByFirebaseUid(caller.uid())
                 .map(tombstone -> {
                     tombstone.restore(); // returning user — bring their account back, don't duplicate
+                    audit.record(caller.uid(), AuditAction.ACCOUNT_REACTIVATED, TARGET_USER, caller.uid());
                     return tombstone;
                 })
                 .orElseGet(() -> insertOrGet(caller));
@@ -75,9 +95,12 @@ public class UserService {
 
     private User insertOrGet(VerifiedUser caller) {
         try {
-            return users.saveAndFlush(new User(caller.uid(), caller.email(), null));
+            User created = users.saveAndFlush(new User(caller.uid(), caller.email(), null));
+            audit.record(caller.uid(), AuditAction.ACCOUNT_PROVISIONED, TARGET_USER, caller.uid());
+            return created;
         } catch (DataIntegrityViolationException race) {
             // A concurrent first-request won the insert (unique firebase_uid) — treat as found.
+            // No audit row: the winning request already recorded ACCOUNT_PROVISIONED.
             return users.findByFirebaseUid(caller.uid())
                     .orElseThrow(() -> race); // genuinely absent ⇒ not the race we expected
         }
