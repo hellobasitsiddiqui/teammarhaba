@@ -76,6 +76,25 @@ export function signOut() {
   return firebaseSignOut(auth);
 }
 
+/**
+ * Resolve the caller's role from the verified ID token's custom claims (the `role` claim set in
+ * TM-110 — the same value the backend authorizes on). Returns {@code "USER"} when signed out or
+ * when no recognised claim is present, so the UI fails safe to the least-privileged view.
+ * @param {boolean} [forceRefresh=false] force-refresh the token first (e.g. just after a promotion).
+ * @returns {Promise<string>} the upper-cased role, e.g. {@code "ADMIN"} / {@code "USER"}.
+ */
+export function getRole(forceRefresh = false) {
+  const user = auth.currentUser;
+  if (!user) return Promise.resolve("USER");
+  return user
+    .getIdTokenResult(forceRefresh)
+    .then((result) => {
+      const role = result.claims && result.claims.role;
+      return typeof role === "string" ? role.toUpperCase() : "USER";
+    })
+    .catch(() => "USER");
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`). Lets the sign-in UI
 // and ad-hoc console checks reach the helpers without a bundler.
 if (typeof window !== "undefined") {
@@ -83,6 +102,7 @@ if (typeof window !== "undefined") {
     auth,
     currentUser,
     getIdToken,
+    getRole,
     onAuthChanged,
     signUp,
     signIn,

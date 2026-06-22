@@ -162,3 +162,435 @@ body {
     font-size: 0.85rem;
     font-weight: 600;
 }
+
+/* ===== Admin console + reusable UI primitives (TM-133) ===== */
+
+/* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. */
+:root {
+    --surface: #ffffff;
+    --surface-2: #f1f2f8;
+    --border: rgba(26, 26, 46, 0.12);
+    --muted: rgba(26, 26, 46, 0.6);
+    --danger: #b00020;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fg: #e8e8f0;
+        --surface: #20202e;
+        --surface-2: #181822;
+        --border: rgba(255, 255, 255, 0.14);
+        --muted: rgba(232, 232, 240, 0.6);
+    }
+
+    body {
+        background: #12121a;
+    }
+}
+
+.app-nav {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.app-nav a,
+.app-nav button {
+    color: var(--accent);
+    background: none;
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.home-links {
+    margin-top: 0.5rem;
+}
+
+.home-links a {
+    color: var(--accent);
+}
+
+/* Console shell */
+.admin-console {
+    width: min(72rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.tm-admin-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.tm-admin-head h2 {
+    margin: 0;
+}
+
+.tm-muted {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+/* Stats bar */
+.tm-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+
+.tm-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.tm-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-stat-label {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+/* Toolbar */
+.tm-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.tm-input {
+    padding: 0.5rem 0.7rem;
+    font: inherit;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.tm-toolbar .tm-input[type="search"] {
+    flex: 1 1 12rem;
+}
+
+.tm-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Table */
+.tm-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.tm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+.tm-table th,
+.tm-table td {
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.tm-table thead th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    background: var(--surface-2);
+    user-select: none;
+}
+
+.tm-table th.tm-sortable {
+    cursor: pointer;
+}
+
+.tm-table tbody tr:hover {
+    background: var(--surface-2);
+}
+
+.tm-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.tm-row-self {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.tm-you {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.7rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+}
+
+.tm-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+/* Badges */
+.tm-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+}
+
+.tm-badge-role-admin {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tm-badge-ok {
+    color: #0a7d57;
+    background: color-mix(in srgb, #0a7d57 14%, transparent);
+    border-color: transparent;
+}
+
+.tm-badge-off {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    border-color: transparent;
+}
+
+/* Buttons */
+.tm-btn {
+    padding: 0.45rem 0.8rem;
+    font: inherit;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.tm-btn-sm {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.82rem;
+}
+
+.tm-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.tm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tm-btn-primary {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tm-btn-danger {
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+.tm-copy {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* Pager */
+.tm-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.tm-pager-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tm-error {
+    padding: 1rem;
+    text-align: center;
+}
+
+/* Toasts */
+.tm-toasts {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 1000;
+}
+
+.tm-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    max-width: 22rem;
+    padding: 0.6rem 0.8rem;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+.tm-toast-success {
+    border-left-color: #0a7d57;
+}
+
+.tm-toast-error {
+    border-left-color: var(--danger);
+}
+
+.tm-toast-action {
+    margin-left: auto;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tm-toast-close {
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+/* Dialog / modal */
+.tm-backdrop {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1100;
+}
+
+.tm-dialog {
+    width: min(28rem, 96vw);
+    padding: 1.25rem;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.tm-modal {
+    width: min(34rem, 96vw);
+}
+
+.tm-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tm-dialog-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.15rem;
+}
+
+.tm-modal-head .tm-dialog-title {
+    margin: 0;
+}
+
+.tm-dialog-msg {
+    margin: 0 0 1rem;
+    color: var(--muted);
+}
+
+.tm-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.tm-modal-body {
+    margin-top: 0.75rem;
+}
+
+.tm-detail {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    gap: 0.4rem 1rem;
+    margin: 0;
+}
+
+.tm-detail dt {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.tm-detail dd {
+    margin: 0;
+    display: flex;
+    align-items: center;
+}
+
+.tm-detail-h {
+    margin: 1rem 0 0.4rem;
+    font-size: 1rem;
+}
+
+.tm-activity {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+@media (max-width: 640px) {
+    .tm-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
