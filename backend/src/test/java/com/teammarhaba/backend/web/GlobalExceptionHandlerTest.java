@@ -16,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -75,6 +76,15 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void optimisticLockConflictReturns409() throws Exception {
+        mockMvc.perform(get("/test/stale"))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Conflict"))
+                .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
     void unexpectedReturns500WithoutLeakingDetails() throws Exception {
         mockMvc.perform(get("/test/boom"))
                 .andExpect(status().isInternalServerError())
@@ -102,6 +112,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/conflict")
         void conflict() {
             throw new DataIntegrityViolationException("duplicate key");
+        }
+
+        @GetMapping("/stale")
+        void stale() {
+            throw new ObjectOptimisticLockingFailureException("users", 1L);
         }
 
         @GetMapping("/boom")
