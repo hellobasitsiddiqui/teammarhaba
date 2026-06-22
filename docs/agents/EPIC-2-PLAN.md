@@ -39,17 +39,35 @@ conventions* on top.
 Each ticket carries a self-contained **Agent execution prompt** in its description (objective /
 files / steps / constraints / verify / out-of-scope), same as Epic 1.
 
-## Status — remaining (2026-06-22)
+## Plan — Option B: admin console slice (2026-06-22)
 
-The login chain is live end-to-end (TM-103/104/105/106/107/108/109/112 merged; sign-up/login → `GET /api/v1/me` works against the deployed env). **5 backend tickets remain** — they complete the SPINE:
+The login chain is live end-to-end (TM-103/104/105/106/107/108/109/112 merged; sign-up/login → `GET /api/v1/me` works against the deployed env). The remaining tail was 5 abstract foundation tickets with **no consumer and no UI** — risking premature abstraction. Re-planned as a single real vertical slice — an **admin users console** — so each foundation piece has a real consumer (and you finally get a UI to see/manage users). Still 100% product-agnostic, so it stays SPINE (Epic 2), not FLESH (Epic 3).
 
-- **TM-110** (wave-1, ready) — RBAC: map Firebase custom claims → Spring authorities, so roles travel in the verified ID token.
-- **TM-114** (wave-1, ready) — Reusable base entity: soft-delete + optimistic concurrency (`@Version`), so every table inherits safe deletes and stale-write `409`s.
-- **TM-113** (wave-2, ← TM-103) — Append-only audit log of account/admin actions.
-- **TM-115** (wave-2) — Standard list conventions: pagination / filtering / sorting.
-- **TM-111** (wave-3, ← TM-110) — `@PreAuthorize` enforcement + admin user-management endpoints (list / enable / disable; `USER` → `403`).
+| Ticket | Role in the slice |
+|---|---|
+| **TM-110** RBAC (wave-1, ready) | Firebase custom claims → Spring authorities; roles in the verified ID token |
+| **TM-111** admin endpoints + enforcement | `GET /api/v1/admin/users` (paged), enable/disable, set-role; `@PreAuthorize`; **+ 404-not-403 on cross-user access, + admin self-protection** |
+| **TM-114** base entity (wave-1, ready) | soft-delete + optimistic concurrency **applied to `users`** (lean — generalize in Epic 3, not a framework for one entity) |
+| **TM-115** list conventions | pagination/filter/sort **applied to the admin users list** (first real consumer; establish a reusable `Page<T>`) |
+| **TM-113** audit log | records the console's actions (disable / promote / login) |
+| **TM-133** Admin users console (web) — **NEW** | ADMIN-only page: users table (search/filter/sort/paginate), stats bar, enable/disable/set-role with styled confirm + toast, detail modal w/ activity. Builds the reusable UX primitives (toasts, confirm dialog, copy, relative-time, empty/error, theme). Consumes TM-110/111/113/115. |
+| **TM-134** Browser e2e — Playwright — **NEW** | first browser-e2e harness + a login→admin→disable-user→audit walkthrough; runs on `main` only, **off** the PR gate |
 
-Wave-1 (TM-110, TM-114) can be claimed in parallel **once pulled into the active sprint**.
+**Demo when Epic 2 is done:** log in as admin → see real users → disable one → it's rejected on their next request **and** shows in the audit log; a `USER` gets `403`; the whole flow is covered by a Playwright e2e.
+
+**Claim order:** ready now (once pulled into the sprint) — **TM-110, TM-114** (wave-1, parallel) → TM-115 / TM-113 → TM-111 → **TM-133** → **TM-134**.
+
+## Deferred generic features (future "Hardening / Prod-readiness" epic)
+
+Mined from the Contact Directory spec — generic, but **no consumer yet → deliberately not built now** (avoid premature work). Captured here so they're not lost:
+
+- **Rate limiting** (global abuse protection beyond Firebase's login lockout)
+- **CSP** security header (we already ship HSTS + frame-options)
+- **Account self-service UI**: password reset + email verification (Firebase provides these; just wire the UI)
+- Public status/uptime page (CD-051); feature flags; GDPR export/deletion; distributed tracing / error monitoring
+- Per-user ownership (404-not-403) as a *general* pattern; multi-tenancy/teams → Epic 3 candidate
+
+That epic would also adopt the loose prod-readiness tickets (**TM-95, TM-97, TM-98, TM-99**). Product-specific contact features (CRUD, tags, CSV, favourites, photo, bulk) → **Epic 3 (FLESH)**, built against real entities.
 
 ## Dependency DAG (waves)
 
