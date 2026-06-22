@@ -108,9 +108,18 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 ---
 
 ## Deferred → future "Hardening / Prod-readiness" epic
-Rate limiting · CSP · account self-service UI (password reset / email verification) · public status
-page · feature flags · GDPR · tracing/error-monitoring. Would also adopt the loose prod-readiness
-tickets **TM-95, TM-97, TM-98, TM-99**. *(OpenAPI drift check is now ticketed — TM-135.)*
+Generic, important, but not built — captured so they're not lost. Grouped:
+
+- **Security & abuse:** rate limiting · CSP · request **payload/size limits** (DoS) · **secrets rotation** (DB password / keys on a schedule)
+- **Resilience & DR:** ⭐ **graceful degradation** (timeouts / retries / circuit-breakers / fallbacks for slow-or-down deps) · **graceful shutdown** (drain in-flight requests on deploy) · **backups + restore drill** (DR) · **idempotency keys** for mutating endpoints
+- **Observability:** **alerting / SLOs + dashboards** (metrics exist; alerts don't) · **correlation/request IDs** through logs · distributed tracing · error monitoring (Sentry-style)
+- **Performance:** **caching layer** (response/data) · **load/perf-test baseline** · connection-pool tuning
+- **Quality:** **Sonar** (code-smell / tech-debt quality gate — overlaps CodeQL/Spotless/JaCoCo; *optional*)
+- **Accounts / UX:** account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive
+- **Compliance:** GDPR export/deletion · consent & retention · **audit-log retention** policy (it grows unbounded)
+- **Feature management:** feature flags
+
+Would also adopt the loose prod-readiness tickets **TM-95, TM-97, TM-98, TM-99**. *(OpenAPI drift check is ticketed — TM-135.)* The ⭐ **graceful degradation** item is the one that actually bites in prod (a hung dependency currently hangs the request).
 
 ## → Epic 3 (FLESH, product-specific)
 First real product feature + anything domain-specific (contacts CRUD/tags/CSV/favourites/photo/bulk).
