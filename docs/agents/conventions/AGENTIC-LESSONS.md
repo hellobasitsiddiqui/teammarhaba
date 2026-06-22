@@ -19,7 +19,7 @@ Kept on replay. **Append a dated lesson whenever the fleet teaches you one**, so
   - `backend/src/main/java/com/teammarhaba/backend/web/GlobalExceptionHandler.java` (+ its test) — every feature adds an exception mapping here (Sprint 7: #109 ↔ #110 collided exactly here).
   - `backend/src/main/resources/db/migration/` — Flyway version-number clashes are **git-invisible** (same `Vn`, different filename); pre-assign or renumber on rebase.
   - `pom.xml`, `application.yml` / `application-prod.yml` — shared backend config.
-  - `docs/agents/blackboard.md` — every agent appends notes.
+  - `docs/agents/runtime/blackboard.md` — every agent appends notes.
   Add to this list when a new file bites; prune when one stops being shared.
 - **Flyway/DB migrations are a serialization point.** Two agents each adding `V3__*.sql` clash. Mitigate: pre-assign migration numbers per ticket, renumber on rebase, or use timestamped names.
 - **Verify blocker-link direction with a read-back.** A wrong `createIssueLink` direction inverts the whole DAG (wave-0 roots look "blocked by" their own descendants). Create one link → read it back → glance at the UI "is blocked by" heading → *then* bulk-create. There's no delete-link API, so a wrong bulk-create is expensive.

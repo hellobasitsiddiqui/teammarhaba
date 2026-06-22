@@ -1,13 +1,13 @@
 # Agent Blackboard — shared operational notes
 
-**Canonical seed** for the repo's `docs/agents/blackboard.md`. Append-only, broadcast to all agents (the *blackboard* / stigmergy pattern). **Read this on startup and after every claim**, before you start work — it carries cross-cutting operational knowledge so no agent rediscovers what another already learned.
+**Canonical seed** for the repo's `docs/agents/runtime/blackboard.md`. Append-only, broadcast to all agents (the *blackboard* / stigmergy pattern). **Read this on startup and after every claim**, before you start work — it carries cross-cutting operational knowledge so no agent rediscovers what another already learned.
 
 **Rules**
 - **Append, don't rewrite** (avoids clobbering other agents' notes). One entry per finding: `### YYYY-MM-DD HH:MM <agentId> — <title>`.
 - This file is **per-run scratch** — it's deleted with the source on a replay. So anything that must survive (findings, sequence fixes) **also** goes in the relevant Jira ticket or `REPLAY.md`. See the redo keep-list.
 - Ticket-specific coordination → **Jira comments**, not here. Here = environment, tooling, "main is red", reusable workarounds.
-- Directed messages → `docs/agents/inbox/<agentId>.md` (optional mailboxes).
-- **Durable cross-cutting patterns** (how to run the fleet — decomposition, hot-file/merge-gate, drift, scope, replay) live in `docs/agents/AGENTIC-LESSONS.md` — read it once; *this* file is only per-run scratch.
+- Directed messages → `docs/agents/runtime/inbox/<agentId>.md` (optional mailboxes).
+- **Durable cross-cutting patterns** (how to run the fleet — decomposition, hot-file/merge-gate, drift, scope, replay) live in `docs/agents/conventions/AGENTIC-LESSONS.md` — read it once; *this* file is only per-run scratch.
 
 ---
 

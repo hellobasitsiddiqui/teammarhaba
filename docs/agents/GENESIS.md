@@ -1,0 +1,73 @@
+# GENESIS — initial setup checklist (Sprint 0 / Bootstrap)
+
+**The single "do ALL of this up front" list.** Everything here was discovered or retrofitted **mid-flight** in TeamMarhaba's first build — so on the **replay** (delete the source, rebuild from the tickets) and on every new project, it belongs in the **initial steps** instead of being found halfway through. Run Sprint 0 **linearly**; only then start the parallel themed sprints.
+
+> **Principle:** *any step we found ourselves doing halfway through is a Genesis step.* When a new mid-flight learning shows up, add it here.
+
+## A. Human prerequisites — do FIRST (can't be automated; sequence before any cloud/build task)
+- **gcloud:** install the SDK, then `gcloud auth login` + `gcloud auth application-default login` **with the Firebase scope** — `--scopes=openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/firebase`. The default cloud-platform-only scope **403s on Firebase ops** mid-build (it bit TM-66 → forced reactive re-auth TM-92). Verify `gcloud auth print-access-token`.
+- **Add Firebase to the project via the Firebase console** up front — the `addFirebase` API/CLI may 403 even with the scope (TM-93); doing it in the console avoids a mid-build stall.
+- **Docker:** installed + running (both Dockerfiles + CI need it).
+- **GCP billing:** a billing account exists and is linked to the project (agents can't set up billing).
+- Track each as a `human-in-the-loop` ticket, **linked as a blocker** of the cloud/build tasks, so no agent attempts them before the prereq is met. *(TeamMarhaba hit these reactively as TM-81 / TM-84.)*
+
+## A2. GCP deploy wiring — APIs · service accounts · IAM (do before the first deploy)
+*Every item here was discovered mid-deploy in Sprint 2 (PR #25, PR #26; follow-up TM-96) — front-load it so the first `git push` to `main` deploys green instead of failing on IAM.*
+
+- **Enable the deploy-path APIs up front** — keyless WIF token exchange **403s without `iamcredentials`**, which blocked *all* CD until PR #25:
+  ```bash
+  gcloud services enable iamcredentials.googleapis.com run.googleapis.com \
+    artifactregistry.googleapis.com secretmanager.googleapis.com sqladmin.googleapis.com \
+    --project="$PROJECT"
+  ```
+- **Two separate service accounts — deploy vs runtime:**
+  - **Deploy SA** (`gha-deployer`) — what WIF impersonates at deploy time: `roles/run.admin` + `roles/iam.serviceAccountUser` (to *act-as* the runtime SA). No JSON key.
+  - **Runtime SA** (`<proj>-run@`) — what the *container* runs as (`--service-account=`); least privilege: `roles/secretmanager.secretAccessor` **scoped to each secret it reads** + `roles/cloudsql.client` + `roles/firebaseauth.admin` (to write RBAC role custom claims — without it the admin bootstrap *and* set-role silently fail in prod; TM-140). **Never run on the default compute SA** — it's over-privileged *and* can't read the secret, which is the exact fatal error that failed Sprint 2's first deploy (fixed in PR #26):
+  ```bash
+  gcloud iam service-accounts create <proj>-run --project="$PROJECT" --display-name="Cloud Run runtime"
+  gcloud secrets add-iam-policy-binding <db-secret> --project="$PROJECT" \
+    --member="serviceAccount:<proj>-run@${PROJECT}.iam.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+  gcloud projects add-iam-policy-binding "$PROJECT" \
+    --member="serviceAccount:<proj>-run@${PROJECT}.iam.gserviceaccount.com" \
+    --role="roles/cloudsql.client" --condition=None
+  gcloud projects add-iam-policy-binding "$PROJECT" \
+    --member="serviceAccount:<proj>-run@${PROJECT}.iam.gserviceaccount.com" \
+    --role="roles/firebaseauth.admin" --condition=None   # write RBAC role custom claims (TM-140)
+  ```
+- **First admin (chicken-and-egg — a real replay step, not code).** JIT provisions every account as `USER` and set-role needs an existing admin, so a fresh repo has *no way in* without this. Promote the first admin via the env-driven bootstrap: set the **GitHub repo variable `ADMIN_BOOTSTRAP_EMAIL`** to that person's email (`deploy.yml` injects it), and have that account **sign in once** (so the Firebase user exists). On the next deploy/restart the backend writes the `ADMIN` claim (requires the runtime SA's `firebaseauth.admin`, above); the admin then re-logs in to refresh their token. *(Hit reactively in TM-139/TM-140 — the SA lacked the role, so the bootstrap silently failed.)*
+- **Decide public vs private up front (org policy).** If the org enforces domain-restricted sharing (`constraints/iam.allowedPolicyMemberDomains`), `--allow-unauthenticated` (allUsers) **fails**. Default to **private** (`--no-allow-unauthenticated`); going public needs an **org-policy exception from an Org Policy Admin** → a `human-in-the-loop` ticket (the **TM-96** pattern), *not* something a project-scoped agent can do.
+- **Verify the deploy by Ready-revision, not a public curl.** Cloud Run gates traffic on the `/health` **startup probe** and only marks a revision Ready after it passes — so asserting `latestReadyRevisionName` *is* proof `/health` serves 200, and it works even when the service is private.
+- **Stamp the build id on the surfaces from day 1 (web first page + backend `/health`/`/version`).** Inject the short git SHA into the web bundle at deploy time (same seam as the API-base-URL injection) and expose the backend SHA + build time + Cloud Run revision. Web and backend deploy independently, so without a visible build id you cannot tell *which build is live* — which wasted real time in this build (a stale revision in TM-131, and a deploy that *failed* but looked like "just wait longer" in TM-140). Resolve everything at build/deploy time, never hardcoded, so a fresh replay shows correct values. *(Retrofitted as **TM-142**; front-load it.)*
+- **Don't merge two code PRs back-to-back into `main`.** CI uses a `cancel-in-progress` concurrency group, so a second merge ~seconds later **cancels the first's CI image build** — the first PR's deploy then times out waiting for an image that was never pushed (hit in TM-140: #128's deploy failed this way, only saved because #129's commit sat on top and carried the same code forward). Let each merge's CI + deploy finish, or expect to re-run the stranded deploy.
+
+## B. Repo + agent operating system (the linear bootstrap)
+- Create the repo (default branch `main`).
+- **Seed the repo COMPLETE from the start** (don't seed minimal then retrofit — TeamMarhaba had to sync-retrofit via TM-87 / TM-89):
+  - `.claude/skills/` — `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`, `jira-mcp-gotchas`.
+  - `docs/agents/` — `AGENT-CLAIM-PROTOCOL`, `DEPENDENCY-DAG`, `SPRINTS`, **`blackboard.md`** (pre-seeded with known env workarounds).
+  - `CLAUDE.md` with **all conventions baked in** (see C).
+  - `CLAUDE.md` `@import docs/agents/runtime/blackboard.md` (auto-load) + blackboard read as a **claim-loop step**.
+- Minimal branch protection + the PR→merge flow.
+- **merge→Done GitHub Action** + its Jira API secrets — so a merged PR auto-moves its ticket to Done from day 1. *(Agents don't loop back after opening a PR; without this, tickets strand In Review — TeamMarhaba's TM-86.)*
+
+## C. Conventions to bake into CLAUDE.md (every one was added mid-flight)
+- **Branch naming:** `<type>/TM-XX-short-desc` — `feature` / `chore` / `fix`.
+- **Markdown only — NEVER Jira wiki markup** (`h3.`, `{code}`, `{{...}}`, `[text|url]` render broken). Descriptions **and** comments.
+- **Board fields / time tracking:** Start date on claim, Due date, **worklog** on PR, **Flagged = Impediment** when blocked. Story points = the estimate.
+- **Blocker-logging:** log every wall as a ticket comment + a `[finding → future improvement]` note; split human-only steps into `human-in-the-loop` tickets.
+- **Blackboard:** read after each claim (loop step) + auto-loaded via `@import`; append cross-cutting findings.
+- **Build tool = Gradle (Kotlin DSL)** — unify with the Gradle-native Android; **don't default to Maven**.
+
+## D. Jira project setup
+- **Epic → Task** model (Tasks are pickable, not Sub-tasks); `group-1.x` + `wave-N` labels.
+- **Human-task tracking:** human-only steps (start sprint, review+merge, billing, UI deletes) = Tasks with the **`human`** label, **assigned to a person** (excluded from the agent claim pool).
+- Board fields available (Start/Due date); *optionally* enable the **Time Tracking field** (UI admin) for hour-based Original Estimate — for AI agents, story points + worklogs already suffice, so usually skip.
+- Sprint naming theme (anatomy: SKELETON → SPINE → …). Start with Sprint 0 / Genesis, then SKELETON 1.
+- **Right-size the sprint box to the fleet** — ~1–2 days or goal-based slices, **not** calendar weeks (agents cleared a 4-day slice in ~1 day; the real limiter is human-gate throughput). **Freeze the sprint** — route mid-flight improvements to the next backlog for a clean burndown + true velocity.
+
+## E. Then — parallel work
+- Launch agents on `/jira-task-claim`; they self-host from the repo (clone → auto-load `CLAUDE.md` / skills / blackboard → pull). Kickoff = one line + `agentId`.
+
+---
+**Sources** — mid-flight tickets/PRs that became Genesis steps: `TM-80` (seed), `TM-81` (gcloud HITL), `TM-84` (billing), `TM-86` (merge→Done), `TM-87` (doc sync), `TM-88` (Gradle), `TM-89` (blackboard auto-load + markdown mandate); Sprint 2 deploy wiring → PR #25 (iamcredentials API), PR #26 (runtime SA + private deploy), `TM-96` (public-access org-policy HITL). Full story: `REPLAY.md`. Verified commands live in `infra/gcp/cloud-run.md` + `secrets-env.md`.
