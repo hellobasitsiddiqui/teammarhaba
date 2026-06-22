@@ -6,12 +6,14 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -26,10 +28,10 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * <p>Extending {@link ResponseEntityExceptionHandler} means the framework's own MVC
  * exceptions (unreadable body, missing params, 404/405/415, …) also return ProblemDetail.
  *
- * <p>The list conventions (TM-115) guard sorting at the source:
+ * <p>List-query safety (bad sort/filter -> 400, never 500): TM-115's
  * {@link com.teammarhaba.backend.common.PageRequests} allow-lists sort properties and raises
- * {@link InvalidListQueryException} (→ 400 below), so a bad {@code sort} never reaches Spring Data
- * as a {@code PropertyReferenceException}.
+ * {@link InvalidListQueryException}; the admin user list (TM-111) adds a
+ * {@code PropertyReferenceException -> 400} safety net. Both are mapped below.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -62,6 +64,35 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InvalidListQueryException.class)
     public ProblemDetail handleInvalidListQuery(InvalidListQueryException ex) {
         return Problems.of(HttpStatus.BAD_REQUEST, "Invalid request", ex.getMessage());
+    }
+
+    /** Malformed request not caught by Bean Validation (e.g. an unknown sort property, TM-111) -> 400. */
+    @ExceptionHandler(BadRequestException.class)
+    public ProblemDetail handleBadRequest(BadRequestException ex) {
+        return Problems.of(HttpStatus.BAD_REQUEST, "Bad request", ex.getMessage());
+    }
+
+    /** A list endpoint asked to sort/filter by an unknown property -> 400 (the safety net for TM-111). */
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ProblemDetail handleBadSortProperty(PropertyReferenceException ex) {
+        return Problems.of(HttpStatus.BAD_REQUEST, "Bad request", "Unknown sort or filter property.");
+    }
+
+    /** A self-protected admin action on one's own account (disable/demote, TM-111) -> 422. */
+    @ExceptionHandler(SelfActionNotAllowedException.class)
+    public ProblemDetail handleSelfAction(SelfActionNotAllowedException ex) {
+        return Problems.unprocessable(ex.getMessage());
+    }
+
+    /**
+     * Authenticated-but-unauthorized — a {@code @PreAuthorize} denial (e.g. {@code USER} on an
+     * admin route, TM-111) -> 403. Method-security throws this <em>during</em> controller dispatch,
+     * so it surfaces here in the advice (not at the security-chain access-denied handler); mapping it
+     * explicitly keeps it a uniform 403 instead of being swallowed as a 500 by the catch-all below.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
+        return Problems.forbidden("You do not have permission to access this resource.");
     }
 
     /** DB / state conflict (e.g. unique-constraint violation) -> 409. */

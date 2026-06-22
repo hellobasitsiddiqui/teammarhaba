@@ -105,8 +105,18 @@ public class User {
         return role;
     }
 
+    /** Mirror the role onto the row (TM-111). The Firebase custom claim stays the auth source of truth. */
+    void setRole(Role role) {
+        this.role = role;
+    }
+
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /** Suspend ({@code false}) or reinstate ({@code true}) an active account (TM-111 admin action). */
+    void setEnabled(boolean enabled) {
+        this.enabled = enabled;
     }
 
     public Instant getDeletedAt() {
