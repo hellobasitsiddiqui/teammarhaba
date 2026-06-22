@@ -12,6 +12,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth,
+  connectAuthEmulator,
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
@@ -25,6 +26,14 @@ import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+
+// Browser-e2e only (TM-134): when the runtime config points at a local Firebase Auth emulator,
+// route all auth through it. `authEmulatorHost` is null in every real environment, so this is a
+// no-op in dev/prod and production auth is untouched. Must run before any other auth call.
+const emulatorHost = window.TEAMMARHABA_CONFIG && window.TEAMMARHABA_CONFIG.authEmulatorHost;
+if (emulatorHost) {
+  connectAuthEmulator(auth, `http://${emulatorHost}`, { disableWarnings: true });
+}
 
 // Keep the user signed in across reloads (best-effort; never block init on it).
 setPersistence(auth, browserLocalPersistence).catch((err) =>

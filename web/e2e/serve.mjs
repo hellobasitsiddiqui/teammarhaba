@@ -1,0 +1,70 @@
+// Minimal static server for the browser-e2e harness (TM-134).
+//
+// Serves the framework-free web app from ../src exactly as nginx does in prod (the app is just
+// static files), with ONE difference: it synthesises /assets/config.js at request time so the
+// committed config.js stays prod-clean (authEmulatorHost: null) while e2e points the app at the
+// local backend + Firebase Auth emulator. Hash routing means every route is `/#/...`, so no SPA
+// rewrite is needed — the server only ever serves `/` (index.html) and `/assets/*`.
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = fileURLToPath(new URL("../src", import.meta.url));
+const PORT = Number(process.env.PORT || 8081);
+const API_BASE_URL = process.env.E2E_API_BASE_URL || "http://127.0.0.1:8080";
+const AUTH_EMULATOR_HOST = process.env.E2E_AUTH_EMULATOR_HOST || "127.0.0.1:9099";
+
+const CONTENT_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
+
+// The injected runtime config — same shape as web/src/assets/config.js, but with the e2e
+// backend URL and the Auth emulator host set so the Firebase client SDK uses the emulator.
+const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
+    apiBaseUrl: ${JSON.stringify(API_BASE_URL)},
+    authEmulatorHost: ${JSON.stringify(AUTH_EMULATOR_HOST)},
+});
+`;
+
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    let pathname = decodeURIComponent(url.pathname);
+
+    if (pathname === "/assets/config.js") {
+      res.writeHead(200, { "content-type": CONTENT_TYPES[".js"], "cache-control": "no-store" });
+      res.end(E2E_CONFIG);
+      return;
+    }
+
+    if (pathname === "/") pathname = "/index.html";
+
+    // Resolve safely under ROOT (no path traversal).
+    const filePath = normalize(join(ROOT, pathname));
+    if (!filePath.startsWith(ROOT)) {
+      res.writeHead(403).end("Forbidden");
+      return;
+    }
+
+    const body = await readFile(filePath);
+    res.writeHead(200, { "content-type": CONTENT_TYPES[extname(filePath)] || "application/octet-stream" });
+    res.end(body);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      res.writeHead(404).end("Not found");
+      return;
+    }
+    res.writeHead(500).end("Server error");
+  }
+});
+
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`[e2e] web server on http://127.0.0.1:${PORT} (api=${API_BASE_URL}, authEmulator=${AUTH_EMULATOR_HOST})`);
+});
