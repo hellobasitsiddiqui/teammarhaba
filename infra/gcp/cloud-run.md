@@ -10,7 +10,7 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 | **Image** | `europe-west2-docker.pkg.dev/teammarhaba/containers/backend:<sha>` (from TM-55) |
 | **Port** | 8080 (Spring binds Cloud Run's `PORT`) |
 | **Scaling** | min `0` (scale-to-zero) · max `3` · startup CPU boost on |
-| **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client`) |
+| **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client` + `firebaseauth.admin` for RBAC custom-claim writes — TM-140) |
 | **Auth** | **public** (`--allow-unauthenticated`) — `allUsers` has `roles/run.invoker`. The org enforces domain-restricted sharing, so this is permitted via a scoped exception (see **Public access** below / **TM-96**). The app still requires a Firebase Bearer token; only `/health` is open. |
 
 ## How it deploys
@@ -79,6 +79,14 @@ gcloud secrets add-iam-policy-binding teammarhaba-db-app-password --project="$PR
 # Connect to Cloud SQL (for the data layer, later)
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${RUN_SA}" --role="roles/cloudsql.client" --condition=None
+
+# Manage Firebase Auth custom claims — REQUIRED for RBAC role-writing. The admin
+# bootstrap (TM-110) and the set-role endpoint (TM-111) call setCustomUserClaims /
+# getUserByEmail via the Admin SDK. Token *verification* needs no IAM (login works
+# without this), but *writing* a claim does — omit it and ALL role assignment
+# silently fails in prod (TM-140).
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${RUN_SA}" --role="roles/firebaseauth.admin" --condition=None
 ```
 
 The deploy SA `gha-deployer` already holds project-level `roles/iam.serviceAccountUser`,
@@ -156,6 +164,12 @@ role grants) is the only human/one-time piece, and it persists across replays of
 
 **Security note:** public = network-reachable only; every real endpoint still requires a
 Firebase Bearer token (TM-108). Preview revisions (TM-65) are *not* tagged → stay private.
+
+## First admin (replay setup — not code)
+
+RBAC provisions every account as `USER` (JIT) and the set-role endpoint needs an existing admin — so a fresh deploy has **no admin** until one is seeded. Two replay-safe steps:
+1. The runtime SA has **`roles/firebaseauth.admin`** (granted in the SA setup above) so it can write the role claim — without it the bootstrap *and* set-role silently fail (TM-140).
+2. Set the **GitHub repo variable** `ADMIN_BOOTSTRAP_EMAIL` to the first admin's email — `deploy.yml` injects it, and the backend's `AdminBootstrap` (TM-110) promotes that account to `ADMIN` on startup. The account must **sign in once** first (so the Firebase user exists); after the deploy, the admin re-logs in to pick up the claim on a fresh token. (`/me` may still show `USER` — it reads the DB role; authorization uses the claim. See TM-140.)
 
 ## Out of scope
 - App-side JDBC datasource / Flyway migrations (data-layer ticket) — the app has no DB driver yet.
