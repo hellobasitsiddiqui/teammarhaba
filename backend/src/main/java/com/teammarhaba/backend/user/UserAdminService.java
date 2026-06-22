@@ -1,9 +1,12 @@
 package com.teammarhaba.backend.user;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
+import java.util.Map;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,17 +25,24 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li><b>Role = Firebase claim first, row second</b> — a role change writes the custom claim (the
  *       authorization source of truth, via {@link RoleService}) and then mirrors it onto the row, so
  *       a claim-write failure rolls the transaction back rather than leaving the two out of sync.</li>
+ *   <li><b>Audited</b> — every effective enable/disable or role change appends one immutable audit
+ *       event (TM-137) in the same transaction as the change, so it's never silently un-audited.</li>
  * </ul>
  */
 @Service
 public class UserAdminService {
 
+    /** Audit {@code target_type} for account actions — the kind of thing acted on. */
+    private static final String TARGET_TYPE = "User";
+
     private final UserRepository users;
     private final RoleService roleService;
+    private final AuditService audit;
 
-    public UserAdminService(UserRepository users, RoleService roleService) {
+    public UserAdminService(UserRepository users, RoleService roleService, AuditService audit) {
         this.users = users;
         this.roleService = roleService;
+        this.audit = audit;
     }
 
     /** A page of active accounts. Soft-deleted rows are excluded by the entity's {@code @SQLRestriction}. */
@@ -64,10 +74,18 @@ public class UserAdminService {
             throw new SelfActionNotAllowedException("You cannot change your own role.");
         }
 
-        if (enabled != null) {
+        // Only an *effective* change is applied and audited — a no-op request writes no event.
+        if (enabled != null && enabled != user.isEnabled()) {
             user.setEnabled(enabled);
+            audit.record(
+                    callerUid,
+                    AuditAction.ACCOUNT_ENABLED_CHANGED,
+                    TARGET_TYPE,
+                    String.valueOf(id),
+                    Map.of("enabled", enabled));
         }
         if (role != null && role != user.getRole()) {
+            Role previous = user.getRole();
             // Claim is the source of truth — write it first; the row is the mirror.
             try {
                 roleService.assignRole(user.getFirebaseUid(), role);
@@ -75,6 +93,12 @@ public class UserAdminService {
                 throw new IllegalStateException("Failed to update the role claim for user " + id, e);
             }
             user.setRole(role); // dirty-checking flushes on commit
+            audit.record(
+                    callerUid,
+                    AuditAction.ROLE_CHANGED,
+                    TARGET_TYPE,
+                    String.valueOf(id),
+                    Map.of("from", previous.name(), "to", role.name()));
         }
         return user;
     }
