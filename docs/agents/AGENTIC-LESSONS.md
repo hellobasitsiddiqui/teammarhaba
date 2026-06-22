@@ -14,6 +14,13 @@ Kept on replay. **Append a dated lesson whenever the fleet teaches you one**, so
 
 ## Decomposition & dependencies
 - **Partition tickets by file/package ownership.** Two parallel agents editing the same hot file (`User.java`, `pom.xml`, `application.yml`, a shared migration) collide at the merge gate. Give each parallel-eligible ticket its own files; if two ready tickets *must* touch the same file, **sequence them (one blocks the other) — don't parallelize.** (Sprint 7: TM-111 & TM-115 both eyed the admin user list — flagged as a watch; TM-110/114 stayed clean only because they happened to live in different packages — luck, not design.)
+- **Keep a HOT-FILES list and plan around it.** Maintain a living list of the files that have *actually* caused merge conflicts, and at planning time **don't co-schedule two parallel tickets that both touch a hot file** — sequence them instead. Treat a hot file like a lock: minimise edits, keep them additive (keep-both resolves cleanly), and review the *whole* region on a change, not just your hunk. **Current hot files:**
+  - `backend/src/main/java/com/teammarhaba/backend/user/User.java` — the central entity; many tickets extend it.
+  - `backend/src/main/java/com/teammarhaba/backend/web/GlobalExceptionHandler.java` (+ its test) — every feature adds an exception mapping here (Sprint 7: #109 ↔ #110 collided exactly here).
+  - `backend/src/main/resources/db/migration/` — Flyway version-number clashes are **git-invisible** (same `Vn`, different filename); pre-assign or renumber on rebase.
+  - `pom.xml`, `application.yml` / `application-prod.yml` — shared backend config.
+  - `docs/agents/blackboard.md` — every agent appends notes.
+  Add to this list when a new file bites; prune when one stops being shared.
 - **Flyway/DB migrations are a serialization point.** Two agents each adding `V3__*.sql` clash. Mitigate: pre-assign migration numbers per ticket, renumber on rebase, or use timestamped names.
 - **Verify blocker-link direction with a read-back.** A wrong `createIssueLink` direction inverts the whole DAG (wave-0 roots look "blocked by" their own descendants). Create one link → read it back → glance at the UI "is blocked by" heading → *then* bulk-create. There's no delete-link API, so a wrong bulk-create is expensive.
 - **Map the DAG before sizing the fleet.** Agents to run = width of the widest *ready* wave (Sprint 7 = 3). More agents than ready tickets just idle. The **critical path** (longest dependency chain) — not total story points — sets how long the sprint takes (Sprint 7: TM-111 → TM-133 → TM-134).

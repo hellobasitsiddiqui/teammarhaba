@@ -107,25 +107,38 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 
 ---
 
-## Deferred → future "Hardening / Prod-readiness" epic
-Generic, important, but not built — captured so they're not lost. Grouped:
+## Deferred epics (mapped to the anatomy arc)
 
-- **Security & abuse:** rate limiting · CSP · request **payload/size limits** (DoS) · **secrets rotation** (DB password / keys on a schedule)
-- **Resilience & DR:** ⭐ **graceful degradation** (timeouts / retries / circuit-breakers / fallbacks for slow-or-down deps) · **graceful shutdown** (drain in-flight requests on deploy) · **backups + restore drill** (DR) · **idempotency keys** for mutating endpoints
-- **Observability:** **alerting / SLOs + dashboards** (metrics exist; alerts don't) · **correlation/request IDs** through logs · distributed tracing · error monitoring (Sentry-style)
-- **Performance:** **caching layer** (response/data) · **load/perf-test baseline** · connection-pool tuning
-- **Quality:** **Sonar** (code-smell / tech-debt quality gate — overlaps CodeQL/Spotless/JaCoCo; *optional*)
-- **Accounts / UX:** account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive
-- **Compliance:** GDPR export/deletion · consent & retention · **audit-log retention** policy (it grows unbounded)
-- **Feature management:** feature flags
-- **Platform / integration:** transactional **email/notifications** service (beyond Firebase auth emails) · **file/object storage** for uploads (avatars/attachments → GCS) · **full-text search** (Postgres FTS / external) · **background jobs / async queue** (emails, exports) · **scheduled tasks** (app-level cron) · **webhooks / outbound events** · **machine-to-machine auth** (API keys / service accounts)
-- **Scaling:** app-tier scale-out · read replicas · HA / failover · CDN (mostly via Firebase Hosting)
-- **Ops:** **maintenance mode** toggle · cost / budget alerts · log-retention policy · DR runbook
-- **Admin / support:** **admin impersonation** ("act as user") · audit-log viewer/export UI
-- **Auth (extra):** 2FA / MFA (TOTP) · device/session management (Firebase covers most)
-- **Frontend (extra):** PWA / offline support · web-vitals performance budgets · push notifications (mobile / FCM) · cookie-consent banner · onboarding / first-login tutorial · white-label / theming (ties to re-skin)
+Generic, important, but not built — captured so they're not lost. They split across the next phases of the arc (SKELETON → SPINE ✅ → FLESH → **MUSCLE** → **SENSES**) plus some platform/UX leftovers. Loose prod-readiness tickets **TM-95/97/98/99** fold into MUSCLE. *(OpenAPI drift is already ticketed — TM-135.)*
 
-Would also adopt the loose prod-readiness tickets **TM-95, TM-97, TM-98, TM-99**. *(OpenAPI drift check is ticketed — TM-135.)* The ⭐ **graceful degradation** item is the one that actually bites in prod (a hung dependency currently hangs the request).
+### MUSCLE — Hardening & Prod-readiness
+Strength: resilience, security, performance, scaling. **What's inside:**
+
+| Area | Feature | Why / note | Priority |
+|---|---|---|:--:|
+| Resilience | Graceful degradation — timeouts / retries / circuit-breakers / fallbacks | a hung dependency currently hangs the request | ⭐ |
+| Resilience | Graceful shutdown — drain in-flight requests on deploy | clean rollouts | high |
+| Resilience | Idempotency keys on mutating endpoints | retry / double-submit safety | high |
+| DR | Backups + **restore drill** | an untested backup = no backup | ⭐ |
+| DR | DR runbook | recovery procedure | med |
+| Security | Rate limiting | abuse protection beyond login lockout | high |
+| Security | Request payload / size limits | cheap DoS guard | high |
+| Security | CSP header | XSS hardening (already have HSTS + frame-options) | med |
+| Security | Secrets rotation | DB password / keys on a schedule | med |
+| Security | 2FA / MFA (TOTP) | account hardening (via Firebase) | med |
+| Performance | Caching layer (response / data) | latency + DB load | med |
+| Performance | Load / perf-test baseline | know the limits before they hit | med |
+| Performance | Connection-pool tuning | DB throughput | low |
+| Scaling | App-tier scale-out · read replicas · HA / failover | grow with load | low |
+| Quality | Sonar quality gate | overlaps CodeQL/Spotless/JaCoCo | optional |
+| Ops | Maintenance mode · cost / budget alerts | planned downtime, spend guard | low |
+| Data | Audit-log retention policy | it grows unbounded | med |
+
+### SENSES — Observability
+Alerting / SLOs + dashboards (metrics exist; alerts don't) · correlation / request IDs through logs · distributed tracing · error monitoring (Sentry-style) · log-retention policy.
+
+### Platform / UX / compliance leftovers (a later platform epic or Epic 3 — *not* hardening)
+Account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive · onboarding / first-login tutorial · white-label / theming (re-skin) · email / notifications service · file / object storage · full-text search · background jobs / async queue · scheduled tasks · webhooks / outbound events · machine-to-machine auth · push notifications (FCM) · cookie-consent banner · admin impersonation · audit-log viewer/export UI · GDPR export/deletion + consent/retention · feature flags.
 
 ## → Epic 3 (FLESH, product-specific)
 First real product feature + anything domain-specific (contacts CRUD/tags/CSV/favourites/photo/bulk).
