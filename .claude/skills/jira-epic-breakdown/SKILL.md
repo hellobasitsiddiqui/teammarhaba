@@ -37,13 +37,13 @@ Use the `jira-ticket-writer` skill for the Standard/Human description + pinned A
 
 ## Dependencies (`is blocked by` links)
 
-For each ticket, list its blockers, then create a **Blocks** link per edge. **The connector's `createIssueLink` direction is inverted from its own docs** — to express "X is blocked by Y":
+For each ticket, list its blockers, then create a **Blocks** link per edge. To express "X is blocked by Y" (Y is the prerequisite/blocker):
 
 ```
-createIssueLink(type: "Blocks", inwardIssue: X (the blocked), outwardIssue: Y (the blocker))
+createIssueLink(type: "Blocks", inwardIssue: Y (the blocker), outwardIssue: X (the blocked))
 ```
 
-Jira's link type defines `inward = "is blocked by"`, `outward = "blocks"`, so the **inward issue is the one that is blocked**. **Create one link first and read it back** (`searchJiraIssuesUsingJql` with `fields: ["issuelinks"]`) to confirm the arrow points the right way before bulk-creating.
+Jira's link type defines `inward = "is blocked by"`, `outward = "blocks"`; the tool's param hint is correct — **`inwardIssue` is the blocker**. On read-back, a task's blockers appear as its **`inwardIssue`** links (it's ready when all of those are Done). **Create one link first and read it back** (`searchJiraIssuesUsingJql` with `fields: ["issuelinks"]`) and glance at the UI "is blocked by" heading before bulk-creating — reversing this inverts the whole DAG. See `jira-mcp-gotchas` → Issue links.
 
 ## Wave labels (pick order)
 
