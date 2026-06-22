@@ -91,7 +91,9 @@ function guard() {
     return;
   }
   if (signedIn && route === LOGIN) {
-    const intended = sessionStorage.getItem(INTENDED_KEY) || HOME;
+    // Land where the user was headed if they deep-linked a protected route before signing in;
+    // otherwise by role — an ADMIN goes to the console, everyone else to home (TM-141).
+    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
     sessionStorage.removeItem(INTENDED_KEY);
     go(intended);
     return;
@@ -119,7 +121,13 @@ function guard() {
 // Resolve the role from the token (async) before guarding, so the admin route/nav decisions use a
 // fresh `isAdmin`. Used for auth-state changes (sign-in/out, reload restore, promotion).
 async function resolveRoleThenGuard() {
-  isAdmin = (await getRole()) === "ADMIN";
+  // Never let a failed role lookup block the guard: if it throws we still must render, or a
+  // signed-in user can be left staring at the sign-in form (TM-141). Fail safe to non-admin.
+  try {
+    isAdmin = (await getRole()) === "ADMIN";
+  } catch {
+    isAdmin = false;
+  }
   guard();
 }
 
