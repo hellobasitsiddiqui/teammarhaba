@@ -3,10 +3,15 @@ package com.teammarhaba.backend.user;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.common.PageRequests;
+import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,12 +34,31 @@ public class UserService {
     /** Audit {@code target_type} for account events. */
     private static final String TARGET_USER = "User";
 
+    /** Properties the admin users list may be sorted on (allow-listed — see {@link PageRequests}). */
+    private static final Set<String> SORTABLE = Set.of("id", "email", "displayName", "role", "enabled");
+
+    /** Stable default ordering when the caller requests none. */
+    private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.ASC, "id");
+
     private final UserRepository users;
     private final AuditService audit;
 
     public UserService(UserRepository users, AuditService audit) {
         this.users = users;
         this.audit = audit;
+    }
+
+    /**
+     * Paged, filtered listing of accounts for the admin users console (TM-115) — the first adopter
+     * of the {@link PageResponse} list convention. Filters are optional ({@code null} disables a
+     * clause); {@code size} is capped and {@code sort} is allow-listed by {@link PageRequests}.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<UserSummary> list(
+            String q, Role role, Boolean enabled, Integer page, Integer size, String sort) {
+        Pageable pageable = PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT);
+        String trimmed = (q == null || q.isBlank()) ? null : q.trim();
+        return PageResponse.from(users.search(trimmed, role, enabled, pageable), UserSummary::from);
     }
 
     /** Find the caller's account, creating (or reactivating) it on first sight. Concurrency-safe. */

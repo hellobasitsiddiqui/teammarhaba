@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.teammarhaba.backend.common.InvalidListQueryException;
 import com.teammarhaba.backend.user.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -76,6 +77,16 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void invalidListQueryReturns400() throws Exception {
+        mockMvc.perform(get("/test/badlist"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.detail").value("Unknown sort property 'ssn'."));
+    }
+
+    @Test
     void optimisticLockConflictReturns409() throws Exception {
         mockMvc.perform(get("/test/stale"))
                 .andExpect(status().isConflict())
@@ -117,6 +128,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/stale")
         void stale() {
             throw new ObjectOptimisticLockingFailureException("users", 1L);
+        }
+
+        @GetMapping("/badlist")
+        void badlist() {
+            throw new InvalidListQueryException("Unknown sort property 'ssn'.");
         }
 
         @GetMapping("/boom")
