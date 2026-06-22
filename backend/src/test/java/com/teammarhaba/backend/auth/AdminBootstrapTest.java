@@ -13,6 +13,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.config.AdminProperties;
 import com.teammarhaba.backend.user.Role;
+import com.teammarhaba.backend.user.UserService;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -25,12 +26,13 @@ class AdminBootstrapTest {
 
     private final FirebaseAuth auth = mock(FirebaseAuth.class);
     private final RoleService roleService = mock(RoleService.class);
+    private final UserService userService = mock(UserService.class);
 
     @SuppressWarnings("unchecked")
     private final ObjectProvider<FirebaseAuth> provider = mock(ObjectProvider.class);
 
     private AdminBootstrap bootstrap(String email) {
-        return new AdminBootstrap(new AdminProperties(email), provider, roleService);
+        return new AdminBootstrap(new AdminProperties(email), provider, roleService, userService);
     }
 
     @Test
@@ -38,6 +40,7 @@ class AdminBootstrapTest {
         bootstrap("   ").run(null);
         verifyNoInteractions(provider);
         verifyNoInteractions(roleService);
+        verifyNoInteractions(userService);
     }
 
     @Test
@@ -45,6 +48,7 @@ class AdminBootstrapTest {
         bootstrap(null).run(null);
         verifyNoInteractions(provider);
         verifyNoInteractions(roleService);
+        verifyNoInteractions(userService);
     }
 
     @Test
@@ -61,15 +65,18 @@ class AdminBootstrapTest {
     }
 
     @Test
-    void isIdempotentWhenAlreadyAdmin() throws Exception {
+    void whenClaimAlreadyAdminReconcilesDbRowWithoutRewritingClaim() throws Exception {
         UserRecord user = mock(UserRecord.class);
+        when(user.getUid()).thenReturn("uid-admin");
         when(user.getCustomClaims()).thenReturn(Map.of("role", "ADMIN"));
         when(provider.getObject()).thenReturn(auth);
         when(auth.getUserByEmail("boss@example.com")).thenReturn(user);
 
         bootstrap("boss@example.com").run(null);
 
+        // The claim is left untouched (no assignRole), but the DB row is still reconciled (TM-140).
         verify(roleService, never()).assignRole(any(), eq(Role.ADMIN));
+        verify(userService).syncRole("uid-admin", Role.ADMIN);
     }
 
     @Test
