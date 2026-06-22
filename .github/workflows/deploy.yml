@@ -150,6 +150,12 @@ jobs:
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
             --quiet
+          # Record the revision THIS deploy created, so the verify step can assert it is
+          # the one actually serving traffic (the TM-131 guard — see "Verify rollout").
+          NEW_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
+            --format='value(status.latestCreatedRevisionName)')
+          echo "Deploy created revision: ${NEW_REV}"
+          echo "NEW_REV=${NEW_REV}" >> "$GITHUB_ENV"
         env:
           GITHUB_SHA: ${{ github.sha }}
 
@@ -180,24 +186,49 @@ jobs:
             sleep 15
           done || true
 
-      # Verify the rollout. `gcloud run deploy` already blocks until the revision is Ready,
-      # and Cloud Run gates Ready on the /health startup probe — so a Ready revision means
-      # /health returned 200 over HTTPS. That check is the source of truth (fatal). We then
-      # REPORT whether the service is public (unauthenticated /health) — informational only,
-      # so the deploy stays green whether it ended up public or private.
-      - name: Verify rollout (/health)
+      # Verify the rollout — TM-131 hardening. A green deploy is NOT enough: in TM-131 the
+      # backend served an ancient revision (#5) for the whole project while every deploy
+      # reported success, because (a) new revisions failed the /health startup probe (Flyway
+      # couldn't auth to Cloud SQL) so never became Ready, and (b) traffic stayed pinned to a
+      # stale revision. The old verify only curled /health — which 200s on the STALE revision
+      # too — so it false-greened. This step instead proves the revision THIS run created is
+      # the one actually serving 100% of traffic, and fails loudly otherwise.
+      #
+      #   AC-H2: roll traffic forward to the latest Ready revision (never leave it pinned).
+      #          If the new revision failed to become Ready, --to-latest routes to an OLDER
+      #          Ready revision, so the AC-H1 match below fails — exactly the TM-131 signal.
+      #   AC-H1: assert the revision serving 100% traffic == the revision this deploy created.
+      - name: Verify rollout (new revision is actually serving)
         run: |
-          READY_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.latestReadyRevisionName)')
-          if [ -z "${READY_REV}" ]; then
-            echo "::error::No Ready revision for ${SERVICE} — /health startup probe did not pass."
+          set -euo pipefail
+          if [ -z "${NEW_REV:-}" ]; then
+            echo "::error::NEW_REV not set — the Deploy step did not record the created revision."
             exit 1
           fi
-          echo "Ready revision: ${READY_REV} (startup probe on /health passed)."
-          URL=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')
+
+          # AC-H2 — roll traffic forward to the latest Ready revision (idempotent).
+          gcloud run services update-traffic "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --to-latest --quiet
+
+          # AC-H1 — which revision is serving 100% of (untagged) traffic right now?
+          gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/svc.json
+          SERVING_REV=$(jq -r '.status.traffic[] | select((.percent==100) and (has("tag")|not)) | .revisionName' /tmp/svc.json | head -n1)
+          echo "Deploy created revision : ${NEW_REV}"
+          echo "Revision serving traffic: ${SERVING_REV}"
+
+          if [ "${SERVING_REV}" != "${NEW_REV}" ]; then
+            echo "::error::Stale rollout — traffic is on '${SERVING_REV}', not the just-deployed '${NEW_REV}'."
+            echo "::error::The new revision likely failed its /health startup probe (check boot logs: Flyway/Cloud SQL/Firebase) so traffic stayed on an older Ready revision."
+            exit 1
+          fi
+          echo "OK — the revision built by this run is serving 100% of traffic (current code is live)."
+
+          # Informational: report public reachability (the deploy stays green whether the
+          # TM-96 public-access exception is applied in this env or not).
+          URL=$(jq -r '.status.url' /tmp/svc.json)
           echo "Service URL: ${URL}"
           code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${URL}/health" 2>/dev/null || echo 000)
           if [ "${code}" = "200" ]; then
             echo "Public /health -> 200 $( [ -f /tmp/health.json ] && cat /tmp/health.json ) (service is PUBLIC)."
           else
-            echo "Unauthenticated /health -> ${code} (service is PRIVATE here — TM-96 exception not applied in this env). Ready-revision check already confirmed /health serves 200 internally."
+            echo "Unauthenticated /health -> ${code} (service is PRIVATE in this env — TM-96 exception not applied). The serving-revision match above already confirmed current code is live."
           fi
