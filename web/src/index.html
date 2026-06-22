@@ -17,6 +17,9 @@
             <a id="nav-signin" href="#/login" hidden>Sign in</a>
             <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
             <a id="nav-admin" href="#/admin" hidden>Admin</a>
+            <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
+                 to re-run the whole-site walkthrough or the current page's tour. -->
+            <button id="nav-help" type="button" hidden>Help</button>
             <button id="signout-btn" type="button" hidden>Sign out</button>
         </nav>
 
@@ -67,5 +70,8 @@
     <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
          signed-out users to #/login and returns them after sign-in, drives the nav. -->
     <script type="module" src="/assets/router.js"></script>
+    <!-- Onboarding product tour (TM-135): auto-runs the whole-site walkthrough on first login and
+         each page's tour on first visit; replayable from the Help menu. -->
+    <script type="module" src="/assets/tours.js"></script>
 </body>
 </html>
