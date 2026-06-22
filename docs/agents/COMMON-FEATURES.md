@@ -118,6 +118,12 @@ Generic, important, but not built — captured so they're not lost. Grouped:
 - **Accounts / UX:** account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive
 - **Compliance:** GDPR export/deletion · consent & retention · **audit-log retention** policy (it grows unbounded)
 - **Feature management:** feature flags
+- **Platform / integration:** transactional **email/notifications** service (beyond Firebase auth emails) · **file/object storage** for uploads (avatars/attachments → GCS) · **full-text search** (Postgres FTS / external) · **background jobs / async queue** (emails, exports) · **scheduled tasks** (app-level cron) · **webhooks / outbound events** · **machine-to-machine auth** (API keys / service accounts)
+- **Scaling:** app-tier scale-out · read replicas · HA / failover · CDN (mostly via Firebase Hosting)
+- **Ops:** **maintenance mode** toggle · cost / budget alerts · log-retention policy · DR runbook
+- **Admin / support:** **admin impersonation** ("act as user") · audit-log viewer/export UI
+- **Auth (extra):** 2FA / MFA (TOTP) · device/session management (Firebase covers most)
+- **Frontend (extra):** PWA / offline support · web-vitals performance budgets · push notifications (mobile / FCM) · cookie-consent banner · onboarding / first-login tutorial · white-label / theming (ties to re-skin)
 
 Would also adopt the loose prod-readiness tickets **TM-95, TM-97, TM-98, TM-99**. *(OpenAPI drift check is ticketed — TM-135.)* The ⭐ **graceful degradation** item is the one that actually bites in prod (a hung dependency currently hangs the request).
 
