@@ -15,6 +15,8 @@
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out. -->
         <nav class="app-nav" aria-label="Account">
             <a id="nav-signin" href="#/login" hidden>Sign in</a>
+            <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
+            <a id="nav-admin" href="#/admin" hidden>Admin</a>
             <button id="signout-btn" type="button" hidden>Sign out</button>
         </nav>
 
@@ -44,8 +46,14 @@
                 <p>You are signed in as <strong id="user-email"></strong>.</p>
                 <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client (TM-108). -->
                 <p id="me" class="status"></p>
+                <!-- Admins reach the users console here (router shows the link only for ADMINs). -->
+                <p class="home-links"><a href="#/admin" id="home-admin-link" hidden>Open the admin users console →</a></p>
             </div>
         </section>
+
+        <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
+             builds the table/filters/actions into this container; router.js owns its visibility. -->
+        <section id="admin-view" class="admin-console" aria-label="Admin users console" hidden></section>
     </main>
     <script src="/assets/config.js"></script>
     <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase + exposes window.tmAuth. -->
