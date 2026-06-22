@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -62,6 +63,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.CONFLICT,
                 "Conflict",
                 "The request conflicts with the current state of the resource.");
+    }
+
+    /** Optimistic-lock conflict: someone else updated the row first (stale {@code @Version}) -> 409. */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ProblemDetail handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        log.warn("Optimistic lock conflict", ex);
+        return Problems.of(
+                HttpStatus.CONFLICT,
+                "Conflict",
+                "The resource was changed by another request. Reload the latest version and try again.");
     }
 
     /** Anything unmapped -> generic 500. The real cause is logged, never returned. */
