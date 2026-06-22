@@ -38,8 +38,8 @@ In Review, post a one-line evidence note, and go straight to Done.
 
 ## Conventions (current — newer than the numbered steps above)
 - **Branch naming:** `<type>/TM-XX-short-kebab-desc` — `feature` (app code), `chore` (infra/CI/cloud/docs/config), `fix` (bug). e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`.
-- **Read the blackboard after you claim:** `docs/agents/blackboard.md` — append-only shared operational notes (env quirks, workarounds, "main red"). Append cross-cutting findings there so no agent rediscovers them.
-- **Idle with budget left? Pull a chore — but ticket it FIRST:** if the claim loop finds **no ready ticket** and you still have token budget before the current usage window resets, take a low-risk item from `docs/agents/housekeeping.md` — but **first raise a quick `chore` Jira ticket** for it (summary + one-line why), then branch/PR against that `TM-XX` like any other work. **No untracked PRs:** every change that reaches `main` must trace to a ticket — idle housekeeping included (#23/#32 slipped through without one; don't repeat that). A ready Jira ticket always wins over housekeeping.
+- **Read the blackboard after you claim:** `docs/agents/runtime/blackboard.md` — append-only shared operational notes (env quirks, workarounds, "main red"). Append cross-cutting findings there so no agent rediscovers them.
+- **Idle with budget left? Pull a chore — but ticket it FIRST:** if the claim loop finds **no ready ticket** and you still have token budget before the current usage window resets, take a low-risk item from `docs/agents/protocol/housekeeping.md` — but **first raise a quick `chore` Jira ticket** for it (summary + one-line why), then branch/PR against that `TM-XX` like any other work. **No untracked PRs:** every change that reaches `main` must trace to a ticket — idle housekeeping included (#23/#32 slipped through without one; don't repeat that). A ready Jira ticket always wins over housekeeping.
 - **Board fields / time tracking:** on **claim** set Start date (`customfield_10015`); on **PR/In Review** log a **worklog** of actual elapsed (`addWorklogToJiraIssue`) + set Due date (`duedate`) if unset; if **blocked/held** set Flagged = Impediment (`customfield_10021`). Story points = the estimate. See `jira-mcp-gotchas` → Time tracking.
 - **Hit a wall? Log it — never fail silently:** comment the blocker + a `[finding → future improvement]` note; for human-only steps (interactive auth, console, secrets) raise a separate human-only ticket (labelled `human`) and link it as a blocker.
 - **Build tool = Gradle (Kotlin DSL)** for the backend going forward — unifies with the Gradle-native Android (TM-88). (The initial backend is still Maven; throwaway on the redo.) Full rationale: `docs/decisions/ADR-0001-gradle-build-standard.md`.
@@ -50,14 +50,17 @@ In Review, post a one-line evidence note, and go straight to Done.
 **Merged to `main`.** (No-PR tasks: the change is applied and evidenced on the ticket.)
 
 ## Pointers
-- `docs/agents/AGENT-CLAIM-PROTOCOL.md` — the full pull-based claim protocol (states, loop, failure handling).
-- `docs/agents/DEPENDENCY-DAG.md` — the dependency graph, leverage leaderboard, and execution order.
-- `docs/agents/SPRINTS.md` — sprint naming scheme and what each sprint contains.
+- `docs/agents/SEED-MANIFEST.md` — the portable agent-OS kit: table of contents, keep-list (generic-OS vs project-instance), and the replay one-pager.
+- `docs/agents/GENESIS.md` — run-first Sprint-0 bootstrap / replay checklist (do all of it up front).
+- `docs/agents/CONSTANTS.md` — the single file you edit to re-skin (project name, GCP / Jira / GitHub ids).
+- `docs/agents/protocol/AGENT-CLAIM-PROTOCOL.md` — the full pull-based claim protocol (states, loop, failure handling).
+- `docs/agents/protocol/DEPENDENCY-DAG.md` — the dependency graph, leverage leaderboard, and execution order.
+- `docs/agents/project/SPRINTS.md` — sprint naming scheme and what each sprint contains.
 - `.claude/skills/jira-mcp-gotchas` — Jira/connector quirks (read before bulk Jira create/edit/link ops).
 - `.claude/skills/` also has `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`.
-- `docs/agents/blackboard.md` — shared operational notes; **read after each claim**, append cross-cutting findings.
+- `docs/agents/runtime/blackboard.md` — shared operational notes; **read after each claim**, append cross-cutting findings.
 
 ## Live operational notes (auto-loaded)
 The blackboard is imported below, so every agent has it in context from startup. **Still re-read it after each claim** (loop step 4) for notes other agents appended mid-run, and append your own cross-cutting findings. Keep it small.
 
-@docs/agents/blackboard.md
+@docs/agents/runtime/blackboard.md
