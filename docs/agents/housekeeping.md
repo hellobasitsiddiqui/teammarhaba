@@ -25,6 +25,19 @@ A ready Jira ticket **always wins** over housekeeping — don't start a chore if
 - This file is **per-run scratch** (deleted with the source on a replay). Anything that must survive a
   replay also belongs in a Jira ticket or `REPLAY.md`. See the redo keep-list.
 
+## Ticket hygiene (periodic sweep)
+
+Keeping the **backlog itself** clean is recurring housekeeping — the orchestrator (or an idle agent) should sweep periodically. The *rules* live in the ticket skills (`jira-ticket-writer`, `jira-epic-breakdown`); this is the checklist for applying them to the existing board:
+
+- **No metadata prefixes in summaries.** Strip `[...]` / `Word:` prefixes (`[human-in-the-loop]`, `[human]`, `Human:`, `[bug]`, `Chore:`, `Tooling:`, …) — metadata belongs in labels/issue-type; summaries stay action-focused.
+- **Human tickets → the single `human` label** (the label the find-ready filter excludes, `labels != "human"`). Never a summary prefix, never the legacy `human-in-the-loop` label.
+- **Defects → the `Bug` issue type**, never a `[bug]` Task title.
+- **Every ticket carries exactly one `replay` / `no-replay`** — the rebuild scope is `labels = replay`, so an unclassified ticket silently drops out.
+- **Close stale tickets** already satisfied by merged work (verify first) and **close duplicates** (comment + link the survivor).
+- When only normalizing a summary/label, **don't change** status, assignee, or the description body.
+
+Done once wholesale in **TM-132** (2026-06-22): 19 summaries normalized, human label collapsed (`human-in-the-loop` → 0), TM-121 given `no-replay`; rules baked into the skills + agent docs (PRs #98/#99). Re-run the sweep whenever the board drifts.
+
 ## Backlog
 - [x] Audit & convert remaining historical Jira comments from wiki markup to GitHub-flavored markdown
   (repo convention). Known offenders: TM-81 (evidence + finding comments), TM-66 (finding comment),
