@@ -1,6 +1,6 @@
 # Glossary — agentic + engineering slang
 
-Shared vocabulary for the fleet. Punchy definitions, grounded in TeamMarhaba where it helps. Part of the agent OS (travels with the replay). **Append a term whenever a useful bit of slang shows up.**
+A plain-language reference **for humans** — to learn the vocabulary this project uses, and for anyone **replaying it under a new name (re-skin)** who wants the terms explained. *Not an agent doc.* Punchy definitions, grounded in TeamMarhaba where it helps. **Append a term whenever a useful bit of slang shows up.**
 
 ## Agentic / multi-agent
 - **Agent fleet** (*swarm*) — many autonomous agents working one backlog concurrently (agent-A/B/C…).
