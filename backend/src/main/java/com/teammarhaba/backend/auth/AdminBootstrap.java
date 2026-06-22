@@ -63,11 +63,14 @@ public class AdminBootstrap implements ApplicationRunner {
             roleService.assignRole(user.getUid(), Role.ADMIN);
             log.info("Bootstrap admin {} promoted to ADMIN.", trimmed);
         } catch (Exception e) {
+            // Pass the throwable as the trailing arg so the full exception (type + message + stack)
+            // is logged — the email substitutes into {} (TM-140: this previously rendered literally,
+            // hiding the real cause, e.g. the runtime SA missing roles/firebaseauth.admin).
             log.warn(
-                    "Could not bootstrap admin '{}': {}. Ensure the account has signed in at least "
-                            + "once (so it exists in Firebase Auth), then restart.",
+                    "Could not bootstrap admin '{}'. Ensure the account has signed in at least once "
+                            + "(so it exists in Firebase Auth) and the runtime SA has firebaseauth.admin, then restart.",
                     trimmed,
-                    e.getMessage());
+                    e);
         }
     }
 }

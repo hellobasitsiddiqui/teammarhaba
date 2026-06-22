@@ -54,6 +54,16 @@
             <artifactId>micrometer-registry-stackdriver</artifactId>
         </dependency>
 
+        <!-- Structured JSON logging for prod (TM-73; fix TM-140). logback's built-in JsonEncoder
+             emits the *unformatted* message + a separate arguments array (so SLF4J `{}` showed up
+             literally in Cloud Logging, hiding the substituted values). LogstashEncoder emits the
+             FORMATTED message and lifts MDC (traceId) to top-level fields. Only used under prod. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.0</version>
+        </dependency>
+
         <!-- Spring Security (TM-74): the SecurityFilterChain that keeps /actuator/health
              public while requiring auth for info/metrics. The permit-list lives here; the
              Firebase token auth that fills in the "authenticated" half is TM-79. -->
