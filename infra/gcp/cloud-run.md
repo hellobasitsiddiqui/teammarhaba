@@ -165,6 +165,12 @@ role grants) is the only human/one-time piece, and it persists across replays of
 **Security note:** public = network-reachable only; every real endpoint still requires a
 Firebase Bearer token (TM-108). Preview revisions (TM-65) are *not* tagged → stay private.
 
+## First admin (replay setup — not code)
+
+RBAC provisions every account as `USER` (JIT) and the set-role endpoint needs an existing admin — so a fresh deploy has **no admin** until one is seeded. Two replay-safe steps:
+1. The runtime SA has **`roles/firebaseauth.admin`** (granted in the SA setup above) so it can write the role claim — without it the bootstrap *and* set-role silently fail (TM-140).
+2. Set the **GitHub repo variable** `ADMIN_BOOTSTRAP_EMAIL` to the first admin's email — `deploy.yml` injects it, and the backend's `AdminBootstrap` (TM-110) promotes that account to `ADMIN` on startup. The account must **sign in once** first (so the Firebase user exists); after the deploy, the admin re-logs in to pick up the claim on a fresh token. (`/me` may still show `USER` — it reads the DB role; authorization uses the claim. See TM-140.)
+
 ## Out of scope
 - App-side JDBC datasource / Flyway migrations (data-layer ticket) — the app has no DB driver yet.
 - Per-PR Cloud Run preview revisions (TM-65 / 1.4.6) — intentionally remain private.
