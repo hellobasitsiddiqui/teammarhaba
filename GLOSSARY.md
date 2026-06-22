@@ -31,6 +31,10 @@ A plain-language reference **for humans** — to learn the vocabulary this proje
 - **Keyless / OIDC** — auth with short-lived federated tokens; no stored key or secret.
 - **Idempotent** — safe to run twice with no extra effect (matters for retries and replays).
 
+## Web / frontend
+- **Framework-free SPA** — a single-page app built with plain HTML/CSS/JS, *no* React/Vue/Svelte. One `index.html` + small ES modules; the page never fully reloads — JS swaps which panel shows. *Ours:* the web surface is deliberately framework-free so it stays tiny and dependency-light (easy to re-skin).
+- **Hash router** — client-side routing off the URL fragment after `#` (`/#/login`, `/#/admin`). The part after `#` never reaches the server, so `router.js` listens for the `hashchange` event and swaps views — no reload, no server round-trip. Works on plain static hosting with zero config; the alternative (clean URLs via the **History API**) needs a host rewrite so a refresh on `/admin` doesn't 404.
+
 ## Engineering wisdom (anti-patterns & rules)
 - **YAGNI** ("You Aren't Gonna Need It") — don't build it until a real need forces it.
 - **Premature abstraction** — generalizing from one example; you usually guess the wrong shape. Wait for ~3 real uses.
