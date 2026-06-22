@@ -39,6 +39,18 @@ conventions* on top.
 Each ticket carries a self-contained **Agent execution prompt** in its description (objective /
 files / steps / constraints / verify / out-of-scope), same as Epic 1.
 
+## Status — remaining (2026-06-22)
+
+The login chain is live end-to-end (TM-103/104/105/106/107/108/109/112 merged; sign-up/login → `GET /api/v1/me` works against the deployed env). **5 backend tickets remain** — they complete the SPINE:
+
+- **TM-110** (wave-1, ready) — RBAC: map Firebase custom claims → Spring authorities, so roles travel in the verified ID token.
+- **TM-114** (wave-1, ready) — Reusable base entity: soft-delete + optimistic concurrency (`@Version`), so every table inherits safe deletes and stale-write `409`s.
+- **TM-113** (wave-2, ← TM-103) — Append-only audit log of account/admin actions.
+- **TM-115** (wave-2) — Standard list conventions: pagination / filtering / sorting.
+- **TM-111** (wave-3, ← TM-110) — `@PreAuthorize` enforcement + admin user-management endpoints (list / enable / disable; `USER` → `403`).
+
+Wave-1 (TM-110, TM-114) can be claimed in parallel **once pulled into the active sprint**.
+
 ## Dependency DAG (waves)
 
 ```
