@@ -23,6 +23,9 @@ test("admin signs in, disables a user via the console, and the change persists",
   // 3. Authenticated: sign-out + admin nav appear (admin nav only shows for ROLE_ADMIN).
   await expect(page.locator("#signout-btn")).toBeVisible();
   await expect(page.locator("#nav-admin")).toBeVisible();
+  // ...and the sign-in form is actually gone — guards TM-141: the `hidden` attribute the router
+  // sets must really hide it (a class `display` rule used to override `[hidden]`, leaving it shown).
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // 4. Open the admin users console; the target user is listed and currently enabled.
   await page.click("#nav-admin");

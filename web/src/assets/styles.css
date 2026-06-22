@@ -8,6 +8,17 @@
     box-sizing: border-box;
 }
 
+/*
+ * The router toggles view/nav visibility with the `hidden` attribute (router.js, TM-109). The UA
+ * rule `[hidden] { display: none }` has the same specificity as a class, so any class that sets
+ * `display` (e.g. `.auth-card { display: flex }`, `.admin-console`) overrides it on source order and
+ * the element stays visible despite `hidden` — which left the sign-in form on screen after login
+ * (TM-141). `!important` makes `hidden` always win, so the attribute means what it says everywhere.
+ */
+[hidden] {
+    display: none !important;
+}
+
 body {
     margin: 0;
     min-height: 100vh;
