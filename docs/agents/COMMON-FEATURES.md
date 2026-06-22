@@ -71,9 +71,11 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 | Guard | Status | Where / ticket |
 |---|:--:|---|
 | Unit + integration tests; JaCoCo coverage gate (LINE 0.85 / BRANCH 0.70) | ✅ | Epic 1 / TM-54 |
+| DB schema drift — `ddl-auto: validate` (boot fails if `@Entity` ≠ Flyway schema) | ✅ | TM-71 / app config |
+| Format drift — Spotless `spotless:check` | ✅ | Epic 1 CI |
 | Browser e2e (Playwright) — UI-regression guard | 🔜 | TM-134 (runs on `main`, off the PR gate) |
 | `.env.example` contract — fail-loud secrets/env validator | ✅ | TM-64 |
-| **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | ⬜ | *candidate — the reference spec has it (§9.2); we don't* |
+| **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | 🔜 | TM-135 |
 | CD "new revision is actually serving" verify | ✅ | TM-60 (post TM-131) |
 | Docs-only auto-merge / no-untracked-PR guards | ✅ | automerge-docs / claim protocol |
 
@@ -107,8 +109,8 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 
 ## Deferred → future "Hardening / Prod-readiness" epic
 Rate limiting · CSP · account self-service UI (password reset / email verification) · public status
-page · OpenAPI drift check · feature flags · GDPR · tracing/error-monitoring. Would also adopt the
-loose prod-readiness tickets **TM-95, TM-97, TM-98, TM-99**.
+page · feature flags · GDPR · tracing/error-monitoring. Would also adopt the loose prod-readiness
+tickets **TM-95, TM-97, TM-98, TM-99**. *(OpenAPI drift check is now ticketed — TM-135.)*
 
 ## → Epic 3 (FLESH, product-specific)
 First real product feature + anything domain-specific (contacts CRUD/tags/CSV/favourites/photo/bulk).
