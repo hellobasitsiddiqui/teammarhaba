@@ -7,6 +7,7 @@
 - This file is **per-run scratch** — it's deleted with the source on a replay. So anything that must survive (findings, sequence fixes) **also** goes in the relevant Jira ticket or `REPLAY.md`. See the redo keep-list.
 - Ticket-specific coordination → **Jira comments**, not here. Here = environment, tooling, "main is red", reusable workarounds.
 - Directed messages → `docs/agents/inbox/<agentId>.md` (optional mailboxes).
+- **Durable cross-cutting patterns** (how to run the fleet — decomposition, hot-file/merge-gate, drift, scope, replay) live in `docs/agents/AGENTIC-LESSONS.md` — read it once; *this* file is only per-run scratch.
 
 ---
 
