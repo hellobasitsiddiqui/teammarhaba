@@ -32,8 +32,11 @@ A plain-language reference **for humans** — to learn the vocabulary this proje
 - **Idempotent** — safe to run twice with no extra effect (matters for retries and replays).
 
 ## Web / frontend
+- **SPA** (Single-Page Application) — the browser loads **one** HTML page once; after that JS swaps views and fetches data *in place*, no full page reloads. Navigation feels instant, app-like. The modern default for interactive web apps. *Ours:* the web surface is an SPA — `router.js` toggles login/home/admin panels without reloading.
+- **MPA** (Multi-Page App) — the traditional opposite: every click/form makes the browser throw away the page and fetch a fresh full HTML page from the server (reload, white flash). Still right for content-heavy/SEO-first sites; SPAs win for interactive apps.
 - **Framework-free SPA** — a single-page app built with plain HTML/CSS/JS, *no* React/Vue/Svelte. One `index.html` + small ES modules; the page never fully reloads — JS swaps which panel shows. *Ours:* the web surface is deliberately framework-free so it stays tiny and dependency-light (easy to re-skin).
 - **Hash router** — client-side routing off the URL fragment after `#` (`/#/login`, `/#/admin`). The part after `#` never reaches the server, so `router.js` listens for the `hashchange` event and swaps views — no reload, no server round-trip. Works on plain static hosting with zero config; the alternative (clean URLs via the **History API**) needs a host rewrite so a refresh on `/admin` doesn't 404.
+- **History API** — the browser's JS API for changing the URL *path* without a reload (`pushState`/`replaceState` + the `popstate` event). The modern way to get **clean URLs** (`/admin`, no `#`) in an SPA — better for SEO, sharing, and link previews. The catch: real paths need a host rewrite ("serve `index.html` for any path") so a refresh on `/admin` doesn't 404. (TM-143 — switch to this when going public.)
 
 ## Engineering wisdom (anti-patterns & rules)
 - **YAGNI** ("You Aren't Gonna Need It") — don't build it until a real need forces it.
