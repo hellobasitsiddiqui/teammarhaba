@@ -34,4 +34,21 @@ public final class Problems {
     public static ProblemDetail unauthorized(String detail) {
         return of(HttpStatus.UNAUTHORIZED, "Unauthorized", detail);
     }
+
+    /**
+     * Reusable {@code 403 Forbidden} shape for authenticated-but-unauthorized requests — e.g. a
+     * {@code USER} hitting an {@code @PreAuthorize("hasRole('ADMIN')")} endpoint (TM-111). Returned
+     * by the access-denied handler so authorization failures match every other error.
+     */
+    public static ProblemDetail forbidden(String detail) {
+        return of(HttpStatus.FORBIDDEN, "Forbidden", detail);
+    }
+
+    /**
+     * {@code 422 Unprocessable Entity} — the request is well-formed but violates a business rule
+     * (e.g. an admin trying to disable or demote their own account, TM-111).
+     */
+    public static ProblemDetail unprocessable(String detail) {
+        return of(HttpStatus.UNPROCESSABLE_ENTITY, "Operation not allowed", detail);
+    }
 }

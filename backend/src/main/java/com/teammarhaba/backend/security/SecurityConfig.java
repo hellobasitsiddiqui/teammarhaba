@@ -3,6 +3,7 @@ package com.teammarhaba.backend.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.firebase.auth.FirebaseAuth;
 import com.teammarhaba.backend.auth.FirebaseAuthenticationFilter;
+import com.teammarhaba.backend.auth.RestAccessDeniedHandler;
 import com.teammarhaba.backend.auth.RestAuthenticationEntryPoint;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
@@ -27,7 +28,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * ({@code /info}, {@code /metrics}) — is {@code authenticated}. Authentication is established by
  * {@link FirebaseAuthenticationFilter} (verifies the {@code Bearer} Firebase ID token); an
  * unauthenticated request to a protected route gets a uniform RFC 7807 {@code 401} from
- * {@link RestAuthenticationEntryPoint}.
+ * {@link RestAuthenticationEntryPoint}, and an authenticated-but-unauthorized one (e.g. a
+ * {@code USER} hitting an {@code @PreAuthorize("hasRole('ADMIN')")} route — method security is on,
+ * see {@link MethodSecurityConfig}) gets a uniform {@code 403} from {@link RestAccessDeniedHandler}.
  *
  * <p>Sessions are stateless and CSRF is off — this is a token API, not a browser form app.
  * Response security headers stay owned by {@link SecurityHeadersFilter} (TM-78), so Spring
@@ -58,7 +61,8 @@ public class SecurityConfig {
                 .addFilterBefore(
                         new FirebaseAuthenticationFilter(firebaseAuth),
                         UsernamePasswordAuthenticationFilter.class)
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper)))
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper)))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(headers -> headers.disable());
