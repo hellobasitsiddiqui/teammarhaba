@@ -134,6 +134,51 @@ Strength: resilience, security, performance, scaling. **What's inside:**
 | Ops | Maintenance mode · cost / budget alerts | planned downtime, spend guard | low |
 | Data | Audit-log retention policy | it grows unbounded | med |
 
+### MUSCLE — E2E hardening (minimize manual testing)
+Goal: push automated coverage so manual testing shrinks to a thin residue (real OAuth consent, real email deliverability, first-pass exploratory). Builds on the TM-134 Playwright harness (`web/e2e/`).
+
+**Dependency DAG**
+- Independent — **start now:** M1, M2, M3, M4, M6
+- **M5 ← M4** — wire the deployed smoke into the canary after it exists
+- **M7 ← TM-137** — needs the audit read endpoint + admin-action audit wiring
+- Parallelism: **5 agents can start at once** (M1, M2, M3, M4, M6); then M5 after M4; M7 after TM-137.
+
+**M1 — Social-login + password-reset/verify e2e (emulator)** · `testing` `e2e` `web`
+Cover the social-login and password-reset/verify flows with Playwright against the Auth emulator, so those paths are automated (not manual).
+- AC: a spec drives social sign-in via the emulator's IdP simulation (`signInWithIdp` / auto-confirmed popup) — exercises the OAuth wiring hermetically; a spec drives reset + verification by reading the code from the emulator's `oobCode` REST API (`/emulator/v1/projects/{p}/oobCodes`); reuses `web/e2e/` fixtures/global-setup — new specs only, no new infra.
+- Agent: add `web/e2e/tests/social-login.spec.mjs` + `password-reset.spec.mjs`; use emulator REST for IdP sign-in and oobCodes; seed accounts in `global-setup.mjs`. **Out of scope:** real Google consent (can't automate).
+
+**M2 — Visual-regression snapshots** · `testing` `e2e` `web`
+Screenshot diffs on key pages/themes so visual regressions fail CI.
+- AC: `toHaveScreenshot()` baselines for login, home, admin console; matrix of light/dark × mobile/desktop viewports (Playwright projects); rendering pinned for stability (containerized run, fonts, animations disabled); baseline-update process documented.
+- Agent: add a visual project to `playwright.config.mjs` + `tests/visual.spec.mjs`; commit baselines generated in the CI container image; document `--update-snapshots`. Runs in `e2e.yml` (main-only).
+
+**M3 — Accessibility checks** · `testing` `e2e` `web` `a11y`
+Automated a11y assertions so violations are caught per page.
+- AC: `@axe-core/playwright` asserts no serious/critical violations on login, home, admin console; findings reported as artifacts; thresholds documented.
+- Agent: add `@axe-core/playwright` to `web/e2e/package.json`; `tests/a11y.spec.mjs` scans each route after load; fail on serious + critical.
+
+**M4 — Post-deploy Playwright smoke (deployed env)** · `testing` `e2e` `ci`
+A small Playwright smoke against the deployed URL so deploy/config drift (CORS, injected `apiBaseUrl`, public access, real ADC) is caught automatically.
+- AC: a read-only smoke (login with a seeded test account → home loads → one read) against the deployed Firebase Hosting URL; uses a dedicated test account in the real Firebase project, creds from GitHub secrets (no prod-data mutation); runs as a job after `deploy.yml` (or a callable workflow); artifacts on failure.
+- Agent: add `web/e2e/tests/deployed-smoke.spec.mjs` gated by `E2E_TARGET=deployed`, pointing at the real URL + real Firebase (no emulator); wire a post-deploy job; store test creds in secrets; keep minimal + non-mutating.
+- **HITL:** needs a human to create the seeded test account + add the secret — split into a `human` ticket if not already covered.
+
+**M5 — Wire the deployed smoke into nightly-canary** · `testing` `e2e` `ci` · *blocked by M4*
+Run the deployed smoke on a schedule so drift is caught even without a deploy.
+- AC: `nightly-canary.yml` invokes the M4 deployed smoke nightly; failure notifies per the existing canary convention.
+- Agent: extend `.github/workflows/nightly-canary.yml` to call the deployed-smoke job/workflow; reuse the same secrets.
+
+**M6 — Expand journey coverage (one spec per critical flow)** · `testing` `e2e` `web`
+A Playwright spec per critical user journey so the core flows are regression-guarded.
+- AC: specs for sign-up→home→sign-out, protected-route guard + USER→admin 403, admin set-role, and search/filter/sort/paginate in the console; mirrors the per-epic manual walkthroughs in `docs/qa/MANUAL-WALKTHROUGHS.md` — that doc updated to note which flows are now automated.
+- Agent: add focused specs under `web/e2e/tests/`; cross-link to the manual walkthrough doc and trim the now-automated manual steps.
+
+**M7 — Audit-panel + soft-delete + 409 e2e** · `testing` `e2e` `web` · *blocked by TM-137*
+Cover the not-yet-wired behaviours once they ship.
+- AC: after TM-137 lands the audit read endpoint + admin-action audit wiring, the walkthrough asserts the `audit_events` entry via the API/UI (replacing the interim DB assertion); soft-delete + restore covered once there's a UI action; optimistic-concurrency 409 covered via a two-request API-level test.
+- Agent: extend the admin walkthrough to assert the audit row through the read endpoint; add a 409 concurrency test; add soft-delete/restore coverage when the UI affordance exists.
+
 ### SENSES — Observability
 Alerting / SLOs + dashboards (metrics exist; alerts don't) · correlation / request IDs through logs · distributed tracing · error monitoring (Sentry-style) · log-retention policy.
 
