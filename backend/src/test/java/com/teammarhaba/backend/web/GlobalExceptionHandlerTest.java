@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.common.InvalidListQueryException;
 import com.teammarhaba.backend.user.UserAdminService;
 import com.teammarhaba.backend.user.UserService;
@@ -42,14 +43,18 @@ class GlobalExceptionHandlerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    // The web slice loads every @RestController; MeController (TM-112) needs a UserService and
-    // UserAdminController (TM-111) needs a UserAdminService, which a @WebMvcTest doesn't supply.
-    // These mocks satisfy that wiring — never called, since the tests only hit the local /test routes.
+    // The web slice loads every @RestController; MeController (TM-112) needs a UserService,
+    // UserAdminController (TM-111) needs a UserAdminService, and AuditController (TM-137) needs an
+    // AuditService — none supplied by a @WebMvcTest. These mocks satisfy that wiring; never called,
+    // since the tests only hit the local /test routes.
     @MockitoBean
     private UserService userService;
 
     @MockitoBean
     private UserAdminService userAdminService;
+
+    @MockitoBean
+    private AuditService auditService;
 
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {

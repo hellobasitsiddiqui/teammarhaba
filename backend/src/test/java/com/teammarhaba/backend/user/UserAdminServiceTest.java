@@ -7,10 +7,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
@@ -18,12 +21,13 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
-/** Rules of admin user-management (TM-111): 404 semantics, self-protection, claim-first role change. */
+/** Rules of admin user-management (TM-111): 404 semantics, self-protection, claim-first role change, audit (TM-137). */
 class UserAdminServiceTest {
 
     private final UserRepository users = mock(UserRepository.class);
     private final RoleService roleService = mock(RoleService.class);
-    private final UserAdminService service = new UserAdminService(users, roleService);
+    private final AuditService audit = mock(AuditService.class);
+    private final UserAdminService service = new UserAdminService(users, roleService, audit);
 
     private static User account(String uid) {
         return new User(uid, uid + "@example.com", null);
@@ -65,6 +69,38 @@ class UserAdminServiceTest {
         service.update(1L, null, Role.USER, "admin-uid");
 
         verifyNoInteractions(roleService);
+    }
+
+    @Test
+    void disableRecordsOneAuditEvent() throws Exception {
+        User target = account("target"); // enabled by default
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, false, null, "admin-uid");
+
+        verify(audit)
+                .record("admin-uid", AuditAction.ACCOUNT_ENABLED_CHANGED, "User", "1", Map.of("enabled", false));
+    }
+
+    @Test
+    void roleChangeRecordsOneAuditEvent() throws Exception {
+        User target = account("target"); // USER by default
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, null, Role.ADMIN, "admin-uid");
+
+        verify(audit)
+                .record("admin-uid", AuditAction.ROLE_CHANGED, "User", "1", Map.of("from", "USER", "to", "ADMIN"));
+    }
+
+    @Test
+    void aNoOpUpdateRecordsNoAuditEvent() throws Exception {
+        User target = account("target"); // already enabled + USER
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, true, Role.USER, "admin-uid"); // both are no-ops
+
+        verifyNoInteractions(audit);
     }
 
     @Test
