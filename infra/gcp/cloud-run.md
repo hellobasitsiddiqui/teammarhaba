@@ -15,10 +15,18 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 
 ## How it deploys
 
-`.github/workflows/deploy.yml` (job `backend`) is a **deliberate, manual deploy** (TM-153) — run it
-from the Actions tab (*Deploy → Run*); it deploys current `main`. It is **not** triggered by a merge
-(that saves Actions minutes and gives you control over when the live site changes). *(A `deploy`-label
-that auto-deploys `main` when a labelled PR merges is planned — TM-156.)* On run:
+`.github/workflows/deploy.yml` (job `backend`) deploys current `main`. There are **two** ways to run
+it, both deliberate (you choose when the live site changes — the Actions-minutes win of TM-153):
+
+- **Manual** (`workflow_dispatch`) — from the Actions tab (*Deploy → Run*). Always available.
+- **`deploy`-label auto-trigger** (TM-156, **live**) — add the **`deploy`** label to a PR and the merge
+  auto-deploys `main`. An unlabelled merge deploys nothing. Implemented *in* this workflow (a
+  `pull_request: [closed]` trigger gated on `merged && labelled deploy`) rather than a separate
+  dispatcher, because a `GITHUB_TOKEN`-dispatched run can't start another workflow (the TM-148 trap).
+  It deploys `DEPLOY_SHA = pull_request.merge_commit_sha` — the real merge commit on `main` that CI
+  built the image for, **not** the ephemeral PR test-merge `github.sha`.
+
+On run:
 
 1. **Auth (deploy-time)** — keyless WIF (TM-67), impersonating `gha-deployer`
    (`roles/run.admin`, `iam.serviceAccountUser` to act-as the runtime SA). No JSON key.
