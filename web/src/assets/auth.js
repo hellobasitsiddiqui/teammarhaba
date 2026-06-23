@@ -18,6 +18,7 @@ import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendEmailVerification,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   signInWithPopup,
@@ -65,9 +66,33 @@ export function onAuthChanged(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-/** Create a new account with email + password (signs the user in on success). */
-export function signUp(email, password) {
-  return createUserWithEmailAndPassword(auth, email, password);
+/**
+ * Create a new account with email + password (signs the user in on success), then trigger a
+ * Firebase verification email for the new address (TM-165). Firebase owns the email delivery and
+ * the `emailVerified` flag — we never store it ourselves. Sending the email is best-effort: a
+ * failure there (e.g. a transient mail hiccup) must not fail an otherwise-successful sign-up, and
+ * the user can always re-request via `resendVerificationEmail` / the backend resend endpoint.
+ * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").UserCredential>}
+ */
+export async function signUp(email, password) {
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  try {
+    await sendEmailVerification(credential.user);
+  } catch (err) {
+    console.warn("[auth] could not send verification email on sign-up:", err?.code ?? err);
+  }
+  return credential;
+}
+
+/**
+ * Re-send the verification email to the currently signed-in user via Firebase (TM-165). Used by the
+ * client when it already holds the Firebase `User`; the backend also exposes
+ * `POST /api/v1/me/resend-verification` (rate-limited) for callers that only have a Bearer token.
+ * @returns {Promise<void>}
+ */
+export function resendVerificationEmail() {
+  const user = auth.currentUser;
+  return user ? sendEmailVerification(user) : Promise.reject(new Error("not signed in"));
 }
 
 /** Sign in with an existing email + password. */
@@ -117,6 +142,7 @@ if (typeof window !== "undefined") {
     signIn,
     signInWithGoogle,
     signOut,
+    resendVerificationEmail,
   };
 }
 

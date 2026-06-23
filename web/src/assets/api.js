@@ -101,7 +101,24 @@ export async function getMe() {
   return response.json();
 }
 
+/**
+ * POST /api/v1/me/resend-verification — ask the backend to re-trigger the caller's Firebase
+ * email-verification (TM-165). The backend rate-limits per user and refuses (422) if the address is
+ * already verified, so the UI can show a precise message. Resolves on success (204); throws with the
+ * HTTP status otherwise (a 401 will already have redirected to login).
+ * @returns {Promise<void>}
+ */
+export async function resendVerification() {
+  const response = await apiFetch("/api/v1/me/resend-verification", {
+    method: "POST",
+    headers: { Accept: "application/problem+json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/resend-verification failed: ${response.status}`);
+  }
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
-  window.tmApi = { apiFetch, getMe, redirectToLogin, LOGIN_PATH };
+  window.tmApi = { apiFetch, getMe, resendVerification, redirectToLogin, LOGIN_PATH };
 }

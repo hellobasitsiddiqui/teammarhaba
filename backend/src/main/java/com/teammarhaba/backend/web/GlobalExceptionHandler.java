@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.web;
 
+import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +84,33 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(SelfActionNotAllowedException.class)
     public ProblemDetail handleSelfAction(SelfActionNotAllowedException ex) {
         return Problems.unprocessable(ex.getMessage());
+    }
+
+    /**
+     * Email-verification resend refused for an actionable reason (TM-165): already verified -> 422
+     * (well-formed request, but the business rule says there's nothing to do); cooldown -> 429 so the
+     * client backs off. Firebase remains the source of truth for whether the address is verified.
+     */
+    @ExceptionHandler(EmailVerificationException.class)
+    public ProblemDetail handleEmailVerification(EmailVerificationException ex) {
+        return switch (ex.reason()) {
+            case ALREADY_VERIFIED -> Problems.unprocessable(ex.getMessage());
+            case COOLDOWN -> Problems.of(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", ex.getMessage());
+        };
+    }
+
+    /**
+     * An Admin SDK call failed (e.g. the user no longer exists, or a transient Firebase error)
+     * (TM-165) -> 502 Bad Gateway: our request was fine but the upstream identity provider did not
+     * complete it. The real cause is logged, never returned.
+     */
+    @ExceptionHandler(FirebaseAuthException.class)
+    public ProblemDetail handleFirebaseAuth(FirebaseAuthException ex) {
+        log.warn("Firebase Admin SDK call failed", ex);
+        return Problems.of(
+                HttpStatus.BAD_GATEWAY,
+                "Upstream error",
+                "The identity provider could not complete the request. Please try again.");
     }
 
     /**
