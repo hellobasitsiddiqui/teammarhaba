@@ -156,6 +156,17 @@ jobs:
       IMAGE: europe-west2-docker.pkg.dev/teammarhaba/containers/backend
       CLOUDSQL: teammarhaba:europe-west2:teammarhaba-pg
     steps:
+      # Full history (fetch-depth: 0) is REQUIRED here: the "Resolve backend image SHA"
+      # step below walks `git rev-list ${DEPLOY_SHA}` to find the newest ancestor that has
+      # a backend image, and a shallow checkout would hide those ancestors. Pinned by SHA to
+      # match the supply-chain convention used by every other action in this file. (The CI
+      # image-build job and the web job already check out full history per CONTRIBUTING.)
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.DEPLOY_SHA }}   # the real main merge commit, not the PR test-merge (TM-156)
+          fetch-depth: 0   # full history so `git rev-list` can see ancestors (TM-194)
+
       # Keyless: WIF -> impersonate gha-deployer (roles/run.admin, cloudsql client via
       # the deploy, secretmanager.secretAccessor, iam.serviceAccountUser). No JSON key.
       - name: Authenticate to GCP (Workload Identity Federation, keyless)
@@ -168,23 +179,80 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      # CI's backend-image job (ci.yml) pushes :${SHA} on the same merge event, so this
-      # deploy races it. Wait for the immutable SHA tag to exist before deploying.
-      # If CI fails (image never pushed), this times out and the deploy fails loudly.
-      - name: Wait for the SHA-tagged image
+      # Resolve the EFFECTIVE backend image SHA to deploy (TM-194).
+      #
+      # The problem: CI's docs-skip gate (TM-151) does NOT build a backend image for a
+      # docs-only commit (the image-build job needs `changes.outputs.code == 'true'`). So
+      # when `main` HEAD (= DEPLOY_SHA) is a docs-only merge, no `backend:<HEAD>` image ever
+      # exists and the old "Wait for the SHA-tagged image" step polled ~10m then exit 1'd —
+      # stranding the deploy even though the backend code itself was unchanged and a perfectly
+      # good image already exists at an earlier ancestor commit (this stranded sprint-170,
+      # HEAD 23adf6a, a docs-only merge).
+      #
+      # The fix: deploy the newest backend image that actually exists.
+      #   1. Bounded wait for backend:${DEPLOY_SHA} — an image for a real backend-code HEAD
+      #      may still be building, racing this deploy. Kept SHORT (~10 x 15s = 2.5m, was 40
+      #      x 15s = 10m): the docs-only fallback is the common case and shouldn't wait 10m.
+      #   2. If still absent, walk ancestry HEAD-first (`git rev-list ${DEPLOY_SHA}`, capped at
+      #      50 commits) and pick the FIRST commit whose backend:<sha> image exists.
+      #   3. If neither HEAD nor any ancestor has an image, fail loudly (never deploy nothing).
+      # The resolved SHA is exported as EFFECTIVE_SHA for the Deploy step. The web job is
+      # untouched — it still deploys HEAD.
+      - name: Resolve backend image SHA
+        id: resolve
         run: |
-          for i in $(seq 1 40); do
-            if gcloud artifacts docker images describe "${IMAGE}:${DEPLOY_SHA}" --quiet >/dev/null 2>&1; then
-              echo "Image ${IMAGE}:${DEPLOY_SHA} is available."
-              exit 0
+          set -euo pipefail
+
+          image_exists() {
+            gcloud artifacts docker images describe "${IMAGE}:$1" --quiet >/dev/null 2>&1
+          }
+
+          EFFECTIVE_SHA=""
+          FELL_BACK="false"
+
+          # 1) Bounded wait for HEAD's image (it may still be building for a code HEAD).
+          for i in $(seq 1 10); do
+            if image_exists "${DEPLOY_SHA}"; then
+              echo "Image ${IMAGE}:${DEPLOY_SHA} is available (HEAD)."
+              EFFECTIVE_SHA="${DEPLOY_SHA}"
+              break
             fi
-            echo "Waiting for ${IMAGE}:${DEPLOY_SHA} (attempt $i/40)..."
+            echo "Waiting for ${IMAGE}:${DEPLOY_SHA} (attempt $i/10)..."
             sleep 15
           done
-          echo "::error::Image ${IMAGE}:${DEPLOY_SHA} not found after ~10m (did CI build/push fail?)."
-          exit 1
 
-      # Deploy the immutable SHA-tagged image. Probes hit /health so a revision only
+          # 2) Fallback: HEAD has no image (e.g. a docs-only commit — CI built none per TM-151).
+          #    Walk ancestry HEAD-first and take the newest commit that DOES have an image.
+          if [ -z "${EFFECTIVE_SHA}" ]; then
+            echo "No image for HEAD ${DEPLOY_SHA} after the bounded wait — walking ancestry for the newest available backend image..."
+            for sha in $(git rev-list --max-count=50 "${DEPLOY_SHA}"); do
+              if image_exists "${sha}"; then
+                EFFECTIVE_SHA="${sha}"
+                FELL_BACK="true"
+                break
+              fi
+              echo "  no image for ancestor ${sha}"
+            done
+          fi
+
+          # 3) Nothing for HEAD or any of the last 50 ancestors — fail loudly, deploy nothing.
+          if [ -z "${EFFECTIVE_SHA}" ]; then
+            echo "::error::No backend image found for HEAD ${DEPLOY_SHA} or any of its last 50 ancestors (did CI build/push fail?)."
+            exit 1
+          fi
+
+          if [ "${FELL_BACK}" = "true" ]; then
+            echo "Backend image resolved to ${EFFECTIVE_SHA} (fallback from HEAD ${DEPLOY_SHA}: docs-only commit — no image built for HEAD)."
+            SUMMARY="Backend image: \`${EFFECTIVE_SHA}\` — **fallback** from docs-only HEAD \`${DEPLOY_SHA}\` (no image built for HEAD per TM-151)."
+          else
+            echo "Backend image resolved to ${EFFECTIVE_SHA} (HEAD)."
+            SUMMARY="Backend image: \`${EFFECTIVE_SHA}\` (HEAD)."
+          fi
+          echo "EFFECTIVE_SHA=${EFFECTIVE_SHA}" >> "$GITHUB_ENV"
+          echo "- ${SUMMARY}" >> "$GITHUB_STEP_SUMMARY"
+
+      # Deploy the immutable SHA-tagged image (EFFECTIVE_SHA, resolved above — HEAD when its
+      # image exists, else the newest ancestor that has one; TM-194). Probes hit /health so a revision only
       # takes traffic once healthy (startup probe gates traffic; liveness restarts a
       # wedged container). Scale-to-zero (min-instances 0) for dev cost; cpu-boost
       # softens the cold start.
@@ -208,7 +276,7 @@ jobs:
         run: |
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
-            --image="${IMAGE}:${DEPLOY_SHA}" \
+            --image="${IMAGE}:${EFFECTIVE_SHA}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
             --no-allow-unauthenticated \
