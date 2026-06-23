@@ -11,23 +11,45 @@ on:
   # `main`): before a test session, at sprint-end, whenever. Because it now runs *after* the merge,
   # `main`'s image already exists in Artifact Registry, so the "Wait for the SHA-tagged image" step
   # below finds it on the first check — the old ~2-3 min idle polling is gone.
-  #
-  # (A `deploy`-label auto-trigger is a tracked follow-up — TM-153. It can't just `gh workflow run`
-  # this with GITHUB_TOKEN, because a token-dispatched run won't trigger a workflow — the same trap
-  # as TM-148 — so it needs in-workflow PR-close handling + commit-SHA care, done deliberately.)
   workflow_dispatch:
 
-# Cancel a superseded deploy if main moves again before this finishes.
+  # Auto-deploy on merge of a PR labelled `deploy` (TM-156) — "this change should go live" = label it.
+  # The trigger lives IN this workflow because it can't be a separate `gh workflow run`: a
+  # GITHUB_TOKEN-dispatched run won't start another workflow (the TM-148 trap). So we listen for the
+  # PR close here, gate every job on `merged && labelled deploy` (the `if:` blocks below), and deploy
+  # DEPLOY_SHA — the real main merge commit, NOT the PR test-merge `github.sha` (see the env below).
+  # The manual `workflow_dispatch` above stays as the always-available control; an unlabelled merge
+  # deploys nothing.
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+# One live environment → serialize ALL deploys regardless of how they were triggered (manual run vs
+# labelled-PR merge — these arrive on different refs, so keying on github.ref would let them run in
+# parallel and clobber each other). A constant group queues them; never cancel an in-flight deploy.
 concurrency:
-  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  group: deploy-${{ github.workflow }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
+# The commit to deploy. On a manual run this is empty → falls back to github.sha (main's head). On a
+# labelled-PR merge it's the PR's merge commit ON main (merge_commit_sha) — NOT github.sha, which for
+# a pull_request event is the ephemeral test-merge, a commit CI never built/pushed an image for
+# (TM-156). Both jobs key off this.
+env:
+  DEPLOY_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
 jobs:
   web:
     name: Deploy web to Firebase Hosting (live)
+    # Manual run, OR a merged PR that carried the `deploy` label (TM-156). An unlabelled merge,
+    # or a PR closed without merging, skips this job.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'deploy'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,6 +58,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ env.DEPLOY_SHA }}   # deploy the real main merge commit, not the PR test-merge (TM-156)
           fetch-depth: 0   # full history + tags so `git describe` can name the build (TM-155)
 
       # Build seam: mirrors web/Dockerfile's build stage (src/ -> dist/). Today a
@@ -103,6 +126,12 @@ jobs:
 
   backend:
     name: Deploy backend to Cloud Run
+    # Manual run, OR a merged PR that carried the `deploy` label (TM-156). An unlabelled merge,
+    # or a PR closed without merging, skips this job.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'deploy'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -132,17 +161,15 @@ jobs:
       - name: Wait for the SHA-tagged image
         run: |
           for i in $(seq 1 40); do
-            if gcloud artifacts docker images describe "${IMAGE}:${GITHUB_SHA}" --quiet >/dev/null 2>&1; then
-              echo "Image ${IMAGE}:${GITHUB_SHA} is available."
+            if gcloud artifacts docker images describe "${IMAGE}:${DEPLOY_SHA}" --quiet >/dev/null 2>&1; then
+              echo "Image ${IMAGE}:${DEPLOY_SHA} is available."
               exit 0
             fi
-            echo "Waiting for ${IMAGE}:${GITHUB_SHA} (attempt $i/40)..."
+            echo "Waiting for ${IMAGE}:${DEPLOY_SHA} (attempt $i/40)..."
             sleep 15
           done
-          echo "::error::Image ${IMAGE}:${GITHUB_SHA} not found after ~10m (did CI build/push fail?)."
+          echo "::error::Image ${IMAGE}:${DEPLOY_SHA} not found after ~10m (did CI build/push fail?)."
           exit 1
-        env:
-          GITHUB_SHA: ${{ github.sha }}
 
       # Deploy the immutable SHA-tagged image. Probes hit /health so a revision only
       # takes traffic once healthy (startup probe gates traffic; liveness restarts a
@@ -168,7 +195,7 @@ jobs:
         run: |
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
-            --image="${IMAGE}:${GITHUB_SHA}" \
+            --image="${IMAGE}:${DEPLOY_SHA}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
             --no-allow-unauthenticated \
@@ -186,8 +213,6 @@ jobs:
             --format='value(status.latestCreatedRevisionName)')
           echo "Deploy created revision: ${NEW_REV}"
           echo "NEW_REV=${NEW_REV}" >> "$GITHUB_ENV"
-        env:
-          GITHUB_SHA: ${{ github.sha }}
 
       # Enable public (unauthenticated) access — best-effort, replay-safe (TM-96).
       # The org enforces domain-restricted sharing (iam.allowedPolicyMemberDomains); binding
