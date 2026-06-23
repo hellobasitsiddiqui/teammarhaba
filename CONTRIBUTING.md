@@ -81,6 +81,24 @@ git add openapi.json
 
 This keeps every API change intentional, reviewable in the diff, and impossible to ship by accident.
 
+## Release versioning (build stamp)
+
+The live web page and the backend `/version` endpoint show a build name derived from
+`git describe --tags` (TM-142 / TM-155) — e.g. `v1.4.0-12-ged338a9`: the nearest release
+tag, commits since it, and the exact short SHA. Until the repo has any tag it shows the bare
+short SHA, so nothing breaks day-one. The exact commit is always recoverable from the string.
+
+To cut a readable release version, tag `main` and push the tag:
+
+```bash
+git tag v1.4.0          # annotated is fine too: git tag -a v1.4.0 -m "1.4.0"
+git push origin v1.4.0
+```
+
+The next deploy (web) and image build (backend) pick the tag up automatically — no code
+change. Use `vMAJOR.MINOR.PATCH`. The CI image build and the deploy both check out full
+history + tags (`fetch-depth: 0`) so `git describe` can see them.
+
 ## Conventions reference
 
 - **Code style** is enforced by Spotless (backend) — CI fails on violations, so format
