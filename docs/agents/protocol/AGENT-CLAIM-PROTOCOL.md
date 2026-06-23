@@ -121,6 +121,21 @@ The status flip is what enforces mutual exclusion (the candidate query is `statu
 ### 4. work() → In Review → Done
 Execute the task's **pinned Agent execution prompt** on a branch named **`<type>/TM-XX-short-kebab-desc`** (`feature` = app code, `chore` = infra/CI/cloud/docs/config, `fix` = bug; e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`).
 
+**First-sub-task dedup checkpoint — yield early instead of double-building.** The claim-time re-verify (§3) can't catch an agent that *selected* this task while it was still `To Do` (before your claim landed) and is now building in its own worktree, blind to your claim. The pre-PR check below catches that — but only *after* both agents have built the whole ticket (the wasted double-builds: TM-151 #145/#146, TM-167 #162/#164). So **the moment you finish your Task's first sub-task** (the first checkpoint on its sub-task progress checklist — see GENESIS "break each non-trivial Task into sub-tasks as a mid-flight progress checklist"), **re-read the ticket's claims and yield if you're not the owner**:
+
+```
+read t                                           # fresh comments
+claims = all "[claim]" comments on t
+if claims.length > 1 and earliest(claims) is NOT myClaim:   # identity, not agentId (see §3)
+    deleteComment(myClaim)                       # remove YOUR claim → the board shows ONE owner
+    post "[yielded] <agentId> duplicate claim — earliest owner keeps it; stopping after sub-task 1"
+    stop work on t (drop your branch) and pick the next ready task
+else:
+    you're the sole/earliest owner -> continue
+```
+
+This turns a duplicate into ~one sub-task of wasted work instead of a whole build, and leaves exactly **one** `[claim]` so the winner is unambiguous (if *you* hold the earliest claim, you keep going — the other instance is the one that yields). It **complements** the pre-PR re-verify, it doesn't replace it — keep both (a duplicate can still appear after your first sub-task). This is why every non-trivial Task carries sub-tasks: the first one is the early dedup tripwire, not just progress reporting.
+
 **Pre-PR re-verify — close the claim→build→PR window.** The claim-time re-verify (§3) settles races *at claim time*, but a build can take many minutes, and a second agent that *selected* this same task **before your claim landed** (while it was still `To Do`) builds in its own worktree and **never re-reads Jira** — so it never sees your claim, your In-Progress flip, or your In-Review transition, and opens a **duplicate PR**. So **immediately before opening the PR (ideally before the final push), re-read the ticket and abort the PR unless all hold** — leave your branch in place, post a one-line note (`[finding]` / evidence), and pick the next task:
 
 ```
