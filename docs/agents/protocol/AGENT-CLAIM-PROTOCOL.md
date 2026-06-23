@@ -72,6 +72,8 @@ loop:
   t = pick(candidates)                       # priority + jitter, see below
   if not claim(t): continue                  # someone beat me -> try again
   work(t)                                     # follow the pinned AGENT EXECUTION PROMPT
+  if not prePrVerify(t): continue             # re-read Jira RIGHT BEFORE the PR — bail if someone else got there
+  openPr(t)
   onPrRaised(t): transition t -> In Review    # PR open, awaiting merge (still locked)
   onMergeToMain(t): transition t -> Done      # release downstream
   continue
@@ -117,7 +119,21 @@ The status flip is what enforces mutual exclusion (the candidate query is `statu
 > ⚠️ **Compare by claim-comment identity, never by agentId alone.** Resolving the tie with "is the earliest `[claim]`'s *agentId* mine?" silently breaks when **two instances share an agentId**: both see their own id as the owner and **both proceed** → duplicate work. This actually happened — two `agent-C` instances both built **TM-107** (PR #78 merged, #81 closed as a duplicate). The check above instead asks "is the earliest `[claim]` *the specific comment I just posted*?" (you kept its id), so the later duplicate yields even when the agentId matches. **Also give every running instance a unique agentId** (`agent-C1`, `agent-C2` — never two `agent-C`) so the status-lock + tie-break stay unambiguous; the identity check is the backstop for when that slips.
 
 ### 4. work() → In Review → Done
-Execute the task's **pinned Agent execution prompt** on a branch named **`<type>/TM-XX-short-kebab-desc`** (`feature` = app code, `chore` = infra/CI/cloud/docs/config, `fix` = bug; e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`). **As soon as you open the PR:**
+Execute the task's **pinned Agent execution prompt** on a branch named **`<type>/TM-XX-short-kebab-desc`** (`feature` = app code, `chore` = infra/CI/cloud/docs/config, `fix` = bug; e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`).
+
+**Pre-PR re-verify — close the claim→build→PR window.** The claim-time re-verify (§3) settles races *at claim time*, but a build can take many minutes, and a second agent that *selected* this same task **before your claim landed** (while it was still `To Do`) builds in its own worktree and **never re-reads Jira** — so it never sees your claim, your In-Progress flip, or your In-Review transition, and opens a **duplicate PR**. So **immediately before opening the PR (ideally before the final push), re-read the ticket and abort the PR unless all hold** — leave your branch in place, post a one-line note (`[finding]` / evidence), and pick the next task:
+
+```
+read t                                          # fresh status + all comments
+abandon-PR t if t.status != "In Progress"       # someone reached In Review/Done first
+abandon-PR t if any other run left a "PR: <url>" comment
+abandon-PR t if the earliest "[claim]" is NOT myClaim   # identity, not agentId (see §3)
+else: open the PR
+```
+
+One cheap Jira read, **deterministic for this class**: in the **TM-151** double-build, the ticket was already `In Review` with the winner's `PR:` comment by the time the duplicate opened its PR (#146, ~14 min after it had selected the still-`To Do` ticket; #145 merged, #146 closed as a duplicate) — a pre-PR read would have aborted it. Note a doc change alone can't rescue an **already-running** build (a mid-flight instance won't reload this file), but it makes every subsequent run's builds safe. This is the §3 check, **re-run at the latest possible moment** — claim-time and pre-PR together bracket the whole window.
+
+**As soon as you open the PR:**
 1. `transitionJiraIssue(t, "In Review")` (transition id `31`) — moves the ticket to the review column. It's **still locked** (`In Review` is `statusCategory = indeterminate`, so it's outside the `status = "To Do"` candidate pool *and* doesn't count as a cleared blocker), so downstream stays blocked until merge.
 2. **Comment on the ticket:** `PR: <url>` (so the link lives on the ticket for anyone watching).
 3. **Return it to whoever spawned you** in your status line / final message.
