@@ -765,3 +765,96 @@ body {
 .tm-help-item:hover {
     background: var(--surface-2);
 }
+
+/* ===== Edit-profile page (TM-167) ===== */
+
+/* Same shell width/alignment as the admin console so the two protected pages feel consistent. */
+.profile-view {
+    width: min(48rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.tm-profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1rem;
+}
+
+/* Avatar slot — disabled placeholder pending TM-166. */
+.tm-profile-avatar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+
+.tm-avatar-frame {
+    display: grid;
+    place-items: center;
+    width: 3.5rem;
+    height: 3.5rem;
+    font-size: 1.6rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+}
+
+.tm-avatar-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.tm-avatar-note {
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+.tm-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+@media (max-width: 32rem) {
+    .tm-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tm-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.tm-field-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tm-field-hint {
+    margin: 0;
+    font-size: 0.78rem;
+}
+
+.tm-field-error {
+    margin: 0;
+    color: var(--danger);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.tm-input.tm-field-invalid {
+    border-color: var(--danger);
+}
+
+.tm-form-actions {
+    display: flex;
+    gap: 0.5rem;
+}

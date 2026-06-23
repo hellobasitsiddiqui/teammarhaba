@@ -118,7 +118,51 @@ export async function resendVerification() {
   }
 }
 
+/**
+ * Raised by {@link updateMe} when the backend rejects the request. Carries the HTTP status, a
+ * human-readable message (from the RFC-7807 `detail`/`title`), and — for a 400 validation failure —
+ * the per-field `errors` array the backend sends (`[{ field, message }]`, see GlobalExceptionHandler),
+ * so the profile UI can attach messages next to the offending inputs (TM-167).
+ */
+export class ApiError extends Error {
+  constructor(status, message, fieldErrors = []) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    /** @type {{field: string, message: string}[]} */
+    this.fieldErrors = fieldErrors;
+  }
+}
+
+/**
+ * PATCH /api/v1/me — update the signed-in user's own profile fields (TM-162 contract): firstName,
+ * lastName, displayName, city, age, phone, notificationPref (EMAIL/PUSH/BOTH), timezone, locale.
+ * Send only the fields you want to change. Returns the refreshed {@link MeResponse} on success.
+ *
+ * On a non-2xx response the body is parsed as RFC-7807 problem JSON and thrown as an {@link ApiError}:
+ * a 400 carries the backend's per-field `errors`, so callers can surface them next to inputs (a 401
+ * will already have refreshed/redirected via {@link apiFetch}).
+ *
+ * @param {Object} patch partial profile fields to update.
+ * @returns {Promise<Object>} the updated MeResponse.
+ * @throws {ApiError}
+ */
+export async function updateMe(patch) {
+  const response = await apiFetch("/api/v1/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Update failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
-  window.tmApi = { apiFetch, getMe, resendVerification, redirectToLogin, LOGIN_PATH };
+  window.tmApi = { apiFetch, getMe, updateMe, resendVerification, redirectToLogin, LOGIN_PATH, ApiError };
 }
