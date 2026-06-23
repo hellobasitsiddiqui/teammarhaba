@@ -37,8 +37,8 @@
 ## Conventions reminders (full versions in the skills/docs)
 
 ### Board fields / time tracking — keep the board functional
-- On **claim**: set **Start date** (`customfield_10015` = today).
-- On **PR / In Review**: log a **worklog** of actual elapsed (`addWorklogToJiraIssue`, `timeSpent` + `started` = claim time) and set **Due date** (`duedate`) if unset.
+- On **claim**: set **Start date** (`customfield_10015` = today) **and Due date** (`duedate` = sprint end) — agents *and* the orchestrator.
+- On **PR / In Review**: log a **worklog** of actual elapsed (`addWorklogToJiraIssue`, `timeSpent` + `started` = claim time).
 - If **blocked/held**: set **Flagged = Impediment** (`customfield_10021` = `[{"value":"Impediment"}]`); clear when unblocked.
 - Story points = the estimate (Original Estimate isn't on the Task screen — UI-admin toggle needed). See `jira-mcp-gotchas` → Time tracking.
 

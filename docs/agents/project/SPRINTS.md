@@ -127,7 +127,7 @@ Completes **Epic 1 (Foundation)**: the CI/security-hardening, repo-hygiene, and 
 - **Creating + starting a sprint is UI-only** — no API for the sprint lifecycle (activate + dates + name + goal). Do that on the board.
 - Optional alternative grouping: a `sprint-<name>` **label** (e.g. `sprint-skeleton`) is queryable even before a real sprint exists — but with the Sprint field working, prefer the real field.
 - Tasks already carry `wave-N` topological labels (`wave-0` = roots that block everything); use those + `DEPENDENCY-DAG.md` to pick a **dependency-closed** slice into each sprint (never sprint a task whose blocker is still in the backlog).
-- **Board fields for a functional sprint:** each worked ticket gets a **Start date** (`customfield_10015`, set on claim), **Due date** (`duedate`, = sprint end), **story points** (estimate), and a **worklog** of actual time (`addWorklogToJiraIssue`) on PR; blocked tickets get **Flagged = Impediment** (`customfield_10021`). Original Estimate needs a one-time UI admin toggle (not on the Task screen) — story points stand in. Full table: `AGENT-CLAIM-PROTOCOL.md` → "Board fields & time logging".
+- **Board fields for a functional sprint:** each worked ticket gets a **Start date** (`customfield_10015`) **and Due date** (`duedate` = sprint end) **both set on claim**, **story points** (estimate), and a **worklog** of actual time (`addWorklogToJiraIssue`) on PR; blocked tickets get **Flagged = Impediment** (`customfield_10021`). Original Estimate needs a one-time UI admin toggle (not on the Task screen) — story points stand in. Full table: `AGENT-CLAIM-PROTOCOL.md` → "Board fields & time logging".
 
 ---
 
