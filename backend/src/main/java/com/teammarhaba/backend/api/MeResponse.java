@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.api;
 
+import com.teammarhaba.backend.auth.AccountState;
 import com.teammarhaba.backend.user.NotificationPref;
 import java.time.Instant;
 
@@ -25,6 +26,13 @@ import java.time.Instant;
  * @param termsAcceptedVersion the terms version the user accepted (TM-163), or {@code null} if never
  * @param termsAcceptedAt      when that terms version was accepted (TM-163), or {@code null} if never
  * @param ageVerified          whether the user has self-attested their age (TM-163); defaults to {@code false}
+ * @param accountState         read-only account state sourced live from Firebase (TM-164): email/phone
+ *                             verified, MFA enrolled, photo URL, last login. Never our own truth — read
+ *                             from the Admin SDK at request time, not stored. Fields are {@code null} if
+ *                             Firebase state can't be read (e.g. credential-free dev/test).
+ * @param lastActiveAt         when the account last made an authenticated {@code /me} call (TM-164);
+ *                             <strong>our</strong> DB column, stamped on every authenticated read.
+ *                             {@code null} only before the very first such call.
  */
 public record MeResponse(
         String uid,
@@ -42,4 +50,6 @@ public record MeResponse(
         boolean onboardingCompleted,
         String termsAcceptedVersion,
         Instant termsAcceptedAt,
-        boolean ageVerified) {}
+        boolean ageVerified,
+        AccountState accountState,
+        Instant lastActiveAt) {}

@@ -1,7 +1,9 @@
 package com.teammarhaba.backend.api;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.auth.AccountState;
 import com.teammarhaba.backend.auth.EmailVerificationService;
+import com.teammarhaba.backend.auth.FirebaseAccountStateService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.ProfileUpdate;
 import com.teammarhaba.backend.user.User;
@@ -43,15 +45,30 @@ public class MeController {
 
     private final UserService userService;
     private final EmailVerificationService emailVerificationService;
+    private final FirebaseAccountStateService accountStateService;
 
-    MeController(UserService userService, EmailVerificationService emailVerificationService) {
+    MeController(
+            UserService userService,
+            EmailVerificationService emailVerificationService,
+            FirebaseAccountStateService accountStateService) {
         this.userService = userService;
         this.emailVerificationService = emailVerificationService;
+        this.accountStateService = accountStateService;
     }
 
+    /**
+     * The caller's profile, plus the live Firebase-owned account state and our own "last active"
+     * marker (TM-164). Provisioning stamps {@code last_active_at = now()} (cheap single-column
+     * update); the Firebase state ({@code emailVerified}, {@code mfaEnabled}, {@code phoneVerified},
+     * {@code photoURL}, {@code lastLoginAt}) is read live from the Admin SDK and never persisted —
+     * Firebase stays the source of truth. Reading that state is best-effort: if Firebase can't be
+     * reached (e.g. credential-free dev), the block degrades to {@code null}s rather than failing.
+     */
     @GetMapping("/me")
     MeResponse me(@AuthenticationPrincipal VerifiedUser caller) {
-        return toResponse(userService.provision(caller));
+        User user = userService.provisionAndTouch(caller);
+        AccountState state = accountStateService.forUid(caller.uid());
+        return toResponse(user, state);
     }
 
     @PatchMapping("/me")
@@ -106,7 +123,17 @@ public class MeController {
         return toResponse(userService.acceptTerms(caller, request.version()));
     }
 
+    /**
+     * Build the response for the mutation endpoints (PATCH / onboarding / accept-terms), which return
+     * the persisted profile without paying for an extra live Firebase round trip: the Firebase-owned
+     * {@code accountState} degrades to {@link AccountState#unknown()} (clients re-read it from
+     * {@code GET /me}). {@code lastActiveAt} reflects whatever is on the row.
+     */
     private static MeResponse toResponse(User user) {
+        return toResponse(user, AccountState.unknown());
+    }
+
+    private static MeResponse toResponse(User user, AccountState accountState) {
         return new MeResponse(
                 user.getFirebaseUid(),
                 user.getEmail(),
@@ -123,6 +150,8 @@ public class MeController {
                 user.isOnboardingCompleted(),
                 user.getTermsAcceptedVersion(),
                 user.getTermsAcceptedAt(),
-                user.isAgeVerified());
+                user.isAgeVerified(),
+                accountState,
+                user.getLastActiveAt());
     }
 }

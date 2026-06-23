@@ -1,0 +1,13 @@
+-- V7__users_last_active_at — "last active" stamp on accounts (TM-164)
+--
+-- The account-state surfaced on GET /api/v1/me is sourced LIVE from Firebase (email verified, MFA
+-- enrolled, phone verified, photo URL, last login) and is deliberately NOT persisted here — Firebase
+-- stays the single source of truth for those. The one piece of state we DO own is "when did this
+-- account last make an authenticated call", which Firebase cannot tell us, so it lives in our table.
+--
+--   last_active_at  When the account last hit an authenticated /me (TIMESTAMPTZ), or NULL if it never
+--                   has yet. Stamped cheaply on every authenticated GET /api/v1/me. NULLABLE so every
+--                   existing row backfills to NULL (no activity recorded before this column existed).
+--                   Mapped to a Java Instant, so the column is TIMESTAMPTZ (Hibernate validate-only
+--                   requires the DDL type to match the entity exactly).
+ALTER TABLE users ADD COLUMN last_active_at TIMESTAMPTZ;

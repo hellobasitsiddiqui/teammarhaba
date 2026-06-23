@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.EmailVerificationService;
+import com.teammarhaba.backend.auth.FirebaseAccountStateService;
 import com.teammarhaba.backend.common.InvalidListQueryException;
 import com.teammarhaba.backend.user.UserAdminService;
 import com.teammarhaba.backend.user.UserService;
@@ -44,15 +45,19 @@ class GlobalExceptionHandlerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    // The web slice loads every @RestController; MeController (TM-112) needs a UserService and an
-    // EmailVerificationService (TM-165), UserAdminController (TM-111) needs a UserAdminService, and
-    // AuditController (TM-137) needs an AuditService — none supplied by a @WebMvcTest. These mocks
-    // satisfy that wiring; never called, since the tests only hit the local /test routes.
+    // The web slice loads every @RestController; MeController (TM-112) needs a UserService, an
+    // EmailVerificationService (TM-165) and a FirebaseAccountStateService (TM-164), UserAdminController
+    // (TM-111) needs a UserAdminService, and AuditController (TM-137) needs an AuditService — none
+    // supplied by a @WebMvcTest. These mocks satisfy that wiring; never called, since the tests only
+    // hit the local /test routes.
     @MockitoBean
     private UserService userService;
 
     @MockitoBean
     private EmailVerificationService emailVerificationService;
+
+    @MockitoBean
+    private FirebaseAccountStateService accountStateService;
 
     @MockitoBean
     private UserAdminService userAdminService;

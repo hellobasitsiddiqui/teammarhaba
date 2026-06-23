@@ -12,6 +12,27 @@
         "required" : [ "version" ],
         "type" : "object"
       },
+      "AccountState" : {
+        "properties" : {
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "lastLoginAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "mfaEnabled" : {
+            "type" : "boolean"
+          },
+          "phoneVerified" : {
+            "type" : "boolean"
+          },
+          "photoURL" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "AuditEventResponse" : {
         "properties" : {
           "action" : {
@@ -43,6 +64,9 @@
       },
       "MeResponse" : {
         "properties" : {
+          "accountState" : {
+            "$ref" : "#/components/schemas/AccountState"
+          },
           "age" : {
             "format" : "int32",
             "type" : "integer"
@@ -60,6 +84,10 @@
             "type" : "string"
           },
           "firstName" : {
+            "type" : "string"
+          },
+          "lastActiveAt" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "lastName" : {

@@ -1,6 +1,9 @@
 package com.teammarhaba.backend.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -8,13 +11,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.UserMetadata;
+import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.UserRepository;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
@@ -35,8 +43,32 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private UserRepository users;
 
+    /**
+     * Stands in for the Admin SDK that backs the live, Firebase-owned account-state block on
+     * {@code GET /me} (TM-164). Tests that care about the block stub {@code getUser(uid)}; tests that
+     * don't leave it unstubbed, so the lookup degrades to an all-{@code null} state (the endpoint must
+     * never fail just because Firebase state can't be read).
+     */
+    @MockBean
+    private FirebaseAuth firebaseAuth;
+
     private static RequestPostProcessor caller(String uid, String email) {
         return authentication(new UsernamePasswordAuthenticationToken(new VerifiedUser(uid, email), null, List.of()));
+    }
+
+    /** Stub the Admin SDK to return a record for {@code uid} with the given verification state. */
+    private void stubFirebaseUser(String uid, boolean emailVerified) throws Exception {
+        UserMetadata metadata = mock(UserMetadata.class);
+        lenient().when(metadata.getLastSignInTimestamp()).thenReturn(0L);
+
+        UserRecord record = mock(UserRecord.class);
+        lenient().when(record.isEmailVerified()).thenReturn(emailVerified);
+        lenient().when(record.getPhoneNumber()).thenReturn(null);
+        lenient().when(record.getPhotoUrl()).thenReturn(null);
+        lenient().when(record.getProviderData()).thenReturn(null);
+        lenient().when(record.getUserMetadata()).thenReturn(metadata);
+
+        when(firebaseAuth.getUser(uid)).thenReturn(record);
     }
 
     @Test
@@ -263,6 +295,63 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"version\":\"\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void verifiedUserSeesEmailVerifiedTrueFromFirebase() throws Exception {
+        stubFirebaseUser("uid-verified", true);
+
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-verified", "ada@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountState.emailVerified").value(true));
+    }
+
+    @Test
+    void unverifiedUserSeesEmailVerifiedFalseFromFirebase() throws Exception {
+        stubFirebaseUser("uid-unverified", false);
+
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-unverified", "eve@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountState.emailVerified").value(false));
+    }
+
+    @Test
+    void accountStateDegradesToNullsWhenFirebaseStateCannotBeRead() throws Exception {
+        // No stub for this uid: the Admin SDK lookup can't resolve the user, so the block must
+        // degrade to nulls rather than failing the caller's own /me.
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-no-fb", "x@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountState").exists())
+                .andExpect(jsonPath("$.accountState.emailVerified").doesNotExist());
+    }
+
+    @Test
+    void lastActiveAtIsStampedAndAdvancesAcrossTwoCalls() throws Exception {
+        var who = caller("uid-last-active", "ada@example.com");
+        stubFirebaseUser("uid-last-active", true);
+
+        String firstBody = mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lastActiveAt").exists())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Instant firstActive =
+                Instant.parse(com.jayway.jsonpath.JsonPath.read(firstBody, "$.lastActiveAt"));
+
+        // A second authenticated read must advance the stamp (cheap update on every /me).
+        String secondBody = mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Instant secondActive =
+                Instant.parse(com.jayway.jsonpath.JsonPath.read(secondBody, "$.lastActiveAt"));
+
+        assertThat(secondActive).isAfterOrEqualTo(firstActive);
+        // And it is genuinely persisted on our row, not just echoed.
+        assertThat(users.findByFirebaseUid("uid-last-active").orElseThrow().getLastActiveAt())
+                .isNotNull();
     }
 
     @Test
