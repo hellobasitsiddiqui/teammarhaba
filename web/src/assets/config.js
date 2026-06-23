@@ -7,7 +7,12 @@
 // set ONLY by the browser-e2e harness (TM-134), which serves a generated config pointing the
 // Firebase client SDK at a local Auth emulator (see web/e2e/). Prod/dev never set it, so
 // production auth behaviour is unchanged.
+//
+// `buildSha` is the git SHA the web bundle was built from. It stays "dev" locally; the deploy
+// injects the real short SHA into this file the same way it injects `apiBaseUrl` (TM-142), so
+// the live first page can show which build it is — and reveal a stale surface at a glance.
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
+    buildSha: "dev",
 });

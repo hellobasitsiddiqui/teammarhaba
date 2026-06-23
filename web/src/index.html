@@ -57,8 +57,16 @@
         <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
              builds the table/filters/actions into this container; router.js owns its visibility. -->
         <section id="admin-view" class="admin-console" aria-label="Admin users console" hidden></section>
+
+        <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
+             backend's /version, so you can see which build is live (and spot a stale surface). -->
+        <footer class="app-footer">
+            <span id="build-info" class="build-info" aria-label="Build version"></span>
+        </footer>
     </main>
     <script src="/assets/config.js"></script>
+    <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
+    <script src="/assets/build-info.js"></script>
     <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase + exposes window.tmAuth. -->
     <script type="module" src="/assets/auth.js"></script>
     <!-- Auth UI controller (TM-106). -->

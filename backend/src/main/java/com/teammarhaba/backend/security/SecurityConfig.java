@@ -20,6 +20,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *
  * <ul>
  *   <li><b>{@code /health}</b> — the Cloud Run liveness probe.</li>
+ *   <li><b>{@code /version}</b> — public build provenance (sha/build time/revision) the web first page reads (TM-142).</li>
  *   <li><b>{@code /actuator/health}</b> (+ {@code liveness}/{@code readiness} groups) — orchestration probes.</li>
  *   <li><b>{@code /v3/api-docs/**}, {@code /swagger-ui/**}</b> — the OpenAPI docs (TM-76; non-prod only, disabled in prod).</li>
  * </ul>
@@ -48,6 +49,7 @@ public class SecurityConfig {
             throws Exception {
         http.authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/health",
+                                "/version",
                                 "/actuator/health",
                                 "/actuator/health/**",
                                 "/v3/api-docs/**",
