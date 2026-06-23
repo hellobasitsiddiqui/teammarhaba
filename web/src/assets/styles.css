@@ -833,6 +833,18 @@ body {
     gap: 0.3rem;
 }
 
+/* A field whose input sits beside a one-tap "Use mine" button (timezone/locale — TM-167 union). */
+.tm-field-fill {
+    display: flex;
+    gap: 0.4rem;
+    align-items: stretch;
+}
+
+.tm-field-fill .tm-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 .tm-field-label {
     font-size: 0.85rem;
     font-weight: 600;

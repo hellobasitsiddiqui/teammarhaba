@@ -59,6 +59,7 @@ const FIELDS = [
     maxLength: 64,
     autocomplete: "off",
     hint: "IANA name, e.g. Europe/London.",
+    fill: timezoneGuess,
   },
   {
     key: "locale",
@@ -67,10 +68,26 @@ const FIELDS = [
     maxLength: 35,
     autocomplete: "off",
     hint: "BCP-47 tag, e.g. en-GB.",
+    fill: localeGuess,
   },
 ];
 
 const NOTIFICATION_VALUES = new Set(["EMAIL", "PUSH", "BOTH"]);
+
+// Best-guess fillers for the timezone/locale fields (TM-167 union), so a user can one-tap their
+// current values instead of typing an IANA/BCP-47 string. Both fail soft to "" if the browser
+// can't tell us (validation then leaves the empty field untouched).
+function timezoneGuess() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+function localeGuess() {
+  return (typeof navigator !== "undefined" && navigator.language) || "";
+}
 
 const state = {
   loaded: false,
@@ -293,9 +310,32 @@ function buildField(field) {
   const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
   const hint = field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null;
 
+  // A "fill" field (timezone/locale) gets a one-tap button that drops in the browser's best guess,
+  // then re-validates so any stale inline error clears (TM-167 union — from the #162 build).
+  const control = field.fill
+    ? el("div", { class: "tm-field-fill" }, [
+        input,
+        el(
+          "button",
+          {
+            class: "tm-btn tm-btn-sm",
+            type: "button",
+            onClick: () => {
+              const guess = field.fill();
+              if (guess) {
+                input.value = guess;
+                setFieldError(field.key, validateField(field, guess));
+              }
+            },
+          },
+          "Use mine",
+        ),
+      ])
+    : input;
+
   const wrapper = el("div", { class: "tm-form-field" }, [
     el("label", { class: "tm-field-label", for: id, text: field.label }),
-    input,
+    control,
     hint,
     error,
   ]);
