@@ -96,6 +96,14 @@ public class User {
     @Column(name = "age_verified", nullable = false)
     private boolean ageVerified = false;
 
+    /**
+     * When this account last made an authenticated {@code GET /api/v1/me} (TM-164). This is the one
+     * piece of account state we own: Firebase can report last <em>login</em>, but not last activity
+     * against our API. {@code null} until the first authenticated call; stamped cheaply on every one.
+     */
+    @Column(name = "last_active_at")
+    private Instant lastActiveAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
     private Role role = Role.USER;
@@ -237,6 +245,15 @@ public class User {
     /** Self-attested age check (TM-163). Real ID verification is out of scope. */
     public void setAgeVerified(boolean ageVerified) {
         this.ageVerified = ageVerified;
+    }
+
+    public Instant getLastActiveAt() {
+        return lastActiveAt;
+    }
+
+    /** Stamp the "last active" marker (TM-164). Called on every authenticated {@code GET /me}. */
+    public void markActive(Instant when) {
+        this.lastActiveAt = when;
     }
 
     public Role getRole() {

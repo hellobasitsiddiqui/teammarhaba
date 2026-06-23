@@ -74,6 +74,20 @@ public class UserService {
     }
 
     /**
+     * Provision the caller (as {@link #provision}) and stamp {@code last_active_at = now()} (TM-164).
+     * This backs {@code GET /api/v1/me}: every authenticated read advances our own "last active"
+     * marker — the one piece of account state we own (Firebase reports last <em>login</em>, not last
+     * activity against our API). A cheap single-column dirty update flushed on commit; the Firebase-
+     * owned state block is read separately and never persisted.
+     */
+    @Transactional
+    public User provisionAndTouch(VerifiedUser caller) {
+        User user = provision(caller);
+        user.markActive(Instant.now()); // dirty-checking flushes on commit
+        return user;
+    }
+
+    /**
      * Apply a partial profile update for the caller (TM-162; generalised from the display-name-only
      * TM-112 path). Provision-then-update, so a PATCH before any GET still works. Each {@code null}
      * field is left unchanged; only the fields actually supplied are written and audited.
