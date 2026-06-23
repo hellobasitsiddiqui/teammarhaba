@@ -789,19 +789,29 @@ body {
     gap: 1rem;
     padding: 1rem;
     background: var(--surface-2);
-    border: 1px dashed var(--border);
+    border: 1px solid var(--border);
     border-radius: 10px;
 }
 
 .tm-avatar-frame {
+    position: relative;
     display: grid;
     place-items: center;
     width: 3.5rem;
     height: 3.5rem;
+    flex: 0 0 auto;
     font-size: 1.6rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 50%;
+    overflow: hidden;
+}
+
+/* The uploaded avatar image fills the round frame (object-fit so non-square images don't distort). */
+.tm-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .tm-avatar-meta {
@@ -813,6 +823,49 @@ body {
 .tm-avatar-note {
     margin: 0;
     font-size: 0.8rem;
+}
+
+/* File input + upload progress for the avatar control (TM-166). */
+.tm-avatar-file {
+    font-size: 0.85rem;
+    max-width: 16rem;
+}
+
+.tm-avatar-progress {
+    height: 0.4rem;
+    width: 100%;
+    max-width: 16rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.tm-avatar-progress-bar {
+    height: 100%;
+    width: 0;
+    background: var(--accent, #2563eb);
+    transition: width 0.15s ease;
+}
+
+/* Round avatar shown in the account nav (TM-166), reflecting the user's photoURL. */
+.tm-nav-avatar {
+    display: inline-grid;
+    place-items: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 1rem;
+    vertical-align: middle;
+}
+
+.tm-nav-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .tm-form-grid {

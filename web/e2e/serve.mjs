@@ -14,6 +14,7 @@ const ROOT = fileURLToPath(new URL("../src", import.meta.url));
 const PORT = Number(process.env.PORT || 8081);
 const API_BASE_URL = process.env.E2E_API_BASE_URL || "http://127.0.0.1:8080";
 const AUTH_EMULATOR_HOST = process.env.E2E_AUTH_EMULATOR_HOST || "127.0.0.1:9099";
+const STORAGE_EMULATOR_HOST = process.env.E2E_STORAGE_EMULATOR_HOST || "127.0.0.1:9199";
 
 const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -25,11 +26,13 @@ const CONTENT_TYPES = {
   ".ico": "image/x-icon",
 };
 
-// The injected runtime config — same shape as web/src/assets/config.js, but with the e2e
-// backend URL and the Auth emulator host set so the Firebase client SDK uses the emulator.
+// The injected runtime config — same shape as web/src/assets/config.js, but with the e2e backend URL
+// and the Auth + Storage emulator hosts set so the Firebase client SDK uses the emulators (TM-166
+// adds the Storage emulator for the avatar-upload walkthrough).
 const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: ${JSON.stringify(API_BASE_URL)},
     authEmulatorHost: ${JSON.stringify(AUTH_EMULATOR_HOST)},
+    storageEmulatorHost: ${JSON.stringify(STORAGE_EMULATOR_HOST)},
 });
 `;
 
@@ -66,5 +69,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[e2e] web server on http://127.0.0.1:${PORT} (api=${API_BASE_URL}, authEmulator=${AUTH_EMULATOR_HOST})`);
+  console.log(
+    `[e2e] web server on http://127.0.0.1:${PORT} (api=${API_BASE_URL}, ` +
+      `authEmulator=${AUTH_EMULATOR_HOST}, storageEmulator=${STORAGE_EMULATOR_HOST})`,
+  );
 });

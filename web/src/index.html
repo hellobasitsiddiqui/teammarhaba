@@ -22,6 +22,8 @@
             <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
                  to re-run the whole-site walkthrough or the current page's tour. -->
             <button id="nav-help" type="button" hidden>Help</button>
+            <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
+            <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
             <button id="signout-btn" type="button" hidden>Sign out</button>
         </nav>
 
@@ -84,6 +86,8 @@
     <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
          signed-out users to #/login and returns them after sign-in, drives the nav. -->
     <script type="module" src="/assets/router.js"></script>
+    <!-- Nav avatar (TM-166): paints the signed-in user's Firebase photoURL into #nav-avatar. -->
+    <script type="module" src="/assets/nav-avatar.js"></script>
     <!-- Onboarding product tour (TM-135): auto-runs the whole-site walkthrough on first login and
          each page's tour on first visit; replayable from the Help menu. -->
     <script type="module" src="/assets/tours.js"></script>

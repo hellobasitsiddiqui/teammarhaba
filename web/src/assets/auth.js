@@ -146,4 +146,6 @@ if (typeof window !== "undefined") {
   };
 }
 
-export { auth };
+// `app` is exported so sibling SDK helpers (e.g. storage.js / TM-166) can reuse the single
+// initialised Firebase app instead of calling initializeApp again.
+export { app, auth };

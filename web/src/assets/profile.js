@@ -8,11 +8,18 @@
 // XSS-safety is inherited from the kit: every node is built with `el()` (textContent only) — no
 // innerHTML seam, so a backend-supplied name/city can never inject markup.
 //
-// AVATAR (TM-166, B5) — NOT MERGED YET. The avatar upload control is intentionally a disabled,
-// clearly-marked placeholder here (see `avatarPlaceholder()`); it is wired to nothing. When TM-166
-// lands, drop the real control into that slot — the rest of the page needs no rework.
+// AVATAR (TM-166, B5). The avatar slot is a real upload control: image preview + file input + upload
+// progress + inline error states (see `buildAvatar()`). The bytes go to Firebase Storage at
+// `avatars/{uid}`; on success we set the Firebase user's `photoURL` to the download URL — the single
+// source of truth. We persist NOTHING avatar-related on our side; the preview + nav read `photoURL`
+// straight off the Firebase user (TM-164 also surfaces it on GET /me). Storage isn't enabled in prod
+// until the HITL TM-184 — when it isn't configured the control degrades to a disabled state rather
+// than hard-failing the page.
 
 import { getMe, updateMe, ApiError } from "./api.js";
+import { currentUser } from "./auth.js";
+import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
+import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { clear, el, toast } from "./ui.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
@@ -263,17 +270,125 @@ async function save(event) {
 
 // ---- rendering ------------------------------------------------------------------------------
 
-/** The disabled, clearly-marked avatar slot pending TM-166 (B5). Wired to nothing — see file header. */
-function avatarPlaceholder() {
-  // TODO(TM-166): replace this disabled placeholder with the real avatar upload control once B5 lands.
-  return el("section", { class: "tm-profile-avatar", "aria-label": "Avatar" }, [
-    el("div", { class: "tm-avatar-frame", "aria-hidden": "true" }, [el("span", { text: "🙂" })]),
+/**
+ * The avatar upload control (TM-166, B5): a circular preview of the current `photoURL`, a file input,
+ * an upload progress bar, and an inline error line. On a valid pick it uploads the bytes to Firebase
+ * Storage and sets the Firebase user's `photoURL` to the download URL (the single source of truth) —
+ * nothing avatar-related is persisted on our side. Degrades to a disabled state when Storage isn't
+ * configured (prod before HITL TM-184), so the page never hard-fails on the missing bucket.
+ *
+ * Returns `{ wrapper, refresh }`; `refresh()` repaints the preview from the current Firebase photoURL.
+ */
+function buildAvatar() {
+  const configured = isStorageConfigured();
+
+  const initial = el("span", { class: "tm-avatar-initial", "aria-hidden": "true", text: "🙂" });
+  const image = el("img", { class: "tm-avatar-img", alt: "", hidden: true });
+  const frame = el("div", { class: "tm-avatar-frame", "aria-hidden": "true" }, [initial, image]);
+
+  const fileInput = el("input", {
+    id: "profile-avatar-file",
+    class: "tm-avatar-file",
+    type: "file",
+    accept: "image/*",
+    "aria-describedby": "profile-avatar-error profile-avatar-hint",
+    disabled: !configured,
+  });
+
+  const progressBar = el("div", { class: "tm-avatar-progress-bar" });
+  const progress = el(
+    "div",
+    {
+      class: "tm-avatar-progress",
+      role: "progressbar",
+      "aria-label": "Upload progress",
+      "aria-valuemin": "0",
+      "aria-valuemax": "100",
+      hidden: true,
+    },
+    [progressBar],
+  );
+
+  const error = el("p", { id: "profile-avatar-error", class: "tm-field-error", role: "alert", hidden: true });
+  const hint = el("p", {
+    id: "profile-avatar-hint",
+    class: "tm-muted tm-avatar-note",
+    text: configured
+      ? `JPG, PNG or GIF, up to ${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB.`
+      : "Avatar uploads aren't available in this environment yet.",
+  });
+
+  /** Paint the preview from the live Firebase photoURL (image if present, else the initial glyph). */
+  const refresh = () => {
+    const url = currentUser()?.photoURL || "";
+    if (url) {
+      image.src = url; // assigning .src is XSS-safe (no markup parse) — never innerHTML.
+      image.hidden = false;
+      initial.hidden = true;
+    } else {
+      image.removeAttribute("src");
+      image.hidden = true;
+      initial.hidden = false;
+    }
+  };
+
+  const setError = (msg) => {
+    error.textContent = msg || "";
+    error.hidden = !msg;
+  };
+  const setProgress = (fraction) => {
+    const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+    progress.hidden = false;
+    progressBar.style.width = `${pct}%`;
+    progress.setAttribute("aria-valuenow", String(pct));
+  };
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    setError("");
+
+    // Fail fast on the client (mirrors the Storage rules) before any network round-trip.
+    const invalid = validateAvatarFile(file);
+    if (invalid) {
+      setError(invalid);
+      toast(invalid, { type: "error" });
+      fileInput.value = "";
+      return;
+    }
+
+    fileInput.disabled = true;
+    setProgress(0);
+    try {
+      await uploadAvatar(file, setProgress);
+      refresh();
+      onAvatarChanged(); // repaint the nav avatar from the new photoURL.
+      toast("Avatar updated.", { type: "success" });
+    } catch (err) {
+      const msg = err?.message || "Could not upload your avatar.";
+      setError(msg);
+      toast(msg, { type: "error" });
+    } finally {
+      fileInput.disabled = false;
+      progress.hidden = true;
+      progressBar.style.width = "0%";
+      fileInput.value = ""; // allow re-picking the same file after an error.
+    }
+  });
+
+  refresh();
+
+  const wrapper = el("section", { class: "tm-profile-avatar", "aria-label": "Avatar" }, [
+    frame,
     el("div", { class: "tm-avatar-meta" }, [
-      el("span", { class: "tm-field-label", text: "Avatar" }),
-      el("button", { class: "tm-btn tm-btn-sm", type: "button", disabled: true }, "Upload — coming soon"),
-      el("p", { class: "tm-muted tm-avatar-note", text: "Avatar upload arrives with TM-166." }),
+      el("label", { class: "tm-field-label", for: "profile-avatar-file", text: "Avatar" }),
+      fileInput,
+      progress,
+      hint,
+      error,
     ]),
   ]);
+  return { wrapper, refresh };
 }
 
 function buildField(field) {
@@ -358,8 +473,10 @@ function buildShell(view) {
     "Reset",
   );
 
+  const avatar = buildAvatar();
+
   const form = el("form", { class: "tm-profile-form", id: "profile-form", novalidate: true, onSubmit: save }, [
-    avatarPlaceholder(),
+    avatar.wrapper,
     el("div", { class: "tm-form-grid" }, fieldNodes),
     el("div", { class: "tm-form-actions" }, [save, reset]),
   ]);
@@ -376,7 +493,7 @@ function buildShell(view) {
     form,
   );
 
-  shell = { form, fields, save, reset, summary, status };
+  shell = { form, fields, save, reset, summary, status, avatar };
 }
 
 /** Reflect load/error state: hide the form while loading or on a load error, show a retry. */

@@ -48,9 +48,12 @@ jobs:
       # Firebase Auth emulator — both the backend (Admin SDK) and the browser talk to it on the host.
       FIREBASE_PROJECT_ID: teammarhaba
       FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      # Firebase Storage emulator (TM-166) — the browser uploads avatars to it.
+      FIREBASE_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
       # Where the e2e harness finds the backend + points the web app's injected config.
       E2E_API_BASE_URL: http://127.0.0.1:8080
       E2E_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      E2E_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
 
     steps:
       - name: Checkout
@@ -80,13 +83,21 @@ jobs:
         working-directory: web/e2e
         run: npx playwright install --with-deps chromium
 
-      - name: Start Firebase Auth emulator
+      - name: Start Firebase Auth + Storage emulators
         working-directory: web/e2e
+        # The Storage emulator (TM-166) loads the repo-root storage.rules via the root firebase.json
+        # (passed with --config, since the Firebase CLI won't reference a rules file outside the
+        # config's own directory), so the avatar walkthrough exercises the real owner/type/size rules.
         run: |
-          npx firebase emulators:start --only auth --project teammarhaba > /tmp/firebase-emulator.log 2>&1 &
+          npx firebase emulators:start --only auth,storage --project teammarhaba --config ../../firebase.json > /tmp/firebase-emulator.log 2>&1 &
           echo "Waiting for the Auth emulator on :9099…"
           for i in $(seq 1 60); do
-            curl -sf "http://127.0.0.1:9099/" > /dev/null && { echo "emulator up"; break; }
+            curl -sf "http://127.0.0.1:9099/" > /dev/null && { echo "auth emulator up"; break; }
+            sleep 2
+          done
+          echo "Waiting for the Storage emulator on :9199…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:9199/" > /dev/null && { echo "storage emulator up"; break; }
             sleep 2
           done
 
