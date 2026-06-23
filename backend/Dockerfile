@@ -22,6 +22,12 @@ WORKDIR /app
 ARG GIT_SHA=dev
 ENV BUILD_SHA=$GIT_SHA
 
+# Human-readable build name (TM-155): `git describe --tags` output (e.g. v1.4.0-12-ged338a9,
+# or the bare short SHA until anything is tagged). Computed on the CI runner — the image build
+# context has no .git — and passed as a build-arg; defaults to "dev" for a plain local build.
+ARG GIT_DESCRIBE=dev
+ENV BUILD_VERSION=$GIT_DESCRIBE
+
 # Non-root runtime user
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 

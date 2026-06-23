@@ -8,11 +8,13 @@
 // Firebase client SDK at a local Auth emulator (see web/e2e/). Prod/dev never set it, so
 // production auth behaviour is unchanged.
 //
-// `buildSha` is the git SHA the web bundle was built from. It stays "dev" locally; the deploy
-// injects the real short SHA into this file the same way it injects `apiBaseUrl` (TM-142), so
-// the live first page can show which build it is — and reveal a stale surface at a glance.
+// `buildVersion` is `git describe --tags` output for the web bundle (TM-155) — a readable build
+// name from the nearest release tag (e.g. v1.4.0-12-ged338a9), or the bare short SHA until
+// anything is tagged. It stays "dev" locally; the deploy injects the real value into this file
+// the same way it injects `apiBaseUrl` (TM-142), so the live first page can show which build it
+// is — and reveal a stale surface at a glance.
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
-    buildSha: "dev",
+    buildVersion: "dev",
 });

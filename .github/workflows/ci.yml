@@ -176,6 +176,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0   # full history + tags so `git describe` can name the build (TM-155)
+
+      # Human-readable build name from the nearest tag (TM-155). `--always` falls back to the
+      # bare short SHA until anything is tagged, so this never fails on a tag-less repo.
+      - name: Compute version (git describe)
+        run: echo "GIT_DESCRIBE=$(git describe --tags --always --long)" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -206,9 +213,11 @@ jobs:
         with:
           context: backend
           file: backend/Dockerfile
-          # Bake the commit SHA into the image so /version reports the live build (TM-142).
+          # Bake the build provenance into the image so /version reports the live build:
+          # the exact commit SHA (TM-142) + the `git describe` name (TM-155).
           build-args: |
             GIT_SHA=${{ github.sha }}
+            GIT_DESCRIBE=${{ env.GIT_DESCRIBE }}
           push: ${{ env.PUSH == 'true' }}
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}

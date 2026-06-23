@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0   # full history + tags so `git describe` can name the build (TM-155)
 
       # Build seam: mirrors web/Dockerfile's build stage (src/ -> dist/). Today a
       # plain copy; a real bundler (Vite/esbuild) drops in here without changing
@@ -75,15 +77,17 @@ jobs:
           sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
           grep apiBaseUrl web/dist/assets/config.js
 
-      # Stamp the web build SHA into the built config.js (same seam as the backend URL above),
-      # so the live first page shows which commit it was deployed from (TM-142). Never hardcoded.
-      - name: Inject web build SHA into config.js
-        env:
-          GITHUB_SHA: ${{ github.sha }}
+      # Stamp the web build name into the built config.js (same seam as the backend URL above),
+      # so the live first page shows which build it was deployed from (TM-142/TM-155). Uses
+      # `git describe --tags` — a readable name from the nearest release tag, or the bare short
+      # SHA until anything is tagged (`--always`, so it never fails on a tag-less repo). The
+      # checkout above fetches full history + tags. Never hardcoded.
+      - name: Inject web build version into config.js
         run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          sed -i "s/buildSha: \"dev\"/buildSha: \"${SHORT_SHA}\"/" web/dist/assets/config.js
-          grep buildSha web/dist/assets/config.js
+          DESCRIBE="$(git describe --tags --always --long)"
+          echo "Build version: ${DESCRIBE}"
+          sed -i "s/buildVersion: \"dev\"/buildVersion: \"${DESCRIBE}\"/" web/dist/assets/config.js
+          grep buildVersion web/dist/assets/config.js
 
       # Content-hash the built assets so each deploy changes their URLs — an automatic cache-bust
       # (TM-144). Runs AFTER the config.js injections above so the hash reflects the final content;
