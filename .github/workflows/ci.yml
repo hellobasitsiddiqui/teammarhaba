@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+    # On merge, docs-only changes build no image (nothing deploys — TM-151). PR runs are left
+    # UNFILTERED on purpose so the docs auto-merge (which waits on this CI workflow) still fires.
+    paths-ignore: ['**/*.md', 'docs/**']
 
 # Concurrency is scoped by EVENT (TM-146):
 #   • pull_request → group per branch ref + cancel-in-progress: a new push to a PR

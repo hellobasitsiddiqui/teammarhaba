@@ -8,6 +8,8 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Docs-only merges deploy nothing — skip the ~11-min deploy (TM-151).
+    paths-ignore: ['**/*.md', 'docs/**']
   workflow_dispatch:
 
 # Cancel a superseded deploy if main moves again before this finishes.

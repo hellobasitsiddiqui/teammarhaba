@@ -6,6 +6,8 @@ name: E2E
 on:
   push:
     branches: [main]
+    # Docs-only merges need no browser e2e — skip it (TM-151).
+    paths-ignore: ['**/*.md', 'docs/**']
   workflow_dispatch:
 
 concurrency:
