@@ -765,3 +765,116 @@ body {
 .tm-help-item:hover {
     background: var(--surface-2);
 }
+
+/* ---- Edit-profile page (TM-167) -------------------------------------------------------- */
+.profile-view {
+    display: block;
+    margin-top: 1.25rem;
+}
+
+.profile-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.25rem 1.5rem;
+    max-width: 640px;
+}
+
+.profile-head {
+    margin-bottom: 1rem;
+}
+
+.profile-head h2 {
+    margin: 0 0 0.15rem;
+}
+
+.profile-sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+/* Two-column field grid that collapses to one column on narrow screens. */
+.profile-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1rem;
+    margin-bottom: 1.25rem;
+}
+
+@media (max-width: 540px) {
+    .profile-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* A field plus an inline "Use mine" button (timezone/locale). */
+.field-fill {
+    display: flex;
+    gap: 0.4rem;
+    align-items: stretch;
+}
+
+.field-fill .tm-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Per-field validation message, shown under the input on a 400 from the server. */
+.field-error {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--danger);
+    font-size: 0.8rem;
+}
+
+.field-note {
+    margin: 0.3rem 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.field-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.profile-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Avatar block — forward-wired but disabled until B5 (TM-166). */
+.profile-avatar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding-bottom: 1rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-avatar-preview {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    overflow: hidden;
+}
+
+.profile-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-avatar-meta {
+    min-width: 0;
+}

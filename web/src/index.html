@@ -15,6 +15,8 @@
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out. -->
         <nav class="app-nav" aria-label="Account">
             <a id="nav-signin" href="#/login" hidden>Sign in</a>
+            <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
+            <a id="nav-profile" href="#/profile" hidden>Profile</a>
             <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
             <a id="nav-admin" href="#/admin" hidden>Admin</a>
             <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
@@ -49,6 +51,8 @@
                 <p>You are signed in as <strong id="user-email"></strong>.</p>
                 <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client (TM-108). -->
                 <p id="me" class="status"></p>
+                <!-- Any signed-in user can edit their profile (TM-167). -->
+                <p class="home-links"><a href="#/profile" id="home-profile-link">Edit your profile →</a></p>
                 <!-- Admins reach the users console here (router shows the link only for ADMINs). -->
                 <p class="home-links"><a href="#/admin" id="home-admin-link" hidden>Open the admin users console →</a></p>
             </div>
@@ -57,6 +61,11 @@
         <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
              builds the table/filters/actions into this container; router.js owns its visibility. -->
         <section id="admin-view" class="admin-console" aria-label="Admin users console" hidden></section>
+
+        <!-- Edit-profile view (TM-167): the signed-in user's self-service profile form. profile.js
+             (imported by router.js) builds it from GET /api/v1/me and saves via PATCH; router owns
+             its visibility. -->
+        <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>
 
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->

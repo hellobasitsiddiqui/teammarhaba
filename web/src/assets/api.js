@@ -87,8 +87,9 @@ export async function apiFetch(path, options = {}) {
 }
 
 /**
- * GET /api/v1/me — the verified caller's identity (TM-107).
- * @returns {Promise<{uid: string, email: ?string, displayName: ?string, role: string}>}
+ * GET /api/v1/me — the verified caller's profile (TM-107; profile fields added in TM-162).
+ * @returns {Promise<Object>} uid, email, displayName, firstName, lastName, city, age, phone,
+ *   notificationPref, timezone, locale, role.
  * @throws {Error} if the response is not ok (a 401 will already have redirected to login).
  */
 export async function getMe() {
@@ -118,7 +119,46 @@ export async function resendVerification() {
   }
 }
 
+/**
+ * Error carrying the backend's RFC 7807 ProblemDetail so callers can surface field-level
+ * validation errors. `fieldErrors` maps field name → message (from the `errors` array the
+ * GlobalExceptionHandler attaches on a 400); `detail` is the human-readable summary.
+ */
+export class ApiError extends Error {
+  constructor(status, detail, fieldErrors = {}) {
+    super(detail || `Request failed (${status})`);
+    this.status = status;
+    this.fieldErrors = fieldErrors;
+  }
+}
+
+/**
+ * PATCH /api/v1/me — partial profile update (TM-162). Send only the fields to change; the
+ * backend leaves omitted fields untouched and re-validates everything. On a validation failure
+ * (400) the returned {@link ApiError} carries per-field messages in `fieldErrors`.
+ *
+ * @param {Object} body the changed profile fields
+ * @returns {Promise<Object>} the updated /me document
+ * @throws {ApiError} on a non-ok response (a 401 will already have redirected to login).
+ */
+export async function patchMe(body) {
+  const response = await apiFetch("/api/v1/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = {};
+    for (const e of Array.isArray(problem.errors) ? problem.errors : []) {
+      if (e && e.field) fieldErrors[e.field] = e.message || "Invalid value";
+    }
+    throw new ApiError(response.status, problem.detail || problem.title, fieldErrors);
+  }
+  return response.json();
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
-  window.tmApi = { apiFetch, getMe, resendVerification, redirectToLogin, LOGIN_PATH };
+  window.tmApi = { apiFetch, getMe, resendVerification, patchMe, redirectToLogin, LOGIN_PATH };
 }

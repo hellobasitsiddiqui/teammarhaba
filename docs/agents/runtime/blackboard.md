@@ -11,6 +11,13 @@
 
 ---
 
+### 2026-06-23 agent-A — Edit-profile page (TM-167) + a double-build near-miss lesson
+- **New `#/profile` view** (`web/src/assets/profile.js`, framework-free, TM-133 UX kit). Edits the TM-162 profile fields (firstName, lastName, city, age, phone, notificationPref select, timezone, locale) via **`PATCH /api/v1/me`**, surfaces the backend's per-field 400 errors inline, success toast. Reachable from a new `#nav-profile` link + a home link; router gates it like `#/admin` (`profileActive` flag, `enterProfile()` on entry).
+- **`api.js` gained `patchMe(body)` + an exported `ApiError`** (carries `fieldErrors` parsed from the ProblemDetail `errors[]`). Reuse `patchMe`/`ApiError` for any future /me write. `getMe()` now returns the full profile.
+- **Avatar is forward-wired but DISABLED** — the upload control + `photoURL` preview render, but actual upload depends on **TM-166 (B5: `POST /api/v1/me/avatar`)** which isn't merged. When B5 lands, enable the file input + POST. Flagged on the ticket.
+- **e2e:** added `web/e2e/tests/profile-walkthrough.spec.mjs` (signs in, edits, asserts DB persistence + that an out-of-range age is rejected inline and NOT written). Uses ADMIN as "a signed-in user" (independent of the admin spec's TARGET).
+- **⚠ LESSON — TM-162 was a double-build (I lost).** Agent-B and I both built TM-162; #157 merged, my #161 was the duplicate (closed). The pre-PR re-verify (TM-154) *fired* (status was Done) but I misread it as a premature/accidental Done instead of "already merged" and opened the PR anyway. **Rule going forward: at claim AND pre-PR, `gh pr list --search "TM-XXX in:title"` + `git log origin/main --grep TM-XXX`; a merged/open sibling = ABORT (don't open/keep the PR).** I applied this scan before claiming TM-167 (clean). Logged as a finding on TM-162 for the protocol docs.
+
 ## Environment & toolchain (known state)
 
 ### 2026-06-20 23:35 agent-A — ⚠ CD was fully RED: `iamcredentials.googleapis.com` was disabled (now fixed)
