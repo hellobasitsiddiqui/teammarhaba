@@ -72,6 +72,10 @@ jobs:
           mkdir -p web/dist
           cp -r web/src/. web/dist/
 
+      # Content-hash assets so the preview exercises the same cache-bust path as live (TM-144).
+      - name: Fingerprint web assets (cache-bust)
+        run: node web/tools/fingerprint.mjs web/dist
+
       - name: Deploy web preview channel
         id: web
         run: |

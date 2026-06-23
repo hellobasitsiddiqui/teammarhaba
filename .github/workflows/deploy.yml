@@ -78,6 +78,15 @@ jobs:
           sed -i "s/buildSha: \"dev\"/buildSha: \"${SHORT_SHA}\"/" web/dist/assets/config.js
           grep buildSha web/dist/assets/config.js
 
+      # Content-hash the built assets so each deploy changes their URLs — an automatic cache-bust
+      # (TM-144). Runs AFTER the config.js injections above so the hash reflects the final content;
+      # it rewrites index.html + the ES-module import specifiers. firebase.json then serves
+      # index.html no-cache and /assets/** immutable.
+      - name: Fingerprint web assets (cache-bust)
+        run: |
+          node web/tools/fingerprint.mjs web/dist
+          ls web/dist/assets
+
       - name: Deploy to Firebase Hosting (live channel)
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 

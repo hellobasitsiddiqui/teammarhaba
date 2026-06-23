@@ -7,10 +7,31 @@ assets to Firebase Hosting, and also shipped as a self-contained nginx container
 ## Layout
 
 - `src/` — the static one-page app (`index.html` + `assets/`).
+- `tools/` — build tooling: `fingerprint.mjs` content-hashes the built assets (TM-144), run by the
+  deploy/preview workflows. `node --test web/tools/*.test.mjs` covers it on the PR gate.
 - `nginx.conf` — runtime server config: SPA fallback (`try_files … /index.html`)
   and caching headers.
 - `Dockerfile` — multi-stage build: assembles `src/` into `/dist` (the documented
   build seam for a real bundler later), then serves it from `nginx:1.27-alpine`.
+
+## Caching & cache-busting (TM-144)
+
+The deploy (`.github/workflows/deploy.yml` → Firebase Hosting) copies `src/ → dist/`, injects the
+backend URL + build SHA into `config.js`, then runs `node tools/fingerprint.mjs web/dist`. That
+content-hashes every `assets/*.{js,css}` to `name.<hash>.ext`, rewriting both `index.html` and the
+ES-module import specifiers — **transitively**, so changing one module busts everything that imports it.
+
+`firebase.json` then serves:
+
+- `index.html` (and any non-asset path) `Cache-Control: no-cache` — always revalidated, so it always
+  points at the newest hashed assets;
+- `/assets/**` `public, max-age=31536000, immutable` — safe to cache forever, because the URL changes
+  whenever the content does.
+
+Net effect: after a deploy a returning user gets the new CSS/JS on a **normal** reload — no hard
+refresh (TM-144). `index.html` stays unhashed (it's the entry). The e2e harness serves `src/` directly,
+so it's unaffected. (Follow-up: the nginx container path still serves stable URLs — fingerprint it too
+if the WebView bundle needs the same guarantee.)
 
 ## Build & run
 
