@@ -124,6 +124,19 @@ jobs:
       - name: Deploy to Firebase Hosting (live channel)
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 
+      # Deploy the committed storage.rules (TM-191) too, reusing the same WIF ADC + pinned
+      # firebase-tools as the hosting deploy above. Kept a SEPARATE, NON-FATAL step on purpose
+      # (mirrors the backend job's best-effort "Enable public access"):
+      #   - On a fresh replay where Firebase Storage isn't enabled yet (the human TM-184 step),
+      #     or before gha-deployer has roles/firebaserules.admin, this warns and the deploy stays
+      #     green instead of failing the hosting deploy.
+      #   - NOT folded into `--only hosting,storage` for exactly that reason — a storage error there
+      #     would fail the (already-succeeded) hosting deploy.
+      - name: Deploy Firebase Storage rules (best-effort)
+        run: |
+          npx --yes firebase-tools@15.22.0 deploy --only storage --project teammarhaba --non-interactive \
+            || echo "::warning::storage rules deploy skipped/failed — is Firebase Storage enabled (TM-184) and does gha-deployer have roles/firebaserules.admin (TM-192)? Not failing the deploy."
+
   backend:
     name: Deploy backend to Cloud Run
     # Manual run, OR a merged PR that carried the `deploy` label (TM-156). An unlabelled merge,
