@@ -88,3 +88,36 @@ jobs:
               title: `🌙 Nightly canary failed — ${today}`,
               body: `The nightly canary on \`main\` failed.\n\n**Run:** ${run}\n\nCheck which step went red: fresh build/test, backend Ready-revision, or web health.`,
             });
+
+      # Push the canary result to Slack (TM-119) — the team lives in Slack, and the issue/summary
+      # above are pull-only. A FAILURE always alerts; a GREEN run posts a daily heartbeat ONLY when
+      # the `CANARY_SLACK_HEARTBEAT` repo variable is "true" (off by default — low noise). Fail-soft:
+      # if `SLACK_WEBHOOK_URL` isn't configured yet (the HITL — TM-176), this no-ops and never fails
+      # the canary. The webhook URL is a secret passed via env (never echoed); the payload is built
+      # with jq so the text is safely escaped.
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          HEARTBEAT: ${{ vars.CANARY_SLACK_HEARTBEAT }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "::notice::SLACK_WEBHOOK_URL not set — skipping Slack notify (HITL pending, TM-176)."
+            exit 0
+          fi
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ "$JOB_STATUS" = "success" ]; then
+            if [ "${HEARTBEAT:-}" != "true" ]; then
+              echo "Canary green and heartbeat disabled — no Slack post."
+              exit 0
+            fi
+            TEXT="✅ Nightly canary green on \`main\` — fresh build + tests + live backend/web all healthy. <${RUN_URL}|run>"
+          else
+            TEXT="❌ Nightly canary *${JOB_STATUS}* on \`main\` — check fresh build/test, backend Ready-revision, or web health. <${RUN_URL}|run>"
+          fi
+          payload="$(jq -nc --arg t "$TEXT" '{text: $t}')"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" || echo 000)"
+          echo "Slack POST -> HTTP $code"
+          [ "$code" = "200" ] || echo "::warning::Slack notify returned HTTP $code — not failing the canary."
