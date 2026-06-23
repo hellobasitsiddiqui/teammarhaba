@@ -15,7 +15,9 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 
 ## How it deploys
 
-`.github/workflows/deploy.yml` (job `backend`) runs on `push` to `main`:
+`.github/workflows/deploy.yml` (job `backend`) is a **deliberate, manual deploy** (TM-153) — run it
+from the Actions tab (*Deploy → Run*); it deploys current `main`. It is **not** triggered by a merge
+(that saves Actions minutes and gives you control over when the live site changes). On run:
 
 1. **Auth (deploy-time)** — keyless WIF (TM-67), impersonating `gha-deployer`
    (`roles/run.admin`, `iam.serviceAccountUser` to act-as the runtime SA). No JSON key.

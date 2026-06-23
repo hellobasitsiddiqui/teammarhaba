@@ -6,15 +6,15 @@ name: Deploy
 #   backend -> Cloud Run          (TM-60 / 1.4.1)
 
 on:
-  push:
-    branches: [main]
-    # Docs-only merges change nothing deployable — skip the full ~11-min CD (TM-151). The web job
-    # copies web/src (no *.md is served) and the backend deploys a code image; neither depends on
-    # Markdown or docs/. A MIXED merge (any non-doc file) still deploys. `workflow_dispatch` below
-    # stays unconditional, so a manual redeploy is always available.
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+  # Deploy is a DELIBERATE action, not an automatic side-effect of merging (TM-153) — that's the
+  # GitHub-Actions-minutes win. Run it from the Actions tab → "Deploy" → Run (it deploys current
+  # `main`): before a test session, at sprint-end, whenever. Because it now runs *after* the merge,
+  # `main`'s image already exists in Artifact Registry, so the "Wait for the SHA-tagged image" step
+  # below finds it on the first check — the old ~2-3 min idle polling is gone.
+  #
+  # (A `deploy`-label auto-trigger is a tracked follow-up — TM-153. It can't just `gh workflow run`
+  # this with GITHUB_TOKEN, because a token-dispatched run won't trigger a workflow — the same trap
+  # as TM-148 — so it needs in-workflow PR-close handling + commit-SHA care, done deliberately.)
   workflow_dispatch:
 
 # Cancel a superseded deploy if main moves again before this finishes.
