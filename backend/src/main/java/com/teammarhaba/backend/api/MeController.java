@@ -29,6 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
  *       locale). Partial: any omitted/{@code null} field is left unchanged.</li>
  *   <li>{@code POST /me/resend-verification} — re-triggers the Firebase email-verification for the
  *       caller (TM-165); rate-limited per user and refused if the address is already verified.</li>
+ *   <li>{@code POST /me/onboarding-complete} — marks first-run onboarding finished and self-attests
+ *       the supplied age (TM-163); idempotent.</li>
+ *   <li>{@code POST /me/accept-terms} — records the accepted terms version + acceptance time
+ *       (TM-163).</li>
  * </ul>
  *
  * <p>Identity ({@code uid}/{@code email}) always comes from the verified token, never the client.
@@ -82,6 +86,26 @@ public class MeController {
         emailVerificationService.resend(caller.uid());
     }
 
+    /**
+     * Mark first-run onboarding complete for the caller (TM-163). Idempotent. Self-attests the age
+     * the user supplied (TM-162): {@code ageVerified} flips to {@code true} only once an age is on
+     * record. Returns the updated profile so the client sees the new lifecycle state.
+     */
+    @PostMapping("/me/onboarding-complete")
+    MeResponse completeOnboarding(@AuthenticationPrincipal VerifiedUser caller) {
+        return toResponse(userService.completeOnboarding(caller));
+    }
+
+    /**
+     * Record the caller's acceptance of a terms version (TM-163). The server stamps {@code now()} as
+     * the acceptance time. Returns the updated profile carrying the accepted version + timestamp.
+     */
+    @PostMapping("/me/accept-terms")
+    MeResponse acceptTerms(
+            @AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid AcceptTermsRequest request) {
+        return toResponse(userService.acceptTerms(caller, request.version()));
+    }
+
     private static MeResponse toResponse(User user) {
         return new MeResponse(
                 user.getFirebaseUid(),
@@ -95,6 +119,10 @@ public class MeController {
                 user.getNotificationPref(),
                 user.getTimezone(),
                 user.getLocale(),
-                user.getRole().name());
+                user.getRole().name(),
+                user.isOnboardingCompleted(),
+                user.getTermsAcceptedVersion(),
+                user.getTermsAcceptedAt(),
+                user.isAgeVerified());
     }
 }

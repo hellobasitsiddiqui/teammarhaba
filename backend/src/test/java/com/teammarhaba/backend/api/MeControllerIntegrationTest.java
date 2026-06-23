@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -173,6 +174,94 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-bad-pref", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"notificationPref\":\"SMS\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void lifecycleFlagsDefaultToUnsetOnFreshAccount() throws Exception {
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-lc-default", "ada@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(false))
+                .andExpect(jsonPath("$.ageVerified").value(false))
+                .andExpect(jsonPath("$.termsAcceptedVersion").doesNotExist())
+                .andExpect(jsonPath("$.termsAcceptedAt").doesNotExist());
+    }
+
+    @Test
+    void onboardingCompleteSetsFlagAndVerifiesAgeWhenAgeOnRecord() throws Exception {
+        var who = caller("uid-onboard", "ada@example.com");
+
+        // Age supplied first (TM-162), so completing onboarding self-attests it (TM-163).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":36}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.ageVerified").value(true));
+
+        // Persisted: the flags survive on a subsequent GET.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.ageVerified").value(true));
+    }
+
+    @Test
+    void onboardingCompleteLeavesAgeUnverifiedWhenNoAgeOnRecord() throws Exception {
+        var who = caller("uid-onboard-noage", "eve@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.ageVerified").value(false));
+    }
+
+    @Test
+    void acceptTermsRecordsVersionAndTimestampVisibleOnMe() throws Exception {
+        var who = caller("uid-terms", "grace@example.com");
+
+        mockMvc.perform(post("/api/v1/me/accept-terms")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":\"2026-06-01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.termsAcceptedVersion").value("2026-06-01"))
+                .andExpect(jsonPath("$.termsAcceptedAt").exists());
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.termsAcceptedVersion").value("2026-06-01"))
+                .andExpect(jsonPath("$.termsAcceptedAt").exists());
+    }
+
+    @Test
+    void acceptTermsOverwritesOnReAcceptanceOfNewVersion() throws Exception {
+        var who = caller("uid-terms-reaccept", "grace@example.com");
+
+        mockMvc.perform(post("/api/v1/me/accept-terms")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":\"2026-01-01\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/me/accept-terms")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":\"2026-06-01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.termsAcceptedVersion").value("2026-06-01"));
+    }
+
+    @Test
+    void acceptTermsRejectsBlankVersionWith400() throws Exception {
+        mockMvc.perform(post("/api/v1/me/accept-terms")
+                        .with(caller("uid-terms-blank", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":\"\"}"))
                 .andExpect(status().isBadRequest());
     }
 

@@ -1,6 +1,17 @@
 {
   "components" : {
     "schemas" : {
+      "AcceptTermsRequest" : {
+        "properties" : {
+          "version" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "version" ],
+        "type" : "object"
+      },
       "AuditEventResponse" : {
         "properties" : {
           "action" : {
@@ -36,6 +47,9 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "ageVerified" : {
+            "type" : "boolean"
+          },
           "city" : {
             "type" : "string"
           },
@@ -58,10 +72,20 @@
             "enum" : [ "EMAIL", "PUSH", "BOTH" ],
             "type" : "string"
           },
+          "onboardingCompleted" : {
+            "type" : "boolean"
+          },
           "phone" : {
             "type" : "string"
           },
           "role" : {
+            "type" : "string"
+          },
+          "termsAcceptedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "termsAcceptedVersion" : {
             "type" : "string"
           },
           "timezone" : {
@@ -422,6 +446,52 @@
           },
           "required" : true
         },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/accept-terms" : {
+      "post" : {
+        "operationId" : "acceptTerms",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AcceptTermsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/onboarding-complete" : {
+      "post" : {
+        "operationId" : "completeOnboarding",
         "responses" : {
           "200" : {
             "content" : {

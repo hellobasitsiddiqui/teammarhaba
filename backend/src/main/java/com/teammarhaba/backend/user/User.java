@@ -16,9 +16,12 @@ import org.hibernate.annotations.SQLRestriction;
  * A TeamMarhaba account, keyed by the Firebase UID from the verified ID token (TM-79).
  *
  * <p>Schema is owned by Flyway ({@code V2__create_users}, {@code V3__users_soft_delete_and_version},
- * {@code V5__users_profile_fields}); Hibernate runs validate-only, so this mapping must match the
- * table exactly. The user-editable profile fields (names, city, age, phone, notification preference,
- * timezone, locale) are added by TM-162 and edited via {@code PATCH /api/v1/me}.
+ * {@code V5__users_profile_fields}, {@code V6__users_lifecycle_fields}); Hibernate runs validate-only,
+ * so this mapping must match the table exactly. The user-editable profile fields (names, city, age,
+ * phone, notification preference, timezone, locale) are added by TM-162 and edited via
+ * {@code PATCH /api/v1/me}. The account-lifecycle flags (onboarding completed, terms accepted
+ * version + timestamp, self-attested age verified) are added by TM-163 and driven by the
+ * {@code POST /api/v1/me/onboarding-complete} and {@code POST /api/v1/me/accept-terms} transitions.
  *
  * <p>Two cross-cutting data conventions land here first (TM-114), to be reused by later entities:
  *
@@ -80,6 +83,18 @@ public class User {
 
     @Column(name = "locale")
     private String locale;
+
+    @Column(name = "onboarding_completed", nullable = false)
+    private boolean onboardingCompleted = false;
+
+    @Column(name = "terms_accepted_version")
+    private String termsAcceptedVersion;
+
+    @Column(name = "terms_accepted_at")
+    private Instant termsAcceptedAt;
+
+    @Column(name = "age_verified", nullable = false)
+    private boolean ageVerified = false;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
@@ -190,6 +205,38 @@ public class User {
 
     public void setLocale(String locale) {
         this.locale = locale;
+    }
+
+    public boolean isOnboardingCompleted() {
+        return onboardingCompleted;
+    }
+
+    /** Mark first-run onboarding finished (TM-163). Idempotent. */
+    public void completeOnboarding() {
+        this.onboardingCompleted = true;
+    }
+
+    public String getTermsAcceptedVersion() {
+        return termsAcceptedVersion;
+    }
+
+    public Instant getTermsAcceptedAt() {
+        return termsAcceptedAt;
+    }
+
+    /** Record acceptance of a terms {@code version} at {@code when} (TM-163). */
+    public void acceptTerms(String version, Instant when) {
+        this.termsAcceptedVersion = version;
+        this.termsAcceptedAt = when;
+    }
+
+    public boolean isAgeVerified() {
+        return ageVerified;
+    }
+
+    /** Self-attested age check (TM-163). Real ID verification is out of scope. */
+    public void setAgeVerified(boolean ageVerified) {
+        this.ageVerified = ageVerified;
     }
 
     public Role getRole() {
