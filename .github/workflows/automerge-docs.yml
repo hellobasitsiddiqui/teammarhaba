@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Merge if every changed file is Markdown
+        id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -38,6 +39,65 @@ jobs:
           mergeable="$(gh pr view "$PR" -R "$REPO" --json mergeable -q '.mergeable')"
           if [ "$mergeable" = "CONFLICTING" ]; then echo "PR #$PR is conflicting — skip."; exit 0; fi
 
+          # Capture the PR title (safe multiline output) for the Jira-key fallback below.
+          {
+            echo "pr_title<<__EOF__"
+            gh pr view "$PR" -R "$REPO" --json title -q '.title'
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
           echo "Docs-only PR #$PR — squash-merging."
-          gh pr merge "$PR" -R "$REPO" --squash --delete-branch \
-            || echo "::warning::merge did not complete (not mergeable yet?) — leaving for manual merge."
+          if gh pr merge "$PR" -R "$REPO" --squash --delete-branch; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::merge did not complete (not mergeable yet?) — leaving for manual merge."
+          fi
+
+      # A GITHUB_TOKEN-authored merge does NOT trigger other workflows (GitHub's recursion
+      # guard), so jira-merge-to-done.yml never fires for these auto-merges and the ticket
+      # strands In Review. Do the same Done-transition inline here (mirrors that workflow).
+      - name: Move the merged docs PR's Jira ticket to Done
+        if: ${{ steps.merge.outputs.merged == 'true' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_TITLE: ${{ steps.merge.outputs.pr_title }}
+        run: |
+          # Fail soft throughout: never fail the job over Jira.
+          set -o pipefail
+
+          # 1) Find a TM-NNN key: branch name first, then PR title.
+          KEY="$(printf '%s' "$BRANCH" | grep -oE 'TM-[0-9]+' | head -n1 || true)"
+          if [ -z "$KEY" ]; then
+            KEY="$(printf '%s' "$PR_TITLE" | grep -oE 'TM-[0-9]+' | head -n1 || true)"
+          fi
+          if [ -z "$KEY" ]; then
+            echo "No TM-NNN key in branch ('$BRANCH') or title ('$PR_TITLE') — nothing to do."
+            exit 0
+          fi
+
+          # 2) Need the Jira secrets to do anything.
+          if [ -z "$JIRA_BASE_URL" ] || [ -z "$JIRA_USER_EMAIL" ] || [ -z "$JIRA_API_TOKEN" ]; then
+            echo "::warning::Jira secrets not configured — skipping transition for $KEY."
+            exit 0
+          fi
+
+          # 3) Transition to Done (id 51). Idempotent: a re-transition just warns, no error.
+          echo "Transitioning $KEY → Done (id 51)…"
+          code="$(curl -sS -o /tmp/jira-resp.txt -w '%{http_code}' \
+            -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data '{"transition":{"id":"51"}}' \
+            "$JIRA_BASE_URL/rest/api/3/issue/$KEY/transitions" || echo "000")"
+
+          if [ "$code" = "204" ]; then
+            echo "$KEY transitioned to Done."
+          else
+            echo "::warning::Could not transition $KEY (HTTP $code) — it may already be Done or the transition isn't available from its current status. Not failing the job."
+            echo "Response: $(cat /tmp/jira-resp.txt 2>/dev/null)"
+          fi
+          # 4) Always succeed.
+          exit 0
