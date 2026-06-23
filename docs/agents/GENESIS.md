@@ -54,7 +54,9 @@
 - **merge→Done GitHub Action** + its Jira API secrets — so a merged PR auto-moves its ticket to Done from day 1. *(Agents don't loop back after opening a PR; without this, tickets strand In Review — TeamMarhaba's TM-86.)* **Make the docs-only auto-merge path transition too:** a PR merged by the `automerge-docs` Action is `GITHUB_TOKEN`-authored, and GitHub **won't let that trigger** the merge→Done workflow — so wire the Jira "→ Done" transition *into* `automerge-docs` itself, or docs-PR tickets silently strand In Review (TM-148, hit on TM-138/TM-145).
 
 ## C. Conventions to bake into CLAUDE.md (every one was added mid-flight)
-- **Branch naming:** `<type>/TM-XX-short-desc` — `feature` / `chore` / `fix`.
+- **Branch naming:** `<type>/TM-XX-short-desc`, where `<type>` matches the *nature* of the work
+  (not the convenience of the moment): `feature/` = an app feature (Story/Task), `fix/` = a Bug,
+  `chore/` = infra / CI / cloud / docs / config. (e.g. a CI-minutes cut is `chore/`, not `feature/`.)
 - **Markdown only — NEVER Jira wiki markup** (`h3.`, `{code}`, `{{...}}`, `[text|url]` render broken). Descriptions **and** comments.
 - **Board fields / time tracking:** Start date on claim, Due date, **worklog** on PR, **Flagged = Impediment** when blocked. Story points = the estimate.
 - **Blocker-logging:** log every wall as a ticket comment + a `[finding → future improvement]` note; split human-only steps into `human-in-the-loop` tickets.

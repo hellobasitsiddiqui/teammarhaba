@@ -6,6 +6,11 @@ name: E2E
 on:
   push:
     branches: [main]
+    # Docs-only merges can't change app behaviour — skip the ~3-min browser run (TM-151). A mixed
+    # merge (any non-doc file) still runs. `workflow_dispatch` stays unconditional for manual runs.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 concurrency:

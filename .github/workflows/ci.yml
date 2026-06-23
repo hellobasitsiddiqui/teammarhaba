@@ -23,10 +23,70 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap pre-gate (TM-151): does this push/PR touch anything but docs? A docs-only change (every
+  # file ends in .md or lives under docs/) skips the expensive backend build/test, image build and
+  # web checks below — that's the GitHub-Actions-minutes win. Gated at the JOB level on purpose,
+  # NOT via workflow-level `paths-ignore`: CI must still RUN and conclude `success` on docs-only
+  # PRs so (a) the docs auto-merge — which fires on this workflow's `workflow_run` success — still
+  # triggers, and (b) any required status check still reports (a skipped job satisfies branch
+  # protection, whereas a never-started workflow strands a required check forever).
+  changes:
+    name: Detect non-docs changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0   # full history so we can diff against the base
+
+      - name: Determine whether any non-docs file changed
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          # Resolve the diff range for either event. Fail SAFE: on any uncertainty we treat the
+          # change as code (run the full CI) rather than risk skipping a real build.
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch --no-tags origin "$BASE_REF" 2>/dev/null || true
+            RANGE="origin/${BASE_REF}...HEAD"
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${BEFORE}...HEAD"
+          else
+            RANGE="HEAD^...HEAD"
+          fi
+          echo "Event: $EVENT | diff range: $RANGE"
+          if ! FILES="$(git diff --name-only $RANGE 2>/dev/null)"; then
+            echo "diff failed — running full CI (fail-safe)."
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Changed files:"; printf '%s\n' "$FILES"
+          if [ -z "$FILES" ]; then
+            echo "No files in range — running full CI (fail-safe)."
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # "docs" = every changed file ends in .md OR lives under docs/. If ANY file falls outside
+          # that set, this is a code change and the full pipeline runs. Print-and-test (not `grep
+          # -q`) so the result is identical under GNU grep and non-GNU variants.
+          NONDOCS="$(printf '%s\n' "$FILES" | grep -vE '(\.md$)|(^docs/)' || true)"
+          if [ -n "$NONDOCS" ]; then
+            echo "Non-docs change detected → code=true (full CI). Triggering files:"; printf '%s\n' "$NONDOCS"
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Docs-only change → code=false (skip backend/image/web build)."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # Fast PR gate for the web build tooling (TM-144). No browser/cloud — just Node, so it stays on
-  # the PR gate (unlike the e2e suite, which runs on main only).
+  # the PR gate (unlike the e2e suite, which runs on main only). Skipped on docs-only changes (TM-151).
   web-build:
     name: Web asset fingerprinting check
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,6 +104,8 @@ jobs:
 
   backend:
     name: Backend build + test
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}   # skip on docs-only changes (TM-151)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,7 +161,8 @@ jobs:
 
   backend-image:
     name: Backend image (build; push to Artifact Registry on main)
-    needs: backend            # only build/push an image that passed build + tests
+    needs: [changes, backend]   # only build/push an image that passed build + tests
+    if: ${{ needs.changes.outputs.code == 'true' }}   # no image for docs-only changes (TM-151)
     runs-on: ubuntu-latest
     permissions:
       contents: read
