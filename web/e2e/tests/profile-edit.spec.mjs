@@ -53,6 +53,24 @@ test("a user edits their profile via #/profile and the change persists", async (
   }
 });
 
+test("a user with a blank phone can save their profile (TM-188)", async ({ page }) => {
+  // Regression for TM-188: a blank phone field used to be sent as "" and rejected (400). Saving
+  // with the phone left empty must now succeed.
+  await page.goto("/#/login");
+  await page.fill("#email", ADMIN.email);
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+  await expect(page.locator("#signout-btn")).toBeVisible();
+
+  await page.click("#nav-profile");
+  await expect(page.locator("#profile-form")).toBeVisible();
+
+  // Explicitly clear the phone field, then save — no inline error, success toast.
+  await page.fill("#profile-phone", "");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Profile saved");
+});
+
 test("client-side validation blocks an out-of-range age before any save", async ({ page }) => {
   await page.goto("/#/login");
   await page.fill("#email", ADMIN.email);

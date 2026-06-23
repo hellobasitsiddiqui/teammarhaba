@@ -192,6 +192,48 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void patchWithBlankPhoneSucceedsAndRoundTrips() throws Exception {
+        // TM-188: a user with no phone on record saves with a blank phone — must be accepted (200),
+        // not rejected by the phone pattern, and round-trip as an empty/cleared value.
+        var who = caller("uid-blank-phone", "ada@example.com");
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Ada L\",\"phone\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Ada L"))
+                .andExpect(jsonPath("$.phone").value(""));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Ada L"))
+                .andExpect(jsonPath("$.phone").value(""));
+    }
+
+    @Test
+    void patchWithAbsentPhoneSucceeds() throws Exception {
+        // TM-188: omitting phone entirely is the client's new behaviour for a blank field — still 200.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-no-phone", "grace@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Grace H\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Grace H"))
+                .andExpect(jsonPath("$.phone").doesNotExist());
+    }
+
+    @Test
+    void rejectsNonEmptyInvalidPhoneWith400() throws Exception {
+        // TM-188: allowing "" must not relax validation for a genuinely invalid, non-empty phone.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-phone", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"not-a-phone!\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void rejectsUnknownTimezoneWith400() throws Exception {
         mockMvc.perform(patch("/api/v1/me")
                         .with(caller("uid-bad-tz", "x@example.com"))

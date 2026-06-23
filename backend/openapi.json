@@ -219,7 +219,7 @@
           "phone" : {
             "maxLength" : 32,
             "minLength" : 0,
-            "pattern" : "^\\+?[0-9 ()./-]{3,32}$",
+            "pattern" : "^$|^\\+?[0-9 ()./-]{3,32}$",
             "type" : "string"
           },
           "timezone" : {

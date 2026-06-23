@@ -188,7 +188,7 @@ function fillForm(profile) {
   }
 }
 
-/** Build the PATCH body: trimmed values, age coerced to a number, blanks sent as "" to clear. */
+/** Build the PATCH body: trimmed values, age coerced to a number; blank fields are omitted. */
 function collectPatch() {
   const patch = {};
   for (const field of FIELDS) {
@@ -196,7 +196,9 @@ function collectPatch() {
     if (field.type === "number") {
       // Only send age when present; an empty number field means "no change" rather than 0.
       if (raw !== "") patch[field.key] = Number(raw);
-    } else {
+    } else if (raw !== "") {
+      // Omit blank optional text fields rather than sending "" — a blank phone would otherwise
+      // be rejected by the server pattern (TM-188), and an untouched field should mean "no change".
       patch[field.key] = raw;
     }
   }
