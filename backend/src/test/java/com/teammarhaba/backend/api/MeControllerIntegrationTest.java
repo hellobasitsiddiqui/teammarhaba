@@ -45,6 +45,10 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.uid").value("uid-new"))
                 .andExpect(jsonPath("$.email").value("ada@example.com"))
                 .andExpect(jsonPath("$.displayName").doesNotExist())
+                // Profile fields are empty until set; notificationPref defaults to EMAIL (TM-162).
+                .andExpect(jsonPath("$.firstName").doesNotExist())
+                .andExpect(jsonPath("$.age").doesNotExist())
+                .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
                 .andExpect(jsonPath("$.role").value("USER"));
 
         Long firstId = users.findByFirebaseUid("uid-new").orElseThrow().getId();
@@ -71,6 +75,91 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/me").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Grace H"));
+    }
+
+    @Test
+    void patchRoundTripsAllProfileFields() throws Exception {
+        var who = caller("uid-profile", "ibn@example.com");
+
+        // PATCH every TM-162 field in one call...
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                """
+                                {
+                                  "firstName": "Ibn",
+                                  "lastName": "Battuta",
+                                  "city": "Tangier",
+                                  "age": 30,
+                                  "phone": "+212 (5) 39-00-00",
+                                  "notificationPref": "BOTH",
+                                  "timezone": "Africa/Casablanca",
+                                  "locale": "ar-MA"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Ibn"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"));
+
+        // ...and GET reads them all back (round-trip through Postgres).
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Ibn"))
+                .andExpect(jsonPath("$.lastName").value("Battuta"))
+                .andExpect(jsonPath("$.city").value("Tangier"))
+                .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.phone").value("+212 (5) 39-00-00"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"))
+                .andExpect(jsonPath("$.timezone").value("Africa/Casablanca"))
+                .andExpect(jsonPath("$.locale").value("ar-MA"));
+    }
+
+    @Test
+    void patchIsPartialAndLeavesUnsetFieldsAlone() throws Exception {
+        var who = caller("uid-partial", "rumi@example.com");
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Rumi\"}"))
+                .andExpect(status().isOk());
+
+        // A second PATCH of a different field must not wipe the first.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Konya\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Rumi"))
+                .andExpect(jsonPath("$.city").value("Konya"));
+    }
+
+    @Test
+    void rejectsInvalidProfileFields() throws Exception {
+        var who = caller("uid-bad", "bad@example.com");
+
+        // Age out of range -> 400 with a field error (Bean Validation).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":7}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("age"));
+
+        // Unknown notification preference -> 400 (unparseable enum in the body).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"notificationPref\":\"CARRIER_PIGEON\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Unknown IANA timezone -> 400 (best-effort service check).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Mars/Olympus_Mons\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

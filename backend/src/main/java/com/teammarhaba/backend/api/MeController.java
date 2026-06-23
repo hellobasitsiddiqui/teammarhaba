@@ -18,7 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <ul>
  *   <li>{@code GET} — returns the persisted profile, <strong>provisioning</strong> the account on
  *       first sight (TM-112) from the verified {@link VerifiedUser} principal.</li>
- *   <li>{@code PATCH} — updates the user-editable profile ({@code displayName}).</li>
+ *   <li>{@code PATCH} — updates the user-editable profile (display name plus the TM-162 fields:
+ *       names, city, age, phone, notification preference, timezone, locale).</li>
  * </ul>
  *
  * <p>Identity ({@code uid}/{@code email}) always comes from the verified token, never the client.
@@ -40,11 +41,22 @@ public class MeController {
 
     @PatchMapping("/me")
     MeResponse updateMe(@AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid UpdateMeRequest request) {
-        return toResponse(userService.updateDisplayName(caller, request.displayName()));
+        return toResponse(userService.updateProfile(caller, request.toProfileUpdate()));
     }
 
     private static MeResponse toResponse(User user) {
         return new MeResponse(
-                user.getFirebaseUid(), user.getEmail(), user.getDisplayName(), user.getRole().name());
+                user.getFirebaseUid(),
+                user.getEmail(),
+                user.getDisplayName(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getCity(),
+                user.getAge(),
+                user.getPhone(),
+                user.getNotificationPref().name(),
+                user.getTimezone(),
+                user.getLocale(),
+                user.getRole().name());
     }
 }

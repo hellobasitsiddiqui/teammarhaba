@@ -54,6 +54,33 @@ public class User {
     @Column(name = "display_name")
     private String displayName;
 
+    // Self-service profile fields (TM-162). All user-editable via PATCH /api/v1/me; all nullable
+    // except notificationPref, which defaults to EMAIL. Schema owned by V5__users_profile_fields.
+    @Column(name = "first_name")
+    private String firstName;
+
+    @Column(name = "last_name")
+    private String lastName;
+
+    @Column(name = "city")
+    private String city;
+
+    @Column(name = "age")
+    private Integer age;
+
+    @Column(name = "phone")
+    private String phone;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notification_pref", nullable = false)
+    private NotificationPreference notificationPref = NotificationPreference.EMAIL;
+
+    @Column(name = "timezone")
+    private String timezone;
+
+    @Column(name = "locale")
+    private String locale;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
     private Role role = Role.USER;
@@ -99,6 +126,73 @@ public class User {
     /** Profile update (TM-112). Identity fields (uid/email) come from the token, not the client. */
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
+    }
+
+    public String getFirstName() {
+        return firstName;
+    }
+
+    public String getLastName() {
+        return lastName;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public Integer getAge() {
+        return age;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public NotificationPreference getNotificationPref() {
+        return notificationPref;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public String getLocale() {
+        return locale;
+    }
+
+    /**
+     * Apply a partial profile update (TM-162): each non-{@code null} field overwrites its column,
+     * a {@code null} leaves it unchanged (PATCH semantics). Identity ({@code uid}/{@code email}) is
+     * never updatable here. Mutation lives on the entity so dirty-checking flushes it on commit.
+     */
+    public void applyProfile(ProfileUpdate p) {
+        if (p.displayName() != null) {
+            this.displayName = p.displayName();
+        }
+        if (p.firstName() != null) {
+            this.firstName = p.firstName();
+        }
+        if (p.lastName() != null) {
+            this.lastName = p.lastName();
+        }
+        if (p.city() != null) {
+            this.city = p.city();
+        }
+        if (p.age() != null) {
+            this.age = p.age();
+        }
+        if (p.phone() != null) {
+            this.phone = p.phone();
+        }
+        if (p.notificationPref() != null) {
+            this.notificationPref = p.notificationPref();
+        }
+        if (p.timezone() != null) {
+            this.timezone = p.timezone();
+        }
+        if (p.locale() != null) {
+            this.locale = p.locale();
+        }
     }
 
     public Role getRole() {

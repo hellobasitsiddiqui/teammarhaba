@@ -11,6 +11,14 @@
 
 ---
 
+### 2026-06-23 agent-A — Profile epic ROOT shipped (TM-162) — coordination for the parallel B-tickets
+- **Flyway `V5__users_profile_fields.sql` is TAKEN.** Adds to `users`: `first_name`, `last_name`, `city`, `age`, `phone`, `notification_pref` (NOT NULL DEFAULT 'EMAIL'), `timezone`, `locale`. **TM-163 (lifecycle), TM-164 (`lastActiveAt`), TM-166 (avatar URL) must each take the NEXT free `Vn` (V6, V7, …) — do not reuse V5.** Flyway version clashes are git-invisible (same `Vn`, different filename) — renumber on rebase.
+- **`User.java` is the hot file** — I added 8 fields + getters + `applyProfile(ProfileUpdate)` (conditional PATCH). Other B-tickets adding columns: keep edits additive, append your fields, and re-run the whole entity for dupes.
+- **New types you can build on (don't re-create):** `user/NotificationPreference` enum (EMAIL/PUSH/BOTH), `user/ProfileUpdate` record (the domain PATCH command — extend it if you add editable fields). `MeResponse` + `UpdateMeRequest` now carry the profile fields; the PATCH path is `MeController.updateMe → UserService.updateProfile(caller, ProfileUpdate)`.
+- **`PATCH /api/v1/me` semantics:** `null` field = leave unchanged (no clear-via-PATCH in v1). Validation: sizes + age 13–120 + lenient phone + BCP-47 locale on the DTO; **IANA timezone is checked best-effort in `UserService.validateTimezone`** (unknown zone → 400 `BadRequestException`). Enum bound directly (bad value → 400 from the framework).
+- **OpenAPI drift:** any `/me` schema change must regenerate `backend/openapi.json` — `./mvnw -pl backend -Dtest=OpenApiDriftTest -Dopenapi.generate=true -Dspotless.check.skip=true test` — or `verify` fails. I regenerated it for V5's fields.
+- **F1 (TM-167 edit-profile page)** consumes the new `GET/PATCH /me` fields; **TM-166 (avatar)** mirrors `photoURL` — both unblocked once this merges.
+
 ## Environment & toolchain (known state)
 
 ### 2026-06-20 23:35 agent-A — ⚠ CD was fully RED: `iamcredentials.googleapis.com` was disabled (now fixed)

@@ -5,8 +5,12 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -67,20 +71,69 @@ public class UserService {
         return users.findByFirebaseUid(caller.uid()).orElseGet(() -> reactivateOrInsert(caller));
     }
 
-    /** Provision-then-update: a PATCH before any GET still works. {@code null} leaves it unchanged. */
+    /**
+     * Apply a partial profile update for the caller (TM-162; generalises the TM-112 display-name
+     * update). Provision-then-update so a PATCH before any GET still works; a {@code null} field
+     * leaves its column unchanged. An empty update is a no-op (no write, no audit row).
+     *
+     * <p>The IANA {@code timezone} is validated best-effort here — only when provided — against the
+     * runtime zone set; an unknown zone is a {@code 400} rather than a silently stored bad value.
+     * The other fields are validated declaratively on the request DTO.
+     */
     @Transactional
-    public User updateDisplayName(VerifiedUser caller, String displayName) {
+    public User updateProfile(VerifiedUser caller, ProfileUpdate update) {
+        validateTimezone(update.timezone());
         User user = provision(caller);
-        if (displayName != null) {
-            user.setDisplayName(displayName); // dirty-checking flushes on commit
+        if (!update.isEmpty()) {
+            user.applyProfile(update); // dirty-checking flushes on commit
             audit.record(
                     caller.uid(),
                     AuditAction.PROFILE_UPDATED,
                     TARGET_USER,
                     caller.uid(),
-                    Map.of("field", "displayName"));
+                    Map.of("fields", String.join(",", changedFields(update))));
         }
         return user;
+    }
+
+    /** Best-effort IANA check: reject a provided zone that the JVM doesn't know (400). */
+    private static void validateTimezone(String timezone) {
+        if (timezone != null && !ZoneId.getAvailableZoneIds().contains(timezone)) {
+            throw new BadRequestException("Unknown timezone: " + timezone);
+        }
+    }
+
+    /** The names of the fields this update actually sets — recorded on the audit row. */
+    private static List<String> changedFields(ProfileUpdate u) {
+        List<String> fields = new ArrayList<>();
+        if (u.displayName() != null) {
+            fields.add("displayName");
+        }
+        if (u.firstName() != null) {
+            fields.add("firstName");
+        }
+        if (u.lastName() != null) {
+            fields.add("lastName");
+        }
+        if (u.city() != null) {
+            fields.add("city");
+        }
+        if (u.age() != null) {
+            fields.add("age");
+        }
+        if (u.phone() != null) {
+            fields.add("phone");
+        }
+        if (u.notificationPref() != null) {
+            fields.add("notificationPref");
+        }
+        if (u.timezone() != null) {
+            fields.add("timezone");
+        }
+        if (u.locale() != null) {
+            fields.add("locale");
+        }
+        return fields;
     }
 
     /**

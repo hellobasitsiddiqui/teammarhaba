@@ -32,13 +32,38 @@
       },
       "MeResponse" : {
         "properties" : {
+          "age" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "city" : {
+            "type" : "string"
+          },
           "displayName" : {
             "type" : "string"
           },
           "email" : {
             "type" : "string"
           },
+          "firstName" : {
+            "type" : "string"
+          },
+          "lastName" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "notificationPref" : {
+            "type" : "string"
+          },
+          "phone" : {
+            "type" : "string"
+          },
           "role" : {
+            "type" : "string"
+          },
+          "timezone" : {
             "type" : "string"
           },
           "uid" : {
@@ -103,8 +128,50 @@
       },
       "UpdateMeRequest" : {
         "properties" : {
+          "age" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "displayName" : {
             "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "firstName" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "lastName" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "locale" : {
+            "maxLength" : 35,
+            "minLength" : 0,
+            "pattern" : "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+            "type" : "string"
+          },
+          "notificationPref" : {
+            "enum" : [ "EMAIL", "PUSH", "BOTH" ],
+            "type" : "string"
+          },
+          "phone" : {
+            "maxLength" : 32,
+            "minLength" : 0,
+            "pattern" : "^[+0-9 ()\\-]*$",
+            "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
             "minLength" : 0,
             "type" : "string"
           }
