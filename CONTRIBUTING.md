@@ -99,6 +99,13 @@ The next deploy (web) and image build (backend) pick the tag up automatically �
 change. Use `vMAJOR.MINOR.PATCH`. The CI image build and the deploy both check out full
 history + tags (`fetch-depth: 0`) so `git describe` can see them.
 
+**Tagging policy — tag deliberate releases only, *not* every deploy.** A tag means "this is a
+release worth naming" (a notable feature, a demo, end-of-sprint). Between tags, `git describe`
+already shows `vX.Y.Z-N-gSHA` — the *distance* (`-N-`) is the useful signal. Tagging every merge
+makes the numbers meaningless and floods the tag list. You never need a tag to identify or roll
+back a deploy: the SHA is in the build stamp, CI tags the image by SHA, and Cloud Run keeps every
+revision (roll back by revision). SemVer: **patch** = fix, **minor** = feature, **major** = breaking.
+
 ## Conventions reference
 
 - **Code style** is enforced by Spotless (backend) — CI fails on violations, so format
