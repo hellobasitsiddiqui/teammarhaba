@@ -72,6 +72,11 @@
 - Sprint naming theme (anatomy: SKELETON → SPINE → …). Start with Sprint 0 / Genesis, then SKELETON 1.
 - **Right-size the sprint box to the fleet** — ~1–2 days or goal-based slices, **not** calendar weeks (agents cleared a 4-day slice in ~1 day; the real limiter is human-gate throughput). **Freeze the sprint** — route mid-flight improvements to the next backlog for a clean burndown + true velocity.
 - **No work outside an *open* sprint.** Don't move a ticket to In Progress or start hands-on work unless it sits in a *started* sprint — the started sprint is the unit of committed work. Sprint create/start is **UI-only** (the connector has no sprint tool), so the flow is: propose name + goal → a human starts it → *then* pull tickets in and work.
+- **Sprint-closure gate — three mandatory items before a sprint closes.** A sprint is not "done" when its feature tickets are merged; it's done when it's been *verified and shipped*. Before closing any sprint, the orchestrator creates/completes:
+  1. **A manual-testing ticket** — a `human`-labelled Task to manually exercise the sprint's delivered features end-to-end (the human residue automated tests don't cover: real auth/email, exploratory, "does it actually feel right"). Lands in the same sprint; closing waits on it.
+  2. **A full code review** — a review pass over *everything the sprint changed* (not per-PR isolated diffs), to catch cross-ticket interactions, drift, and consistency. Raise a review ticket or run the review workflow; record findings as follow-up tickets.
+  3. **A deploy** — ship the sprint's merged `main` to production (the `teammarhaba-deploy` skill / manual `workflow_dispatch`) and confirm the new build is actually serving (build-stamp matches HEAD). An unshipped sprint isn't finished.
+  Only after manual test passes + review is clear + the deploy is verified does the human close the sprint. Treat these three as the sprint's Definition of Done, the same way green CI is a PR's.
 
 ## E. Then — parallel work
 - Launch agents on `/jira-task-claim`; they self-host from the repo (clone → auto-load `CLAUDE.md` / skills / blackboard → pull). Kickoff = one line + `agentId`.
