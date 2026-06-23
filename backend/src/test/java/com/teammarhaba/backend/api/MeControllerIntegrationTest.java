@@ -74,6 +74,109 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void patchThenGetRoundTripsEveryProfileField() throws Exception {
+        var who = caller("uid-profile", "ada@example.com");
+
+        String body =
+                """
+                {
+                  "displayName": "Ada L",
+                  "firstName": "Ada",
+                  "lastName": "Lovelace",
+                  "city": "London",
+                  "age": 36,
+                  "phone": "+44 20 7946 0958",
+                  "notificationPref": "BOTH",
+                  "timezone": "Europe/London",
+                  "locale": "en-GB"
+                }""";
+
+        // PATCH echoes the persisted profile back.
+        mockMvc.perform(patch("/api/v1/me").with(who).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Ada L"))
+                .andExpect(jsonPath("$.firstName").value("Ada"))
+                .andExpect(jsonPath("$.lastName").value("Lovelace"))
+                .andExpect(jsonPath("$.city").value("London"))
+                .andExpect(jsonPath("$.age").value(36))
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"))
+                .andExpect(jsonPath("$.timezone").value("Europe/London"))
+                .andExpect(jsonPath("$.locale").value("en-GB"));
+
+        // GET reads the same values back from the database.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.uid").value("uid-profile"))
+                .andExpect(jsonPath("$.email").value("ada@example.com"))
+                .andExpect(jsonPath("$.displayName").value("Ada L"))
+                .andExpect(jsonPath("$.firstName").value("Ada"))
+                .andExpect(jsonPath("$.lastName").value("Lovelace"))
+                .andExpect(jsonPath("$.city").value("London"))
+                .andExpect(jsonPath("$.age").value(36))
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"))
+                .andExpect(jsonPath("$.timezone").value("Europe/London"))
+                .andExpect(jsonPath("$.locale").value("en-GB"));
+    }
+
+    @Test
+    void notificationPrefDefaultsToEmailUntilSet() throws Exception {
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-default-pref", "eve@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
+                .andExpect(jsonPath("$.firstName").doesNotExist());
+    }
+
+    @Test
+    void patchIsPartialAndLeavesOmittedFieldsUnchanged() throws Exception {
+        var who = caller("uid-partial", "grace@example.com");
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Grace\",\"city\":\"Baltimore\"}"))
+                .andExpect(status().isOk());
+
+        // A second PATCH touching only one field must not wipe the others.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lastName\":\"Hopper\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Grace"))
+                .andExpect(jsonPath("$.lastName").value("Hopper"))
+                .andExpect(jsonPath("$.city").value("Baltimore"));
+    }
+
+    @Test
+    void rejectsOutOfRangeAgeWith400() throws Exception {
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-age", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsUnknownTimezoneWith400() throws Exception {
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-tz", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Mars/Olympus_Mons\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsUnknownNotificationPrefWith400() throws Exception {
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-pref", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"notificationPref\":\"SMS\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void rejectsAnonymousWith401() throws Exception {
         mockMvc.perform(get("/api/v1/me")).andExpect(status().isUnauthorized());
     }

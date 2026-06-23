@@ -5,8 +5,14 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -67,20 +73,89 @@ public class UserService {
         return users.findByFirebaseUid(caller.uid()).orElseGet(() -> reactivateOrInsert(caller));
     }
 
-    /** Provision-then-update: a PATCH before any GET still works. {@code null} leaves it unchanged. */
+    /**
+     * Apply a partial profile update for the caller (TM-162; generalised from the display-name-only
+     * TM-112 path). Provision-then-update, so a PATCH before any GET still works. Each {@code null}
+     * field is left unchanged; only the fields actually supplied are written and audited.
+     *
+     * <p>Identity ({@code uid}/{@code email}) is taken from the verified token and is never settable
+     * here. Syntactic validation (sizes, age range, phone pattern, enum) happens at the web boundary;
+     * {@code timezone} (IANA id) and {@code locale} (BCP-47 tag) get a best-effort semantic check
+     * here, rejecting an unresolvable value with a {@code 400}.
+     */
     @Transactional
-    public User updateDisplayName(VerifiedUser caller, String displayName) {
+    public User updateProfile(VerifiedUser caller, ProfileUpdate update) {
         User user = provision(caller);
-        if (displayName != null) {
-            user.setDisplayName(displayName); // dirty-checking flushes on commit
+        List<String> changed = new ArrayList<>();
+
+        if (update.displayName() != null) {
+            user.setDisplayName(update.displayName());
+            changed.add("displayName");
+        }
+        if (update.firstName() != null) {
+            user.setFirstName(update.firstName());
+            changed.add("firstName");
+        }
+        if (update.lastName() != null) {
+            user.setLastName(update.lastName());
+            changed.add("lastName");
+        }
+        if (update.city() != null) {
+            user.setCity(update.city());
+            changed.add("city");
+        }
+        if (update.age() != null) {
+            user.setAge(update.age());
+            changed.add("age");
+        }
+        if (update.phone() != null) {
+            user.setPhone(update.phone());
+            changed.add("phone");
+        }
+        if (update.notificationPref() != null) {
+            user.setNotificationPref(update.notificationPref());
+            changed.add("notificationPref");
+        }
+        if (update.timezone() != null) {
+            user.setTimezone(validTimezone(update.timezone()));
+            changed.add("timezone");
+        }
+        if (update.locale() != null) {
+            user.setLocale(validLocale(update.locale()));
+            changed.add("locale");
+        }
+
+        if (!changed.isEmpty()) {
+            // dirty-checking flushes on commit
             audit.record(
                     caller.uid(),
                     AuditAction.PROFILE_UPDATED,
                     TARGET_USER,
                     caller.uid(),
-                    Map.of("field", "displayName"));
+                    Map.of("fields", String.join(",", changed)));
         }
         return user;
+    }
+
+    /** Best-effort IANA timezone check: the value must resolve to a known {@link ZoneId}. */
+    private static String validTimezone(String timezone) {
+        try {
+            return ZoneId.of(timezone).getId();
+        } catch (DateTimeException ex) {
+            throw new BadRequestException("Unknown timezone: " + timezone);
+        }
+    }
+
+    /**
+     * Best-effort BCP-47 locale check: the tag must parse and name a language. Java's lenient parser
+     * accepts a blank/garbage tag without complaint, so we additionally require a non-empty language.
+     */
+    private static String validLocale(String locale) {
+        Locale parsed = Locale.forLanguageTag(locale);
+        if (parsed.getLanguage().isEmpty()) {
+            throw new BadRequestException("Unknown locale: " + locale);
+        }
+        return locale;
     }
 
     /**
