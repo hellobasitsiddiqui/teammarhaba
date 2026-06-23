@@ -6,10 +6,17 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs on the same ref (e.g. new push to a PR branch).
+# Concurrency is scoped by EVENT (TM-146):
+#   • pull_request → group per branch ref + cancel-in-progress: a new push to a PR
+#     supersedes its older run, keeping the PR gate fast.
+#   • push to main → group per COMMIT (github.sha) + NO cancel: two merges in quick
+#     succession must NOT cancel each other, or the first merge's `backend-image` push job
+#     is killed, its `:<sha>` image never reaches Artifact Registry, and that commit's
+#     deploy then strands ~10 min waiting for an image that never arrives. Every merged
+#     SHA must produce its pushed image.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Least privilege by default; widen per-job where needed.
 permissions:
