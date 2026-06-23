@@ -19,7 +19,9 @@ export default defineConfig({
   use: {
     baseURL: WEB_BASE_URL,
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    // Capture a screenshot at the end of EVERY test (not just failures) so each run yields
+    // evidence to attach to the sprint test ticket (TM-195). Trace/video stay failure-only (size).
+    screenshot: "on",
     video: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

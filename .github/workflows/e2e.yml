@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: '0 3 * * *'   # ~03:00 UTC nightly
   workflow_dispatch:
+    inputs:
+      evidence_ticket:
+        description: "Jira ticket key to attach screenshot evidence to (e.g. TM-190). Blank = skip."
+        required: false
+        default: ""
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -120,8 +125,8 @@ jobs:
         working-directory: web/e2e
         run: npm test
 
-      - name: Upload Playwright report + traces (on failure)
-        if: ${{ failure() }}
+      - name: Upload Playwright report + screenshots (always — evidence)
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
@@ -129,6 +134,38 @@ jobs:
             web/e2e/playwright-report
             web/e2e/test-results
           if-no-files-found: warn
+
+      # Best-effort, non-fatal: attach the run's screenshots/report to a Jira ticket when the run was
+      # dispatched with an `evidence_ticket` (e.g. the sprint test ticket TM-190). Skips silently if
+      # no ticket was given or the JIRA_* secrets aren't set — never fails the e2e job.
+      - name: Post screenshot evidence to the Jira ticket (best-effort)
+        if: ${{ always() && github.event.inputs.evidence_ticket != '' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET: ${{ github.event.inputs.evidence_ticket }}
+        run: |
+          set -o pipefail
+          if [ -z "$JIRA_BASE_URL" ] || [ -z "$JIRA_USER_EMAIL" ] || [ -z "$JIRA_API_TOKEN" ]; then
+            echo "::warning::Jira secrets not set — skipping evidence post for $TICKET."; exit 0
+          fi
+          if [ ! -d web/e2e/playwright-report ] && [ ! -d web/e2e/test-results ]; then
+            echo "::warning::no Playwright report/screenshots found — nothing to post."; exit 0
+          fi
+          ZIP="/tmp/playwright-evidence-${GITHUB_RUN_ID}.zip"
+          ( cd web/e2e && zip -qr "$ZIP" playwright-report test-results ) || true
+          if [ ! -f "$ZIP" ]; then echo "::warning::failed to build evidence zip — skipping."; exit 0; fi
+          code="$(curl -sS -o /tmp/jira-att.txt -w '%{http_code}' \
+            -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@${ZIP}" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$TICKET/attachments" || echo "000")"
+          case "$code" in
+            200|201) echo "Posted evidence zip to $TICKET." ;;
+            *) echo "::warning::could not attach evidence to $TICKET (HTTP $code): $(cat /tmp/jira-att.txt 2>/dev/null)" ;;
+          esac
+          exit 0
 
       - name: Upload service logs (on failure)
         if: ${{ failure() }}

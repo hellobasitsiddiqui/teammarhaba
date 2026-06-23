@@ -26,6 +26,17 @@ Notes:
 
 ---
 
+## Per-sprint testing — always SPLIT (DECIDED 2026-06-23)
+
+Every sprint's testing work is **split into two tickets**, never one mixed manual ticket:
+
+1. **Automated** (`test` / `e2e`) — the deterministic, repeatable checks: form CRUD + persistence, validation, role routing, lifecycle, account-state, file size/type rules → Playwright specs in `web/e2e/`, run by the `E2E` workflow against the Firebase emulators. Screenshots are captured for **every** test and the workflow can post them back to the human ticket (dispatch with `evidence_ticket`).
+2. **Human** (`human` + `test`) — only the residue automation can't cover: **real** email delivery, **real** prod Firebase auth/storage, subjective "does it feel right", and post-deploy smoke (build-stamp matches the deployed commit).
+
+**Why:** re-running deterministic checks by hand every sprint is waste and drifts; automate them once, leave humans the judgment calls. Pattern set splitting **TM-190** (human) → **TM-195** (automated). **Sprint close is gated on both green.**
+
+---
+
 ## Sprint 1 — SKELETON (1)
 
 First sprint of the SKELETON phase: the opening foundation slice. Bones that stand and a pipeline that's green — no movement (deploy) yet; that lands in a later SKELETON sprint.
