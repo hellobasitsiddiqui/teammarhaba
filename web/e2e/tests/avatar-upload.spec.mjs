@@ -70,6 +70,13 @@ test("a non-image file is rejected client-side before any upload", async ({ page
   await page.click("#nav-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
 
+  // The avatar preview reflects the user's current photoURL. The first test in this file uploaded an
+  // avatar for this same ADMIN account (persisted on the Firebase user in the emulator), so the
+  // preview img is already showing. Capture its state up-front so we can prove the rejected pick
+  // leaves the EXISTING avatar untouched.
+  const previewImg = page.locator(".tm-profile-avatar .tm-avatar-img");
+  const photoURLBefore = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
+
   // A text file isn't image/* — the control rejects it inline (mirrors the Storage rules) and never
   // uploads. No success toast appears; an error message + error toast do.
   await page.locator("#profile-avatar-file").setInputFiles({
@@ -80,5 +87,18 @@ test("a non-image file is rejected client-side before any upload", async ({ page
 
   await expect(page.locator("#profile-avatar-error")).toBeVisible();
   await expect(page.locator("#tm-toasts .tm-toast-error")).toBeVisible();
-  await expect(page.locator(".tm-profile-avatar .tm-avatar-img")).toBeHidden();
+  // Never a success toast — the bytes were never uploaded.
+  await expect(page.locator("#tm-toasts .tm-toast-success")).toHaveCount(0);
+
+  // The rejection does NOT touch the existing avatar: photoURL is unchanged and the preview shows
+  // exactly what it did before (visible if the user already had one — which they do here). Rejecting
+  // a NEW file must never wipe the user's current avatar.
+  const photoURLAfter = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
+  expect(photoURLAfter).toBe(photoURLBefore);
+  if (photoURLBefore) {
+    await expect(previewImg).toBeVisible();
+    await expect(previewImg).toHaveAttribute("src", photoURLBefore);
+  } else {
+    await expect(previewImg).toBeHidden();
+  }
 });
