@@ -185,6 +185,14 @@ Alerting / SLOs + dashboards (metrics exist; alerts don't) · correlation / requ
 ### Platform / UX / compliance leftovers (a later platform epic or Epic 3 — *not* hardening)
 Account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive · onboarding / first-login tutorial · white-label / theming (re-skin) · email / notifications service · file / object storage · full-text search · background jobs / async queue · scheduled tasks · webhooks / outbound events · machine-to-machine auth · push notifications (FCM) · cookie-consent banner · admin impersonation · audit-log viewer/export UI · GDPR export/deletion + consent/retention · feature flags.
 
+### Growth
+Generic growth/virality features — deferred, captured so they're not lost.
+
+| Feature | Status | Where / ticket |
+|---|:--:|---|
+| **Refer a user** (invite/referral link or code → attribute referrer↔referee on sign-up; user sees own link + referred-count) | ⬜ | TM-177 (backlog) |
+| **Admin referral-graph page** (visualise who referred whom + top-referrer/virality stats) — *distant follow-on, depends on referral attribution existing* | ⬜ | TM-177 (distant) |
+
 ## → Epic 3 (FLESH, product-specific)
 First real product feature + anything domain-specific (contacts CRUD/tags/CSV/favourites/photo/bulk).
 **Tenancy / teams** is the leading Epic-3 candidate (generic-ish, fits the name).
