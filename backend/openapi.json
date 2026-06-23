@@ -432,6 +432,27 @@
         },
         "tags" : [ "health-controller" ]
       }
+    },
+    "/version" : {
+      "get" : {
+        "operationId" : "version",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "version-controller" ]
+      }
     }
   },
   "servers" : [ {
