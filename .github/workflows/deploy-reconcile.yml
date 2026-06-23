@@ -1,0 +1,107 @@
+name: Deploy reconcile
+
+# Self-healing backstop for CD (TM-146). A green deploy pipeline does not guarantee that the
+# revision serving traffic runs `main`'s latest code — a deploy can be stranded (CI image build
+# cancelled by a back-to-back merge so its `:<sha>` never pushed → that commit's deploy times out
+# waiting for the image) or otherwise skipped. The `ci.yml` per-commit concurrency change (TM-146)
+# prevents the cancel at the source; this workflow is the safety net that *heals* any residual
+# strand without a human noticing: it asserts the Cloud Run service is serving the image built for
+# `main` HEAD and, if not, re-dispatches the Deploy workflow to roll forward.
+#
+# Pairs with deploy.yml's "Verify rollout" (TM-131, which proves the just-deployed revision serves)
+# and the nightly canary (TM-118, which proves a Ready revision exists). This closes the gap those
+# two leave: "a deploy never ran / was stranded, so HEAD never reached prod at all."
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 min — heals a stranded deploy without manual intervention
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: teammarhaba
+  REGION: europe-west2
+  SERVICE: teammarhaba-backend
+  IMAGE: europe-west2-docker.pkg.dev/teammarhaba/containers/backend
+
+jobs:
+  reconcile:
+    name: Reconcile serving revision to main HEAD
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # keyless WIF for gcloud reads
+      actions: write    # re-dispatch the Deploy workflow
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Reconcile (re-deploy if the serving revision isn't main HEAD)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          echo "main HEAD: ${HEAD_SHA}"
+
+          # Canonical digest for an image ref (tag OR digest) — empty if it doesn't exist.
+          digest_of() { gcloud artifacts docker images describe "$1" \
+            --format='value(image_summary.fully_qualified_digest)' 2>/dev/null || true; }
+
+          HEAD_DIGEST="$(digest_of "${IMAGE}:${HEAD_SHA}")"
+          if [ -z "${HEAD_DIGEST}" ]; then
+            # No image for HEAD → CI's build for this commit is missing/failed/still running.
+            # Re-deploying can't help (nothing to roll to); that's a CI signal, not a strand.
+            # Stay green so the reconcile doesn't flap; CI failure / nightly canary surface it.
+            echo "::notice::No image for main HEAD ${HEAD_SHA} yet — nothing to roll forward to. Skipping."
+            exit 0
+          fi
+
+          # Which revision serves 100% of untagged (production) traffic, and what image does it run?
+          gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/svc.json
+          SERVING_REV="$(jq -r '.status.traffic[] | select((.percent==100) and (has("tag")|not)) | .revisionName' /tmp/svc.json | head -n1)"
+          if [ -z "${SERVING_REV}" ] || [ "${SERVING_REV}" = "null" ]; then
+            echo "::warning::Could not determine the serving revision — re-dispatching Deploy to converge."
+            gh workflow run deploy.yml --ref main
+            exit 0
+          fi
+          SERVING_IMG="$(gcloud run revisions describe "${SERVING_REV}" --project="${PROJECT}" --region="${REGION}" --format='value(spec.containers[0].image)')"
+          SERVING_DIGEST="$(digest_of "${SERVING_IMG}")"
+
+          echo "serving revision : ${SERVING_REV}"
+          echo "serving digest   : ${SERVING_DIGEST:-<unresolved>}"
+          echo "main HEAD digest : ${HEAD_DIGEST}"
+
+          if [ "${SERVING_DIGEST}" = "${HEAD_DIGEST}" ]; then
+            echo "In sync — the serving revision runs the image built for main HEAD. Nothing to do."
+            { echo "## ✅ Deploy reconcile — in sync"; echo "Serving \`${SERVING_REV}\` runs main HEAD (\`${HEAD_SHA}\`)."; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Stale: HEAD's image exists but isn't what's serving → a stranded/skipped deploy.
+          # Don't pile up: if a Deploy is already running, let it finish rather than re-dispatch.
+          RUNNING="$(gh run list --workflow=deploy.yml --status=in_progress --json databaseId --jq 'length' 2>/dev/null || echo 0)"
+          QUEUED="$(gh run list --workflow=deploy.yml --status=queued --json databaseId --jq 'length' 2>/dev/null || echo 0)"
+          if [ "${RUNNING}" != "0" ] || [ "${QUEUED}" != "0" ]; then
+            echo "::notice::Serving revision is stale, but a Deploy is already in progress/queued — letting it converge."
+            exit 0
+          fi
+
+          echo "::warning::Stranded deploy — serving '${SERVING_REV}' is not main HEAD. Re-dispatching Deploy to roll forward."
+          gh workflow run deploy.yml --ref main
+          {
+            echo "## 🔧 Deploy reconcile — healed a stranded deploy"
+            echo "Serving \`${SERVING_REV}\` did not match main HEAD (\`${HEAD_SHA}\`); re-dispatched **Deploy** to roll forward."
+          } >> "$GITHUB_STEP_SUMMARY"

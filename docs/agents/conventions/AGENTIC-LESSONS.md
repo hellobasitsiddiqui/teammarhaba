@@ -39,6 +39,7 @@ Kept on replay. **Append a dated lesson whenever the fleet teaches you one**, so
 
 ## Drift & verification — don't trust "green"
 - **"Green pipeline / green deploy" ≠ correct.** Assert the *real* postcondition. For CD: the revision serving traffic == the just-built SHA — not merely `/health` 200. (TM-131: prod served stale code for the entire project behind green deploys, because the verify only curled `/health`.)
+- **`cancel-in-progress` on a shared `main` group strands deploys.** A `concurrency` group keyed on `github.ref` cancels the *previous* `main` run when a second merge lands — including its image-build/push job, so that commit's image never ships and its deploy strands waiting for it (TM-140/TM-146). Scope concurrency by event: cancel on PR branch refs (fast gate), but key `push` runs per-`github.sha` so back-to-back merges never cancel each other. Pair the prevention with a **scheduled reconcile** that re-deploys if the serving revision ≠ `main` HEAD — a deploy that *never landed* is invisible to both the per-deploy verify and a "Ready revision exists" canary.
 - **Keep a drift guard for every contract:** DB schema (`ddl-auto: validate`), env (`.env.example` + fail-loud validator), format (Spotless), coverage (JaCoCo gate), deps (dependency-review / CodeQL / SBOM), API (OpenAPI drift check). Track status in `COMMON-FEATURES.md`.
 - **A coverage tracker catches missing generics early.** Playwright e2e and the "seed the first ADMIN" gap were both found by auditing against the reference spec — not by an agent failing later.
 

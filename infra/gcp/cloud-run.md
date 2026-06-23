@@ -92,6 +92,29 @@ gcloud projects add-iam-policy-binding "$PROJECT" \
 The deploy SA `gha-deployer` already holds project-level `roles/iam.serviceAccountUser`,
 which lets it act-as (`--service-account`) this runtime SA at deploy time.
 
+## Stranded-deploy hardening (TM-146)
+
+A *green* deploy pipeline doesn't guarantee `main`'s latest code is what's serving. Two layers
+keep CD self-correcting:
+
+**1. Prevent — per-commit CI concurrency.** `ci.yml`'s concurrency is scoped by event: PRs cancel
+superseded runs on the branch ref (fast gate); **`push` to `main` keys the group by `github.sha`
+and does not cancel.** Previously a second merge arriving while the first was still building would
+`cancel-in-progress` the first run — killing its `backend-image` push, so that commit's `:<sha>`
+image never reached Artifact Registry. The deploy then strands ~10 min in *Wait for the SHA-tagged
+image* and skips, looking like "still running, just wait" (hit live in TM-140). Per-commit groups
+mean **every merged SHA builds and pushes its image**; the two deploys queue (`deploy.yml`
+concurrency is `cancel-in-progress: false`) and both run, latest serving.
+
+**2. Self-heal — `deploy-reconcile.yml`.** A scheduled workflow (every 30 min, `+ workflow_dispatch`)
+asserts the revision serving 100% of untagged traffic runs the image built for `main` HEAD. If the
+HEAD image exists but isn't serving (a stranded/skipped deploy), it re-dispatches **Deploy** to roll
+forward — no human needed. It no-ops when in sync, when a Deploy is already in progress/queued, or
+when HEAD has no image yet (a CI signal, surfaced by CI failure / the nightly canary instead). This
+complements deploy.yml's *Verify rollout* (TM-131 — proves the just-deployed revision serves) and the
+nightly canary (TM-118 — proves a Ready revision exists) by covering the gap they miss: *a deploy that
+never landed at all.*
+
 ## Cold-start upgrade
 
 `min-instances=0` means a request after idle pays a JVM cold start (helped by
