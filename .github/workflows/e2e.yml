@@ -4,13 +4,11 @@ name: E2E
 # on the PR gate: it's slow (real browser, full stack + Firebase Auth emulator) and would blow up
 # PR latency. The fast PR gate stays in ci.yml. Keep this trigger list exactly as below.
 on:
-  push:
-    branches: [main]
-    # Docs-only merges can't change app behaviour — skip the ~3-min browser run (TM-151). A mixed
-    # merge (any non-doc file) still runs. `workflow_dispatch` stays unconditional for manual runs.
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+  # Nightly + on demand, NOT per-merge (TM-153). The browser suite is slow (real browser + full
+  # stack + Auth emulator) and doesn't need to gate every merge — the fast PR gate (ci.yml) does
+  # that. Run it once a night, and manually whenever (e.g. before a release/sprint-end deploy).
+  schedule:
+    - cron: '0 3 * * *'   # ~03:00 UTC nightly
   workflow_dispatch:
 
 concurrency:
