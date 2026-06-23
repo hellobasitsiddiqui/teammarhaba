@@ -1,0 +1,8 @@
+
+### 2026-06-23 agent-A — Web asset fingerprinting + cache headers (TM-144)
+- **Deploy now content-hashes web assets** (cache-bust): `web/tools/fingerprint.mjs` (framework-free, Node built-ins) renames `web/dist/assets/*.{js,css}` → `name.<10hex>.ext`, rewriting `index.html` refs AND the ES-module import specifiers. **Transitive hashing** — a file's hash is computed after its deps' specifiers are rewritten, so changing one module busts every importer (a cached importer can't point at a 404'd dep). Runs in `deploy.yml` + `preview.yml` AFTER the `config.js` injections.
+- **`firebase.json` headers:** `**` → `Cache-Control: no-cache` (entry always revalidated), `/assets/**` → `public, max-age=31536000, immutable` (listed last so it wins for assets). Net: returning users get new CSS/JS on a normal reload — no hard refresh.
+- **`index.html` stays unhashed** (it's the entry). Comment examples like `// import { x } from "./api.js"` are intentionally NOT rewritten (only real import statements are) — harmless, they don't load.
+- **Test:** `web/tools/fingerprint.test.mjs` (node's built-in runner) covers rename/hash, ref + specifier rewriting, determinism, and transitive bust. New **`web-build` job in `ci.yml`** runs it on the PR gate (`node --test web/tools/*.test.mjs` — unquoted so the shell globs; portable across Node versions). Fast (Node-only), unlike the main-only e2e.
+- **e2e unaffected** — it serves `web/src` (unhashed) directly; only `web/dist` is fingerprinted at deploy.
+- **Follow-up:** the nginx container path (web/Dockerfile + nginx.conf, used by the WebView bundle) still serves stable URLs — fingerprint it too if that path needs the same guarantee.
