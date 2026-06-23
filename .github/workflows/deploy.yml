@@ -8,6 +8,13 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Docs-only merges change nothing deployable — skip the full ~11-min CD (TM-151). The web job
+    # copies web/src (no *.md is served) and the backend deploys a code image; neither depends on
+    # Markdown or docs/. A MIXED merge (any non-doc file) still deploys. `workflow_dispatch` below
+    # stays unconditional, so a manual redeploy is always available.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 # Cancel a superseded deploy if main moves again before this finishes.
