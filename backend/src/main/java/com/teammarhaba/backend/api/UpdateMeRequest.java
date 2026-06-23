@@ -17,7 +17,8 @@ import jakarta.validation.constraints.Size;
  * <ul>
  *   <li>{@code age} — bounded to a sensible human range (13–120).
  *   <li>{@code phone} — lenient pattern: digits, spaces and common separators, optional leading
- *       {@code +}; we do not attempt to verify a real, dialable number.
+ *       {@code +}; we do not attempt to verify a real, dialable number. An empty string is also
+ *       accepted (clear/leave blank), consistent with the optional {@code @Size} text fields.
  *   <li>{@code notificationPref} — the {@link NotificationPref} enum; an unknown value is rejected
  *       by Jackson at deserialization time (uniform {@code 400}).
  *   <li>{@code timezone} (IANA id) and {@code locale} (BCP-47 tag) — best-effort validated in
@@ -41,7 +42,7 @@ public record UpdateMeRequest(
         @Size(max = 255) String lastName,
         @Size(max = 255) String city,
         @Min(13) @Max(120) Integer age,
-        @Size(max = 32) @Pattern(regexp = "^\\+?[0-9 ()./-]{3,32}$", message = "must be a valid phone number")
+        @Size(max = 32) @Pattern(regexp = "^$|^\\+?[0-9 ()./-]{3,32}$", message = "must be a valid phone number")
                 String phone,
         NotificationPref notificationPref,
         @Size(max = 64) String timezone,
