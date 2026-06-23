@@ -93,20 +93,28 @@ The `sprint in openSprints()` clause is the **scope gate** — only tickets in t
 - **Hot-file avoidance (optional, soft tie-breaker):** the only conflicts that actually bite this flow are **concurrent branches editing the same "hot file"** — `backend/pom.xml`, `.github/dependabot.yml`, shared workflow YAMLs (`ci.yml`, `deploy.yml`), `backend/src/main/resources/application*.yml`, the README stubs. They're not parent/child clashes — they're *siblings* both touching one file. So when picking among the top-`K` ready tasks, **if another task is already In Progress / In Review that edits a hot file, prefer a ready task that does *not* touch that same hot file** (the pinned AGENT EXECUTION PROMPT lists each task's files/scope — read it). It's a tie-breaker, not a blocker: if every ready task touches the hot file, just take one and expect a trivial rebase. Don't branch a dependent off its parent's *branch* to dodge this — with squash-merge that creates worse history divergence; branch off `main` and rely on "ready = blockers Done" so `main` already has the parent's code.
 
 ### 3. claim() — race-safe even when all agents share ONE Jira user
-In Claude Code every agent acts as **the same Jira account (you)**, so `assignee` can't distinguish agents. The real lock is the **status transition**; a **claim comment** breaks ties. Each agent has a unique `agentId` (e.g. `agent-A`), passed in its kickoff prompt.
+In Claude Code every agent acts as **the same Jira account (you)**, so `assignee` can't distinguish agents. The real lock is the **status transition**; a **claim comment** breaks ties. Each running instance has an `agentId` (e.g. `agent-A`), passed in its kickoff prompt — **it MUST be unique per instance** (see the warning below).
 
 ```
 transitionJiraIssue(t, "In Progress")          # THE LOCK: removes t from every
 editJiraIssue(t, assignee = me)                #   other agent's To-Do/unassigned query
-addComment(t, "[claim] <agentId> <ISO-8601>")  # stamp who owns it
-# resolve the rare simultaneous double-flip:
-read t.comments
-owner = earliest "[claim]" comment's agentId
-if owner != me:  abandon t (do NOT touch it further) and pick the next candidate
-else:            you own t -> proceed
+myClaim = addComment(t, "[claim] <agentId> <ISO-8601>")   # stamp who owns it — KEEP its comment id
+
+# RE-VERIFY before doing any work — re-read truth from Jira, then bail unless all hold:
+read t            # fresh status + all comments
+abandon t if t.status != "In Progress"                       # moved on you: PR opened / reclaimed / Done
+abandon t if any other run left a "PR: <url>" comment        # already being worked → don't duplicate
+earliest = the earliest "[claim]" comment on t
+abandon t if earliest is NOT `myClaim`                        # compare by COMMENT IDENTITY (id/timestamp),
+                                                             #   not by agentId — see warning
+else: you own t -> proceed
 ```
 
-The status flip is what enforces mutual exclusion (the candidate query is `status = "To Do" AND assignee is EMPTY`, so an In-Progress/assigned task is invisible to others). The claim comment only settles the rare case where two agents flipped the *same* task in the same instant — earliest stamp wins, the loser just walks away (it does **not** roll the status back, since the winner already owns it).
+"Abandon" = leave it exactly as-is (do **not** roll the status back — the real winner owns it) and pick the next candidate.
+
+The status flip is what enforces mutual exclusion (the candidate query is `status = "To Do" AND assignee is EMPTY`, so an In-Progress/assigned task is invisible to others). The re-verify settles the rare cases the lock alone can't: two agents flipping the *same* task in the same instant (earliest claim wins), or a task already in flight whose status flip you raced past.
+
+> ⚠️ **Compare by claim-comment identity, never by agentId alone.** Resolving the tie with "is the earliest `[claim]`'s *agentId* mine?" silently breaks when **two instances share an agentId**: both see their own id as the owner and **both proceed** → duplicate work. This actually happened — two `agent-C` instances both built **TM-107** (PR #78 merged, #81 closed as a duplicate). The check above instead asks "is the earliest `[claim]` *the specific comment I just posted*?" (you kept its id), so the later duplicate yields even when the agentId matches. **Also give every running instance a unique agentId** (`agent-C1`, `agent-C2` — never two `agent-C`) so the status-lock + tie-break stay unambiguous; the identity check is the backstop for when that slips.
 
 ### 4. work() → In Review → Done
 Execute the task's **pinned Agent execution prompt** on a branch named **`<type>/TM-XX-short-kebab-desc`** (`feature` = app code, `chore` = infra/CI/cloud/docs/config, `fix` = bug; e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`). **As soon as you open the PR:**
