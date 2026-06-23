@@ -15,8 +15,10 @@ import org.hibernate.annotations.SQLRestriction;
 /**
  * A TeamMarhaba account, keyed by the Firebase UID from the verified ID token (TM-79).
  *
- * <p>Schema is owned by Flyway ({@code V2__create_users}, {@code V3__users_soft_delete_and_version});
- * Hibernate runs validate-only, so this mapping must match the table exactly.
+ * <p>Schema is owned by Flyway ({@code V2__create_users}, {@code V3__users_soft_delete_and_version},
+ * {@code V5__users_profile_fields}); Hibernate runs validate-only, so this mapping must match the
+ * table exactly. The user-editable profile fields (names, city, age, phone, notification preference,
+ * timezone, locale) are added by TM-162 and edited via {@code PATCH /api/v1/me}.
  *
  * <p>Two cross-cutting data conventions land here first (TM-114), to be reused by later entities:
  *
@@ -53,6 +55,31 @@ public class User {
 
     @Column(name = "display_name")
     private String displayName;
+
+    @Column(name = "first_name")
+    private String firstName;
+
+    @Column(name = "last_name")
+    private String lastName;
+
+    @Column(name = "city")
+    private String city;
+
+    @Column(name = "age")
+    private Integer age;
+
+    @Column(name = "phone")
+    private String phone;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "notification_pref", nullable = false)
+    private NotificationPref notificationPref = NotificationPref.EMAIL;
+
+    @Column(name = "timezone")
+    private String timezone;
+
+    @Column(name = "locale")
+    private String locale;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
@@ -99,6 +126,70 @@ public class User {
     /** Profile update (TM-112). Identity fields (uid/email) come from the token, not the client. */
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
+    }
+
+    public String getFirstName() {
+        return firstName;
+    }
+
+    public void setFirstName(String firstName) {
+        this.firstName = firstName;
+    }
+
+    public String getLastName() {
+        return lastName;
+    }
+
+    public void setLastName(String lastName) {
+        this.lastName = lastName;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public void setCity(String city) {
+        this.city = city;
+    }
+
+    public Integer getAge() {
+        return age;
+    }
+
+    public void setAge(Integer age) {
+        this.age = age;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public NotificationPref getNotificationPref() {
+        return notificationPref;
+    }
+
+    public void setNotificationPref(NotificationPref notificationPref) {
+        this.notificationPref = notificationPref;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public void setTimezone(String timezone) {
+        this.timezone = timezone;
+    }
+
+    public String getLocale() {
+        return locale;
+    }
+
+    public void setLocale(String locale) {
+        this.locale = locale;
     }
 
     public Role getRole() {
