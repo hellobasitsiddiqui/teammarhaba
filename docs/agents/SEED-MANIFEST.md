@@ -11,14 +11,13 @@ docs/agents/
   GENESIS.md                      ← run-FIRST bootstrap/replay checklist
   CONSTANTS.md                    ← the ONE file you edit to re-skin
   SEED-MANIFEST.md                ← this file
-  protocol/                       ← how the fleet operates
+  protocol/                       ← how the fleet operates (pure generic — copy wholesale)
     AGENT-CLAIM-PROTOCOL.md
-    DEPENDENCY-DAG.md             ← (project-specific graph)
     housekeeping.md
   conventions/
     AGENTIC-LESSONS.md            ← fleet-orchestration playbook
   project/                        ← THIS build's instance (rewrite on a new project)
-    COMMON-FEATURES.md · SPRINTS.md · EPIC-2-PLAN.md · REPLAY.md
+    DEPENDENCY-DAG.md · COMMON-FEATURES.md · SPRINTS.md · EPIC-2-PLAN.md · REPLAY.md
   runtime/                        ← per-run scratch (ships empty / regenerated)
     blackboard.md · inbox/
 ```
@@ -37,7 +36,7 @@ docs/agents/
 | `docs/agents/protocol/AGENT-CLAIM-PROTOCOL.md` | **GENERIC-OS** | copy as-is |
 | `docs/agents/protocol/housekeeping.md` | **GENERIC-OS** | copy as-is |
 | `docs/agents/conventions/AGENTIC-LESSONS.md` | **GENERIC-OS** | copy as-is; append new cross-cutting lessons |
-| `docs/agents/protocol/DEPENDENCY-DAG.md` | **PROJECT-INSTANCE** | regenerate from the new epic breakdown |
+| `docs/agents/project/DEPENDENCY-DAG.md` | **PROJECT-INSTANCE** | regenerate from the new epic breakdown |
 | `docs/agents/project/COMMON-FEATURES.md` | **PROJECT-INSTANCE** | keep the generic feature rows; reset the status column |
 | `docs/agents/project/SPRINTS.md` | **PROJECT-INSTANCE** | new sprint log |
 | `docs/agents/project/EPIC-*-PLAN.md` | **PROJECT-INSTANCE** | new epic plans |
@@ -52,5 +51,8 @@ docs/agents/
 1. **New empty repo** (default branch `main`).
 2. **Copy the GENERIC-OS paths** above into it (`CLAUDE.md`, `.claude/`, `docs/agents/{GENESIS,CONSTANTS,SEED-MANIFEST}.md`, `protocol/`, `conventions/`, an empty `runtime/blackboard.md`).
 3. **Edit `CONSTANTS.md`** — every value for the new project (name, GCP/Jira/GitHub ids).
-4. **Run `GENESIS.md`** — the linear Sprint-0 bootstrap (human prereqs → GCP/IAM wiring → repo + merge→Done Action → Jira project).
-5. **Launch the fleet** — agents run `/jira-task-claim`, self-host from the repo, and pull `labels = replay` (or the new backlog) wave by wave.
+4. **Rename the worked example.** The generic files carry the previous project name as a worked example — most visibly `CLAUDE.md`'s title + opening description. Find/replace the old name → the new one across the copied files, and rewrite `CLAUDE.md`'s intro for the new product. (`CONSTANTS.md` is the source of truth for *values*; this step is just the human-readable prose.)
+5. **Run `GENESIS.md`** — the linear Sprint-0 bootstrap (human prereqs → GCP/IAM wiring → repo + merge→Done Action → Jira project).
+6. **Launch the fleet** — agents run `/jira-task-claim`, self-host from the repo, and pull `labels = replay` (or the new backlog) wave by wave.
+
+> **Forward references are expected, not bugs.** Generic files point at project-instance docs you haven't written yet — `project/DEPENDENCY-DAG.md`, `project/SPRINTS.md`, `project/REPLAY.md`. Those are produced *during* the build (the epic breakdown + GENESIS), so the links resolve as the project fills in. Don't treat them as missing files.
