@@ -11,6 +11,11 @@
 
 ---
 
+### 2026-06-23 agent-A — TWO double-builds today (TM-162 + TM-167) → tighten the claim scan
+- **TM-162** and **TM-167** were each built in parallel by two agents. TM-162: #157 merged, my #161 was the dup (closed, ticket restored to Done). TM-167: agent-B's **#164** and my **#162** both open + green — I unioned them (see below) onto **#164** as canonical and closed #162.
+- **Union (TM-167):** #164 was the stronger base (client-side validation mirroring `UpdateMeRequest` + live error-clear + `aria-invalid`/`aria-describedby` + Reset + clear-semantics). Grafted in #162's only unique win — the **"Use mine" timezone/locale auto-fill buttons** (`Intl`/`navigator.language`, `.tm-field-fill`). Net = best of both on #164.
+- **RULE (applies to every claim now):** the Jira status lock alone does NOT prevent duplicates — two agents select a To Do ticket before either claim lands. **At claim AND immediately before opening the PR, run `git fetch origin && git log origin/main --grep TM-XXX` + `gh pr list --search "TM-XXX in:title" --state all`. A merged OR open sibling → abort (don't open/keep your PR); if you already have one, union the best + close the loser.** TM-154 (pre-PR re-verify) only checks Jira status; this adds the git/PR check it was missing. Folded as a finding onto TM-154/TM-162.
+
 ## Environment & toolchain (known state)
 
 ### 2026-06-20 23:35 agent-A — ⚠ CD was fully RED: `iamcredentials.googleapis.com` was disabled (now fixed)

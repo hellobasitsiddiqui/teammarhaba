@@ -17,18 +17,23 @@
 
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
+import { enterProfile } from "./profile.js";
 import { toast } from "./ui.js";
 
 const LOGIN = "#/login";
 const HOME = "#/home";
 const ADMIN = "#/admin";
-const PROTECTED = new Set([HOME, ADMIN]);
+// Self-service edit-profile view (TM-167) — protected, available to any signed-in user.
+const PROFILE = "#/profile";
+const PROTECTED = new Set([HOME, ADMIN, PROFILE]);
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
 let isAdmin = false;
 // Whether the admin console is currently mounted/loaded, so we (re)load it only on entry.
 let adminActive = false;
+// Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
+let profileActive = false;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
@@ -38,7 +43,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -60,16 +65,21 @@ function render() {
   const loginView = $("auth-signed-out");
   const homeView = $("auth-signed-in");
   const adminView = $("admin-view");
+  const profileView = $("profile-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
+  if (profileView) profileView.hidden = route !== PROFILE;
 
   // Nav reflects auth state: a sign-in link when signed out, the sign-out control when in.
   const navSignIn = $("nav-signin");
   const navSignOut = $("signout-btn");
   const navAdmin = $("nav-admin");
+  const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
+  // The edit-profile link shows for any signed-in user (TM-167).
+  if (navProfile) navProfile.hidden = !signedIn;
   // The admin link shows only for a signed-in ADMIN (TM-133).
   if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin);
   const homeAdminLink = $("home-admin-link");
@@ -115,6 +125,15 @@ function guard() {
     }
   } else {
     adminActive = false;
+  }
+  // Same lifecycle for the edit-profile view (TM-167): mount + reload its values on entry.
+  if (route === PROFILE) {
+    if (!profileActive) {
+      profileActive = true;
+      enterProfile();
+    }
+  } else {
+    profileActive = false;
   }
 }
 

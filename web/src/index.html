@@ -15,6 +15,8 @@
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out. -->
         <nav class="app-nav" aria-label="Account">
             <a id="nav-signin" href="#/login" hidden>Sign in</a>
+            <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
+            <a id="nav-profile" href="#/profile" hidden>Profile</a>
             <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
             <a id="nav-admin" href="#/admin" hidden>Admin</a>
             <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
@@ -57,6 +59,10 @@
         <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
              builds the table/filters/actions into this container; router.js owns its visibility. -->
         <section id="admin-view" class="admin-console" aria-label="Admin users console" hidden></section>
+
+        <!-- Edit-profile view (TM-167): self-service #/profile view for any signed-in user. profile.js
+             (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
+        <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>
 
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
