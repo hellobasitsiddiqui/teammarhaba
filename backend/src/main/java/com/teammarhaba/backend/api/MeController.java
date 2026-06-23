@@ -1,20 +1,27 @@
 package com.teammarhaba.backend.api;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.AccountState;
 import com.teammarhaba.backend.auth.EmailVerificationService;
 import com.teammarhaba.backend.auth.FirebaseAccountStateService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.common.PageRequests;
+import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.user.ProfileUpdate;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import jakarta.validation.Valid;
+import java.util.Set;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -45,17 +52,25 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class MeController {
 
+    /** History is a timeline — sort only by time/identity, newest first by default (TM-185). */
+    private static final Set<String> HISTORY_SORTABLE = Set.of("createdAt", "id");
+
+    private static final Sort HISTORY_DEFAULT_SORT = Sort.by(Sort.Direction.DESC, "createdAt");
+
     private final UserService userService;
     private final EmailVerificationService emailVerificationService;
     private final FirebaseAccountStateService accountStateService;
+    private final AuditService auditService;
 
     MeController(
             UserService userService,
             EmailVerificationService emailVerificationService,
-            FirebaseAccountStateService accountStateService) {
+            FirebaseAccountStateService accountStateService,
+            AuditService auditService) {
         this.userService = userService;
         this.emailVerificationService = emailVerificationService;
         this.accountStateService = accountStateService;
+        this.auditService = auditService;
     }
 
     /**
@@ -76,6 +91,22 @@ public class MeController {
     @PatchMapping("/me")
     MeResponse updateMe(@AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid UpdateMeRequest request) {
         return toResponse(userService.updateProfile(caller, toProfileUpdate(request)));
+    }
+
+    /**
+     * The caller's own profile-change history (TM-185), newest first, paginated via the shared list
+     * convention. Each entry is a {@code PROFILE_UPDATED} audit row whose {@code metadata} carries the
+     * field-level {@code old → new} diff, the source ({@code self}/{@code admin}), and the actor. A
+     * user only ever sees their own history — the target is the verified token's uid, never a param.
+     */
+    @GetMapping("/me/history")
+    PageResponse<AuditEventResponse> history(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort) {
+        Pageable pageable = PageRequests.of(page, size, sort, HISTORY_SORTABLE, HISTORY_DEFAULT_SORT);
+        return PageResponse.from(auditService.profileHistory(caller.uid(), pageable), AuditEventResponse::from);
     }
 
     private static ProfileUpdate toProfileUpdate(UpdateMeRequest r) {

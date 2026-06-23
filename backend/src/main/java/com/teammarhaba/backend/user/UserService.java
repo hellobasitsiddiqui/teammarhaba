@@ -11,9 +11,11 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
@@ -100,55 +102,87 @@ public class UserService {
     @Transactional
     public User updateProfile(VerifiedUser caller, ProfileUpdate update) {
         User user = provision(caller);
-        List<String> changed = new ArrayList<>();
+        List<Map<String, Object>> changes = new ArrayList<>();
 
-        if (update.displayName() != null) {
+        if (update.displayName() != null && !Objects.equals(user.getDisplayName(), update.displayName())) {
+            changes.add(change("displayName", user.getDisplayName(), update.displayName()));
             user.setDisplayName(update.displayName());
-            changed.add("displayName");
         }
-        if (update.firstName() != null) {
+        if (update.firstName() != null && !Objects.equals(user.getFirstName(), update.firstName())) {
+            changes.add(change("firstName", user.getFirstName(), update.firstName()));
             user.setFirstName(update.firstName());
-            changed.add("firstName");
         }
-        if (update.lastName() != null) {
+        if (update.lastName() != null && !Objects.equals(user.getLastName(), update.lastName())) {
+            changes.add(change("lastName", user.getLastName(), update.lastName()));
             user.setLastName(update.lastName());
-            changed.add("lastName");
         }
-        if (update.city() != null) {
+        if (update.city() != null && !Objects.equals(user.getCity(), update.city())) {
+            changes.add(change("city", user.getCity(), update.city()));
             user.setCity(update.city());
-            changed.add("city");
         }
-        if (update.age() != null) {
+        if (update.age() != null && !Objects.equals(user.getAge(), update.age())) {
+            changes.add(change("age", user.getAge(), update.age()));
             user.setAge(update.age());
-            changed.add("age");
         }
-        if (update.phone() != null) {
+        if (update.phone() != null && !Objects.equals(user.getPhone(), update.phone())) {
+            changes.add(change("phone", user.getPhone(), update.phone()));
             user.setPhone(update.phone());
-            changed.add("phone");
         }
-        if (update.notificationPref() != null) {
+        if (update.notificationPref() != null && user.getNotificationPref() != update.notificationPref()) {
+            changes.add(change(
+                    "notificationPref",
+                    user.getNotificationPref() == null ? null : user.getNotificationPref().name(),
+                    update.notificationPref().name()));
             user.setNotificationPref(update.notificationPref());
-            changed.add("notificationPref");
         }
         if (update.timezone() != null) {
-            user.setTimezone(validTimezone(update.timezone()));
-            changed.add("timezone");
+            String tz = validTimezone(update.timezone());
+            if (!Objects.equals(user.getTimezone(), tz)) {
+                changes.add(change("timezone", user.getTimezone(), tz));
+                user.setTimezone(tz);
+            }
         }
         if (update.locale() != null) {
-            user.setLocale(validLocale(update.locale()));
-            changed.add("locale");
+            String loc = validLocale(update.locale());
+            if (!Objects.equals(user.getLocale(), loc)) {
+                changes.add(change("locale", user.getLocale(), loc));
+                user.setLocale(loc);
+            }
         }
 
-        if (!changed.isEmpty()) {
-            // dirty-checking flushes on commit
+        if (!changes.isEmpty()) {
+            // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
+            // target, the source (self vs admin), and the old→new diff in its JSONB metadata. Only
+            // actual changes are recorded — a PATCH that sets a field to its current value is a no-op.
+            // Dirty-checking flushes the entity on commit.
             audit.record(
                     caller.uid(),
                     AuditAction.PROFILE_UPDATED,
                     TARGET_USER,
                     caller.uid(),
-                    Map.of("fields", String.join(",", changed)));
+                    profileChangeMetadata(caller.uid(), caller.uid(), "self", changes));
         }
         return user;
+    }
+
+    /** A single field diff entry for the profile-change history (TM-185). Null-tolerant (old may be null). */
+    private static Map<String, Object> change(String field, Object oldValue, Object newValue) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("field", field);
+        entry.put("old", oldValue);
+        entry.put("new", newValue);
+        return entry;
+    }
+
+    /** The PROFILE_UPDATED audit metadata shape (TM-185): who, whom, how, and the field-level diff. */
+    private static Map<String, Object> profileChangeMetadata(
+            String actorUid, String targetUid, String source, List<Map<String, Object>> changes) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("actorUid", actorUid);
+        metadata.put("targetUid", targetUid);
+        metadata.put("source", source);
+        metadata.put("changes", changes);
+        return metadata;
     }
 
     /**

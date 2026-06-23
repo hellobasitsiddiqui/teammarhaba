@@ -27,6 +27,14 @@ public interface AuditRepository extends Repository<AuditEvent, Long> {
     /** A target's history (e.g. one account's events), most recent first. */
     List<AuditEvent> findByTargetTypeAndTargetIdOrderByCreatedAtDesc(String targetType, String targetId);
 
+    /**
+     * Paged history of a single action against one target (TM-185 profile-change history): e.g.
+     * {@code (User, <uid>, PROFILE_UPDATED)} for one account's profile edits. Ordering comes from the
+     * {@link Pageable} (the endpoints default to newest-first).
+     */
+    Page<AuditEvent> findByTargetTypeAndTargetIdAndAction(
+            String targetType, String targetId, AuditAction action, Pageable pageable);
+
     /** Total event count (used by tests / sanity checks). */
     long count();
 
