@@ -21,7 +21,7 @@
     --project="$PROJECT"
   ```
 - **Two separate service accounts — deploy vs runtime:**
-  - **Deploy SA** (`gha-deployer`) — what WIF impersonates at deploy time: `roles/run.admin` + `roles/iam.serviceAccountUser` (to *act-as* the runtime SA). No JSON key.
+  - **Deploy SA** (`gha-deployer`) — what WIF impersonates at deploy time: `roles/run.admin` (deploy Cloud Run) + `roles/iam.serviceAccountUser` (to *act-as* the runtime SA) + `roles/firebasehosting.admin` (deploy the web app — TM-61) + `roles/firebaserules.admin` (publish Storage security rules from CD — TM-191/TM-192; without it the CD storage step warns and no-ops). No JSON key.
   - **Runtime SA** (`<proj>-run@`) — what the *container* runs as (`--service-account=`); least privilege: `roles/secretmanager.secretAccessor` **scoped to each secret it reads** + `roles/cloudsql.client` + `roles/firebaseauth.admin` (to write RBAC role custom claims — without it the admin bootstrap *and* set-role silently fail in prod; TM-140). **Never run on the default compute SA** — it's over-privileged *and* can't read the secret, which is the exact fatal error that failed Sprint 2's first deploy (fixed in PR #26):
   ```bash
   gcloud iam service-accounts create <proj>-run --project="$PROJECT" --display-name="Cloud Run runtime"
