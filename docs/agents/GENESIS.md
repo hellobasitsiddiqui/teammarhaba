@@ -40,6 +40,8 @@
 - **Verify the deploy by Ready-revision, not a public curl.** Cloud Run gates traffic on the `/health` **startup probe** and only marks a revision Ready after it passes — so asserting `latestReadyRevisionName` *is* proof `/health` serves 200, and it works even when the service is private.
 - **Stamp the build id on the surfaces from day 1 (web first page + backend `/health`/`/version`).** Inject the short git SHA into the web bundle at deploy time (same seam as the API-base-URL injection) and expose the backend SHA + build time + Cloud Run revision. Web and backend deploy independently, so without a visible build id you cannot tell *which build is live* — which wasted real time in this build (a stale revision in TM-131, and a deploy that *failed* but looked like "just wait longer" in TM-140). Resolve everything at build/deploy time, never hardcoded, so a fresh replay shows correct values. *(Retrofitted as **TM-142**; front-load it.)*
 - **Don't merge two code PRs back-to-back into `main`.** CI uses a `cancel-in-progress` concurrency group, so a second merge ~seconds later **cancels the first's CI image build** — the first PR's deploy then times out waiting for an image that was never pushed (hit in TM-140: #128's deploy failed this way, only saved because #129's commit sat on top and carried the same code forward). Let each merge's CI + deploy finish, or expect to re-run the stranded deploy.
+- **Fingerprint web assets + set cache headers from day 1.** Serving assets at stable URLs (`/assets/app.js`) with a default `max-age` makes a deploy **invisible to returning users for up to an hour** — a stale CSS cache made the TM-141 fix *look* unshipped. Emit content-hashed filenames (`app.[hash].js`) so a new deploy = new URL = instant cache-bust; serve `index.html` `no-cache` and hashed assets `immutable` (TM-144).
+- **Set up every drift guard up front — including the API contract.** Beyond schema (`ddl-auto: validate`), env (`.env.example` validator), format (Spotless), coverage (JaCoCo), deps (dependency-review/CodeQL/SBOM): commit `openapi.json` + a `verify`-gated drift test so any REST API change must be regenerated + committed or CI fails (TM-135). Fast, PR-gating, no browser/cloud.
 
 ## B. Repo + agent operating system (the linear bootstrap)
 - Create the repo (default branch `main`).
@@ -49,7 +51,7 @@
   - `CLAUDE.md` with **all conventions baked in** (see C).
   - `CLAUDE.md` `@import docs/agents/runtime/blackboard.md` (auto-load) + blackboard read as a **claim-loop step**.
 - Minimal branch protection + the PR→merge flow.
-- **merge→Done GitHub Action** + its Jira API secrets — so a merged PR auto-moves its ticket to Done from day 1. *(Agents don't loop back after opening a PR; without this, tickets strand In Review — TeamMarhaba's TM-86.)*
+- **merge→Done GitHub Action** + its Jira API secrets — so a merged PR auto-moves its ticket to Done from day 1. *(Agents don't loop back after opening a PR; without this, tickets strand In Review — TeamMarhaba's TM-86.)* **Make the docs-only auto-merge path transition too:** a PR merged by the `automerge-docs` Action is `GITHUB_TOKEN`-authored, and GitHub **won't let that trigger** the merge→Done workflow — so wire the Jira "→ Done" transition *into* `automerge-docs` itself, or docs-PR tickets silently strand In Review (TM-148, hit on TM-138/TM-145).
 
 ## C. Conventions to bake into CLAUDE.md (every one was added mid-flight)
 - **Branch naming:** `<type>/TM-XX-short-desc` — `feature` / `chore` / `fix`.
@@ -58,6 +60,7 @@
 - **Blocker-logging:** log every wall as a ticket comment + a `[finding → future improvement]` note; split human-only steps into `human-in-the-loop` tickets.
 - **Blackboard:** read after each claim (loop step) + auto-loaded via `@import`; append cross-cutting findings.
 - **Build tool = Gradle (Kotlin DSL)** — unify with the Gradle-native Android; **don't default to Maven**.
+- **One PR implements its one ticket.** A PR's branch/key must match the work it contains — never build an out-of-scope or deferred feature under a convenient ticket. The orchestrator *flags* a mis-scoped PR (doesn't merge it). *(An onboarding tour shipped under TM-135's OpenAPI-drift ticket — caught only by manual review.)*
 
 ## D. Jira project setup
 - **Epic → Task** model (Tasks are pickable, not Sub-tasks); `group-1.x` + `wave-N` labels.
@@ -65,6 +68,7 @@
 - Board fields available (Start/Due date); *optionally* enable the **Time Tracking field** (UI admin) for hour-based Original Estimate — for AI agents, story points + worklogs already suffice, so usually skip.
 - Sprint naming theme (anatomy: SKELETON → SPINE → …). Start with Sprint 0 / Genesis, then SKELETON 1.
 - **Right-size the sprint box to the fleet** — ~1–2 days or goal-based slices, **not** calendar weeks (agents cleared a 4-day slice in ~1 day; the real limiter is human-gate throughput). **Freeze the sprint** — route mid-flight improvements to the next backlog for a clean burndown + true velocity.
+- **No work outside an *open* sprint.** Don't move a ticket to In Progress or start hands-on work unless it sits in a *started* sprint — the started sprint is the unit of committed work. Sprint create/start is **UI-only** (the connector has no sprint tool), so the flow is: propose name + goal → a human starts it → *then* pull tickets in and work.
 
 ## E. Then — parallel work
 - Launch agents on `/jira-task-claim`; they self-host from the repo (clone → auto-load `CLAUDE.md` / skills / blackboard → pull). Kickoff = one line + `agentId`.

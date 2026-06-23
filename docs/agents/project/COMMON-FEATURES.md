@@ -23,19 +23,19 @@ identified. This file is part of the agent OS (kept on replay).
 ## Authorization & admin
 | Feature | Status | Where / ticket |
 |---|:--:|---|
-| RBAC (USER/ADMIN) — Firebase claims → Spring authorities | 🔜 | TM-110 |
-| **Bootstrap the first ADMIN** (env-driven seed) | 🔜 | TM-110 — *was a gap; without it the admin surface is unreachable* |
-| Admin user-management endpoints (list/enable/disable/set-role) | 🔜 | TM-111 |
-| Admin users console (web UI) | 🔜 | TM-133 |
-| 404-not-403 on cross-user access; admin self-protection | 🔜 | TM-111 |
+| RBAC (USER/ADMIN) — Firebase claims → Spring authorities | ✅ | TM-110 |
+| **Bootstrap the first ADMIN** (env-driven seed) | ✅ | TM-110 — *was a gap; without it the admin surface is unreachable* |
+| Admin user-management endpoints (list/enable/disable/set-role) | ✅ | TM-111 |
+| Admin users console (web UI) | ✅ | TM-133 |
+| 404-not-403 on cross-user access; admin self-protection | ✅ | TM-111 |
 | Fine-grained perms; multi-tenancy / teams | ⬜ | Epic 3 candidate |
 
 ## API design
 | Feature | Status | Where / ticket |
 |---|:--:|---|
 | `/api/v1` versioning; RFC-7807 error model; request validation | ✅ | Epic 1 |
-| Pagination / filter / sort + reusable `Page<T>` | 🔜 | TM-115 (applied to admin users list) |
-| Optimistic concurrency (`@Version` → 409/412) | 🔜 | TM-114 |
+| Pagination / filter / sort + reusable `Page<T>` | ✅ | TM-115 (applied to admin users list) |
+| Optimistic concurrency (`@Version` → 409/412) | ✅ | TM-114 |
 | OpenAPI / Swagger | ✅ (non-prod) | enabled in dev; **off in prod by decision** (TM-76) |
 | Global rate limiting | ⬜ | deferred → Hardening epic |
 
@@ -43,16 +43,16 @@ identified. This file is part of the agent OS (kept on replay).
 | Feature | Status | Where / ticket |
 |---|:--:|---|
 | Spring Data JPA + Hibernate; Flyway-owned schema | ✅ | Epic 1 / TM-71 |
-| Soft-delete + restore | 🔜 | TM-114 (applied to `users`) |
+| Soft-delete + restore | ✅ | TM-114 (applied to `users`) |
 | Created/updated timestamps | ✅ | base entity |
-| Seed / reference data | 🔜 | folded into seed-admin (TM-110) |
+| Seed / reference data | ✅ | folded into seed-admin (TM-110) |
 | Backups / restore (DR) | ⬜ | deferred |
 
 ## Observability
 | Feature | Status | Where / ticket |
 |---|:--:|---|
 | Actuator health (public) + metrics (authed) | ✅ | TM-74 |
-| Append-only audit log | 🔜 | TM-113 |
+| Append-only audit log | ✅ | TM-113 |
 | Structured logging | ✅ (partial) | TM-73 |
 | Public status / uptime page (CD-051) | ⬜ | deferred → Hardening epic |
 | Distributed tracing; error monitoring | ⬜ | deferred |
@@ -63,7 +63,7 @@ identified. This file is part of the agent OS (kept on replay).
 | HSTS + frame-options | ✅ | Epic 1 |
 | Content-Security-Policy (CSP) | ⬜ | deferred → Hardening epic |
 | Dependabot + dependency-review + CodeQL + gitleaks | ✅ | Epic 1 CI |
-| Input validation / output encoding (XSS-safe) | ✅ / 🔜 | backend ✅; web XSS-safety enforced in TM-133 |
+| Input validation / output encoding (XSS-safe) | ✅ | backend ✅; web XSS-safety enforced in TM-133 |
 | Cloud SQL private IP / VPC | ⬜ | TM-95 (prod-readiness) |
 
 ## Testing & drift guards
@@ -73,7 +73,7 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 | Unit + integration tests; JaCoCo coverage gate (LINE 0.85 / BRANCH 0.70) | ✅ | Epic 1 / TM-54 |
 | DB schema drift — `ddl-auto: validate` (boot fails if `@Entity` ≠ Flyway schema) | ✅ | TM-71 / app config |
 | Format drift — Spotless `spotless:check` | ✅ | Epic 1 CI |
-| Browser e2e (Playwright) — UI-regression guard | 🔜 | TM-134 (runs on `main`, off the PR gate) |
+| Browser e2e (Playwright) — UI-regression guard | ✅ | TM-134 (runs on `main`, off the PR gate) |
 | `.env.example` contract — fail-loud secrets/env validator | ✅ | TM-64 |
 | **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | ✅ | TM-135 |
 | CD "new revision is actually serving" verify | ✅ | TM-60 (post TM-131) |
@@ -96,8 +96,8 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 ## Frontend / UX (generic primitives)
 | Feature | Status | Where / ticket |
 |---|:--:|---|
-| Reusable UX kit: toasts, styled confirm dialog, copy-to-clipboard, relative-time, loading/empty/error | 🔜 | built in TM-133 (first consumer) |
-| Dark / light theme (persisted) | 🔜 | TM-133 |
+| Reusable UX kit: toasts, styled confirm dialog, copy-to-clipboard, relative-time, loading/empty/error | ✅ | built in TM-133 (first consumer) |
+| Dark / light theme (persisted) | ✅ | TM-133 |
 | Responsive layout; a11y; i18n | ⬜ | partial/deferred (matters for the mobile surfaces, Epic 3+) |
 
 ## Compliance & privacy
