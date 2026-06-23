@@ -4,11 +4,17 @@
 # /android once it has a build.gradle (it's a stub today).
 #
 # Routine minor/patch bumps are grouped into one PR per ecosystem (low-noise, safe to
-# merge when green). MAJOR bumps are treated as framework migrations, not chores:
-#  - Maven majors are ignored here (Spring Boot 4 / springdoc 3 broke main once, #56) —
-#    do them deliberately by hand.
-#  - Any major that still opens (actions/docker) is tagged `semver-major` by
-#    .github/workflows/dependabot-auto-label.yml so it isn't mistaken for a safe chore.
+# merge when green). MAJOR bumps are treated as framework migrations, not chores, and are
+# IGNORED in EVERY ecosystem (maven, github-actions, docker) — do them deliberately by hand.
+# Rationale (TM-136): an investigation found the open Actions/Docker majors all passed CI, so
+# auto-opening them caught no breakage — it only generated noise (5 major PRs landed at once)
+# and a false sense of safety: `github/codeql-action` 3→4 was *green* only because the PR gate
+# path-skips CodeQL on workflow-only changes, so its major was never actually exercised. The
+# real breakage history is maven (Spring Boot 4 / springdoc 3 broke main once, #56). So we make
+# the policy consistent: minor/patch flows everywhere (keeps SHA pins fresh — TM-59); majors are
+# deliberate, human-initiated migrations. `.github/workflows/dependabot-auto-label.yml` stays as
+# a backstop — it tags `semver-major` any major that still surfaces (e.g. a security update,
+# which the version-update ignore below does not suppress).
 version: 2
 updates:
   # Backend Java dependencies (Maven).
@@ -53,6 +59,13 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Major Action bumps are deliberate, not auto-PRs (TM-136). They didn't break CI, but
+      # auto-opening them only added noise + a false-green blind spot (codeql-action 3→4 isn't
+      # exercised by the PR gate). Bump a major by hand when you actually want it.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   # Backend container base image.
   - package-ecosystem: docker
@@ -71,3 +84,9 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Major base-image bumps are deliberate, not auto-PRs (TM-136) — same policy as maven and
+      # github-actions. Minor/patch (security + routine) still flow above.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
