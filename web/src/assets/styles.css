@@ -50,6 +50,19 @@ body {
     font-weight: 600;
 }
 
+/* Build/version stamp (TM-142) — deliberately faint; informational, never dominant. */
+.app-footer {
+    margin-top: 2.5rem;
+    text-align: center;
+}
+
+.build-info {
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Account nav (TM-109) */
 .app-nav {
     display: flex;

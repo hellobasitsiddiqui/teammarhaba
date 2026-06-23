@@ -159,6 +159,17 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <!-- Emit META-INF/build-info.properties (build time/version) so a BuildProperties
+                     bean is available for the /version endpoint (TM-142). Coexists with the
+                     parent's default `repackage` execution. -->
+                <executions>
+                    <execution>
+                        <id>build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <!-- Supply-chain SBOM (TM-59): emit a CycloneDX SBOM (target/bom.json) listing every

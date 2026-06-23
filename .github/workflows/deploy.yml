@@ -68,6 +68,16 @@ jobs:
           sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
           grep apiBaseUrl web/dist/assets/config.js
 
+      # Stamp the web build SHA into the built config.js (same seam as the backend URL above),
+      # so the live first page shows which commit it was deployed from (TM-142). Never hardcoded.
+      - name: Inject web build SHA into config.js
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          sed -i "s/buildSha: \"dev\"/buildSha: \"${SHORT_SHA}\"/" web/dist/assets/config.js
+          grep buildSha web/dist/assets/config.js
+
       - name: Deploy to Firebase Hosting (live channel)
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 

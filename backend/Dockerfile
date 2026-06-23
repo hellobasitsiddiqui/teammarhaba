@@ -17,6 +17,11 @@ RUN ./mvnw -q -B -DskipTests package
 FROM eclipse-temurin:25-jre-jammy AS runtime
 WORKDIR /app
 
+# Build provenance (TM-142): the git SHA the image was built from, surfaced at /version.
+# Passed as a build-arg from GITHUB_SHA in CI; defaults to "dev" for a plain local build.
+ARG GIT_SHA=dev
+ENV BUILD_SHA=$GIT_SHA
+
 # Non-root runtime user
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 
