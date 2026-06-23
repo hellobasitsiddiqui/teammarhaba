@@ -5,7 +5,7 @@ description: Decentralized pull-based protocol for one of N agents to claim and 
 
 # jira-task-claim
 
-You are **one of N agents** (2 or 20 — you don't know or care). Pull the next ready task from the TM backlog, claim it race-safely, work it, mark it Done, repeat. No central scheduler. Jira `status` + `assignee` is the lock. Full spec: `Projects/TeamMarhaba/AGENT-CLAIM-PROTOCOL.md`; graph + priority: `DEPENDENCY-DAG.md`.
+You are **one of N agents** (2 or 20 — you don't know or care). Pull the next ready task from the TM backlog, claim it race-safely, work it, mark it Done, repeat. No central scheduler. Jira `status` + `assignee` is the lock. Full spec: `docs/agents/protocol/AGENT-CLAIM-PROTOCOL.md`; graph + priority: `docs/agents/project/DEPENDENCY-DAG.md`.
 
 ## State
 - **In scope** = ticket is in the active started sprint (`sprint in openSprints()`). A ticket sitting in the Backlog is OFF-LIMITS — never work it.

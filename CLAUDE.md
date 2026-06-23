@@ -54,7 +54,7 @@ In Review, post a one-line evidence note, and go straight to Done.
 - `docs/agents/GENESIS.md` — run-first Sprint-0 bootstrap / replay checklist (do all of it up front).
 - `docs/agents/CONSTANTS.md` — the single file you edit to re-skin (project name, GCP / Jira / GitHub ids).
 - `docs/agents/protocol/AGENT-CLAIM-PROTOCOL.md` — the full pull-based claim protocol (states, loop, failure handling).
-- `docs/agents/protocol/DEPENDENCY-DAG.md` — the dependency graph, leverage leaderboard, and execution order.
+- `docs/agents/project/DEPENDENCY-DAG.md` — the dependency graph, leverage leaderboard, and execution order.
 - `docs/agents/project/SPRINTS.md` — sprint naming scheme and what each sprint contains.
 - `.claude/skills/jira-mcp-gotchas` — Jira/connector quirks (read before bulk Jira create/edit/link ops).
 - `.claude/skills/` also has `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`.
