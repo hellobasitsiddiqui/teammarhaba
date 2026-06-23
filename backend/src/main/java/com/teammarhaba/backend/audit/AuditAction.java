@@ -30,5 +30,11 @@ public enum AuditAction {
     ROLE_CHANGED,
 
     /** An admin enabled or disabled an account (wired by the admin endpoints, TM-111). */
-    ACCOUNT_ENABLED_CHANGED
+    ACCOUNT_ENABLED_CHANGED,
+
+    /** A user finished first-run onboarding via {@code POST /api/v1/me/onboarding-complete} (TM-163). */
+    ONBOARDING_COMPLETED,
+
+    /** A user accepted a terms version via {@code POST /api/v1/me/accept-terms} (TM-163). */
+    TERMS_ACCEPTED
 }

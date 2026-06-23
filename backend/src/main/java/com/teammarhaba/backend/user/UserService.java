@@ -137,6 +137,56 @@ public class UserService {
         return user;
     }
 
+    /**
+     * Mark first-run onboarding complete for the caller (TM-163). Provision-then-update, so the
+     * transition works even before any GET. Idempotent: completing an already-completed account is a
+     * no-op for the flag, and only an actual flip is audited.
+     *
+     * <p>Age attestation is tied to the TM-162 {@code age} field: completing onboarding self-attests
+     * the age the user supplied, so {@code age_verified} is set true here <em>only once an age is on
+     * record</em>. Real ID verification is out of scope for this ticket.
+     */
+    @Transactional
+    public User completeOnboarding(VerifiedUser caller) {
+        User user = provision(caller);
+        boolean wasComplete = user.isOnboardingCompleted();
+        boolean ageWasVerified = user.isAgeVerified();
+
+        user.completeOnboarding();
+        // Self-attested age check (TM-163): only meaningful once the user has supplied an age (TM-162).
+        if (user.getAge() != null) {
+            user.setAgeVerified(true);
+        }
+
+        if (!wasComplete || user.isAgeVerified() != ageWasVerified) {
+            audit.record(
+                    caller.uid(),
+                    AuditAction.ONBOARDING_COMPLETED,
+                    TARGET_USER,
+                    caller.uid(),
+                    Map.of("ageVerified", String.valueOf(user.isAgeVerified())));
+        }
+        return user;
+    }
+
+    /**
+     * Record the caller's acceptance of a terms {@code version} at {@code now()} (TM-163).
+     * Provision-then-update. Re-accepting (e.g. a new version) overwrites the stored version and
+     * timestamp and is audited each time.
+     */
+    @Transactional
+    public User acceptTerms(VerifiedUser caller, String version) {
+        User user = provision(caller);
+        user.acceptTerms(version, Instant.now()); // dirty-checking flushes on commit
+        audit.record(
+                caller.uid(),
+                AuditAction.TERMS_ACCEPTED,
+                TARGET_USER,
+                caller.uid(),
+                Map.of("version", version));
+        return user;
+    }
+
     /** Best-effort IANA timezone check: the value must resolve to a known {@link ZoneId}. */
     private static String validTimezone(String timezone) {
         try {
