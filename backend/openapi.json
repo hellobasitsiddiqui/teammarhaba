@@ -437,6 +437,17 @@
         "tags" : [ "me-controller" ]
       }
     },
+    "/api/v1/me/resend-verification" : {
+      "post" : {
+        "operationId" : "resendVerification",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
     "/api/v1/meta" : {
       "get" : {
         "operationId" : "meta",
