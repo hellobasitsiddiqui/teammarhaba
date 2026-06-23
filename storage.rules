@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Firebase Storage security rules (TM-166) — avatar uploads.
+//
+// The web app uploads a user's avatar image to `avatars/{uid}` and then sets the Firebase user's
+// `photoURL` to the resulting download URL (the single source of truth). These rules are the real
+// authority for who may write what; the client mirrors them only for a fast, friendly pre-check.
+//
+// Enforced on write:
+//   - OWNER ONLY  — request.auth.uid must equal the {uid} path segment, so a user can only write
+//                   (or overwrite/delete) their OWN avatar object.
+//   - IMAGE ONLY  — the uploaded content-type must be image/*.
+//   - SIZE CAP    — at most 5 MB (must match MAX_AVATAR_BYTES in web/src/assets/storage.js).
+//
+// Read: avatars are public-readable. `photoURL` is a non-secret display image rendered in the app
+// (and potentially surfaced to other users), and Firebase download URLs already carry an unguessable
+// token, so a public read here is appropriate and avoids minting per-view signed URLs.
+//
+// Everything else under the bucket is denied by default (no catch-all allow).
+//
+// Deployed to prod by the HITL TM-184 (which also enables Firebase Storage on the project); tested
+// here against the Storage emulator (web/e2e).
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    match /avatars/{uid} {
+      // Anyone may read an avatar (public, non-secret display image).
+      allow read: if true;
+
+      // Only the authenticated owner may upload/replace their own avatar, and only an image
+      // content-type no larger than 5 MB. `request.resource` is the incoming object (create/update).
+      allow create, update: if request.auth != null
+                            && request.auth.uid == uid
+                            && request.resource.size < 5 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+
+      // The owner may also delete their own avatar (used by the re-upload cleanup path). A delete has
+      // no `request.resource`, so it carries only the owner check — not the size/content-type checks.
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

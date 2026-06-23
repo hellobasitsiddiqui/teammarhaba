@@ -10,6 +10,10 @@ export const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "teammarhaba";
 export const AUTH_EMULATOR_HOST =
   process.env.FIREBASE_AUTH_EMULATOR_HOST || process.env.E2E_AUTH_EMULATOR_HOST || "127.0.0.1:9099";
 
+/** Where the Firebase Storage emulator listens (browser reaches it for avatar uploads — TM-166). */
+export const STORAGE_EMULATOR_HOST =
+  process.env.FIREBASE_STORAGE_EMULATOR_HOST || process.env.E2E_STORAGE_EMULATOR_HOST || "127.0.0.1:9199";
+
 /** Backend + web base URLs (host-published ports; overridable for local runs). */
 export const API_BASE_URL = process.env.E2E_API_BASE_URL || "http://127.0.0.1:8080";
 export const WEB_BASE_URL = process.env.E2E_WEB_BASE_URL || "http://127.0.0.1:8081";

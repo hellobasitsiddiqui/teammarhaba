@@ -6,7 +6,7 @@
   "description": "Browser end-to-end tests (Playwright) for TeamMarhaba — TM-134. Runs on main only.",
   "scripts": {
     "serve": "node serve.mjs",
-    "emulator": "firebase emulators:start --only auth --project teammarhaba",
+    "emulator": "firebase emulators:start --only auth,storage --project teammarhaba --config ../../firebase.json",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "report": "playwright show-report"
