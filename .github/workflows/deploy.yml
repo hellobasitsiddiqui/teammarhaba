@@ -275,6 +275,40 @@ jobs:
           echo "EFFECTIVE_SHA=${EFFECTIVE_SHA}" >> "$GITHUB_ENV"
           echo "- ${SUMMARY}" >> "$GITHUB_STEP_SUMMARY"
 
+      # Resolve the MAIL (email-code delivery) config — gated on the secret EXISTING (TM-253).
+      #
+      # WHY GATED, not hardcoded: `gcloud run deploy --set-secrets=MAIL_PASSWORD=teammarhaba-mail-app-password:latest`
+      # FAILS THE WHOLE DEPLOY if that Secret Manager secret doesn't exist yet. Minting + pasting the
+      # app password is the HUMAN half (TM-252) and may not be done when this lands. So instead of
+      # unconditionally wiring MAIL_PASSWORD (which would red-fail every deploy until TM-252 is done),
+      # we probe for the secret and only wire the MAIL block when it's actually present:
+      #   - secret PRESENT  -> add MAIL_PASSWORD (secret) + MAIL_HOST/MAIL_PORT/MAIL_USERNAME (plain env)
+      #                        => SmtpEmailCodeMailer turns ON (application.yml binds these; TM-249).
+      #   - secret ABSENT   -> add nothing; MAIL_HOST stays unset => LoggingEmailCodeMailer fallback,
+      #                        deploy stays GREEN. (This is the "impossible to footgun" choice.)
+      # Env names match TM-249's application.yml mapping exactly: MAIL_HOST->spring.mail.host,
+      # MAIL_PORT->spring.mail.port, MAIL_USERNAME->spring.mail.username, MAIL_PASSWORD->spring.mail.password.
+      # The password is passed by Secret Manager *name* only — its value never touches CI, the repo, or
+      # the logs (same no-mask-needed property as DB_PASSWORD). The runtime SA teammarhaba-run needs
+      # secretmanager.secretAccessor on teammarhaba-mail-app-password — see infra/gcp/secrets-env.md.
+      - name: Resolve MAIL config (gate on secret existing — TM-252/TM-253)
+        id: mail
+        run: |
+          set -euo pipefail
+          MAIL_SECRETS=""
+          MAIL_ENV=""
+          if gcloud secrets describe teammarhaba-mail-app-password --project="${PROJECT}" >/dev/null 2>&1; then
+            echo "Secret teammarhaba-mail-app-password found — wiring real email-code delivery (TM-249)."
+            MAIL_SECRETS="MAIL_PASSWORD=teammarhaba-mail-app-password:latest"
+            MAIL_ENV="MAIL_HOST=smtp.gmail.com,MAIL_PORT=587,MAIL_USERNAME=no-reply@10xai.co.uk"
+            echo "- Email-code delivery: **ON** (mail secret present)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Secret teammarhaba-mail-app-password NOT found — deploying WITHOUT mail (logging fallback). Create it (TM-252) to turn email delivery on; see infra/gcp/secrets-env.md."
+            echo "- Email-code delivery: **OFF** (mail secret absent — create it per TM-252)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "secrets=${MAIL_SECRETS}" >> "$GITHUB_OUTPUT"
+          echo "env=${MAIL_ENV}" >> "$GITHUB_OUTPUT"
+
       # Deploy the immutable SHA-tagged image (EFFECTIVE_SHA, resolved above — HEAD when its
       # image exists, else the newest ancestor that has one; TM-194). Probes hit /health so a revision only
       # takes traffic once healthy (startup probe gates traffic; liveness restarts a
@@ -292,12 +326,25 @@ jobs:
       #
       # Secrets/env (TM-62): the full required-var set is documented in .env.example
       # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
-      # passed as plain --set-env-vars; the only sensitive value (DB_PASSWORD) is a
-      # Secret Manager reference via --set-secrets — its value never touches CI, the
-      # repo, or the logs (we pass the secret *name*, not the value, so there is
-      # nothing for the runner to mask).
+      # passed as plain --set-env-vars; sensitive values (DB_PASSWORD, and MAIL_PASSWORD
+      # when present) are Secret Manager references via --set-secrets — the value never
+      # touches CI, the repo, or the logs (we pass the secret *name*, not the value, so
+      # there is nothing for the runner to mask).
+      #
+      # MAIL block (TM-253): the MAIL_SECRETS / MAIL_ENV fragments come from the gated
+      # "Resolve MAIL config" step above and are EMPTY when teammarhaba-mail-app-password
+      # doesn't exist yet (TM-252 not done) — so the comma-join below drops them cleanly and
+      # the deploy never references a missing secret. When present they append
+      # MAIL_PASSWORD (secret) + MAIL_HOST/MAIL_PORT/MAIL_USERNAME (env) to turn delivery on.
       - name: Deploy to Cloud Run
+        env:
+          MAIL_SECRETS: ${{ steps.mail.outputs.secrets }}
+          MAIL_ENV: ${{ steps.mail.outputs.env }}
         run: |
+          set -euo pipefail
+          # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD (empty -> no trailing comma).
+          SECRETS="DB_PASSWORD=teammarhaba-db-app-password:latest${MAIL_SECRETS:+,${MAIL_SECRETS}}"
+          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }}${MAIL_ENV:+,${MAIL_ENV}}"
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
             --image="${IMAGE}:${EFFECTIVE_SHA}" \
@@ -307,8 +354,8 @@ jobs:
             --min-instances=0 --max-instances=3 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
-            --set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest \
-            --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }} \
+            --set-secrets="${SECRETS}" \
+            --set-env-vars="${ENV_VARS}" \
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
             --quiet
