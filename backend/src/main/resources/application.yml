@@ -66,6 +66,12 @@ app:
       ttl: ${EMAIL_CODE_TTL:10m}                # how long an issued code stays valid (short by design)
       send-cooldown: ${EMAIL_CODE_SEND_COOLDOWN:60s}  # min gap between requests for one address (rate-limit + Resend)
       max-verify-attempts: ${EMAIL_CODE_MAX_VERIFY_ATTEMPTS:5}  # wrong guesses before the code is burned
+      # Bounded in-memory state + per-IP limit (TM-247): cap memory under a flood of distinct addresses
+      # / source IPs, and throttle varied-address floods the per-address cooldown can't catch.
+      max-outstanding: ${EMAIL_CODE_MAX_OUTSTANDING:100000}     # hard cap on addresses with in-memory auth state
+      ip-request-limit: ${EMAIL_CODE_IP_REQUEST_LIMIT:20}       # max request calls per client IP per window (429 over)
+      ip-request-window: ${EMAIL_CODE_IP_REQUEST_WINDOW:1m}     # fixed window for the per-IP limit
+      max-tracked-ips: ${EMAIL_CODE_MAX_TRACKED_IPS:100000}     # hard cap on IPs the limiter tracks (bounds the limiter)
 
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:

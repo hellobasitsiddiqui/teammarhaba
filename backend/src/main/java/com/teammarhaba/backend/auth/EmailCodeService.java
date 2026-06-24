@@ -1,5 +1,8 @@
 package com.teammarhaba.backend.auth;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseAuthException;
 import com.google.firebase.auth.UserRecord;
@@ -11,7 +14,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -40,10 +42,21 @@ import org.springframework.stereotype.Service;
  *
  * <p><strong>Rate limiting.</strong> {@code request} enforces a per-address send cooldown
  * ({@link EmailCodeProperties#sendCooldown()}) so the endpoint can't be used to spam an inbox or
- * enumerate accounts by timing; {@code verify} enforces the attempt cap. Both stores are process-
- * local {@link ConcurrentHashMap}s — fine for a single Cloud Run instance and the common case; a
- * distributed store (e.g. Redis) is the future improvement if the service scales out and the limits
- * must be global. (Same trade-off the TM-165 cooldown documents.)
+ * enumerate accounts by timing; {@code verify} enforces the attempt cap. A coarse per-IP limit in
+ * front of {@code request} lives in {@link EmailCodeRateLimiter} (varied addresses from one source
+ * are still throttled). All three stores are process-local — fine for a single Cloud Run instance
+ * and the common case; a distributed store (e.g. Redis) is the future improvement if the service
+ * scales out and the limits must be global. (Same trade-off the TM-165 cooldown documents.)
+ *
+ * <p><strong>Bounded state (TM-247).</strong> {@code pending} and {@code lastSent} are
+ * <em>bounded, expiring</em> Caffeine caches, not plain maps: each entry expires on its own
+ * ({@code pending} after {@link EmailCodeProperties#ttl()} — a code is useless past then;
+ * {@code lastSent} after {@link EmailCodeProperties#sendCooldown()} — the cooldown is over),
+ * and each is capped at {@link EmailCodeProperties#maxOutstanding()} entries. So a flood of
+ * distinct random addresses can neither pin entries for their full TTL nor grow the heap without
+ * limit (the unbounded-map / mail-bomb DoS the TM-238 review flagged). A missing entry — expired or
+ * size-evicted — reads exactly as "no outstanding code" / "no active cooldown", which is the safe,
+ * already-handled case, so no behaviour changes for a legitimate user inside the window.
  *
  * <p>{@link FirebaseAuth} is resolved lazily through an {@link ObjectProvider}, matching {@link
  * EmailVerificationService} / {@link RoleService}, so nothing here touches Firebase/ADC until a
@@ -60,11 +73,21 @@ public class EmailCodeService {
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
-    /** Normalised email -> the single outstanding code for that address. */
-    private final ConcurrentHashMap<String, PendingCode> pending = new ConcurrentHashMap<>();
+    /**
+     * Normalised email -> the single outstanding code for that address. Bounded + expiring
+     * (TM-247): entries expire after {@link EmailCodeProperties#ttl()} (a code is invalid past
+     * then anyway) and the cache is size-capped, so a flood of distinct addresses can't grow it
+     * without limit. A missing entry == "no outstanding code", the existing null-handled case.
+     */
+    private final Cache<String, PendingCode> pending;
 
-    /** Normalised email -> the instant of its last successful send; drives the send cooldown. */
-    private final ConcurrentHashMap<String, Instant> lastSent = new ConcurrentHashMap<>();
+    /**
+     * Normalised email -> the instant of its last successful send; drives the send cooldown.
+     * Bounded + expiring (TM-247): entries expire after {@link EmailCodeProperties#sendCooldown()}
+     * (the cooldown is over by then, so the entry is meaningless) and the cache is size-capped. A
+     * missing entry == "no active cooldown", the existing null-handled case.
+     */
+    private final Cache<String, Instant> lastSent;
 
     @Autowired
     public EmailCodeService(
@@ -79,6 +102,24 @@ public class EmailCodeService {
         this.mailer = mailer;
         this.props = props;
         this.clock = clock;
+        // Drive Caffeine's expiry off the same Clock as the cooldown/TTL logic so a test's
+        // advanceable clock evicts entries deterministically (and prod uses real wall-clock time).
+        Ticker ticker = () -> clock.instant().toEpochMilli() * 1_000_000L;
+        // The logical TTL is enforced by PendingCode.expiresAt() in verify(); the cache is evicted a
+        // little LATER (2x ttl) so a just-expired entry still exists to be read and reported as the
+        // explicit CODE_EXPIRED (410), not silently dropped and misreported as CODE_INVALID (401).
+        // After its logical expiry an entry can only ever yield CODE_EXPIRED, so keeping it briefly
+        // longer leaks nothing new and still bounds memory (to ~2x the live-code window).
+        this.pending = Caffeine.newBuilder()
+                .ticker(ticker)
+                .expireAfterWrite(props.ttl().multipliedBy(2))
+                .maximumSize(props.maxOutstanding())
+                .build();
+        this.lastSent = Caffeine.newBuilder()
+                .ticker(ticker)
+                .expireAfterWrite(props.sendCooldown())
+                .maximumSize(props.maxOutstanding())
+                .build();
     }
 
     /**
@@ -95,7 +136,7 @@ public class EmailCodeService {
         String email = normalise(rawEmail);
         Instant now = clock.instant();
 
-        Instant previous = lastSent.get(email);
+        Instant previous = lastSent.getIfPresent(email);
         if (previous != null && Duration.between(previous, now).compareTo(props.sendCooldown()) < 0) {
             throw new EmailCodeException(
                     EmailCodeException.Reason.SEND_RATE_LIMITED,
@@ -126,12 +167,12 @@ public class EmailCodeService {
         String email = normalise(rawEmail);
         String code = rawCode == null ? "" : rawCode.trim();
 
-        PendingCode current = pending.get(email);
+        PendingCode current = pending.getIfPresent(email);
         if (current == null) {
             throw new EmailCodeException(EmailCodeException.Reason.CODE_INVALID, "That code is not valid.");
         }
         if (clock.instant().isAfter(current.expiresAt())) {
-            pending.remove(email);
+            pending.invalidate(email);
             throw new EmailCodeException(
                     EmailCodeException.Reason.CODE_EXPIRED, "That code has expired. Please request a new one.");
         }
@@ -139,7 +180,7 @@ public class EmailCodeService {
             // Burn the code once the attempt budget is exhausted, so a short numeric code can't be
             // brute-forced; otherwise just consume one attempt and let the caller retry.
             if (current.attemptsLeft() <= 1) {
-                pending.remove(email);
+                pending.invalidate(email);
                 throw new EmailCodeException(
                         EmailCodeException.Reason.VERIFY_RATE_LIMITED,
                         "Too many incorrect attempts. Please request a new code.");
@@ -149,13 +190,24 @@ public class EmailCodeService {
         }
 
         // Correct: burn the single-use code BEFORE minting, so a token is never issued twice for it.
-        pending.remove(email);
-        lastSent.remove(email);
+        pending.invalidate(email);
+        lastSent.invalidate(email);
 
         String uid = resolveOrCreateUid(email);
         String token = firebaseAuth.getObject().createCustomToken(uid);
         log.info("Minted a custom token for an email-code login.");
         return token;
+    }
+
+    /**
+     * Test seam (TM-247): the number of addresses currently holding in-memory auth state across both
+     * stores, after forcing any pending size-/time-based eviction. Lets a flood test assert the count
+     * stays bounded (not N) under a flood of distinct addresses.
+     */
+    long trackedEntryCount() {
+        pending.cleanUp();
+        lastSent.cleanUp();
+        return Math.max(pending.estimatedSize(), lastSent.estimatedSize());
     }
 
     /** Look up the Firebase uid for {@code email}, creating the account on first sight. */

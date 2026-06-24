@@ -1,7 +1,9 @@
 package com.teammarhaba.backend.api;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.auth.EmailCodeRateLimiter;
 import com.teammarhaba.backend.auth.EmailCodeService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,19 +36,27 @@ import org.springframework.web.bind.annotation.RestController;
 public class EmailCodeController {
 
     private final EmailCodeService emailCodeService;
+    private final EmailCodeRateLimiter rateLimiter;
 
-    EmailCodeController(EmailCodeService emailCodeService) {
+    EmailCodeController(EmailCodeService emailCodeService, EmailCodeRateLimiter rateLimiter) {
         this.emailCodeService = emailCodeService;
+        this.rateLimiter = rateLimiter;
     }
 
     /**
      * Request a login code for the given address. Returns {@code 204 No Content} — there is nothing to
-     * return and no body that could leak whether the address exists. A second request inside the send
-     * cooldown is refused with {@code 429} (the "Resend" UI uses this to back off).
+     * return and no body that could leak whether the address exists. A coarse per-IP limit (TM-247)
+     * runs first and a second request inside the per-address send cooldown is refused; either is
+     * {@code 429} (the "Resend" UI uses this to back off).
+     *
+     * <p>The per-IP check precedes the service call so a varied-address flood from one source is
+     * throttled before it ever touches the in-memory auth state — and, like the cooldown, it leaks no
+     * account-existence signal (every caller still sees only {@code 204} or {@code 429}).
      */
     @PostMapping("/request")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    void request(@RequestBody @Valid EmailCodeRequest body) {
+    void request(@RequestBody @Valid EmailCodeRequest body, HttpServletRequest httpRequest) {
+        rateLimiter.checkAndRecord(httpRequest);
         emailCodeService.request(body.email());
     }
 

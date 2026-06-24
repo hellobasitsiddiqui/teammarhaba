@@ -9,6 +9,9 @@ package com.teammarhaba.backend.auth;
  * <ul>
  *   <li>{@link Reason#SEND_RATE_LIMITED} — a code was requested for this address too recently (the
  *       per-address send cooldown is still active). Mapped to {@code 429 Too Many Requests}.</li>
+ *   <li>{@link Reason#IP_RATE_LIMITED} — too many {@code request} calls from one client IP within the
+ *       window, regardless of address (the coarse per-IP limit that backs up the per-address cooldown
+ *       against varied-address floods, TM-247). Mapped to {@code 429 Too Many Requests}.</li>
  *   <li>{@link Reason#CODE_INVALID} — the submitted code does not match the outstanding one (or none
  *       is outstanding). Mapped to {@code 401 Unauthorized}: it's an authentication failure.</li>
  *   <li>{@link Reason#CODE_EXPIRED} — a code was issued but its short TTL has elapsed. Mapped to
@@ -25,6 +28,7 @@ public class EmailCodeException extends RuntimeException {
     /** Why the request/verify was refused — drives the HTTP status in the web layer. */
     public enum Reason {
         SEND_RATE_LIMITED,
+        IP_RATE_LIMITED,
         CODE_INVALID,
         CODE_EXPIRED,
         VERIFY_RATE_LIMITED
