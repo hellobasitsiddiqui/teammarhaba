@@ -202,13 +202,19 @@ els.signOut?.addEventListener("click", () => run(() => signOut()));
 // Reflect identity / reset on auth change. View visibility (which panel shows) is owned by the
 // router/guard (TM-109); this only updates the form's own concerns: the displayed email, clearing
 // errors, and resetting the flow back to the default email step on sign-out.
+//
+// The reset runs ONLY on an actual sign-OUT transition (was signed in → now not), NOT on the
+// initial boot event — onAuthChanged fires once with user=null after Firebase initialises, and
+// resetting then would wipe anything already typed during a slow auth boot and collapse the flow
+// back to step 1 (TM-229: that boot reset raced the mobile e2e fill, submitting an empty email).
+let wasSignedIn = false;
 onAuthChanged((user) => {
   showError(null);
   const signedIn = Boolean(user);
   if (signedIn && els.userEmail) {
     els.userEmail.textContent = user.email ?? user.phoneNumber ?? user.displayName ?? user.uid;
   }
-  if (!signedIn) {
+  if (!signedIn && wasSignedIn) {
     els.form?.reset();
     showEmailStep();
     if (els.alternatives) els.alternatives.hidden = true;
@@ -217,4 +223,5 @@ onAuthChanged((user) => {
     els.smsCodeStep.hidden = true;
     smsConfirmation = null;
   }
+  wasSignedIn = signedIn;
 });

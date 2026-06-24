@@ -35,14 +35,16 @@ async function expectControlUsable(page, locator) {
 }
 
 async function signInAsAdmin(page) {
+  // Email-code is the default front door (TM-234); the email+password form lives under "Try another
+  // way" — reveal it first, same as the other specs' helper.
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  // Wait for auth to ACTUALLY resolve before the caller navigates. #signout-btn is always in the
-  // DOM (markup carries it with the `hidden` attr), so toBeAttached() resolves instantly — before
-  // sign-in completes — and the caller's hash navigation then races the guard back to #/login. At a
-  // phone viewport the sign-out button lives inside the collapsed nav, so toBeVisible() never holds
-  // either. The viewport-independent "signed in" signal is the signed-OUT login panel disappearing.
+  // Wait for auth to ACTUALLY resolve before the caller navigates. #signout-btn lives in the
+  // collapsed nav at a phone viewport, so toBeVisible() never holds; the viewport-independent
+  // "signed in" signal is the signed-OUT login panel disappearing. (Asserting too early would let
+  // the caller's hash navigation race the guard back to #/login.)
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
@@ -60,10 +62,12 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("login at a phone viewport", () => {
-  test("no horizontal page scroll and the sign-in button is usable", async ({ page }) => {
+  test("no horizontal page scroll and the primary login control is usable", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectControlUsable(page, page.locator("#signin-btn"));
+    // The default front door is the email-code button (TM-234); email+password is behind "Try
+    // another way". Assert the primary control a phone user actually sees.
+    await expectControlUsable(page, page.locator("#emailcode-send-btn"));
     await expectNoHorizontalPageScroll(page);
   });
 
