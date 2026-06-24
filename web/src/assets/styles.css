@@ -448,6 +448,33 @@ body {
 }
 
 /*
+ * Doodle placement (TM-215). The TM-214 doodles are wired into the real pages (landing/login/home
+ * headers, the profile + admin heads, and the admin/profile empty states). They are decorative only,
+ * so they must show ONLY under the doodle theme: every builder sets the base `tm-doodle` class, so
+ * this single rule hides every mounted doodle whenever <html> isn't `[data-theme="doodle"]`. That
+ * keeps `clean` byte-for-byte the current look even though the nodes are present in the DOM — no
+ * per-page forks, no JS branching on the theme. Under doodle, the `.tm-doodle-*` size variants above
+ * take over.
+ */
+:root:not([data-theme="doodle"]) .tm-doodle {
+    display: none;
+}
+
+/* Header flourish: let a heading host an inline doodle beside its text without disturbing the
+ * existing flex head layouts. Only meaningful under doodle (the doodle is hidden otherwise). */
+[data-theme="doodle"] h1:has(.tm-doodle-header),
+[data-theme="doodle"] h2:has(.tm-doodle-header) {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Empty / error states: centre the doodle hero over its explanatory line (admin "No users yet",
+ * profile load error). Inert on clean (the doodle is hidden, the text stays left as before). */
+[data-theme="doodle"] .tm-empty {
+    text-align: center;
+}
+
+/*
  * A11y — reduced motion (TM-213). The wobble is purely decorative. Users who ask for reduced
  * motion get the displacement removed entirely (the filter is dropped), so corners render as the
  * plain irregular CSS radii with no SVG jitter; fonts/palette/borders are unaffected.

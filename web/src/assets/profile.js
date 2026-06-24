@@ -21,6 +21,7 @@ import { currentUser } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
 import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { clear, el, toast } from "./ui.js";
+import { doodle } from "./doodles.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -490,7 +491,8 @@ function buildShell(view) {
 
   clear(view).append(
     el("div", { class: "tm-admin-head" }, [
-      el("h2", { text: "Edit profile" }),
+      // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
+      el("h2", {}, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Edit profile"]),
       el("a", { class: "tm-btn tm-btn-sm", href: "#/home" }, "Back to home"),
     ]),
     summary,
@@ -512,7 +514,9 @@ function renderStatus() {
   }
   if (state.error) {
     shell.form.hidden = true;
-    shell.status.append(el("div", { class: "tm-error" }, [
+    shell.status.append(el("div", { class: "tm-error tm-empty" }, [
+      // An empty-state doodle (TM-215) so a load failure still reads warmly; CSS gates it to doodle.
+      doodle("chat", { class: "tm-doodle-empty", title: "Couldn't load your profile" }),
       el("p", { text: state.error }),
       el("button", { class: "tm-btn", type: "button", onClick: load }, "Retry"),
     ]));
