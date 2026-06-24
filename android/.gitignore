@@ -1,0 +1,28 @@
+# Android module gitignore (TM-231). The repo-root .gitignore already ignores build/, .gradle/,
+# *.apk, *.aab, local.properties, *.p12, *.pem, etc. This file adds Android-specific entries and —
+# importantly — re-includes the Gradle wrapper jar, which the root `*.jar` rule would otherwise
+# exclude (the wrapper jar MUST be committed so `./gradlew` works on a fresh clone).
+
+# Build outputs
+/build/
+/app/build/
+.gradle/
+captures/
+.cxx/
+
+# Local SDK pointer + IDE noise (never commit)
+local.properties
+*.iml
+.idea/
+
+# --- Secrets — NEVER commit (defense-in-depth; signing reads these from props/env) ---------------
+# Keystores of every common extension, and the local keystore.properties the build can optionally
+# read. The release keystore + passwords are supplied at build time, never stored in the repo.
+*.jks
+*.keystore
+keystore.properties
+*.p12
+*.pem
+
+# Re-include the Gradle wrapper jar (root .gitignore's `*.jar` would drop it).
+!gradle/wrapper/gradle-wrapper.jar

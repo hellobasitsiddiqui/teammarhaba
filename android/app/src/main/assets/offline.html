@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>You're offline — TeamMarhaba</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, "Roboto", "Segoe UI", system-ui, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 24px; box-sizing: border-box;
+      background: #ffffff; color: #0d1117;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0d1117; color: #e6edf3; }
+      .btn { background: #1f6feb; }
+    }
+    .glyph { font-size: 56px; line-height: 1; margin-bottom: 16px; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { margin: 0 0 24px; max-width: 28rem; opacity: 0.8; line-height: 1.5; }
+    .btn {
+      appearance: none; border: 0; border-radius: 10px; cursor: pointer;
+      background: #1f6feb; color: #fff; font-size: 16px; font-weight: 600;
+      padding: 12px 28px;
+    }
+  </style>
+</head>
+<body>
+  <div class="glyph" aria-hidden="true">📡</div>
+  <h1>You're offline</h1>
+  <p>TeamMarhaba needs an internet connection. Check your connection and try again.</p>
+  <button class="btn" id="retry" type="button">Retry</button>
+  <script>
+    // Retry asks the native shell to reload the hosted app via the injected JS bridge. The bridge
+    // (window.TeamMarhabaWebView, added in WebViewActivity) hops to the UI thread and reloads APP_URL.
+    document.getElementById("retry").addEventListener("click", function () {
+      if (window.TeamMarhabaWebView && typeof window.TeamMarhabaWebView.reload === "function") {
+        window.TeamMarhabaWebView.reload();
+      } else {
+        // Fallback if the bridge isn't present (e.g. opened outside the shell): just reload.
+        location.reload();
+      }
+    });
+  </script>
+</body>
+</html>
