@@ -85,7 +85,9 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
         return "Your TeamMarhaba sign-in code is:\n\n"
                 + "    " + code + "\n\n"
                 + "Enter it to finish signing in. It expires shortly and can only be used once.\n\n"
-                + "If you didn't request this, you can safely ignore this email.\n";
+                + "If you didn't request this, you can safely ignore this email.\n\n"
+                // Attribution byline (TM-254): subtle one-line credit in the email footer.
+                + "—\nA product of 10xAI · https://10xai.co.uk\n";
     }
 
     private static String htmlBody(String code) {
@@ -97,6 +99,9 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
                 + "<p>Enter it to finish signing in. It expires shortly and can only be used once.</p>"
                 + "<p style=\"color:#666;font-size:13px;\">If you didn't request this, "
                 + "you can safely ignore this email.</p>"
+                // Attribution byline (TM-254): subtle one-line credit in the email footer.
+                + "<p style=\"color:#999;font-size:12px;margin-top:24px;\">A product of "
+                + "<a href=\"https://10xai.co.uk\" style=\"color:#999;\">10xAI</a></p>"
                 + "</body></html>";
     }
 

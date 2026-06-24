@@ -46,6 +46,11 @@
             </button>
             <div id="nav-items" class="app-nav-items">
                 <a id="nav-signin" href="#/login" hidden>Sign in</a>
+                <!-- Help page link (TM-255): always shown — the #/help guide is static content safe
+                     for signed-in and signed-out visitors alike. Distinct from #nav-help below, which
+                     is the TM-135 tour-REPLAY menu (signed-in only); this is the standalone Help page.
+                     A plain hash-link, so nav-toggle.js closes the mobile menu on click like the others. -->
+                <a id="nav-help-link" href="#/help">Help</a>
                 <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
                 <a id="nav-profile" href="#/profile" hidden>Profile</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
@@ -175,6 +180,11 @@
              completed. -->
         <section id="onboarding-view" class="onboarding-view" aria-label="Complete your profile" hidden></section>
 
+        <!-- Help view (TM-255): the static #/help guide. help.js (imported by router.js) builds the
+             content into this container on first entry; router.js owns its visibility. Reachable
+             signed-in or signed-out (static, framework-free content). -->
+        <section id="help-view" class="help-view" aria-label="Help" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
@@ -186,6 +196,15 @@
             <p id="privacy-policy" class="privacy-note" aria-label="Privacy">
                 Privacy: phone numbers you enter to sign in by SMS are sent to and stored by Google
                 to prevent spam and abuse across Google services.
+            </p>
+            <!-- Attribution byline (TM-254): subtle "A product of 10xAI" credit, secondary-text
+                 styled via theme tokens (see .app-byline in styles.css). Cosmetic only — its own
+                 footer line, kept separate from the build-stamp/privacy lines above so it never
+                 disturbs them. Opens 10xai.co.uk in a new tab with rel=noopener. The Android
+                 WebView inherits this footer automatically (same index.html). -->
+            <p class="app-byline">
+                A product of
+                <a href="https://10xai.co.uk" target="_blank" rel="noopener">10xAI</a>
             </p>
         </footer>
     </main>

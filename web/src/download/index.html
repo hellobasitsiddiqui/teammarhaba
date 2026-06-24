@@ -89,6 +89,10 @@
         }
         a { color: var(--accent); }
         footer { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 2rem; }
+        /* TM-254 byline — subtle, secondary text; the link is muted (not accent) so it stays a quiet credit. */
+        .byline { margin: .6rem 0 0; font-size: .8rem; color: var(--muted); }
+        .byline a { color: var(--muted); text-decoration: underline; }
+        .byline a:hover { color: var(--ink); }
     </style>
 </head>
 <body>
@@ -133,6 +137,10 @@
 
         <footer>
             <p>Prefer the web app? Just open <a href="/">teammarhaba.web.app</a> in any browser.</p>
+            <!-- Attribution byline (TM-254): subtle "A product of 10xAI" credit. This page is
+                 self-contained (no styles.css), so it reuses the page's own --muted token; the
+                 footer is already muted, so the byline just sits as its own line. New tab + rel=noopener. -->
+            <p class="byline">A product of <a href="https://10xai.co.uk" target="_blank" rel="noopener">10xAI</a></p>
         </footer>
     </div>
 

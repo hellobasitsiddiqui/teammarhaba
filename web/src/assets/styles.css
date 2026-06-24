@@ -125,6 +125,26 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+/* Attribution byline (TM-254) — subtle, secondary-text credit on its own footer line. Uses theme
+   tokens only (--muted / --fg), so it renders correctly under clean / doodle / sketch. The link is
+   muted (not accent) so it reads as a quiet credit, not a primary action; it brightens to --fg on
+   hover/focus. Its own line + margin so it never disturbs the build-stamp / privacy lines above. */
+.app-byline {
+    margin: 0.6rem 0 0;
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.app-byline a {
+    color: var(--muted);
+    text-decoration: underline;
+}
+
+.app-byline a:hover,
+.app-byline a:focus-visible {
+    color: var(--fg);
+}
+
 /* Account nav (TM-109) */
 .app-nav {
     display: flex;
@@ -1687,4 +1707,73 @@ html {
     .tm-tour-actions .tm-btn {
         min-height: 44px;
     }
+}
+
+/* ===== Help page (TM-255) ===== */
+/* The static #/help guide. A single centred, readable card built from theme tokens only, so it
+   follows clean / doodle / sketch automatically and stays responsive at phone widths + inside the
+   Android WebView. text-align:left keeps prose readable; width clamps to the viewport on narrow
+   screens (no horizontal page scroll — the responsive-mobile invariant). */
+.help-view {
+    width: min(44rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.help-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1.25rem, 4vw, 2rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.help-card h2 {
+    margin: 0 0 0.25rem;
+    color: var(--fg);
+}
+
+.help-intro {
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+}
+
+.help-section {
+    margin-top: 1.5rem;
+}
+
+.help-section h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.help-section p {
+    margin: 0.4rem 0;
+    color: var(--fg);
+    line-height: 1.55;
+}
+
+.help-list {
+    margin: 0.4rem 0;
+    padding-left: 1.25rem;
+}
+
+.help-list li {
+    margin: 0.5rem 0;
+    color: var(--fg);
+    line-height: 1.55;
+}
+
+.help-support-link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    /* Long emails shouldn't force a horizontal scroll on a narrow phone screen. */
+    word-break: break-word;
+}
+
+.help-support-link:hover,
+.help-support-link:focus-visible {
+    text-decoration: underline;
 }
