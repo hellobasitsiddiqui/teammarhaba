@@ -1,0 +1,278 @@
+name: Android
+
+# Android APK CI + release (TM-246). Two independent jobs:
+#
+#   compile-check  — on PRs that TOUCH android/: JDK 17 + Android SDK, `./gradlew assembleDebug`.
+#                    Closes the gap from TM-231 (the Kotlin shell shipped with NO Android CI — the
+#                    bootstrap sandbox had no SDK). Path-filtered so unrelated PRs don't pay for it,
+#                    and kept OFF the required PR gate (it's a separate workflow, not a `ci.yml` job)
+#                    so a slow Android build never blocks merging non-Android changes.
+#
+#   release        — on a git TAG (v*) or manual `workflow_dispatch`: decode the keystore from the
+#                    TM-245 secrets, run `assembleRelease`, produce the SIGNED APK, stamp its
+#                    versionName to the live web `buildVersion`, and publish APK + /download page to
+#                    Firebase Hosting (reusing deploy.yml's keyless WIF path). FAILS LOUD if the
+#                    signing secrets are absent — it never ships an unsigned/debug APK as a release.
+#
+# Secrets consumed by `release` (stored by the human ticket TM-245 — never committed here):
+#   KEYSTORE_BASE64    base64 of the release .jks
+#   KEYSTORE_PASSWORD  keystore (store) password
+#   KEY_ALIAS          signing key alias
+#   KEY_PASSWORD       signing key password
+
+on:
+  # Compile-check only when android/ (or this workflow) changes — the path filter is the
+  # Actions-minutes win (TM-151 spirit): a PR touching only web/ or backend/ skips the Android SDK.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-release.yml'
+
+  # Release on a deliberate version tag (the same "tag real releases only" discipline as TM-155/157)…
+  push:
+    tags:
+      - 'v*'
+
+  # …or on demand from the Actions tab → "Android" → Run (deploys current main's signed APK).
+  workflow_dispatch:
+
+# Cancel an in-flight PR compile-check when the PR is updated (fast gate); serialize releases so two
+# tag pushes / dispatches don't race the single Hosting site. Keyed by ref so a release never cancels
+# a PR check and vice-versa.
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # PR compile check — works IMMEDIATELY (needs no secrets). Proves the Kotlin/Gradle/manifest
+  # actually compile into an APK on every android/ change.
+  # ---------------------------------------------------------------------------------------------
+  compile-check:
+    name: Android compile check (assembleDebug)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 17 (Temurin) + Gradle cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # Installs the Android SDK + accepts licences; cmdline-tools land on PATH and ANDROID_HOME/
+      # ANDROID_SDK_ROOT are exported, so Gradle's AGP resolves platform 34 / build-tools itself.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Compile the APK (assembleDebug)
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      # Hand the debug APK back as an artifact so a reviewer can sideload it from the PR without a
+      # local Android toolchain (it is NOT a release — debug-keystore signed, applicationId .debug).
+      - name: Upload debug APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------------------------
+  # Signed release + host. Stays RED until the TM-245 secrets exist (fail-loud preflight), then goes
+  # green: builds the signed APK, stamps versionName = live web buildVersion, deploys APK + the
+  # /download page to Firebase Hosting.
+  # ---------------------------------------------------------------------------------------------
+  release:
+    name: Signed release APK + host on Firebase
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # keyless WIF auth to GCP/Firebase (same as deploy.yml)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0   # full history + tags so `git describe` names the build (matches deploy.yml)
+
+      # FAIL LOUD if the signing secrets aren't configured yet (the human TM-245 step). Without this
+      # guard `assembleRelease` would happily emit an UNSIGNED APK and we'd publish a non-installable
+      # /update — exactly what the AC forbids. We test the *names* (never echo the values), so nothing
+      # secret reaches the log.
+      - name: Require signing secrets (fail loud if absent — TM-245)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "${KEYSTORE_BASE64}" ]   && missing="${missing} KEYSTORE_BASE64"
+          [ -z "${KEYSTORE_PASSWORD}" ] && missing="${missing} KEYSTORE_PASSWORD"
+          [ -z "${KEY_ALIAS}" ]         && missing="${missing} KEY_ALIAS"
+          [ -z "${KEY_PASSWORD}" ]      && missing="${missing} KEY_PASSWORD"
+          if [ -n "${missing}" ]; then
+            echo "::error::Release signing secrets missing:${missing}. Store them via the human keystore-custody ticket TM-245 before cutting a signed release. Refusing to build an unsigned/debug APK."
+            exit 1
+          fi
+          echo "All four signing secrets are present."
+
+      - name: Set up JDK 17 (Temurin) + Gradle cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Node (for firebase-tools + the asset fingerprinter)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      # The APK's versionName MUST equal the web `buildVersion` it was cut from, so TM-231's
+      # auto-update check (remote config.js buildVersion != installed versionName ⇒ prompt) fires
+      # exactly when a newer web build shipped. Compute it the SAME way deploy.yml stamps config.js:
+      # `git describe --tags --always --long`. versionCode is a monotonic int — GITHUB_RUN_NUMBER is
+      # monotonic per-workflow, so every release the installed-APK sees as an upgrade on sideload.
+      - name: Compute release version (match web buildVersion)
+        id: ver
+        run: |
+          DESCRIBE="$(git describe --tags --always --long)"
+          echo "Release versionName (= web buildVersion): ${DESCRIBE}"
+          echo "versionName=${DESCRIBE}" >> "$GITHUB_OUTPUT"
+          echo "versionCode=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      # Decode the keystore from the secret into a runner-local file (gitignored pattern; runner is
+      # ephemeral). Passwords flow to Gradle as ORG_GRADLE_PROJECT_* env so the Kotlin signingConfig
+      # (app/build.gradle.kts → loadReleaseSigningProps) picks them up — never on the command line
+      # (argv is visible in `ps`), never echoed.
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "${KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/teammarhaba-release.jks"
+          echo "KEYSTORE_PATH=${RUNNER_TEMP}/teammarhaba-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK (assembleRelease)
+        working-directory: android
+        env:
+          # The signing-property contract (gradle.properties header / README "Signing & release").
+          # ORG_GRADLE_PROJECT_<name> sets Gradle project property <name> without exposing it in argv.
+          ORG_GRADLE_PROJECT_teammarhaba.releaseStoreFile: ${{ env.KEYSTORE_PATH }}
+          ORG_GRADLE_PROJECT_teammarhaba.releaseStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_teammarhaba.releaseKeyAlias: ${{ secrets.KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_teammarhaba.releaseKeyPassword: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -PtmVersionName="${{ steps.ver.outputs.versionName }}" \
+            -PtmVersionCode="${{ steps.ver.outputs.versionCode }}"
+
+      # Locate the built APK and verify it is REALLY signed (apksigner ships with build-tools). This
+      # is the belt-and-braces to the fail-loud preflight: if signing silently produced an unsigned
+      # `*-unsigned.apk`, we abort rather than publish it.
+      - name: Locate + verify signed APK
+        id: apk
+        run: |
+          set -euo pipefail
+          APK="$(find android/app/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk' | head -n1)"
+          if [ -z "${APK}" ] || [ ! -f "${APK}" ]; then
+            echo "::error::No signed release APK produced (only an unsigned artifact?). Check the keystore secrets."
+            exit 1
+          fi
+          echo "Built APK: ${APK}"
+          APKSIGNER="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools" -name apksigner | sort -V | tail -n1)"
+          "${APKSIGNER}" verify --verbose "${APK}"
+          echo "apk=${APK}" >> "$GITHUB_OUTPUT"
+
+      # Build the Hosting bundle exactly like deploy.yml's web job (src -> dist, inject config.js),
+      # THEN drop the signed APK into /downloads/. Deploying the whole site keeps the current web,
+      # the /download page, and the APK consistent in one atomic Hosting release.
+      - name: Build web bundle (mirror deploy.yml) + stage APK
+        run: |
+          rm -rf web/dist && mkdir -p web/dist
+          cp -r web/src/. web/dist/
+          mkdir -p web/dist/downloads
+          cp "${{ steps.apk.outputs.apk }}" web/dist/downloads/teammarhaba.apk
+          ls -la web/dist/downloads
+
+      # Keyless WIF → impersonate gha-deployer (has firebasehosting.admin) — identical to deploy.yml.
+      - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          project_id: teammarhaba
+          workload_identity_provider: projects/58443206078/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      # Same config.js injections as deploy.yml so the hosted build stays consistent: backend URL,
+      # the build version (which we just stamped INTO the APK — keep them identical), and theme.
+      - name: Inject backend API base URL into config.js
+        run: |
+          URL=$(gcloud run services describe teammarhaba-backend --project=teammarhaba --region=europe-west2 --format='value(status.url)')
+          if [ -z "$URL" ]; then echo "::error::could not resolve backend Cloud Run URL"; exit 1; fi
+          sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
+          grep apiBaseUrl web/dist/assets/config.js
+
+      - name: Inject web build version into config.js
+        run: |
+          DESCRIBE="${{ steps.ver.outputs.versionName }}"
+          echo "Build version: ${DESCRIBE}"
+          sed -i "s/buildVersion: \"dev\"/buildVersion: \"${DESCRIBE}\"/" web/dist/assets/config.js
+          grep buildVersion web/dist/assets/config.js
+
+      - name: Inject web theme into config.js
+        env:
+          THEME: ${{ vars.THEME }}
+        run: |
+          THEME="${THEME:-doodle}"
+          if grep -q "theme:" web/dist/assets/config.js; then
+            sed -i "s/theme: \"[^\"]*\"/theme: \"${THEME}\"/" web/dist/assets/config.js
+          else
+            sed -i "s#\(apiBaseUrl: \"[^\"]*\",\)#\1\n    theme: \"${THEME}\",#" web/dist/assets/config.js
+          fi
+          grep theme web/dist/assets/config.js
+
+      # Fingerprint /assets/** for cache-busting (same as deploy.yml). It only touches /assets/*.{js,
+      # css}; the /download page and /downloads/*.apk are untouched, so their URLs stay stable.
+      - name: Fingerprint web assets (cache-bust)
+        run: |
+          node web/tools/fingerprint.mjs web/dist
+          ls web/dist/assets
+
+      - name: Deploy to Firebase Hosting (live channel)
+        run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
+
+      - name: Upload signed release APK as a build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### Android signed release"
+            echo "- versionName (= web buildVersion): \`${{ steps.ver.outputs.versionName }}\`"
+            echo "- versionCode: \`${{ steps.ver.outputs.versionCode }}\`"
+            echo "- Hosted APK: https://teammarhaba.web.app/downloads/teammarhaba.apk"
+            echo "- Download page: https://teammarhaba.web.app/download"
+          } >> "$GITHUB_STEP_SUMMARY"

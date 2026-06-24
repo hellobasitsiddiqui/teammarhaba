@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Download TeamMarhaba for Android</title>
+    <meta name="description" content="Install the TeamMarhaba Android app — direct APK download with step-by-step install instructions." />
+
+    <!-- Self-contained page (TM-246). Served at /download as a REAL static file (web/dist/download/
+         index.html), so Firebase Hosting returns it directly before the SPA rewrite (** -> /index.html)
+         applies. Deliberately NO module imports / auth / styles.css so it:
+           - works for a signed-out visitor arriving from the in-app "Update available" prompt
+             (UpdateChecker opens https://teammarhaba.web.app/download — see android/UpdateChecker.kt),
+           - is NOT touched by the asset fingerprinter (it only hashes /assets/*.{js,css}), so this
+             URL stays stable across deploys, and
+           - renders even if /assets/** failed to load.
+         The APK is published by the release workflow to /downloads/teammarhaba.apk (.github/workflows/
+         android-release.yml). Until the first signed release lands (blocked on the TM-245 keystore
+         secrets) that file 404s; the page below degrades gracefully and says so. -->
+    <style>
+        :root {
+            --bg: #0f1226;
+            --card: #1a1f3a;
+            --ink: #f4f6ff;
+            --muted: #aab2d5;
+            --accent: #5b8cff;
+            --accent-ink: #ffffff;
+            --line: #2b3360;
+            --radius: 14px;
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #f3f5fc; --card: #ffffff; --ink: #181c33; --muted: #5a627f;
+                --accent: #2f63ff; --accent-ink: #ffffff; --line: #e3e7f5;
+            }
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; }
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+        }
+        .wrap { max-width: 680px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+        header { text-align: center; margin-bottom: 2rem; }
+        h1 { font-size: 1.9rem; margin: 0 0 .35rem; }
+        .tagline { color: var(--muted); margin: 0; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin: 1.25rem 0;
+        }
+        .cta {
+            text-align: center;
+        }
+        .btn {
+            display: inline-block;
+            background: var(--accent);
+            color: var(--accent-ink);
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 1.1rem;
+            padding: .85rem 2rem;
+            border-radius: 999px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+        .meta { color: var(--muted); font-size: .9rem; margin-top: .75rem; }
+        h2 { font-size: 1.2rem; margin: 0 0 .75rem; }
+        ol { margin: 0; padding-left: 1.25rem; }
+        ol li { margin: .55rem 0; }
+        code, kbd {
+            background: rgba(127,127,127,.18);
+            padding: .12em .4em;
+            border-radius: 6px;
+            font-size: .92em;
+        }
+        .note {
+            font-size: .9rem;
+            color: var(--muted);
+            border-left: 3px solid var(--accent);
+            padding: .25rem 0 .25rem .85rem;
+            margin: 1rem 0 0;
+        }
+        a { color: var(--accent); }
+        footer { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 2rem; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <header>
+            <h1>Get TeamMarhaba for Android</h1>
+            <p class="tagline">A direct-download app — no Play Store needed.</p>
+        </header>
+
+        <div class="card cta">
+            <!-- Stable hosted path; the release workflow publishes the signed APK here. -->
+            <a class="btn" href="/downloads/teammarhaba.apk" download>Download the app (.apk)</a>
+            <p class="meta" id="apk-meta">Android 7.0+ &middot; installs from this page</p>
+            <p class="note" id="apk-missing" hidden>
+                The installable APK hasn’t been published yet. It goes live the moment the signed
+                release build runs — check back shortly.
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>Install it (allow “unknown sources”)</h2>
+            <p>Because this app is delivered directly (not via the Play Store), Android asks you to
+               approve installs from the app you used to open the file. One-time per source:</p>
+            <ol>
+                <li>Tap <strong>Download the app</strong> above on your phone — the <code>.apk</code> downloads.</li>
+                <li>Open the downloaded file. Android prompts to allow installs from this source.</li>
+                <li>Go to <strong>Settings → Apps → Special access → Install unknown apps</strong>,
+                    pick the browser or file app you used to open the APK, and turn on
+                    <strong>Allow from this source</strong>.</li>
+                <li>Go back and tap <strong>Install</strong>.</li>
+            </ol>
+            <p class="note">On Android 8 and newer this permission is granted per app (per source). On
+               older devices it’s a single toggle at <strong>Settings → Security → Unknown sources</strong>.</p>
+        </div>
+
+        <div class="card">
+            <h2>Updating</h2>
+            <p>The app checks for a newer version when it launches and prompts you. When it does, come
+               back to this page, download the latest APK, and install it over the top — your data and
+               sign-in stay put.</p>
+        </div>
+
+        <footer>
+            <p>Prefer the web app? Just open <a href="/">teammarhaba.web.app</a> in any browser.</p>
+        </footer>
+    </div>
+
+    <!-- Tiny progressive enhancement: if the APK isn't published yet (404), disable the button and
+         reveal the "not published yet" note. No framework, fails safe (if the probe errors, we leave
+         the button enabled so a working APK is never hidden). -->
+    <script>
+        (function () {
+            var btn = document.querySelector(".btn");
+            var missing = document.getElementById("apk-missing");
+            var meta = document.getElementById("apk-meta");
+            if (!btn || !missing) return;
+            fetch(btn.getAttribute("href"), { method: "HEAD" })
+                .then(function (r) {
+                    if (!r.ok) {
+                        btn.setAttribute("aria-disabled", "true");
+                        btn.style.opacity = "0.5";
+                        btn.style.pointerEvents = "none";
+                        if (meta) meta.hidden = true;
+                        missing.hidden = false;
+                    }
+                })
+                .catch(function () { /* fail safe — leave the button enabled */ });
+        })();
+    </script>
+</body>
+</html>
