@@ -23,10 +23,17 @@
 //   `clean` stays fully selectable by asking for it explicitly (config/THEME = "clean").
 //   So `resolveTheme(cfg)` always returns a name that exists in the registry.
 //
+// ── Dev/test override (TM-216) ────────────────────────────────────────────────────────────────
+//   A `?theme=clean|doodle` query param (read from location.search — it sits BEFORE the `#/...`
+//   hash route, e.g. `/?theme=clean#/login`) or a `tm-theme` localStorage key force a theme at boot,
+//   layered OVER the config value. Query wins over storage; only ALLOWED values are honoured, any
+//   other is ignored. It's a client-side VISUAL toggle only (no behaviour change, no data), so it's
+//   harmless in prod and lets you A/B a theme — and the e2e suite flip themes — without a redeploy.
+//
 // Classic (non-module) script, loaded right after config.js and before paint, so switching the
 // family causes no flash of the wrong look (matches the build-info.js pattern). It also publishes
-// `window.TeamMarhabaTheme` ({ THEMES, DEFAULT_THEME, resolveTheme, applyTheme }) so other code and
-// tests can reuse the contract without re-implementing it.
+// `window.TeamMarhabaTheme` ({ THEMES, DEFAULT_THEME, resolveTheme, readOverride, activeTheme,
+// applyTheme }) so other code and tests can reuse the contract without re-implementing it.
 (function () {
   "use strict";
 
@@ -58,6 +65,37 @@
     return ALLOWED.indexOf(requested) !== -1 ? requested : DEFAULT_THEME;
   }
 
+  // Dev/test override (TM-216). Lets a theme be exercised without a redeploy: a `?theme=` query
+  // param (read from location.search — note the app hash-routes, so the query lives BEFORE the
+  // `#/...`, e.g. `/?theme=clean#/login`) or a `tm-theme` localStorage key. The query param wins
+  // over localStorage; only ALLOWED values are honoured and anything else is ignored (returns
+  // null → caller falls back to the configured theme). This is purely a client-side VISUAL toggle
+  // layered over the config value — it changes no behaviour and ships no data, so it's harmless in
+  // prod (an unconfigured deploy still serves the configured/default theme). It also lets the e2e
+  // suite flip themes against a single served bundle. Best-effort: any access error (e.g. a locked
+  // localStorage) is swallowed so a bad environment can never break boot.
+  var OVERRIDE_STORAGE_KEY = "tm-theme";
+  function readOverride() {
+    try {
+      var fromQuery = new URLSearchParams(window.location.search).get("theme");
+      if (ALLOWED.indexOf(fromQuery) !== -1) return fromQuery;
+    } catch (e) {
+      /* no/locked location.search — ignore */
+    }
+    try {
+      var fromStorage = window.localStorage.getItem(OVERRIDE_STORAGE_KEY);
+      if (ALLOWED.indexOf(fromStorage) !== -1) return fromStorage;
+    } catch (e) {
+      /* no/locked localStorage — ignore */
+    }
+    return null;
+  }
+
+  /** The theme to boot with: the dev override if a valid one is present, else the configured one. */
+  function activeTheme(cfg) {
+    return readOverride() || resolveTheme(cfg);
+  }
+
   /** Set the resolved theme on <html> as `data-theme`, which scopes the token contract in CSS. */
   function applyTheme(name) {
     var theme = ALLOWED.indexOf(name) !== -1 ? name : DEFAULT_THEME;
@@ -65,8 +103,8 @@
     return theme;
   }
 
-  // Boot: read config and apply, synchronously, before the page paints.
-  applyTheme(resolveTheme(window.TEAMMARHABA_CONFIG));
+  // Boot: read config (honouring the dev override) and apply, synchronously, before the page paints.
+  applyTheme(activeTheme(window.TEAMMARHABA_CONFIG));
 
   // Expose the contract for reuse (TM-212, e2e, future theme switchers) without re-implementation.
   window.TeamMarhabaTheme = {
@@ -74,6 +112,8 @@
     ALLOWED: ALLOWED,
     DEFAULT_THEME: DEFAULT_THEME,
     resolveTheme: resolveTheme,
+    readOverride: readOverride,
+    activeTheme: activeTheme,
     applyTheme: applyTheme,
   };
 })();
