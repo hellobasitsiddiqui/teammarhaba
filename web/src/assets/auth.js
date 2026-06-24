@@ -23,10 +23,13 @@ import {
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   RecaptchaVerifier,
   signInWithPhoneNumber,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
+import { shouldUseRedirect } from "./auth-env.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -43,6 +46,34 @@ if (emulatorHost) {
 setPersistence(auth, browserLocalPersistence).catch((err) =>
   console.warn("[auth] could not set persistence:", err?.code ?? err)
 );
+
+// Complete any redirect-based sign-in that's coming back to us (TM-230). On mobile / inside the
+// Android WebView we use `signInWithRedirect` for OAuth providers (see `signInWithGoogle`), which
+// navigates away to the auth handler and back; the result must be reclaimed on load or the user
+// lands signed-out despite a successful round-trip ("Missing initial state"). `onAuthChanged` then
+// fires with the user as normal, so the rest of the app needs no redirect-specific code. This is a
+// no-op (resolves null) on a normal page load with no pending redirect, and harmless on desktop
+// (which uses popup). Best-effort: a failure here must not break boot — it's surfaced to the
+// console and (since onAuthChanged won't fire signed-in) the user simply sees the sign-in panel.
+//
+// `redirectResult` is exported (and wrapped by `awaitRedirectResult()`) so the sign-in UI (login.js)
+// can await it and show any redirect-flow error inline instead of swallowing it.
+export const redirectResult = getRedirectResult(auth).catch((err) => {
+  console.warn("[auth] redirect sign-in did not complete:", err?.code ?? err);
+  // Re-throw shape kept minimal; callers that care await `awaitRedirectResult()` which re-surfaces.
+  throw err;
+});
+
+/**
+ * Await completion of a pending redirect sign-in (TM-230). Resolves to the `UserCredential` when a
+ * redirect just completed, `null` on a normal load (no redirect pending), and REJECTS with the
+ * Firebase error if the redirect flow failed — so the UI can show it. Safe to call on every page
+ * load; only the redirect-return load resolves to a credential.
+ * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").UserCredential|null>}
+ */
+export function awaitRedirectResult() {
+  return redirectResult;
+}
 
 /** The currently signed-in Firebase user, or null when signed out. */
 export function currentUser() {
@@ -147,9 +178,22 @@ export async function startPhoneSignIn(phoneNumber, containerEl) {
 /** The live reCAPTCHA verifier for the in-flight phone sign-in, or null between attempts. */
 let recaptchaVerifier = null;
 
-/** Sign in with Google (popup). Requires the Google provider enabled in the Firebase console. */
+/**
+ * Sign in with Google (TM-230). Uses `signInWithRedirect` on mobile browsers and inside the Android
+ * WebView — a popup is blocked/mis-handled on phones and impossible inside a WebView — and keeps the
+ * snappier `signInWithPopup` on desktop. The redirect path navigates away to the Firebase auth
+ * handler and back; `awaitRedirectResult()` (resolved at module load, above) reclaims the result, so
+ * on redirect this function returns a promise that resolves to `undefined` AFTER the navigation
+ * starts (the page is leaving), while on desktop it resolves to the popup `UserCredential`.
+ *
+ * Requires the Google provider enabled in the Firebase console (parked under TM-200) AND the auth
+ * handler served first-party so Safari ITP / third-party-cookie blocking can't strand the redirect —
+ * delivered via the `authDomain` → our Hosting origin in firebase-config.js + docs/agents/webview-auth-contract.md (TM-230).
+ * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").UserCredential|void>}
+ */
 export function signInWithGoogle() {
-  return signInWithPopup(auth, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  return shouldUseRedirect() ? signInWithRedirect(auth, provider) : signInWithPopup(auth, provider);
 }
 
 /** Sign the current user out. */
@@ -190,6 +234,7 @@ if (typeof window !== "undefined") {
     signInWithEmailCodeToken,
     startPhoneSignIn,
     signInWithGoogle,
+    awaitRedirectResult,
     signOut,
     resendVerificationEmail,
   };
