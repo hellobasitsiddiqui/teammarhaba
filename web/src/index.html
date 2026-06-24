@@ -98,7 +98,9 @@
     <script src="/assets/config.js"></script>
     <!-- Theme system core (TM-210). Classic script, runs right after config.js + before paint:
          reads window.TEAMMARHABA_CONFIG.theme and sets data-theme on <html> (default/fallback
-         "clean"). Picks the visual family; the dark/light axis (TM-133) still follows the OS. -->
+         "doodle"). Picks the visual family; the dark/light axis (TM-133) still follows the OS.
+         A dev override (TM-216) — `?theme=clean|doodle` in the URL query, or a `tm-theme`
+         localStorage key — forces a theme over config for testing; harmless client-side toggle. -->
     <script src="/assets/theme.js"></script>
     <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
     <script src="/assets/build-info.js"></script>

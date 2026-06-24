@@ -15,6 +15,23 @@ login + admin flow against the full stack, with Firebase Auth replaced by the lo
 toast + status badge flips to *Disabled*) → the change **persists in Postgres** (`users.enabled = false`)
 → **sign out**.
 
+`tests/theme-visual.spec.mjs` (TM-216): guards the **theme system** so a theme can't silently break a
+page. Proves the app **boots in the configured theme** (and that an unknown override is ignored), then
+walks the **key pages** — **login, home, profile, admin** — under **both `clean` and `doodle`**,
+asserting `<html data-theme>` is right and each page's **primary control** is visible and **not covered
+or clipped** (a cheap "no layout break" invariant — no pixel snapshots, so no font/SVG-filter flake). It
+flips themes with the **`?theme=` dev override** (see below), against the single served bundle.
+
+### Theme dev override (`?theme=`)
+
+`theme.js` honours a dev/test override at boot, layered over `window.TEAMMARHABA_CONFIG.theme`: a
+`?theme=clean|doodle` **URL query param** (the app hash-routes, so the query sits *before* the hash —
+`/?theme=clean#/login`) or a `tm-theme` **localStorage key** (query wins). Only `clean`/`doodle` are
+honoured; any other value is ignored and the configured/default theme is used. It's a **client-side
+visual toggle only** — no behaviour change, no data — so it's harmless in prod and lets you (and this
+suite) exercise both themes without a redeploy. The override survives hash navigation, so the spec
+loads it once via the initial URL then moves between views without reloading.
+
 ## How it fits together
 
 - **Auth = Firebase Auth emulator.** The web app connects to it via a guarded `connectAuthEmulator`
