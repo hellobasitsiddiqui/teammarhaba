@@ -31,19 +31,32 @@
         <p class="tagline">Walking skeleton — web surface.</p>
         <p id="status" class="status">loading…</p>
 
-        <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out. -->
+        <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out.
+             Responsive (TM-229): on narrow screens the row collapses behind a hamburger toggle.
+             #nav-toggle is hidden on wide screens by CSS and only appears below the nav breakpoint;
+             nav-toggle.js wires the open/close behaviour. The toggle controls #nav-items (the
+             collapsible group); the items themselves keep their ids/visibility logic unchanged. -->
         <nav class="app-nav" aria-label="Account">
-            <a id="nav-signin" href="#/login" hidden>Sign in</a>
-            <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
-            <a id="nav-profile" href="#/profile" hidden>Profile</a>
-            <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
-            <a id="nav-admin" href="#/admin" hidden>Admin</a>
-            <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
-                 to re-run the whole-site walkthrough or the current page's tour. -->
-            <button id="nav-help" type="button" hidden>Help</button>
-            <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
-            <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
-            <button id="signout-btn" type="button" hidden>Sign out</button>
+            <!-- No `hidden` attribute: CSS (the nav media query) decides when the hamburger shows,
+                 and the UA `[hidden]{display:none!important}` rule would otherwise beat that. The
+                 toggle is display:none on wide screens via CSS instead (see .app-nav-toggle). -->
+            <button id="nav-toggle" class="app-nav-toggle" type="button"
+                    aria-controls="nav-items" aria-expanded="false" aria-label="Menu">
+                <span class="app-nav-toggle-bars" aria-hidden="true"></span>
+            </button>
+            <div id="nav-items" class="app-nav-items">
+                <a id="nav-signin" href="#/login" hidden>Sign in</a>
+                <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
+                <a id="nav-profile" href="#/profile" hidden>Profile</a>
+                <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
+                <a id="nav-admin" href="#/admin" hidden>Admin</a>
+                <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
+                     to re-run the whole-site walkthrough or the current page's tour. -->
+                <button id="nav-help" type="button" hidden>Help</button>
+                <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
+                <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
+                <button id="signout-btn" type="button" hidden>Sign out</button>
+            </div>
         </nav>
 
         <!-- Auth views (TM-106 panels, routed by TM-109): #auth-signed-out = #/login,
@@ -176,6 +189,9 @@
     <script type="module" src="/assets/router.js"></script>
     <!-- Nav avatar (TM-166): paints the signed-in user's Firebase photoURL into #nav-avatar. -->
     <script type="module" src="/assets/nav-avatar.js"></script>
+    <!-- Responsive nav toggle (TM-229): hamburger open/close for the collapsed nav on narrow
+         screens. Vanilla, dependency-free; inert on wide screens (the toggle is CSS-hidden there). -->
+    <script src="/assets/nav-toggle.js"></script>
     <!-- Onboarding product tour (TM-135): auto-runs the whole-site walkthrough on first login and
          each page's tour on first visit; replayable from the Help menu. -->
     <script type="module" src="/assets/tours.js"></script>

@@ -22,7 +22,24 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // Desktop project runs every spec EXCEPT the mobile-only responsive one (which needs the phone
+    // viewport from the mobile-chromium project below).
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: /responsive-mobile\.spec\.mjs/,
+    },
+    // Mobile viewport project (TM-229) — a phone profile (Pixel 5 ≈ 393px wide) so the responsive
+    // specs exercise the real narrow-screen layout: hamburger nav, no horizontal page scroll, the
+    // scrollable admin table. Scoped to the responsive spec via its testMatch so the desktop specs
+    // don't double-run under mobile.
+    {
+      name: "mobile-chromium",
+      use: { ...devices["Pixel 5"] },
+      testMatch: /responsive-mobile\.spec\.mjs/,
+    },
+  ],
   // Serve the static web app (with e2e config injected). The backend + emulator are external.
   webServer: {
     command: "node serve.mjs",
