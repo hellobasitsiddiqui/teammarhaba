@@ -295,6 +295,105 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void onboardingGatePersistsNameLocationAgeAndCompletesInOneShot() throws Exception {
+        // TM-250: the first-login profile gate. One atomic POST sets name (→ displayName),
+        // location (→ city) and age, flips onboardingCompleted, and self-attests the age.
+        var who = caller("uid-gate", "ibn@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Ibn Battuta\",\"location\":\"Tangier\",\"age\":30}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
+                .andExpect(jsonPath("$.city").value("Tangier"))
+                .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.ageVerified").value(true));
+
+        // Persisted: a fresh GET reads the same values + flags back from the database.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
+                .andExpect(jsonPath("$.city").value("Tangier"))
+                .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
+
+        // And on the row itself (not just echoed back in the response).
+        var saved = users.findByFirebaseUid("uid-gate").orElseThrow();
+        assertThat(saved.getDisplayName()).isEqualTo("Ibn Battuta");
+        assertThat(saved.getCity()).isEqualTo("Tangier");
+        assertThat(saved.getAge()).isEqualTo(30);
+        assertThat(saved.isOnboardingCompleted()).isTrue();
+    }
+
+    @Test
+    void onboardingGateTrimsNameAndLocation() throws Exception {
+        var who = caller("uid-gate-trim", "trim@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  Timbuktu  \",\"age\":40}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Mansa Musa"))
+                .andExpect(jsonPath("$.city").value("Timbuktu"));
+    }
+
+    @Test
+    void onboardingGateRejectsMissingNameWith400() throws Exception {
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-noname", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"location\":\"Cairo\",\"age\":25}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onboardingGateRejectsBlankLocationWith400() throws Exception {
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-blankloc", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon\",\"location\":\"   \",\"age\":25}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onboardingGateRejectsMissingAgeWith400() throws Exception {
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-noage", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onboardingGateRejectsOutOfRangeAgeWith400() throws Exception {
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-badage", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onboardingGateDoesNotPersistOnValidationFailure() throws Exception {
+        // A rejected gate submission must leave NO half-applied state — the account stays un-gated-able
+        // (onboarding still incomplete) rather than a partial write sneaking through.
+        var who = caller("uid-gate-atomic", "atomic@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Half\",\"location\":\"Done\",\"age\":200}"))
+                .andExpect(status().isBadRequest());
+
+        // The account may not exist yet (request rejected before provision) — if it does, it's clean.
+        users.findByFirebaseUid("uid-gate-atomic").ifPresent(u -> {
+            assertThat(u.isOnboardingCompleted()).isFalse();
+            assertThat(u.getDisplayName()).isNull();
+        });
+    }
+
+    @Test
     void acceptTermsRecordsVersionAndTimestampVisibleOnMe() throws Exception {
         var who = caller("uid-terms", "grace@example.com");
 

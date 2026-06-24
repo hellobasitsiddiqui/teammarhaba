@@ -22,7 +22,12 @@ async function ensureUser(auth, { email, password }) {
 }
 
 /** Mint an emulator ID token for the account, then call GET /api/v1/me so the backend
- *  provisions its `users` row (JIT) — that's what makes it appear in the admin list. */
+ *  provisions its `users` row (JIT) — that's what makes it appear in the admin list. Also marks the
+ *  account onboarding-complete so the TM-250 first-login gate doesn't intercept it: the seeded
+ *  ADMIN/TARGET are "returning, complete" fixtures, and every existing spec (admin walkthrough,
+ *  profile edit, email-code login as these accounts) expects them to land straight in the app, not on
+ *  the gate. They're JIT-provisioned at RUN time — AFTER migrations — so the V8 backfill can't reach
+ *  them; we flip the flag here via POST /me/onboarding-complete (the existing idempotent transition). */
 async function provisionInBackend({ email, password }) {
   const signInUrl =
     `http://${AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`;
@@ -35,12 +40,22 @@ async function provisionInBackend({ email, password }) {
     throw new Error(`emulator sign-in failed for ${email}: ${signInRes.status} ${await signInRes.text()}`);
   }
   const { idToken } = await signInRes.json();
+  const authed = { Authorization: `Bearer ${idToken}`, Accept: "application/json" };
 
-  const meRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
-    headers: { Authorization: `Bearer ${idToken}`, Accept: "application/json" },
-  });
+  const meRes = await fetch(`${API_BASE_URL}/api/v1/me`, { headers: authed });
   if (!meRes.ok) {
     throw new Error(`provision (GET /me) failed for ${email}: ${meRes.status} ${await meRes.text()}`);
+  }
+
+  // Un-gate the seeded account (TM-250): mark first-run onboarding complete so the gate is bypassed.
+  const onboardRes = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, {
+    method: "POST",
+    headers: authed,
+  });
+  if (!onboardRes.ok) {
+    throw new Error(
+      `mark onboarding-complete failed for ${email}: ${onboardRes.status} ${await onboardRes.text()}`,
+    );
   }
 }
 

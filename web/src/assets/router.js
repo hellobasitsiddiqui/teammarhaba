@@ -18,6 +18,8 @@
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterProfile } from "./profile.js";
+import { enterOnboarding } from "./onboarding.js";
+import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 
 const LOGIN = "#/login";
@@ -25,15 +27,25 @@ const HOME = "#/home";
 const ADMIN = "#/admin";
 // Self-service edit-profile view (TM-167) — protected, available to any signed-in user.
 const PROFILE = "#/profile";
-const PROTECTED = new Set([HOME, ADMIN, PROFILE]);
+// First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
+// here and can't reach any other app view until they complete it.
+const ONBOARDING = "#/onboarding";
+const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING]);
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
 let isAdmin = false;
+// Whether the signed-in caller has completed first-login onboarding (TM-250). Resolved from
+// GET /api/v1/me alongside the role on each auth change, so the gate decision is synchronous in the
+// guard. Fails OPEN (true = not gated) on a lookup error: a backend hiccup must never trap a user
+// behind the gate with no way through — the backend is still the real authority on what they can do.
+let isOnboarded = true;
 // Whether the admin console is currently mounted/loaded, so we (re)load it only on entry.
 let adminActive = false;
 // Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
 let profileActive = false;
+// Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
+let onboardingActive = false;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
@@ -43,7 +55,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -66,10 +78,16 @@ function render() {
   const homeView = $("auth-signed-in");
   const adminView = $("admin-view");
   const profileView = $("profile-view");
+  const onboardingView = $("onboarding-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
   if (profileView) profileView.hidden = route !== PROFILE;
+  if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
+
+  // While the first-login gate is up (signed in but not onboarded — TM-250), suppress the in-app nav
+  // links so the user can't side-step the gate; only the sign-out control stays (never trap a user).
+  const gated = signedIn && !isOnboarded;
 
   // Nav reflects auth state: a sign-in link when signed out, the sign-out control when in.
   const navSignIn = $("nav-signin");
@@ -78,12 +96,12 @@ function render() {
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
-  // The edit-profile link shows for any signed-in user (TM-167).
-  if (navProfile) navProfile.hidden = !signedIn;
-  // The admin link shows only for a signed-in ADMIN (TM-133).
-  if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin);
+  // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
+  if (navProfile) navProfile.hidden = !signedIn || gated;
+  // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
+  if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
   const homeAdminLink = $("home-admin-link");
-  if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin);
+  if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
 }
 
 /**
@@ -98,6 +116,26 @@ function guard() {
   if (!signedIn && PROTECTED.has(route)) {
     sessionStorage.setItem(INTENDED_KEY, route);
     go(LOGIN);
+    return;
+  }
+  // First-login profile gate (TM-250). A signed-in user who hasn't completed onboarding is forced to
+  // the gate and cannot reach ANY other view until they finish it. This precedes the login-return and
+  // admin checks so the gate wins over them. The gate keeps the INTENDED route untouched, so once the
+  // user completes it the normal login-return logic still lands them where they were headed.
+  if (signedIn && !isOnboarded && route !== ONBOARDING) {
+    // Preserve a deep-linked protected target (if not already remembered) so we can return there
+    // after the gate; an in-app route like #/profile shouldn't be lost behind the gate.
+    if (route !== LOGIN && !sessionStorage.getItem(INTENDED_KEY)) {
+      sessionStorage.setItem(INTENDED_KEY, route);
+    }
+    go(ONBOARDING);
+    return;
+  }
+  // Conversely, an already-onboarded user has no business on the gate — send them on.
+  if (signedIn && isOnboarded && route === ONBOARDING) {
+    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
+    sessionStorage.removeItem(INTENDED_KEY);
+    go(intended);
     return;
   }
   if (signedIn && route === LOGIN) {
@@ -135,18 +173,46 @@ function guard() {
   } else {
     profileActive = false;
   }
+  // First-login gate view (TM-250): mount on entry, passing the `done` callback the gate invokes
+  // after a successful submit. `done` flips our local onboarded flag (the server now reports it) and
+  // re-guards, which moves the now-onboarded user on to their intended route / home.
+  if (route === ONBOARDING) {
+    if (!onboardingActive) {
+      onboardingActive = true;
+      enterOnboarding(onOnboardingComplete);
+    }
+  } else {
+    onboardingActive = false;
+  }
 }
 
-// Resolve the role from the token (async) before guarding, so the admin route/nav decisions use a
-// fresh `isAdmin`. Used for auth-state changes (sign-in/out, reload restore, promotion).
+/** Invoked by the onboarding gate once the user completes it (TM-250): drop the gate + re-route. */
+function onOnboardingComplete() {
+  isOnboarded = true;
+  onboardingActive = false; // allow a future re-mount (e.g. a later sign-out → new gated user)
+  guard();
+}
+
+// Resolve the role (from the token) AND onboarding state (from GET /me) before guarding, so the
+// admin route/nav AND the first-login gate (TM-250) decisions use fresh values. Used for auth-state
+// changes (sign-in/out, reload restore, promotion).
 async function resolveRoleThenGuard() {
-  // Never let a failed role lookup block the guard: if it throws we still must render, or a
-  // signed-in user can be left staring at the sign-in form (TM-141). Fail safe to non-admin.
-  try {
-    isAdmin = (await getRole()) === "ADMIN";
-  } catch {
+  const signedIn = Boolean(currentUser());
+  // Signed-out: reset to safe defaults (no gate, non-admin) and skip the network calls entirely.
+  if (!signedIn) {
     isAdmin = false;
+    isOnboarded = true;
+    guard();
+    return;
   }
+  // Resolve both in parallel; each fails safe independently so one hiccup can't block the guard.
+  //  - role: fail safe to non-admin (TM-141 — never strand a signed-in user on the login form).
+  //  - onboarded: fail OPEN (true = not gated) so a /me hiccup can't trap a user behind the gate;
+  //    the backend stays the real authority on what an un-onboarded account may actually do.
+  const [adminResult, onboardedResult] = await Promise.allSettled([getRole(), getMe()]);
+  isAdmin = adminResult.status === "fulfilled" && adminResult.value === "ADMIN";
+  isOnboarded =
+    onboardedResult.status === "fulfilled" ? Boolean(onboardedResult.value?.onboardingCompleted) : true;
   guard();
 }
 

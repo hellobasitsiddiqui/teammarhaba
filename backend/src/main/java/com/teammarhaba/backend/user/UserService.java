@@ -184,6 +184,60 @@ public class UserService {
     }
 
     /**
+     * Complete the first-login "profile gate" in one atomic transaction (TM-250): persist the three
+     * required minimum fields (name → {@code displayName}, location → {@code city}, age) <em>and</em>
+     * mark onboarding complete, so a new passwordless user can't enter the app with an empty shell.
+     *
+     * <p>Unlike {@link #updateProfile} (partial PATCH), this is all-or-nothing: all three values are
+     * required by the {@code OnboardingRequest} bean validation at the web boundary; here we
+     * additionally reject blank/whitespace-only name and location (a {@code @Size(min=1)} lets a
+     * single space through). The whole thing runs in one {@code @Transactional} unit, so the profile
+     * write and the onboarding-flag flip commit together or not at all — the gate never half-applies.
+     *
+     * <p>Reuses the existing onboarding-complete machinery (TM-163): completing onboarding here also
+     * self-attests the supplied age ({@code ageVerified = true}), since an age is always on record by
+     * construction. Idempotent on the flag, but the profile fields are always (re)written from the
+     * request, so re-submitting overwrites with the latest values.
+     */
+    @Transactional
+    public User completeProfileOnboarding(VerifiedUser caller, String name, String location, Integer age) {
+        User user = provision(caller);
+
+        user.setDisplayName(requireText(name, "name"));
+        user.setCity(requireText(location, "location"));
+        user.setAge(age); // range already enforced (13–120) by bean validation at the boundary
+
+        boolean wasComplete = user.isOnboardingCompleted();
+        user.completeOnboarding();
+        user.setAgeVerified(true); // an age is always on record here (required field) — self-attested
+
+        // The gate is a profile fill plus an onboarding completion; record both for a complete trail.
+        audit.record(
+                caller.uid(),
+                AuditAction.PROFILE_UPDATED,
+                TARGET_USER,
+                caller.uid(),
+                Map.of("fields", "displayName,city,age", "via", "onboarding"));
+        if (!wasComplete) {
+            audit.record(
+                    caller.uid(),
+                    AuditAction.ONBOARDING_COMPLETED,
+                    TARGET_USER,
+                    caller.uid(),
+                    Map.of("ageVerified", "true"));
+        }
+        return user;
+    }
+
+    /** Required free-text field: reject {@code null}/blank (a single space passes {@code @Size(min=1)}). */
+    private static String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new BadRequestException(field + " is required");
+        }
+        return value.trim();
+    }
+
+    /**
      * Record the caller's acceptance of a terms {@code version} at {@code now()} (TM-163).
      * Provision-then-update. Re-accepting (e.g. a new version) overwrites the stored version and
      * timestamp and is audited each time.

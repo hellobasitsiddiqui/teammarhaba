@@ -1,0 +1,18 @@
+-- V8__backfill_onboarding_complete — don't gate pre-existing accounts (TM-250)
+--
+-- The first-login "complete your profile" gate (TM-250) routes any signed-in user whose onboarding
+-- isn't complete to a blocking profile form (name/location/age) before they can enter the app. The
+-- onboarding_completed flag (V6/TM-163) defaults to false, so WITHOUT this backfill every account
+-- that existed before this feature shipped — including anyone already happily using the app — would
+-- suddenly be bounced to the gate on their next visit.
+--
+-- This is a one-time data backfill, not a schema change: mark every CURRENT row onboarding-complete
+-- so the gate only ever applies to accounts created from here on. We only flip rows that still have
+-- the default false (idempotent / no needless writes), and we leave the column default (false) in
+-- place so genuinely new accounts are still gated.
+--
+-- NOTE on e2e: the Playwright suite seeds its ADMIN/TARGET accounts at RUN time (JIT-provisioned via
+-- GET /me AFTER migrations run), so this backfill can't reach them — global-setup marks those seeded
+-- accounts onboarding-complete explicitly instead (web/e2e/global-setup.mjs), keeping the existing
+-- "sign in → land on home/admin" specs un-gated.
+UPDATE users SET onboarding_completed = true WHERE onboarding_completed = false;

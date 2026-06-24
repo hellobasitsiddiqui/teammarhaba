@@ -211,12 +211,40 @@ export async function updateMe(patch) {
   return response.json();
 }
 
+/**
+ * POST /api/v1/me/onboarding — complete the first-login profile gate (TM-250) in one atomic call:
+ * the three required minimum fields (name, location, age) are persisted AND onboarding is marked
+ * complete server-side. Unlike {@link updateMe} (partial PATCH), all three are required: the backend
+ * rejects a missing/blank field or an out-of-range age with a 400 carrying per-field `errors`, which
+ * the gate UI attaches next to the offending inputs. Returns the updated {@link MeResponse} (now
+ * `onboardingCompleted: true`) so the caller can drop the gate and proceed.
+ *
+ * @param {{name: string, location: string, age: number}} body the three required fields.
+ * @returns {Promise<Object>} the updated MeResponse.
+ * @throws {ApiError}
+ */
+export async function submitOnboarding(body) {
+  const response = await apiFetch("/api/v1/me/onboarding", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Onboarding failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
   window.tmApi = {
     apiFetch,
     getMe,
     updateMe,
+    submitOnboarding,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,
