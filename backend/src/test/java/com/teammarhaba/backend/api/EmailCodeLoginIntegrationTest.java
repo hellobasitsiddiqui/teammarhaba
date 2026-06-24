@@ -13,6 +13,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.EmailCodeMailer;
+import com.teammarhaba.backend.auth.EmailCodeProperties;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -112,6 +113,33 @@ class EmailCodeLoginIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(429));
+    }
+
+    @Test
+    void perIpRequestFloodHits429RegardlessOfDistinctAddresses(@Autowired EmailCodeProperties props)
+            throws Exception {
+        // The varied-address DoS the per-address cooldown can't catch (TM-247): every call uses a
+        // DISTINCT address (so the send cooldown never fires) but the SAME spoofed client IP via
+        // X-Forwarded-For. After ipRequestLimit calls the coarse per-IP limit returns 429. A unique
+        // forwarded IP keeps this test's budget independent of the other tests' 127.0.0.1 traffic.
+        String floodIp = "198.18.0.99";
+        int limit = props.ipRequestLimit();
+
+        for (int i = 0; i <= limit; i++) {
+            var result = mockMvc.perform(post("/api/v1/auth/email-code/request")
+                            .header("X-Forwarded-For", floodIp)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"ipflood-" + i + "@example.com\"}"))
+                    .andReturn();
+            int statusCode = result.getResponse().getStatus();
+            if (i < limit) {
+                assertThat(statusCode).isEqualTo(204); // within budget
+            } else {
+                assertThat(statusCode).isEqualTo(429); // the (limit+1)-th trips the per-IP limit
+                assertThat(result.getResponse().getContentType())
+                        .contains(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+            }
+        }
     }
 
     @Test

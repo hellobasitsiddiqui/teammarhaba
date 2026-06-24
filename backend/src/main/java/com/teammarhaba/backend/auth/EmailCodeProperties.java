@@ -23,12 +23,31 @@ import org.springframework.validation.annotation.Validated;
  *       {@code request} + powers a meaningful "Resend" (default 60s, matching the TM-165 cooldown).</li>
  *   <li>{@code maxVerifyAttempts} — wrong guesses allowed against one outstanding code before it is
  *       burned, to stop brute-forcing a short numeric code (default 5).</li>
+ *   <li>{@code maxOutstanding} — hard cap on how many addresses can have in-memory auth state at once
+ *       (the {@code pending} + {@code lastSent} stores). Bounds memory so a flood of distinct random
+ *       addresses can't grow the heap without limit; entries also expire on their own (TM-247,
+ *       default 100000 — generous for a single instance, ~tens of MB worst case).</li>
+ *   <li>{@code ipRequestLimit} — max {@code request} calls allowed from one client IP per
+ *       {@code ipRequestWindow} before the endpoint returns {@code 429}; a coarse per-IP limit in
+ *       front of the per-address cooldown, so varied addresses from one source are still throttled
+ *       (TM-247, default 20).</li>
+ *   <li>{@code ipRequestWindow} — the fixed window for {@code ipRequestLimit} (TM-247, default 1m).</li>
+ *   <li>{@code maxTrackedIps} — hard cap on how many client IPs the per-IP limiter tracks at once, so
+ *       the limiter itself can't become a new unbounded map under a spoofed-{@code X-Forwarded-For}
+ *       flood (TM-247, default 100000). Counters also expire after {@code ipRequestWindow}.</li>
  * </ul>
  */
 @Validated
 @ConfigurationProperties(prefix = "app.auth.email-code")
 public record EmailCodeProperties(
-        @Min(4) int length, Duration ttl, Duration sendCooldown, @Min(1) int maxVerifyAttempts) {
+        @Min(4) int length,
+        Duration ttl,
+        Duration sendCooldown,
+        @Min(1) int maxVerifyAttempts,
+        @Min(1) long maxOutstanding,
+        @Min(1) int ipRequestLimit,
+        Duration ipRequestWindow,
+        @Min(1) long maxTrackedIps) {
 
     public EmailCodeProperties {
         if (length == 0) {
@@ -38,6 +57,17 @@ public record EmailCodeProperties(
         sendCooldown = requirePositive(sendCooldown, Duration.ofSeconds(60), "app.auth.email-code.send-cooldown");
         if (maxVerifyAttempts == 0) {
             maxVerifyAttempts = 5;
+        }
+        if (maxOutstanding == 0) {
+            maxOutstanding = 100_000;
+        }
+        if (ipRequestLimit == 0) {
+            ipRequestLimit = 20;
+        }
+        ipRequestWindow =
+                requirePositive(ipRequestWindow, Duration.ofMinutes(1), "app.auth.email-code.ip-request-window");
+        if (maxTrackedIps == 0) {
+            maxTrackedIps = 100_000;
         }
     }
 

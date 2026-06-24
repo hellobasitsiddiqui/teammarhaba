@@ -59,9 +59,22 @@ class EmailCodeServiceTest {
         mailer = new CapturingMailer();
         clock = new MutableClock(T0);
         // Short, explicit limits so the test reads clearly: 6 digits, 10m TTL, 60s cooldown, 5 tries.
-        EmailCodeProperties props =
-                new EmailCodeProperties(6, Duration.ofMinutes(10), Duration.ofSeconds(60), 5);
-        service = new EmailCodeService(provider, mailer, props, clock);
+        // A small maxOutstanding (50) makes the flood-bound assertion concrete; the per-IP limiter
+        // tunables are exercised by EmailCodeRateLimiterTest, so any valid value will do here.
+        service = new EmailCodeService(provider, mailer, props(50), clock);
+    }
+
+    /** Build properties with the given {@code maxOutstanding}; everything else fixed for the suite. */
+    private static EmailCodeProperties props(long maxOutstanding) {
+        return new EmailCodeProperties(
+                6,
+                Duration.ofMinutes(10),
+                Duration.ofSeconds(60),
+                5,
+                maxOutstanding,
+                20,
+                Duration.ofMinutes(1),
+                100_000);
     }
 
     @Test
@@ -151,6 +164,24 @@ class EmailCodeServiceTest {
                 .extracting(e -> ((EmailCodeException) e).reason())
                 .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
         verify(firebaseAuth, never()).createCustomToken(anyString());
+    }
+
+    @Test
+    void floodOfDistinctAddressesLeavesInMemoryStateBounded() {
+        // The DoS the TM-238 review found: an attacker scripts `request` with millions of distinct,
+        // validly-formed random addresses. With unbounded maps this grew the heap without limit; with
+        // the bounded Caffeine caches the live entry count stays capped at maxOutstanding (50 here),
+        // NOT the 5000 distinct addresses flooded.
+        int flood = 5_000;
+        for (int i = 0; i < flood; i++) {
+            // Distinct address per call, and clock untouched so none expire — only the size cap bounds it.
+            service.request("flood-" + i + "@example.com");
+        }
+
+        long tracked = service.trackedEntryCount();
+        assertThat(tracked).isLessThan(flood); // the whole point: not N
+        // Caffeine's maximumSize is approximate; allow generous slack but well below the flood size.
+        assertThat(tracked).isLessThanOrEqualTo(50L * 3);
     }
 
     @Test

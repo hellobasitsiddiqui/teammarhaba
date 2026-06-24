@@ -80,6 +80,16 @@
             <version>9.9.0</version>
         </dependency>
 
+        <!-- Caffeine: bounded, expiring in-memory caches for the email-code auth state and the
+             per-IP request limiter (TM-247). Version managed by the Spring Boot BOM. Used directly
+             (not via Spring's CacheManager) so each store has its own expiry + maximumSize, which
+             caps memory under a flood of distinct addresses / source IPs (the unbounded-map DoS the
+             TM-238 review found). -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <!-- Data layer (TM-71): JPA/Hibernate + JDBC + Spring's DAO exception hierarchy
              (DataIntegrityViolationException -> 409, used by the TM-72 error model). -->
         <dependency>
