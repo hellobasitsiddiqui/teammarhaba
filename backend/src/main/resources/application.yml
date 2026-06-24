@@ -18,6 +18,30 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  # Mail transport for the email-code login (TM-249). Google Workspace SMTP on 10xai.co.uk.
+  # host binds from MAIL_HOST (recommended value smtp.gmail.com) but is ONLY set when MAIL_HOST is
+  # provided — left unset, no JavaMailSender is created and the email-code login falls back to
+  # LoggingEmailCodeMailer, so dev/test/CI/e2e boot with no mail config and no SMTP connection.
+  # username/password come from MAIL_USERNAME/MAIL_PASSWORD (a Workspace *app password*, SECRET);
+  # the SMTP mailer fails startup loudly if mail is enabled but either is blank. To turn delivery
+  # ON, set MAIL_HOST (+ creds) — or app.auth.email-code.smtp.enabled=true (which still needs a host).
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          # Fail fast instead of hanging a request thread if Gmail SMTP is unreachable.
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
 # 12-factor: bind to the platform-provided port (Cloud Run sets PORT), default 8080 locally.
 server:
   port: ${PORT:8080}
@@ -37,6 +61,15 @@ management:
       show-details: when-authorized
       probes:
         enabled: true
+  health:
+    # Don't let the email-code SMTP relay (TM-249) gate the app's health. spring-boot-starter-mail
+    # auto-registers a MailHealthIndicator that opens an SMTP connection on every /actuator/health
+    # call; an unreachable/unconfigured relay would flip overall health to DOWN (503) and fail
+    # liveness/readiness probes — coupling the app's "am I up" to an external mail server. Mail
+    # delivery failures already surface per-request (EmailCodeDeliveryException); they must not
+    # take the instance out of rotation.
+    mail:
+      enabled: false
   info:
     env:
       enabled: true
@@ -72,6 +105,14 @@ app:
       ip-request-limit: ${EMAIL_CODE_IP_REQUEST_LIMIT:20}       # max request calls per client IP per window (429 over)
       ip-request-window: ${EMAIL_CODE_IP_REQUEST_WINDOW:1m}     # fixed window for the per-IP limit
       max-tracked-ips: ${EMAIL_CODE_MAX_TRACKED_IPS:100000}     # hard cap on IPs the limiter tracks (bounds the limiter)
+      # Real SMTP delivery (TM-249). Activates SmtpEmailCodeMailer when `enabled` is true OR
+      # spring.mail.host is set; otherwise the LoggingEmailCodeMailer fallback stays in place.
+      # `from` is the sender address (decided sender domain 10xai.co.uk); these are NOT secrets —
+      # the SMTP credentials live in spring.mail.username/password (MAIL_USERNAME/MAIL_PASSWORD).
+      smtp:
+        enabled: ${MAIL_SMTP_ENABLED:false}     # explicit on-switch; or just set MAIL_HOST
+        from: ${APP_MAIL_FROM:no-reply@10xai.co.uk}   # From address on the code email
+        from-name: ${APP_MAIL_FROM_NAME:TeamMarhaba}  # display name shown with the From address
 
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:

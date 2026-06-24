@@ -80,6 +80,16 @@
             <version>9.9.0</version>
         </dependency>
 
+        <!-- Mail transport (TM-249): JavaMailSender for the email-code login. Used by
+             SmtpEmailCodeMailer when mail is configured (spring.mail.host set); when it isn't,
+             the default LoggingEmailCodeMailer is used and no SMTP connection is ever attempted,
+             so dev/test/CI boot credential-free. Provider-agnostic — prod can repoint
+             spring.mail.host at any SMTP relay (e.g. SendGrid, TM-251) with no code change. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- Caffeine: bounded, expiring in-memory caches for the email-code auth state and the
              per-IP request limiter (TM-247). Version managed by the Spring Boot BOM. Used directly
              (not via Spring's CacheManager) so each store has its own expiry + maximumSize, which
