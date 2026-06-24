@@ -1372,3 +1372,274 @@ body {
     display: flex;
     gap: 0.5rem;
 }
+
+/*
+ * ===== Responsive mobile-web polish (TM-229) =====
+ *
+ * Foundation of the Mobile epic: make every view usable at phone widths (≈320–430px) and inside
+ * the Android/iOS WebView wrappers, WITHOUT a framework — vanilla CSS plus the tiny nav-toggle.js.
+ * This EXTENDS the existing 640px / 32rem media queries above (per the ticket: extend, don't
+ * restart); it adds the nav hamburger, tap-target floors, and the small-screen breakpoints.
+ *
+ * It is theme-agnostic: every rule uses the same `var(--token)`s the components already read, so it
+ * holds under clean / doodle / sketch alike (no hard-coded colours, no per-theme forks).
+ */
+
+/* --- Global: never allow horizontal page scroll on a phone (a stray wide child = the classic
+   mobile break). Width-cap the page container so a long unbroken string can't force a sideways
+   scroll, and let long words/URLs wrap instead of overflowing. ----------------------------------- */
+html {
+    overflow-x: hidden;
+}
+
+.app {
+    width: 100%;
+    max-width: 100vw;
+    overflow-wrap: break-word;
+}
+
+/* --- Nav: hamburger scaffolding (TM-229) -------------------------------------------------------
+   These rules are layout-only and inert on wide screens (the toggle stays display:none until the
+   narrow breakpoint below reveals it). #nav-items is the collapsible group; on wide screens it's a
+   normal inline row that flows with the rest of the nav. */
+.app-nav {
+    flex-wrap: wrap;
+    position: relative;
+}
+
+.app-nav-items {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* The hamburger button: a 44px square tap target, drawn with three CSS bars (no icon font/asset).
+   Hidden on wide screens; the narrow breakpoint flips it to inline-grid. */
+.app-nav-toggle {
+    display: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    color: var(--accent);
+    background: transparent;
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.app-nav-toggle:hover {
+    background: var(--accent-soft);
+}
+
+.app-nav-toggle-bars,
+.app-nav-toggle-bars::before,
+.app-nav-toggle-bars::after {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 2px;
+}
+
+.app-nav-toggle-bars {
+    position: relative;
+}
+
+.app-nav-toggle-bars::before,
+.app-nav-toggle-bars::after {
+    content: "";
+    position: absolute;
+    left: 0;
+}
+
+.app-nav-toggle-bars::before {
+    top: -6px;
+}
+
+.app-nav-toggle-bars::after {
+    top: 6px;
+}
+
+/*
+ * --- Nav breakpoint: collapse the row into a hamburger menu (≤ 33rem ≈ 528px) ------------------
+ * Below this, the nav stacks behind the toggle (matches the matchMedia("min-width:33rem") in
+ * nav-toggle.js). The toggle appears; #nav-items becomes an absolutely-positioned dropdown card
+ * that only shows when nav-toggle.js sets [data-nav-open="true"] on the nav.
+ */
+@media (max-width: 33rem) {
+    .app-nav-toggle {
+        display: inline-grid;
+    }
+
+    .app-nav-items {
+        position: absolute;
+        top: calc(100% + 0.4rem);
+        right: 0;
+        z-index: 1500;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.25rem;
+        min-width: 12rem;
+        max-width: min(16rem, 90vw);
+        padding: 0.4rem;
+        background: var(--surface);
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-menu);
+    }
+
+    /* Collapsed by default; nav-toggle.js opens it. An empty menu (signed out, nothing to show but
+       the Sign-in link) still behaves — the link is the only visible child. */
+    .app-nav:not([data-nav-open="true"]) .app-nav-items {
+        display: none;
+    }
+
+    /* Inside the dropdown, every item is a full-width ≥44px tap row, left-aligned like a menu. */
+    .app-nav-items > a,
+    .app-nav-items > button {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        min-height: 44px;
+        padding: 0.5rem 0.6rem;
+        border-radius: var(--radius-sm);
+        text-align: left;
+    }
+
+    .app-nav-items > a:hover,
+    .app-nav-items > button:hover {
+        background: var(--surface-2);
+        text-decoration: none;
+    }
+
+    /* The nav avatar sits inline with a label-less row; give it room and centre it. */
+    .app-nav-items > .tm-nav-avatar {
+        align-self: center;
+        margin: 0.15rem auto;
+    }
+}
+
+/*
+ * --- Phone layout polish (≤ 30rem ≈ 480px) ----------------------------------------------------
+ * Tighter padding, full-bleed cards, single-column stats, and ≥44px tap targets across the
+ * interactive controls so nothing is fiddly to hit on a touch screen.
+ */
+@media (max-width: 30rem) {
+    .app {
+        padding: 1.1rem 0.85rem 2rem;
+    }
+
+    .app h1 {
+        font-size: 2rem;
+    }
+
+    /* Auth card spans the screen (minus the page padding) instead of a fixed 22rem. */
+    .auth {
+        max-width: none;
+    }
+
+    /* Tap-target floor for the primary auth + Google buttons. */
+    .auth button {
+        min-height: 44px;
+    }
+
+    /* Inputs at 16px font already (avoids iOS zoom-on-focus); give them a comfortable height. */
+    .field input,
+    .tm-input {
+        min-height: 44px;
+        font-size: 16px;
+    }
+
+    /* Stats: a single column reads better than a cramped 2×2 on the narrowest phones. */
+    .tm-stats {
+        grid-template-columns: 1fr;
+    }
+
+    /* Admin head: let the Refresh button drop under the heading rather than squeeze beside it. */
+    .tm-admin-head {
+        flex-wrap: wrap;
+    }
+
+    /* Toolbar: each control takes a full row so the selects aren't hairline-thin. */
+    .tm-toolbar .tm-input,
+    .tm-toolbar .tm-input[type="search"] {
+        flex: 1 1 100%;
+        min-height: 44px;
+    }
+
+    /* The admin table stays a horizontally-scrollable wrapper (.tm-table-wrap already has
+       overflow-x:auto) — the ticket's accepted option. Hint the scroll with momentum on iOS and
+       stop a wide table forcing the whole page sideways. */
+    .tm-table-wrap {
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+    }
+
+    /* Per-row action buttons: ≥44px tall and allowed to wrap so they never overflow the cell. */
+    .tm-actions .tm-btn,
+    .tm-btn,
+    .tm-btn-sm {
+        min-height: 44px;
+    }
+
+    /* Pager wraps to two rows on a narrow screen instead of overflowing. */
+    .tm-pager {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+
+    /* Modals / dialogs / toasts: fit the viewport with a small inset instead of a fixed rem width. */
+    .tm-dialog,
+    .tm-modal {
+        width: calc(100vw - 1.5rem);
+    }
+
+    .tm-toasts {
+        left: 0.75rem;
+        right: 0.75rem;
+        bottom: 0.75rem;
+    }
+
+    .tm-toast {
+        max-width: none;
+    }
+
+    /* Profile form actions stack full-width so Save/Cancel are easy to hit. */
+    .tm-form-actions {
+        flex-direction: column;
+    }
+
+    .tm-form-actions .tm-btn {
+        width: 100%;
+    }
+
+    /* The Help replay menu can otherwise sit half off the right edge on a phone. */
+    .tm-help-menu {
+        max-width: calc(100vw - 1.5rem);
+    }
+}
+
+/*
+ * --- Tour coachmarks on small screens (TM-229) ------------------------------------------------
+ * The callout width is already capped to `100vw - 2rem` (above); here we keep its controls a
+ * comfortable tap size and let the foot wrap so Back/Next/Done never overflow a narrow callout.
+ * Positioning is handled in tour.js placeCallout() (now overlap- and viewport-safe on short
+ * screens). The help dropdown + spotlight need no per-width rules — they're measured from the live
+ * viewport in JS.
+ */
+@media (max-width: 30rem) {
+    .tm-tour-callout {
+        width: calc(100vw - 1.5rem);
+    }
+
+    .tm-tour-foot {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .tm-tour-actions .tm-btn {
+        min-height: 44px;
+    }
+}

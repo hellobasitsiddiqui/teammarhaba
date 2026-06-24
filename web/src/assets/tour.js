@@ -198,12 +198,32 @@ export function runTour(tour, { force = false } = {}) {
     const ch = callout.offsetHeight || 160;
     const vh = window.innerHeight;
     const vw = window.innerWidth;
-    // Prefer below the target; flip above if there isn't room.
-    let top = r.bottom + margin;
-    if (top + ch > vh - margin) top = Math.max(margin, r.top - ch - margin);
+
+    // Horizontal: centre on the target, then clamp inside the viewport (the callout width is already
+    // capped to `100vw - 2rem` in CSS, so this always fits on a phone).
     let left = r.left + r.width / 2 - cw / 2;
-    left = Math.min(Math.max(margin, left), vw - cw - margin);
-    callout.style.top = `${Math.max(margin, top)}px`;
+    left = Math.min(Math.max(margin, left), Math.max(margin, vw - cw - margin));
+
+    // Vertical: prefer below the target, flip above if there isn't room below.
+    const roomBelow = vh - r.bottom - margin;
+    const roomAbove = r.top - margin;
+    let top;
+    if (roomBelow >= ch) {
+      top = r.bottom + margin;
+    } else if (roomAbove >= ch) {
+      top = r.top - ch - margin;
+    } else {
+      // TM-229: small/short screens — the target is tall relative to the viewport and the callout
+      // fits neither fully below nor fully above without overlapping the spotlight. Dock it to the
+      // side (below vs above) that has MORE room and clamp it into the viewport, so the callout is
+      // always fully visible and never pushed off-screen. The spotlight may be partially behind it,
+      // but the callout text + actions stay reachable — the previous logic could shove it off the
+      // bottom edge on a phone, hiding the Next/Done buttons.
+      top = roomBelow >= roomAbove ? r.bottom + margin : Math.max(margin, r.top - ch - margin);
+    }
+    // Final clamp: never let the callout extend past either viewport edge.
+    top = Math.min(Math.max(margin, top), Math.max(margin, vh - ch - margin));
+    callout.style.top = `${top}px`;
     callout.style.left = `${left}px`;
   }
 
