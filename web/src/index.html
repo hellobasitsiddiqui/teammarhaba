@@ -109,6 +109,14 @@
                                 <span>Phone (with country code)</span>
                                 <input id="phone" type="tel" autocomplete="tel" placeholder="+15555550123" />
                             </label>
+                            <!-- TM-242: consent + disclosure copy. Firebase requires explicit user
+                                 consent + disclosure before a verification SMS is sent: tell the user
+                                 we'll text a code and that standard SMS rates may apply. Choosing SMS
+                                 and pressing "Text me a code" having seen this line is the consent. -->
+                            <p id="sms-disclosure" class="auth-disclosure">
+                                We'll text a 6-digit code to this number to sign you in.
+                                Standard SMS rates may apply.
+                            </p>
                             <div class="auth-actions">
                                 <button id="sms-send-btn" type="button">Text me a code</button>
                             </div>
@@ -165,6 +173,14 @@
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
             <span id="build-info" class="build-info" aria-label="Build version"></span>
+            <!-- TM-242: privacy disclosure. No standalone privacy-policy page exists yet, so the
+                 required Firebase phone-auth line lives in this footer (the app's legal/chrome
+                 surface) until a full policy page is built. Phone sign-in is a Firebase requirement:
+                 numbers entered are sent to and stored by Google for abuse prevention. -->
+            <p id="privacy-policy" class="privacy-note" aria-label="Privacy">
+                Privacy: phone numbers you enter to sign in by SMS are sent to and stored by Google
+                to prevent spam and abuse across Google services.
+            </p>
         </footer>
     </main>
     <script src="/assets/config.js"></script>
