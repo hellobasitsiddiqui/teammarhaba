@@ -31,11 +31,10 @@ async function expectTheme(page, theme) {
     .toBe(theme);
 }
 
-// Cheap "no layout break" invariant for a primary control: it must be visible, have a real
-// (non-zero) box that sits inside the viewport, and NOT be covered by another element — i.e. a
-// hit-test at its centre lands on the control itself (or a descendant of it). This catches a theme
-// that pushes a control off-screen, collapses it, or drops an overlay/decoration on top of it,
-// without the flakiness of exact-pixel snapshots.
+// Cheap "no layout break" invariant for a primary control: it must be visible and, after scrolling
+// it into view if needed, sit inside the viewport with a real (non-zero) box. This catches a theme
+// that hides a control, collapses it, or pushes/shoves it off-screen, without the flakiness of
+// exact-pixel snapshots.
 async function expectControlUsable(page, locator) {
   // "Usable" = visible, on-screen, and interactable. Use Playwright's built-ins, NOT a manual
   // elementFromPoint hit-test — that false-fails on controls below the fold or with inner content

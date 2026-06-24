@@ -369,10 +369,12 @@ body {
 }
 
 /*
- * The reusable "wobble" skin (TM-213) — decorative hand-drawn jitter on the CHROME only.
- * `#wobble` / `#wobble-soft` are SVG filters defined in index.html. We apply them to surfaces,
- * inputs, buttons and dividers, never to text containers, so legibility is unaffected. The
- * `.tm-wobble` / `.tm-wobble-soft` utility classes let future doodle markup opt in explicitly.
+ * The reusable "wobble" skin (TM-213) — decorative hand-drawn jitter. `#wobble-soft` is an SVG
+ * filter defined in index.html. We apply it to surfaces, dividers, AND to text-bearing controls
+ * (buttons, nav buttons, inputs), so it applies a mild whole-element displacement to those controls
+ * and does lightly warp their labels — keep the filter's `scale` ≤ ~2.5 so labels stay legible. It
+ * is dropped under reduced-motion. The `.tm-wobble` / `.tm-wobble-soft` utility classes let future
+ * doodle markup opt in explicitly.
  */
 [data-theme="doodle"] .tm-wobble,
 [data-theme="doodle"] .auth-card,
