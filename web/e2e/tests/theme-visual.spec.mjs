@@ -53,6 +53,21 @@ async function signInAsAdmin(page) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
+// Suppress the first-run product tour (TM-147): its modal + dimmed backdrop would overlay the pages
+// under test (covering controls, blocking nav). The tour persists `{done:true}` in localStorage
+// keyed by uid+tourId; make any `tm.tour.*` key read as completed at boot so no tour auto-runs
+// (works for any uid). General hygiene — the tour will flake any spec that lingers long enough.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const orig = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (k) {
+      return typeof k === "string" && k.startsWith("tm.tour.")
+        ? JSON.stringify({ done: true })
+        : orig.call(this, k);
+    };
+  });
+});
+
 test.describe("the app boots in the configured theme", () => {
   test("with no override, config resolves to the default doodle theme", async ({ page }) => {
     // serve.mjs injects a config WITHOUT `theme`, so resolveTheme() falls back to DEFAULT_THEME.
@@ -139,11 +154,10 @@ test.describe("authenticated pages render under both themes", () => {
       const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
       await expect(targetRow).toBeVisible();
       await expectTheme(page, theme);
-      // Primary control: the row's Disable action button.
-      await expectControlUsable(
-        page,
-        targetRow.getByRole("button", { name: "Disable", exact: true }),
-      );
+      // Primary control: the row's first action button — by role, NOT the "Disable" text. An earlier
+      // spec (admin-walkthrough) may have already disabled this user (shared emulator state), which
+      // flips the button to "Enable"; we only assert the row's primary action is usable.
+      await expectControlUsable(page, targetRow.getByRole("button").first());
     });
   }
 });
