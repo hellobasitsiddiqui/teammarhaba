@@ -50,4 +50,33 @@ Done once wholesale in **TM-132** (2026-06-22): 19 summaries normalized, human l
 - [x] Add `docs/decisions/README.md` indexing the ADRs (currently just ADR-0001). — done agent-A 2026-06-20 (branch `chore/adr-decisions-index`)
 - [x] Spell/format pass over `README.md` + the surface stub READMEs for consistency. — reviewed root + all 6 surface READMEs; consistent, no typos. Refreshed the stale `infra/gcp/README.md` index (Related/out-of-scope) + removed the throwaway `.merge-to-done-test.md` instead. agent-B 2026-06-20 (branch `chore/gcp-docs-index-refresh`)
 
+### Spikes (research → design note/ADR, no production code)
+_These already have Jira tickets — claim the ticket (status lock) before working it; no need to raise a new one._
+- [ ] **Spike: configurable per-field profile edit policy — [TM-201](https://10xai.atlassian.net/browse/TM-201).** Investigate how to enforce, post-login,
+  that profile fields have **per-field mutability rules** — some **never changeable** (e.g. `email`),
+  some **editable on a cadence** (e.g. `displayName` at most once per 7 days) — all driven by
+  **configuration**, not hard-coded. Builds on the existing `PATCH /api/v1/me` (`MeController` /
+  `UserService`, TM-107/TM-112). Deliverable: a short design note / ADR covering:
+  - a policy model — per field `IMMUTABLE` | `EDITABLE` | `RATE_LIMITED(window)` — sourced from config
+    (e.g. `application.yml` `user.field-policy.*`) so cadences are tunable without a logic change.
+  - where enforcement lives (a validation layer in/around `UserService.updateDisplayName` / `PATCH /me`)
+    and the reject shape — RFC 7807 `409`/`422` with a clear `retryAfter`/next-allowed-at.
+  - how to track **last-changed per field** (column(s) on `users` vs a small audit table) to compute the
+    cadence window.
+  - the **email special case**: email is owned by the Firebase token, not our DB — document whether email
+    is simply immutable via our API, or needs a Firebase re-verification flow (building that flow is out of scope).
+- [ ] **Spike: developer role (RBAC) + in-app "developer info" panel — [TM-202](https://10xai.atlassian.net/browse/TM-202).** Investigate how a **developer**
+  user signs in and sees an extra **diagnostics frame/section** the normal user doesn't — showing
+  runtime info about the running app (build/version/commit, active profile, feature flags, recent
+  request/trace id, dependency health, maybe a link to actuator). Two halves to scope:
+  - **RBAC:** add a `DEVELOPER` role alongside `USER`. How is it assigned — Firebase **custom claims**
+    (the claims wiring is flagged as TM-110) mapped onto the stored `User.role`? How does the backend
+    authorize a developer-only endpoint (Spring Security authority check, default-deny preserved)?
+  - **Surfacing the info:** a backend developer-only endpoint (e.g. `GET /api/v1/dev/info`, gated to
+    `DEVELOPER`) that returns the runtime snapshot, and how the web app conditionally renders the panel
+    only when `me.role == DEVELOPER`. Reuse actuator `/info`/`/metrics` (already authenticated) rather
+    than re-inventing — document what's safe to expose and the prod-vs-dev gating.
+  - **Security note:** must not leak secrets/internal detail to non-developers; the panel is authz-gated
+    server-side, never just hidden client-side. Deliverable: a design note / ADR + a proposed ticket breakdown.
+
 _Seeded by agent-A, 2026-06-20. Extend freely._
