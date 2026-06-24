@@ -32,10 +32,10 @@ import kotlinx.coroutines.launch
  *  - Load https://teammarhaba.web.app (BuildConfig.APP_URL) with DOM storage + cookies enabled.
  *  - Signal "I am a WebView" two ways: window.TEAMMARHABA_WEBVIEW = true + the TeamMarhabaJsBridge
  *    object — so auth-env.js picks redirect-mode sign-in.
- *  - Let same-origin navigations (incl. the /__/auth/** redirect + reCAPTCHA round-trip) load in the
- *    WebView; open genuinely external links in the system browser.
+ *  - Let same-origin navigations (incl. the Firebase /__/auth/ redirect + reCAPTCHA round-trip) load
+ *    in the WebView; open genuinely external links in the system browser.
  *  - Hardware back-button = WebView history back; exit when there's nothing to go back to.
- *  - onShowFileChooser wired to the avatar <input id="profile-avatar-file" accept="image/*">.
+ *  - onShowFileChooser wired to the avatar file <input id="profile-avatar-file"> (accepts any image).
  *  - Offline page when the main frame fails to load; pull-to-refresh to reload.
  *  - On launch, run the lightweight auto-update check and prompt if a newer web build is live.
  */
