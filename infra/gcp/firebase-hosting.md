@@ -23,6 +23,21 @@ Config:
 The live site is served over HTTPS on the Firebase Hosting domain
 (`https://teammarhaba.web.app` / `https://teammarhaba.firebaseapp.com`).
 
+## Deploy-time config injection
+
+Between **Build** and **Deploy**, the `web` job rewrites the built
+`web/dist/assets/config.js` so the live bundle carries real values (never
+hardcoded in the repo):
+
+- **Backend API URL** — resolved from Cloud Run (`window.TEAMMARHABA_CONFIG.apiBaseUrl`).
+- **Build stamp** — `git describe --tags` (`buildVersion`, TM-142 / TM-155).
+- **Active theme** — the `THEME` repo variable (`window.TEAMMARHABA_CONFIG.theme`, TM-212).
+
+**Switching the live theme:** set the **`THEME`** repo variable
+(Settings → Secrets and variables → Actions → Variables) to **`doodle`** or
+**`clean`** and redeploy. It defaults to **`clean`** when the variable is unset.
+See [CONTRIBUTING.md → Switching the live theme](../../CONTRIBUTING.md#switching-the-live-theme).
+
 ## Rollback (previous release)
 
 Every deploy creates an immutable **release**; Hosting keeps the history, so
