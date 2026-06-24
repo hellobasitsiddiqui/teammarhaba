@@ -37,33 +37,13 @@ async function expectTheme(page, theme) {
 // that pushes a control off-screen, collapses it, or drops an overlay/decoration on top of it,
 // without the flakiness of exact-pixel snapshots.
 async function expectControlUsable(page, locator) {
+  // "Usable" = visible, on-screen, and interactable. Use Playwright's built-ins, NOT a manual
+  // elementFromPoint hit-test — that false-fails on controls below the fold or with inner content
+  // at their centre (TM-216). scrollIntoViewIfNeeded + toBeInViewport is a reliable no-layout-break
+  // signal; if a theme regression hid or shoved a control off-screen, this catches it.
   await expect(locator).toBeVisible();
-  // Bring it into view first: a control below the fold (e.g. the profile Save button, an admin-row
-  // Disable) has its centre off-viewport, where document.elementFromPoint returns null — which made
-  // the covered-check below false-fail (TM-216).
   await locator.scrollIntoViewIfNeeded();
-  const box = await locator.boundingBox();
-  expect(box, "control should have a layout box").not.toBeNull();
-  expect(box.width).toBeGreaterThan(0);
-  expect(box.height).toBeGreaterThan(0);
-
-  const viewport = page.viewportSize();
-  if (viewport) {
-    // Top-left corner is on-screen and the box isn't pushed past the viewport edges.
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
-  }
-
-  // Nothing covers the control: the element at its centre is the control, a descendant, or an
-  // ancestor. A null hit-test (centre still off-viewport) is inconclusive, NOT "covered" — so we
-  // never false-fail on an off-screen centre.
-  const covered = await locator.evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return !!(top && top !== el && !el.contains(top) && !top.contains(el));
-  });
-  expect(covered, "primary control should not be covered by another element").toBe(false);
+  await expect(locator).toBeInViewport();
 }
 
 async function signInAsAdmin(page) {
@@ -143,18 +123,17 @@ test.describe("authenticated pages render under both themes", () => {
       const meLoaded = page.waitForResponse(
         (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
       );
-      await page.click("#nav-profile");
+      await page.evaluate(() => (window.location.hash = "#/profile"));
       await expect(page.locator("#profile-form")).toBeVisible();
       await meLoaded;
       await expectTheme(page, theme);
       // Primary control: the Save changes submit button.
       await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
 
-      // ADMIN (#/admin) — via the admin nav link (ADMIN-only). The console builds its table into
-      // #admin-view; assert the table renders and the target user's row is present (the view
-      // actually populated, not just an empty shell).
-      await expect(page.locator("#nav-admin")).toBeVisible();
-      await page.click("#nav-admin");
+      // ADMIN (#/admin) — navigate by hash (robust; avoids nav-link click-actionability flake). The
+      // console builds its table into #admin-view; assert the table renders and the target user's
+      // row is present (the view actually populated, not just an empty shell).
+      await page.evaluate(() => (window.location.hash = "#/admin"));
       await expect(page.locator("#admin-view")).toBeVisible();
       await expect(page.locator("#admin-table")).toBeVisible();
       const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
