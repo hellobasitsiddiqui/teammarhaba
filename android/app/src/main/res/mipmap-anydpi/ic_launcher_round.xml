@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-API-26 round launcher icon (minSdk 24): plain vector, same glyph as ic_launcher. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_legacy" />

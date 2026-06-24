@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-API-26 launcher icon (minSdk 24): a plain vector drawable (adaptive-icon is v26+ only, so it
+     lives in mipmap-anydpi-v26). Referencing the composited legacy glyph via an inset drawable. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_legacy" />
