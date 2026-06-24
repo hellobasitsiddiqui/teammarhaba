@@ -73,7 +73,7 @@ Drift guards = CI checks that fail when reality drifts from a committed contract
 | Unit + integration tests; JaCoCo coverage gate (LINE 0.85 / BRANCH 0.70) | ✅ | Epic 1 / TM-54 |
 | DB schema drift — `ddl-auto: validate` (boot fails if `@Entity` ≠ Flyway schema) | ✅ | TM-71 / app config |
 | Format drift — Spotless `spotless:check` | ✅ | Epic 1 CI |
-| Browser e2e (Playwright) — UI-regression guard | ✅ | TM-134 (runs on `main`, off the PR gate) |
+| Browser e2e (Playwright) — UI-regression guard | ⚠️ | TM-134 (nightly + dispatch, **off the PR gate**) — specs can **rot un-run** and merge red; profile specs were 5/7 red first run + hid a prod bug (TM-198/199). Needs a no-rot guard (smoke subset on the PR gate, or run on `web/` PRs, or required "nightly green" before a sprint closes). |
 | `.env.example` contract — fail-loud secrets/env validator | ✅ | TM-64 |
 | **OpenAPI spec drift check** (committed `openapi.json` vs generated; CI fails on drift) | ✅ | TM-135 |
 | CD "new revision is actually serving" verify | ✅ | TM-60 (post TM-131) |
