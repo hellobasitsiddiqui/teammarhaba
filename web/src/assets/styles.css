@@ -249,6 +249,22 @@ body {
     font-weight: 600;
 }
 
+/* TM-242: SMS consent/disclosure line — secondary copy shown before the "Text me a code" button. */
+.auth-disclosure {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+/* TM-242: footer privacy note — quiet legal copy alongside the build stamp. */
+.privacy-note {
+    margin: 0.4rem 0 0;
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
 /* ===== Admin console + reusable UI primitives (TM-133) ===== */
 
 /* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. These

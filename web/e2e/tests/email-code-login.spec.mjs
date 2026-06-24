@@ -90,10 +90,21 @@ test('"Try another way" reveals SMS and email+password, and SMS reaches the code
   await expect(page.locator("#password")).toBeVisible(); // existing email+password still here
   await expect(page.locator("#sms-send-btn")).toBeVisible(); // SMS option present
 
-  // SMS smoke against an emulator test number: request a code → the SMS code step appears. The
-  // emulator returns the verification code out-of-band (no real SMS); we assert the flow advances,
-  // which exercises Firebase Phone Auth wiring end-to-end short of the emulator's code lookup.
-  const phone = "+15555550100";
+  // TM-242: the consent/disclosure line is present on the SMS phone step, BEFORE the send button,
+  // and tells the user we'll text a code + that standard SMS rates may apply. The deliberate act of
+  // choosing SMS + clicking send having seen this line is the explicit consent Firebase requires.
+  const disclosure = page.locator("#sms-disclosure");
+  await expect(disclosure).toBeVisible();
+  await expect(disclosure).toContainText(/text/i);
+  await expect(disclosure).toContainText(/standard sms rates may apply/i);
+
+  // The privacy-policy line discloses that phone numbers are sent to and stored by Google.
+  await expect(page.locator("#privacy-policy")).toContainText(/sent to and stored by google/i);
+
+  // SMS smoke against the configured fictional test number (+16505550100 → 123456, TM-241): request a
+  // code → the SMS code step appears. No real SMS / no quota burn; we assert the flow advances, which
+  // exercises Firebase Phone Auth wiring end-to-end short of the emulator's code lookup.
+  const phone = "+16505550100";
   await page.fill("#phone", phone);
   await page.click("#sms-send-btn");
 
