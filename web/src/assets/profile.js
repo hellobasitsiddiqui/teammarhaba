@@ -468,7 +468,10 @@ function buildShell(view) {
   });
 
   const summary = el("p", { class: "tm-muted", id: "profile-summary", text: "Your profile" });
-  const save = el("button", { class: "tm-btn tm-btn-primary", type: "submit" }, "Save changes");
+  // NB: must NOT be named `save` — that would shadow the module-level `save` submit handler, so the
+  // form's `onSubmit: save` would bind this button element instead of the handler and the form would
+  // do a native submit / page reload instead of PATCHing (TM-199).
+  const saveBtn = el("button", { class: "tm-btn tm-btn-primary", type: "submit" }, "Save changes");
   const reset = el(
     "button",
     { class: "tm-btn", type: "button", onClick: () => { fillForm(state.profile); clearAllFieldErrors(); } },
@@ -480,7 +483,7 @@ function buildShell(view) {
   const form = el("form", { class: "tm-profile-form", id: "profile-form", novalidate: true, onSubmit: save }, [
     avatar.wrapper,
     el("div", { class: "tm-form-grid" }, fieldNodes),
-    el("div", { class: "tm-form-actions" }, [save, reset]),
+    el("div", { class: "tm-form-actions" }, [saveBtn, reset]),
   ]);
 
   const status = el("div", { id: "profile-status" });
@@ -495,7 +498,7 @@ function buildShell(view) {
     form,
   );
 
-  shell = { form, fields, save, reset, summary, status, avatar };
+  shell = { form, fields, save: saveBtn, reset, summary, status, avatar };
 }
 
 /** Reflect load/error state: hide the form while loading or on a load error, show a retry. */
