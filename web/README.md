@@ -54,6 +54,48 @@ in `src/assets/firebase-config.js` (the Firebase web `apiKey` is a public projec
 not a secret — see `/.gitleaks.toml`). The sign-in UI (TM-106) and Bearer-token wiring
 (TM-108) build on this.
 
+## Doodle asset pack (TM-214)
+
+`src/assets/doodles.js` is a small pack of hand-drawn, MVP-rough **SVG line-art doodles** for the
+**`doodle` theme** (TM-213). Motifs are social-events only — people meeting at events (dates, RSVPs,
+places, a crowd, a hello wave, a celebration). They decorate doodle-theme **headers**, **empty states**
+(e.g. "no events yet") and **dividers**. They are **visual only**; TM-215 wires them into pages.
+
+Properties:
+
+- **Themeable** — every doodle uses `stroke="currentColor"` + `fill="none"` (solids use
+  `currentColor`), so it inks with the TM-210/211 tokens (`var(--fg)`) wherever it's mounted and flips
+  with the doodle dark variant. No hardcoded colours.
+- **XSS-safe** — built from a namespaced element factory (attributes + a single static `<text>` via
+  `textContent`); no innerHTML, no user data. Every doodle is static inline SVG.
+- **Doodle-theme-only** — mount under `[data-theme="doodle"]`; the pack adds **nothing** to `clean`.
+- **No owls / mascots / animals.**
+
+Motifs: `calendar` · `ticket` (RSVP) · `pin` (location/map) · `crowd` (group of people) · `chat`
+(speech bubble) · `hello` (waving hand) · `celebrate` (confetti popper) · `clock` (time) · `host`
+(host badge) · `divider` (squiggle, optional `hello!` tag).
+
+Usage (framework-free, mirrors the `el()` kit in `ui.js`):
+
+```js
+import { doodles, doodle, doodleNames } from "./doodles.js";
+
+// by name (data-driven), with the header size variant:
+header.append(doodle("calendar", { size: 56, class: "tm-doodle-header" }));
+
+// or call the builder directly — empty-state hero with an accessible label:
+emptyState.prepend(doodles.crowd({ class: "tm-doodle-empty", title: "No events yet" }));
+
+// a full-width divider between sections:
+section.after(doodles.divider({ class: "tm-doodle-divider", tag: true }));
+```
+
+Each builder returns a fresh detached `<svg>` element. Options: `size` (px), `title` (adds `<title>`
++ `role="img"`/`aria-label`; omit → `aria-hidden` decorative), `class` (extra classes appended after
+`tm-doodle`), `wobble:true` (adds `tm-wobble-soft` to pick up the theme's hand-drawn jitter filter).
+Sizing/spacing classes (`.tm-doodle`, `.tm-doodle-header`, `.tm-doodle-empty`, `.tm-doodle-divider`)
+live under `[data-theme="doodle"]` in `styles.css`.
+
 ## Deploy
 
 Merges to `main` deploy this app to Firebase Hosting (live channel) via
