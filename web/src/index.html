@@ -73,6 +73,10 @@
         </footer>
     </main>
     <script src="/assets/config.js"></script>
+    <!-- Theme system core (TM-210). Classic script, runs right after config.js + before paint:
+         reads window.TEAMMARHABA_CONFIG.theme and sets data-theme on <html> (default/fallback
+         "clean"). Picks the visual family; the dark/light axis (TM-133) still follows the OS. -->
+    <script src="/assets/theme.js"></script>
     <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
     <script src="/assets/build-info.js"></script>
     <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase + exposes window.tmAuth. -->
