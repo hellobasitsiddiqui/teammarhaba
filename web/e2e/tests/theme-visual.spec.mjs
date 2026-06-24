@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN, TARGET } from "../fixtures.mjs";
 
-// Theme-switch guard (TM-216). Proves a theme can't silently break a page: the app boots in the
-// CONFIGURED theme, and every key page renders under BOTH `clean` and `doodle` with its primary
-// control still visible and un-covered (no layout break). This is the test side of the
+// Theme-switch guard (TM-216; extended for sketch in TM-236). Proves a theme can't silently break a
+// page: the app boots in the CONFIGURED theme, and every key page renders under EVERY registered
+// family (`clean`, `doodle`, `sketch`) with its primary control still visible and un-covered (no
+// layout break). New families join by being added to the THEMES constant below. This is the test side of the
 // Grows-Skin epic — it asserts the *mechanism* (data-theme is right) and a cheap *visual* invariant
 // (the primary control isn't clipped to nothing or hidden under an overlay), without pinning exact
 // pixels. It rides the existing E2E workflow (main + manual dispatch), never the PR gate.
@@ -17,7 +18,7 @@ import { ADMIN, TARGET } from "../fixtures.mjs";
 // asserting): we wait for each view's container to be visible, and for signed-in pages we wait for
 // `#signout-btn` (auth has resolved) before checking nav-driven controls.
 
-const THEMES = ["clean", "doodle"];
+const THEMES = ["clean", "doodle", "sketch"];
 
 /** Build a hash route carrying the `?theme=` dev override in the query (before the hash). */
 function routeWithTheme(theme, hashRoute) {
@@ -80,7 +81,7 @@ test.describe("the app boots in the configured theme", () => {
       allowed: window.TeamMarhabaTheme?.ALLOWED,
     }));
     expect(contract.def).toBe("doodle");
-    expect(contract.allowed).toEqual(["clean", "doodle"]);
+    expect(contract.allowed).toEqual(["clean", "doodle", "sketch"]);
   });
 
   test("an unknown override value is ignored (falls back to the configured theme)", async ({ page }) => {

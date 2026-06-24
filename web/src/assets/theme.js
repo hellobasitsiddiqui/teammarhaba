@@ -17,14 +17,14 @@
 //      needs no override block — it IS the current look.
 //
 // ── How the active theme is chosen (FIXED CONTRACT — TM-212 depends on this) ───────────────────
-//   Read `window.TEAMMARHABA_CONFIG.theme`. Allowed values: "clean" | "doodle".
+//   Read `window.TEAMMARHABA_CONFIG.theme`. Allowed values: "clean" | "doodle" | "sketch".
 //   • unset / missing  → "doodle"  (the default — an unconfigured deploy looks like the MVP; TM-215)
 //   • unknown value    → "doodle"  (fall back to the default; never break the page / never blank)
 //   `clean` stays fully selectable by asking for it explicitly (config/THEME = "clean").
 //   So `resolveTheme(cfg)` always returns a name that exists in the registry.
 //
 // ── Dev/test override (TM-216) ────────────────────────────────────────────────────────────────
-//   A `?theme=clean|doodle` query param (read from location.search — it sits BEFORE the `#/...`
+//   A `?theme=clean|doodle|sketch` query param (read from location.search — it sits BEFORE the `#/...`
 //   hash route, e.g. `/?theme=clean#/login`) or a `tm-theme` localStorage key force a theme at boot,
 //   layered OVER the config value. Query wins over storage; only ALLOWED values are honoured, any
 //   other is ignored. It's a client-side VISUAL toggle only (no behaviour change, no data), so it's
@@ -46,11 +46,15 @@
     // Now live (TM-213): the doodle token block + wobble skin exist in styles.css, so doodle is a
     // first-class registered family, not just an allowed-but-unstyled request.
     doodle: { label: "Doodle" },
+    // Now live (TM-236): a graph-paper "sketch / blueprint" family — a light-blue ruled grid
+    // behind a hand-drawn wireframe (reuses the #wobble-soft skin). Its token block lives in
+    // styles.css; doodle stays the default, sketch is an additional selectable option.
+    sketch: { label: "Sketch" },
   };
 
   // Values config is allowed to ask for (the fixed contract). Kept separate from THEMES so a theme
   // name can be a *valid request* (passes the contract) before its full registry entry/CSS exists.
-  var ALLOWED = ["clean", "doodle"];
+  var ALLOWED = ["clean", "doodle", "sketch"];
 
   // The intended default (TM-215): an unconfigured deploy serves "doodle" (the social-events MVP
   // look). It's also the hard fallback for an unset/unknown config value — a real, registered,

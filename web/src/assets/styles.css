@@ -498,6 +498,169 @@ body {
     }
 }
 
+/*
+ * ===== The "sketch" / blueprint theme family (TM-236) =====
+ *
+ * A third selectable family alongside `clean` and `doodle` (doodle stays the default — TM-215).
+ * The look is a graph-paper wireframe sketch: a subtle light-blue ruled GRID behind everything
+ * plus a hand-drawn pen/pencil WIREFRAME feel (sketchy borders, reused `#wobble-soft` filter).
+ * Cooler / more technical than doodle (which is warm ink-on-cream): here it's slate-blue ink on
+ * near-white graph paper.
+ *
+ * Like doodle, this is a pure TOKEN OVERRIDE: it re-points the same TM-210/TM-211 tokens every
+ * component already reads via `var(--token)`, so the WHOLE app restyles with no per-page edits.
+ * `clean` and `doodle` are untouched — every rule below is scoped to `[data-theme="sketch"]`.
+ *
+ * Ink-colour choice: light-blue ruling on near-white is the signature graph-paper look and the
+ * brief's preferred option; the slate-blue ink (#27406b) over the pale-blue grid keeps text
+ * contrast well above WCAG AA (≈ 9.8:1 on #fbfdff), so the blue ruling never clashes with copy —
+ * we went with blue (not the B&W fallback). The grid lines themselves sit at ~10% blue, far below
+ * any text, so they read as paper, not foreground.
+ * Fonts: reuse the hand-lettered faces already loaded in index.html (Patrick Hand body, Gochi Hand
+ * for headings/buttons) to keep the pencil-wireframe feel; degrade to the system stack.
+ * Shape: sketchy ~2px ink borders + slightly irregular radii (a touch tighter than doodle).
+ * Wobble: reuses the SAME `#wobble-soft` SVG filter (defs in index.html) on the chrome — decorative
+ * only, never relied on for meaning, and dropped under `prefers-reduced-motion` (media query below).
+ */
+[data-theme="sketch"] {
+    /* ── Palette: slate-blue ink on near-white graph paper ──────────────────────────────────── */
+    --fg: #27406b;                /* slate-blue pen ink */
+    --accent: #2f5fb0;            /* a cooler technical blue for links/buttons */
+    --on-accent: #fbfdff;         /* near-white sits on the blue fills */
+    --page-bg: #fbfdff;           /* near-white paper (the grid is layered on top via `body`) */
+    --surface: #fbfdff;
+    --surface-2: #eef4fc;
+    --surface-card: #ffffff;      /* cards/inputs crisp white so the grid shows through the page */
+    --muted: #5b6b86;
+    --danger: #b3263b;            /* a desaturated red still reads on the cool palette */
+    --success: #1f7a5a;
+
+    /* Sketchy pen lines, re-derived against the ink token so washes track the theme. */
+    --border-width: 2px;
+    --border: color-mix(in srgb, var(--fg) 70%, transparent);
+    --fg-line: color-mix(in srgb, var(--fg) 55%, transparent);
+    --fg-line-strong: color-mix(in srgb, var(--fg) 70%, transparent);
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 80%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 55%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+
+    /* Irregular, hand-drawn corners (a touch tighter than doodle so it reads "wireframe"). */
+    --radius-sm: 7px 5px 8px 5px / 5px 8px 5px 7px;
+    --radius: 9px 7px 10px 6px / 7px 10px 6px 9px;
+    --radius-md: 11px 8px 12px 8px / 8px 12px 8px 11px;
+    --radius-lg: 14px 10px 15px 11px / 10px 15px 11px 14px;
+    --radius-pill: 999px;
+
+    /* Hand-lettered fonts (shared with doodle); system stack as the graceful fallback. */
+    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+
+    /* Flat, inky offset depth in the pen colour — keeps the technical-sketch feel. */
+    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 16%, transparent);
+    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 24%, transparent);
+    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+    --overlay: color-mix(in srgb, var(--fg) 40%, transparent);
+    --overlay-strong: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+
+/*
+ * The signature graph-paper grid (TM-236). A subtle CSS `repeating-linear-gradient` on BOTH axes,
+ * light-blue ruling on the near-white page, layered behind everything via `body` (whose background
+ * otherwise paints flat `--page-bg` and would cover a grid set on <html>). A bolder line every 5th
+ * cell gives the classic graph-paper "major/minor" ruling. Purely decorative: the lines sit at ~8–14%
+ * blue, far below text, so contrast (slate-blue ink ≈ 9.8:1 on the paper) stays well above WCAG AA.
+ */
+[data-theme="sketch"] body {
+    --grid-line: color-mix(in srgb, #2f5fb0 14%, transparent);
+    --grid-line-minor: color-mix(in srgb, #2f5fb0 8%, transparent);
+    --grid: 22px;            /* minor cell size */
+    background-color: var(--page-bg);
+    background-image:
+        /* major lines (every 5th) — vertical then horizontal */
+        repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        /* minor lines — vertical then horizontal */
+        repeating-linear-gradient(to right, var(--grid-line-minor) 0 1px, transparent 1px var(--grid)),
+        repeating-linear-gradient(to bottom, var(--grid-line-minor) 0 1px, transparent 1px var(--grid));
+    background-attachment: fixed;
+}
+
+/* Dark variant: blueprint mode — pale cyan ruling/ink on deep navy (the literal "blueprint" look).
+   Still strictly cool-blue; contrast preserved (pale ink ≈ 12:1 on the navy). */
+@media (prefers-color-scheme: dark) {
+    [data-theme="sketch"] {
+        --fg: #dbe7fb;
+        --accent: #8fb6f2;
+        --on-accent: #0c1a33;
+        --page-bg: #0e1f3d;
+        --surface: #0e1f3d;
+        --surface-2: #14264a;
+        --surface-card: #142a52;
+        --muted: rgba(219, 231, 251, 0.62);
+    }
+
+    [data-theme="sketch"] body {
+        --grid-line: color-mix(in srgb, #8fb6f2 26%, transparent);
+        --grid-line-minor: color-mix(in srgb, #8fb6f2 14%, transparent);
+    }
+}
+
+/*
+ * The reusable "wobble" skin reused for sketch (TM-236) — same `#wobble-soft` SVG filter as doodle
+ * (defs in index.html), applied to the chrome (cards / inputs / buttons / dividers) for the
+ * hand-drawn wireframe edge. Decorative only; never on standalone text; dropped under reduced motion.
+ */
+[data-theme="sketch"] .tm-wobble,
+[data-theme="sketch"] .auth-card,
+[data-theme="sketch"] .tm-modal,
+[data-theme="sketch"] .tm-menu,
+[data-theme="sketch"] .tm-wobble-soft,
+[data-theme="sketch"] .field input,
+[data-theme="sketch"] .tm-input,
+[data-theme="sketch"] .auth button,
+[data-theme="sketch"] .app-nav button,
+[data-theme="sketch"] .tm-btn,
+[data-theme="sketch"] hr {
+    filter: url("#wobble-soft");
+}
+
+/* Headings/buttons pick up the hand-lettered display face (the text itself is NOT wobbled). */
+[data-theme="sketch"] .app h1,
+[data-theme="sketch"] h2,
+[data-theme="sketch"] h3,
+[data-theme="sketch"] .auth button,
+[data-theme="sketch"] .app-nav button,
+[data-theme="sketch"] .tm-btn {
+    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+
+[data-theme="sketch"] .tagline,
+[data-theme="sketch"] .build-info {
+    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+}
+
+/*
+ * A11y — reduced motion (TM-236, mirrors the doodle handling). The wobble is purely decorative, so
+ * users who ask for reduced motion get the displacement filter dropped (the grid, palette, borders
+ * and irregular radii are unaffected — they carry no motion).
+ */
+@media (prefers-reduced-motion: reduce) {
+    [data-theme="sketch"] .tm-wobble,
+    [data-theme="sketch"] .tm-wobble-soft,
+    [data-theme="sketch"] .auth-card,
+    [data-theme="sketch"] .tm-modal,
+    [data-theme="sketch"] .tm-menu,
+    [data-theme="sketch"] .field input,
+    [data-theme="sketch"] .tm-input,
+    [data-theme="sketch"] .auth button,
+    [data-theme="sketch"] .app-nav button,
+    [data-theme="sketch"] .tm-btn,
+    [data-theme="sketch"] hr {
+        filter: none;
+    }
+}
+
 .app-nav {
     display: flex;
     gap: 1rem;
