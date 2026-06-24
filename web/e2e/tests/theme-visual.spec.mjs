@@ -38,6 +38,10 @@ async function expectTheme(page, theme) {
 // without the flakiness of exact-pixel snapshots.
 async function expectControlUsable(page, locator) {
   await expect(locator).toBeVisible();
+  // Bring it into view first: a control below the fold (e.g. the profile Save button, an admin-row
+  // Disable) has its centre off-viewport, where document.elementFromPoint returns null — which made
+  // the covered-check below false-fail (TM-216).
+  await locator.scrollIntoViewIfNeeded();
   const box = await locator.boundingBox();
   expect(box, "control should have a layout box").not.toBeNull();
   expect(box.width).toBeGreaterThan(0);
@@ -51,11 +55,13 @@ async function expectControlUsable(page, locator) {
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
   }
 
-  // Nothing covers the control: the element at its centre is the control or inside it.
+  // Nothing covers the control: the element at its centre is the control, a descendant, or an
+  // ancestor. A null hit-test (centre still off-viewport) is inconclusive, NOT "covered" — so we
+  // never false-fail on an off-screen centre.
   const covered = await locator.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return !(top && (top === el || el.contains(top) || top.contains(el)));
+    return !!(top && top !== el && !el.contains(top) && !top.contains(el));
   });
   expect(covered, "primary control should not be covered by another element").toBe(false);
 }
