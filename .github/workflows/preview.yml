@@ -117,6 +117,12 @@ jobs:
       # revision can't come up, we still post the web preview + a clear "backend unavailable"
       # note rather than red-failing the PR. A generous startup budget (failureThreshold 12 ≈
       # 130s) absorbs the slower cold start of a no-traffic preview (DB connect + Flyway).
+      #
+      # NO MAIL_* env / MAIL_PASSWORD secret here, ON PURPOSE (TM-253): PR previews must NOT send
+      # real email. With MAIL_HOST unset the backend uses LoggingEmailCodeMailer (TM-249) — login
+      # codes are logged, never emailed — so a throwaway preview can't spam real inboxes or burn the
+      # Workspace app password's quota. Real email-code delivery is wired only in the production
+      # deploy (deploy.yml), gated on the mail secret existing.
       - name: Deploy backend preview revision (tagged, no traffic)
         id: backend
         continue-on-error: true
