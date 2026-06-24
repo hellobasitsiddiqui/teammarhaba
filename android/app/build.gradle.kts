@@ -15,8 +15,15 @@ plugins {
 // versionName is the human-readable app version shown to users and compared by the auto-update check
 // against the hosted web `buildVersion`. Bump versionCode (monotonic int) on every release you ship
 // an APK for — Android uses it to decide "is this APK newer than the installed one" on sideload.
-val tmVersionName = "1.0.0"
-val tmVersionCode = 1
+//
+// Both are OVERRIDABLE at build time so the release CI (TM-246) can STAMP the APK's versionName to
+// match the web `buildVersion` it was cut from — the exact contract UpdateChecker relies on (a
+// `git describe --tags` value like `v1.4.0-12-ged338a9`). The release workflow passes:
+//   -PtmVersionName="<web buildVersion>" -PtmVersionCode=<monotonic int>
+// Falls back to the committed defaults for a plain local `assembleDebug` (no -P needed). versionCode
+// must stay a positive int (Android requirement), so a non-numeric override is ignored.
+val tmVersionName = (findProperty("tmVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.0"
+val tmVersionCode = (findProperty("tmVersionCode") as String?)?.toIntOrNull() ?: 1
 
 // The hosted web origin the WebView loads, and the small version source the auto-update check reads.
 // Centralised here so a single build config flips them (e.g. to a preview channel) with no code edit.
