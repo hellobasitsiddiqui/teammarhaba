@@ -169,6 +169,12 @@
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
         <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>
 
+        <!-- First-login profile gate (TM-250): the #/onboarding view a signed-in but not-yet-onboarded
+             user is forced to. onboarding.js (imported by router.js) builds the name/location/age form
+             into this container; router.js owns visibility + the gating that blocks the app until it's
+             completed. -->
+        <section id="onboarding-view" class="onboarding-view" aria-label="Complete your profile" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">

@@ -161,6 +161,28 @@
         },
         "type" : "object"
       },
+      "OnboardingRequest" : {
+        "properties" : {
+          "age" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "location" : {
+            "maxLength" : 255,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "name" : {
+            "maxLength" : 255,
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "age", "location", "name" ],
+        "type" : "object"
+      },
       "PageResponseAuditEventResponse" : {
         "properties" : {
           "items" : {
@@ -582,6 +604,34 @@
             "application/json" : {
               "schema" : {
                 "$ref" : "#/components/schemas/AcceptTermsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/onboarding" : {
+      "post" : {
+        "operationId" : "onboarding",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OnboardingRequest"
               }
             }
           },

@@ -1240,6 +1240,35 @@ body {
     text-align: left;
 }
 
+/* First-login profile gate (TM-250) — the #/onboarding view. A centred, focused card so the new
+   user does this one thing; reuses the shared .tm-form-* primitives for the fields/actions, and the
+   theme tokens (--surface-card / spacing) so it follows clean + doodle skins automatically. */
+.onboarding-view {
+    width: min(34rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.tm-onboarding-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1.25rem, 4vw, 2rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.tm-onboarding-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1rem;
+}
+
+/* Single-column form: the gate has only three fields, so don't split them into the profile grid. */
+.tm-onboarding-form .tm-form-grid {
+    grid-template-columns: 1fr;
+}
+
 .tm-profile-form {
     display: flex;
     flex-direction: column;

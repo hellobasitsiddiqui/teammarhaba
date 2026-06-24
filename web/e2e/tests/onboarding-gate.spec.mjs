@@ -1,0 +1,111 @@
+import { test, expect } from "@playwright/test";
+import pg from "pg";
+import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
+
+// First-login profile gate (TM-250): a brand-new passwordless user is routed to a blocking
+// "complete your profile" form (Name, Location, Age) and cannot enter the app until it's filled +
+// saved; a returning, already-onboarded user (the seeded ADMIN — global-setup marks it complete) is
+// NOT gated and lands straight in the app. Mirrors the email-code-login + profile-edit specs' shape
+// (real Firebase emulator sign-in + DB persistence assertion).
+//
+// Suppress the first-run product tour (TM-147) so its modal/backdrop can't overlay the gate controls
+// — same trick the email-code spec uses.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const orig = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (k) {
+      return typeof k === "string" && k.startsWith("tm.tour.")
+        ? JSON.stringify({ done: true })
+        : orig.call(this, k);
+    };
+  });
+});
+
+/** Read the last code the backend "emailed" to an address (emulator-only peek endpoint). */
+async function peekCode(email) {
+  const res = await fetch(`${API_BASE_URL}/auth/email-code/peek?email=${encodeURIComponent(email)}`);
+  if (!res.ok) throw new Error(`peek failed for ${email}: ${res.status}`);
+  return (await res.text()).trim();
+}
+
+/** Sign in a fresh email-code user (a never-seen address ⇒ a brand-new, un-onboarded account). */
+async function signInFreshUser(page, email) {
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.fill("#email", email);
+  const requested = page.waitForResponse(
+    (r) => r.url().includes("/auth/email-code/request") && r.request().method() === "POST",
+  );
+  await page.click("#emailcode-send-btn");
+  await requested;
+  const code = await peekCode(email);
+  await page.fill("#emailcode-code", code);
+  await page.click("#emailcode-verify-btn");
+  // Signed in (the nav sign-out control appears regardless of where the guard then routes us).
+  await expect(page.locator("#signout-btn")).toBeVisible();
+}
+
+test("a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
+  const email = `e2e-onboard-${Date.now()}@teammarhaba.test`;
+  const location = `Gateville-${Date.now()}`;
+
+  await signInFreshUser(page, email);
+
+  // GATED: routed to the onboarding view; the home view is NOT shown.
+  await expect(page.locator("#onboarding-view")).toBeVisible();
+  await expect(page.locator("#onboarding-form")).toBeVisible();
+  await expect(page.locator("#auth-signed-in")).toBeHidden();
+  // The in-app nav links are suppressed while gated, so the user can't side-step it.
+  await expect(page.locator("#nav-profile")).toBeHidden();
+
+  // Validation: submitting empty surfaces required-field errors and does NOT let the user through.
+  await page.click("#onboarding-form button[type=submit]");
+  await expect(page.locator("#onboarding-name-error")).toBeVisible();
+  await expect(page.locator("#onboarding-view")).toBeVisible();
+
+  // Fill all three required fields and submit.
+  await page.fill("#onboarding-name", "Fresh User");
+  await page.fill("#onboarding-location", location);
+  await page.fill("#onboarding-age", "27");
+  const saved = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
+  );
+  await page.click("#onboarding-form button[type=submit]");
+  await saved;
+
+  // ENTERED: the gate lifts → the app home view shows, the gate is gone, the nav links return.
+  await expect(page.locator("#auth-signed-in")).toBeVisible();
+  await expect(page.locator("#onboarding-view")).toBeHidden();
+  await expect(page.locator("#nav-profile")).toBeVisible();
+
+  // It persisted: name → display_name, location → city, age, and the onboarding flag are on the row.
+  const client = new pg.Client(dbConfig);
+  await client.connect();
+  try {
+    const { rows } = await client.query(
+      "SELECT display_name, city, age, onboarding_completed FROM users WHERE lower(email) = lower($1)",
+      [email],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].display_name).toBe("Fresh User");
+    expect(rows[0].city).toBe(location);
+    expect(rows[0].age).toBe(27);
+    expect(rows[0].onboarding_completed).toBe(true);
+  } finally {
+    await client.end();
+  }
+});
+
+test("a returning, already-onboarded user is NOT gated and lands straight in the app", async ({ page }) => {
+  // The seeded ADMIN is marked onboarding-complete in global-setup, so signing in must skip the gate.
+  await page.goto("/#/login");
+  await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+
+  await expect(page.locator("#signout-btn")).toBeVisible();
+  // Not gated: the onboarding view never shows; the app (admin nav, signed-in home) is reachable.
+  await expect(page.locator("#onboarding-view")).toBeHidden();
+  await expect(page.locator("#nav-admin")).toBeVisible();
+});

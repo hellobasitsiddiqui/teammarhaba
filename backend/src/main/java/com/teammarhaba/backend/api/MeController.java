@@ -33,6 +33,8 @@ import org.springframework.web.bind.annotation.RestController;
  *       caller (TM-165); rate-limited per user and refused if the address is already verified.</li>
  *   <li>{@code POST /me/onboarding-complete} — marks first-run onboarding finished and self-attests
  *       the supplied age (TM-163); idempotent.</li>
+ *   <li>{@code POST /me/onboarding} — the first-login profile gate (TM-250): atomically persists the
+ *       three required minimum fields (name/location/age) and marks onboarding complete.</li>
  *   <li>{@code POST /me/accept-terms} — records the accepted terms version + acceptance time
  *       (TM-163).</li>
  * </ul>
@@ -111,6 +113,21 @@ public class MeController {
     @PostMapping("/me/onboarding-complete")
     MeResponse completeOnboarding(@AuthenticationPrincipal VerifiedUser caller) {
         return toResponse(userService.completeOnboarding(caller));
+    }
+
+    /**
+     * Complete the first-login profile gate (TM-250): atomically persist the three required minimum
+     * fields — name (→ display name), location (→ city), age — and mark onboarding complete, in a
+     * single transaction. All three are required ({@link OnboardingRequest} bean validation): a
+     * missing/blank field or an out-of-range age is a uniform {@code 400}, so a new user can't slip
+     * into the app with an empty profile. Returns the updated profile carrying
+     * {@code onboardingCompleted = true} so the client can drop the gate and proceed.
+     */
+    @PostMapping("/me/onboarding")
+    MeResponse onboarding(
+            @AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid OnboardingRequest request) {
+        return toResponse(
+                userService.completeProfileOnboarding(caller, request.name(), request.location(), request.age()));
     }
 
     /**
