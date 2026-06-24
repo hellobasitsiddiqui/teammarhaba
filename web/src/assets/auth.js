@@ -18,10 +18,13 @@ import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   sendEmailVerification,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   signInWithPopup,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -100,6 +103,50 @@ export function signIn(email, password) {
   return signInWithEmailAndPassword(auth, email, password);
 }
 
+/**
+ * Complete a passwordless email-code sign-in (TM-234): exchange the Firebase **custom token** the
+ * backend minted (after it verified the 6-digit code — see `verifyEmailCode` in api.js) for a real
+ * Firebase session via `signInWithCustomToken`. From here on it's an ordinary Firebase session —
+ * same ID tokens, same backend verification — so nothing else in the app needs to know how the user
+ * signed in. The default front door; email+password still works unchanged.
+ * @param {string} customToken the Firebase custom token from POST /auth/email-code/verify.
+ * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").UserCredential>}
+ */
+export function signInWithEmailCodeToken(customToken) {
+  return signInWithCustomToken(auth, customToken);
+}
+
+/**
+ * Begin an SMS phone sign-in (TM-234, the "try another way" option) using Firebase Phone Auth.
+ * Renders an invisible reCAPTCHA into `containerEl` (Firebase requires it as the abuse guard), sends
+ * the code to `phoneNumber` (E.164, e.g. "+15555550123"), and returns the `ConfirmationResult` whose
+ * `.confirm(code)` finishes sign-in.
+ *
+ * <p>Real SMS needs the Firebase **Phone** provider enabled in the console (Blaze plan, paid per SMS)
+ * — that's the separate human ticket **TM-239**; this path is built + tested now against the Auth
+ * emulator's test numbers (no real SMS, no reCAPTCHA challenge), so enabling the provider later needs
+ * no code change. We create a fresh verifier per attempt and clear any previous one so a retry can't
+ * reuse a solved/expired widget.
+ *
+ * @param {string} phoneNumber E.164 phone number to text the code to.
+ * @param {HTMLElement} containerEl element to host the invisible reCAPTCHA.
+ * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").ConfirmationResult>}
+ */
+export async function startPhoneSignIn(phoneNumber, containerEl) {
+  if (recaptchaVerifier) {
+    try {
+      recaptchaVerifier.clear();
+    } catch {
+      /* already cleared/never rendered — non-fatal. */
+    }
+  }
+  recaptchaVerifier = new RecaptchaVerifier(auth, containerEl, { size: "invisible" });
+  return signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+}
+
+/** The live reCAPTCHA verifier for the in-flight phone sign-in, or null between attempts. */
+let recaptchaVerifier = null;
+
 /** Sign in with Google (popup). Requires the Google provider enabled in the Firebase console. */
 export function signInWithGoogle() {
   return signInWithPopup(auth, new GoogleAuthProvider());
@@ -140,6 +187,8 @@ if (typeof window !== "undefined") {
     onAuthChanged,
     signUp,
     signIn,
+    signInWithEmailCodeToken,
+    startPhoneSignIn,
     signInWithGoogle,
     signOut,
     resendVerificationEmail,

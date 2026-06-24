@@ -47,11 +47,14 @@ class GlobalExceptionHandlerTest {
 
     // The web slice loads every @RestController; MeController (TM-112) needs a UserService, an
     // EmailVerificationService (TM-165) and a FirebaseAccountStateService (TM-164), UserAdminController
-    // (TM-111) needs a UserAdminService, and AuditController (TM-137) needs an AuditService — none
-    // supplied by a @WebMvcTest. These mocks satisfy that wiring; never called, since the tests only
-    // hit the local /test routes.
+    // (TM-111) needs a UserAdminService, AuditController (TM-137) needs an AuditService, and
+    // EmailCodeController (TM-234) needs an EmailCodeService — none supplied by a @WebMvcTest. These
+    // mocks satisfy that wiring; never called, since the tests only hit the local /test routes.
     @MockitoBean
     private UserService userService;
+
+    @MockitoBean
+    private com.teammarhaba.backend.auth.EmailCodeService emailCodeService;
 
     @MockitoBean
     private EmailVerificationService emailVerificationService;

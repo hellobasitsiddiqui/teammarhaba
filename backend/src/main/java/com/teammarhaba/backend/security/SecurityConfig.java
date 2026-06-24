@@ -23,6 +23,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *   <li><b>{@code /version}</b> — public build provenance (sha/build time/revision) the web first page reads (TM-142).</li>
  *   <li><b>{@code /actuator/health}</b> (+ {@code liveness}/{@code readiness} groups) — orchestration probes.</li>
  *   <li><b>{@code /v3/api-docs/**}, {@code /swagger-ui/**}</b> — the OpenAPI docs (TM-76; non-prod only, disabled in prod).</li>
+ *   <li><b>{@code /api/v1/auth/email-code/request}, {@code .../verify}</b> — passwordless email-code
+ *       login (TM-234): you can't hold a token before you sign in, so these are permit-listed and
+ *       guarded instead by per-address rate-limiting + code validation in {@code EmailCodeService}.</li>
  * </ul>
  *
  * <p>Everything else — the whole {@code /api/v1} surface and the rest of {@code /actuator/**}
@@ -53,7 +56,17 @@ public class SecurityConfig {
                                 "/actuator/health",
                                 "/actuator/health/**",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**")
+                                "/swagger-ui/**",
+                                // Passwordless email-code login (TM-234): obtaining a session must be
+                                // reachable WITHOUT a token. Both routes are rate-limited + validated
+                                // server-side (EmailCodeService); verify returns a Firebase custom token.
+                                "/api/v1/auth/email-code/request",
+                                "/api/v1/auth/email-code/verify",
+                                // Emulator-only e2e peek for the code (TM-234). The handler bean only
+                                // exists when FIREBASE_AUTH_EMULATOR_HOST is set (unset in dev/prod), so
+                                // in any real environment this matches nothing and 404s — the permit is
+                                // inert there. Lives outside the api package, hence the unprefixed path.
+                                "/auth/email-code/peek")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

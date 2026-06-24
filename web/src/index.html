@@ -49,22 +49,85 @@
         <!-- Auth views (TM-106 panels, routed by TM-109): #auth-signed-out = #/login,
              #auth-signed-in = #/home. router.js owns their visibility. -->
         <section class="auth" aria-label="Account">
+            <!-- TM-234: the signed-out panel hosts the new passwordless email-code login as the
+                 DEFAULT front door, with "Try another way" revealing SMS + the existing
+                 email+password. The #auth-signed-out element stays the form the router toggles. -->
             <form class="auth-card" id="auth-signed-out" novalidate>
                 <h2>Sign in</h2>
-                <label class="field">
-                    <span>Email</span>
-                    <input id="email" type="email" autocomplete="email" required />
-                </label>
-                <label class="field">
-                    <span>Password</span>
-                    <input id="password" type="password" autocomplete="current-password" required minlength="6" />
-                </label>
-                <p id="auth-error" class="auth-error" role="alert" hidden></p>
-                <div class="auth-actions">
-                    <button id="signin-btn" type="submit" form="auth-signed-out">Sign in</button>
-                    <button id="signup-btn" type="button" class="secondary">Sign up</button>
+
+                <!-- Step 1 — default: ask for the email to send a 6-digit code to. -->
+                <div id="emailcode-step-email" class="auth-step">
+                    <label class="field">
+                        <span>Email</span>
+                        <input id="email" type="email" autocomplete="email" required />
+                    </label>
+                    <div class="auth-actions">
+                        <button id="emailcode-send-btn" type="submit" form="auth-signed-out">Email me a code</button>
+                    </div>
                 </div>
-                <button id="google-btn" type="button" class="google">Continue with Google</button>
+
+                <!-- Step 2 — enter the 6-digit code (revealed after a code is sent). -->
+                <div id="emailcode-step-code" class="auth-step" hidden>
+                    <p class="auth-hint">We emailed a 6-digit code to <strong id="emailcode-sent-to"></strong>.</p>
+                    <label class="field">
+                        <span>6-digit code</span>
+                        <input id="emailcode-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                               pattern="\d{6}" maxlength="6" />
+                    </label>
+                    <div class="auth-actions">
+                        <button id="emailcode-verify-btn" type="button">Sign in</button>
+                        <button id="emailcode-resend-btn" type="button" class="secondary">Resend</button>
+                        <button id="emailcode-back-btn" type="button" class="secondary">Use a different email</button>
+                    </div>
+                </div>
+
+                <p id="auth-error" class="auth-error" role="alert" hidden></p>
+
+                <!-- "Try another way" disclosure: SMS + the existing email+password (TM-234). -->
+                <button id="try-another-btn" type="button" class="linkish" aria-expanded="false"
+                        aria-controls="auth-alternatives">Try another way</button>
+                <div id="auth-alternatives" hidden>
+                    <!-- SMS (Firebase Phone Auth). Real SMS needs the Phone provider enabled (TM-239);
+                         tested now against the Auth emulator test numbers. -->
+                    <fieldset class="auth-alt">
+                        <legend>Text me a code (SMS)</legend>
+                        <div id="sms-step-phone" class="auth-step">
+                            <label class="field">
+                                <span>Phone (with country code)</span>
+                                <input id="phone" type="tel" autocomplete="tel" placeholder="+15555550123" />
+                            </label>
+                            <div class="auth-actions">
+                                <button id="sms-send-btn" type="button">Text me a code</button>
+                            </div>
+                        </div>
+                        <div id="sms-step-code" class="auth-step" hidden>
+                            <label class="field">
+                                <span>SMS code</span>
+                                <input id="sms-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                                       pattern="\d{6}" maxlength="6" />
+                            </label>
+                            <div class="auth-actions">
+                                <button id="sms-verify-btn" type="button">Sign in</button>
+                            </div>
+                        </div>
+                        <!-- Firebase renders the (invisible) reCAPTCHA abuse guard here. -->
+                        <div id="recaptcha-container"></div>
+                    </fieldset>
+
+                    <!-- Existing email + password — kept working, nothing removed (no migration). -->
+                    <fieldset class="auth-alt">
+                        <legend>Email and password</legend>
+                        <label class="field">
+                            <span>Password</span>
+                            <input id="password" type="password" autocomplete="current-password" minlength="6" />
+                        </label>
+                        <div class="auth-actions">
+                            <button id="signin-btn" type="button">Sign in</button>
+                            <button id="signup-btn" type="button" class="secondary">Sign up</button>
+                        </div>
+                        <button id="google-btn" type="button" class="google" hidden>Continue with Google</button>
+                    </fieldset>
+                </div>
             </form>
 
             <div class="auth-card" id="auth-signed-in" hidden>

@@ -47,7 +47,9 @@ async function expectControlUsable(page, locator) {
 }
 
 async function signInAsAdmin(page) {
+  // Email-code is the default front door (TM-234); the email+password form is under "Try another way".
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();
@@ -100,8 +102,8 @@ test.describe("login page renders under both themes", () => {
       await page.goto(routeWithTheme(theme, "/login"));
       await expect(page.locator("#auth-signed-out")).toBeVisible();
       await expectTheme(page, theme);
-      // Primary control: the sign-in submit button.
-      await expectControlUsable(page, page.locator("#signin-btn"));
+      // Primary control: the email-code "Email me a code" submit, the default front door (TM-234).
+      await expectControlUsable(page, page.locator("#emailcode-send-btn"));
     });
   }
 });

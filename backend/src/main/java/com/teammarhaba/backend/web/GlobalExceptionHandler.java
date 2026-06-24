@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.web;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.auth.EmailCodeException;
 import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
 import java.util.List;
@@ -96,6 +97,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return switch (ex.reason()) {
             case ALREADY_VERIFIED -> Problems.unprocessable(ex.getMessage());
             case COOLDOWN -> Problems.of(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", ex.getMessage());
+        };
+    }
+
+    /**
+     * Passwordless email-code login (TM-234) refused for an actionable reason. A bad code is a
+     * <em>401</em> (it's an authentication failure) and an expired one a <em>410 Gone</em> (the
+     * credential existed but is no longer valid — request a fresh one); both the send cooldown and the
+     * exhausted-attempt cap are <em>429</em> so the client backs off. Messages are deliberately generic
+     * (never reveal whether an address has an account or how many attempts remain).
+     */
+    @ExceptionHandler(EmailCodeException.class)
+    public ProblemDetail handleEmailCode(EmailCodeException ex) {
+        return switch (ex.reason()) {
+            case CODE_INVALID -> Problems.unauthorized(ex.getMessage());
+            case CODE_EXPIRED -> Problems.of(HttpStatus.GONE, "Code expired", ex.getMessage());
+            case SEND_RATE_LIMITED, VERIFY_RATE_LIMITED -> Problems.of(
+                    HttpStatus.TOO_MANY_REQUESTS, "Too many requests", ex.getMessage());
         };
     }
 

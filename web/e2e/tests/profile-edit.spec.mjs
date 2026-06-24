@@ -17,7 +17,9 @@ import { ADMIN, dbConfig } from "../fixtures.mjs";
 // subsequent fills stick. A real user types after the form has loaded, so this is purely test timing.
 async function openProfile(page) {
   await page.goto("/#/login");
+  // Email-code is the default front door (TM-234); the email+password form is under "Try another way".
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();

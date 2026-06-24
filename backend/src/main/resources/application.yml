@@ -55,6 +55,18 @@ springdoc:
   swagger-ui:
     path: /swagger-ui
 
+# Passwordless email-code login (TM-234). Safe defaults shared by every profile; these are
+# tunables, NOT secrets (the only secret is the generated code, which is never logged/persisted).
+# Prod can tighten any value via the environment. A non-positive ttl/length/limit fails startup
+# loudly (Bean Validation in EmailCodeProperties) rather than silently weakening the flow.
+app:
+  auth:
+    email-code:
+      length: ${EMAIL_CODE_LENGTH:6}            # digits in the one-time code (matches the SMS UX)
+      ttl: ${EMAIL_CODE_TTL:10m}                # how long an issued code stays valid (short by design)
+      send-cooldown: ${EMAIL_CODE_SEND_COOLDOWN:60s}  # min gap between requests for one address (rate-limit + Resend)
+      max-verify-attempts: ${EMAIL_CODE_MAX_VERIFY_ATTEMPTS:5}  # wrong guesses before the code is burned
+
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:
   app:
