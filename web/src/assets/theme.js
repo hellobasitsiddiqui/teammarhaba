@@ -35,7 +35,9 @@
   // a known name and falls through to the base look until its token block exists.
   var THEMES = {
     clean: { label: "Clean" },
-    // doodle: { label: "Doodle" }, // slots in with TM-22x; reserved as an allowed value below.
+    // Now live (TM-213): the doodle token block + wobble skin exist in styles.css, so doodle is a
+    // first-class registered family, not just an allowed-but-unstyled request.
+    doodle: { label: "Doodle" },
   };
 
   // Values config is allowed to ask for (the fixed contract). Kept separate from THEMES so a theme

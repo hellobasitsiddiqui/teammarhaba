@@ -4,9 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TeamMarhaba</title>
+    <!-- Hand-lettered fonts for the "doodle" theme family (TM-213). Loaded for every page but only
+         referenced under [data-theme="doodle"] (see styles.css); other themes never use them, so
+         this is inert for "clean". If the request fails the doodle skin degrades to the system font
+         stack declared in --font-sans. preconnect warms the Google Fonts hosts. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
+    <!-- Hidden inline SVG defs for the doodle theme's "wobble" skin (TM-213). These feTurbulence +
+         feDisplacementMap filters make straight CSS edges look hand-drawn; styles.css applies them
+         via filter:url(#wobble…) only under [data-theme="doodle"], to decorative chrome (cards,
+         inputs, buttons, dividers) — never to text — and drops them under prefers-reduced-motion.
+         Inert for every other theme. aria-hidden + zero box so it never affects layout or a11y. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <filter id="wobble">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="4.5" />
+        </filter>
+        <filter id="wobble-soft">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+        </filter>
+    </svg>
+
     <main class="app">
         <h1>TeamMarhaba</h1>
         <p class="tagline">Walking skeleton — web surface.</p>

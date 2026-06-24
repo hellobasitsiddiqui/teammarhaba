@@ -291,6 +291,143 @@ body {
     /* intentionally empty — clean == the base :root token contract */
 }
 
+/*
+ * ===== The "doodle" theme family (TM-213) =====
+ *
+ * A hand-drawn, black-&-white "social events" skin. It is purely a TOKEN OVERRIDE plus a reusable
+ * "wobble" filter: by re-pointing the same TM-210/TM-211 tokens the components already read via
+ * `var(--token)`, the WHOLE app restyles with no per-component edits. `clean` is untouched — every
+ * rule below is scoped to `[data-theme="doodle"]` (and doodle-only assets live in index.html).
+ *
+ * Palette: ink (#161616) on paper (#f6f2e9), B&W only; cards/inputs a touch lighter paper.
+ * Fonts: hand-lettered Google fonts (loaded in index.html, degrade to system) — Gochi Hand for
+ * headings/buttons, Patrick Hand for body, Shadows Into Light for accents.
+ * Shape: sketchy ~2.5–3px ink borders + slightly irregular radii.
+ * Wobble: an SVG feTurbulence + feDisplacementMap filter (defs in index.html) applied to the
+ * chrome (cards / inputs / buttons / dividers) — decorative only, never on text, and reduced /
+ * dropped under `prefers-reduced-motion` (see the media query at the end of this block).
+ */
+[data-theme="doodle"] {
+    /* ── Palette: ink on paper, black & white only ──────────────────────────────────────────── */
+    --fg: #161616;
+    --accent: #161616;            /* no colour — links/buttons are ink, distinguished by shape/weight */
+    --on-accent: #f6f2e9;         /* paper text sits on ink fills */
+    --page-bg: #f6f2e9;
+    --surface: #f6f2e9;
+    --surface-2: #efe9da;
+    --surface-card: #faf7ef;      /* cards/inputs a touch lighter paper */
+    --muted: #5a5650;
+    --danger: #161616;            /* B&W only — danger reads via copy/weight, not hue */
+    --success: #161616;
+
+    /* Sketchy ink lines (re-derived against the ink token so washes still track the theme). */
+    --border-width: 2.5px;
+    --border: color-mix(in srgb, var(--fg) 85%, transparent);
+    --fg-line: color-mix(in srgb, var(--fg) 80%, transparent);
+    --fg-line-strong: color-mix(in srgb, var(--fg) 85%, transparent);
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 90%, transparent);
+    --accent-line: color-mix(in srgb, var(--fg) 85%, transparent);
+    --accent-soft: color-mix(in srgb, var(--fg) 8%, transparent);
+
+    /* Irregular, hand-drawn corners — asymmetric horizontal/vertical radii read as "wobbly". */
+    --radius-sm: 10px 8px 12px 7px / 8px 12px 7px 10px;
+    --radius: 14px 11px 16px 10px / 12px 16px 10px 14px;
+    --radius-md: 16px 13px 18px 12px / 13px 18px 12px 16px;
+    --radius-lg: 20px 15px 22px 16px / 16px 22px 16px 20px;
+    --radius-pill: 999px;
+
+    /* Hand-lettered fonts; system stack as the graceful fallback if the web fonts don't load. */
+    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+
+    /* Flatter, inkier depth than clean's soft drop-shadows. */
+    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 22%, transparent);
+    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 28%, transparent);
+    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 30%, transparent);
+    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 26%, transparent);
+    --overlay: color-mix(in srgb, var(--fg) 45%, transparent);
+    --overlay-strong: color-mix(in srgb, var(--fg) 55%, transparent);
+
+    /* Faint paper grain (a tiny inline SVG noise data-URI at low opacity). Decorative background;
+       text contrast (ink #161616 on paper #f6f2e9 ≈ 16:1) stays well above WCAG AAA. */
+    background-image:
+        radial-gradient(transparent, color-mix(in srgb, var(--fg) 1.5%, transparent)),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");
+}
+
+/* Dark variant: doodle is paper-on-ink in dark mode (still strictly B&W, contrast preserved). */
+@media (prefers-color-scheme: dark) {
+    [data-theme="doodle"] {
+        --fg: #f3eee2;
+        --accent: #f3eee2;
+        --on-accent: #161616;
+        --page-bg: #14130f;
+        --surface: #1b1a15;
+        --surface-2: #14130f;
+        --surface-card: #211f19;
+        --muted: rgba(243, 238, 226, 0.6);
+    }
+}
+
+/*
+ * The reusable "wobble" skin (TM-213) — decorative hand-drawn jitter on the CHROME only.
+ * `#wobble` / `#wobble-soft` are SVG filters defined in index.html. We apply them to surfaces,
+ * inputs, buttons and dividers, never to text containers, so legibility is unaffected. The
+ * `.tm-wobble` / `.tm-wobble-soft` utility classes let future doodle markup opt in explicitly.
+ */
+[data-theme="doodle"] .tm-wobble,
+[data-theme="doodle"] .auth-card,
+[data-theme="doodle"] .tm-modal,
+[data-theme="doodle"] .tm-menu {
+    filter: url("#wobble-soft");
+}
+
+[data-theme="doodle"] .tm-wobble-soft,
+[data-theme="doodle"] .field input,
+[data-theme="doodle"] .tm-input,
+[data-theme="doodle"] .auth button,
+[data-theme="doodle"] .app-nav button,
+[data-theme="doodle"] .tm-btn,
+[data-theme="doodle"] hr {
+    filter: url("#wobble-soft");
+}
+
+/* Headings/logo + accents pick up the hand-lettered display faces (text itself is NOT wobbled). */
+[data-theme="doodle"] .app h1,
+[data-theme="doodle"] h2,
+[data-theme="doodle"] h3,
+[data-theme="doodle"] .auth button,
+[data-theme="doodle"] .app-nav button,
+[data-theme="doodle"] .tm-btn {
+    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+
+[data-theme="doodle"] .tagline,
+[data-theme="doodle"] .build-info {
+    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+}
+
+/*
+ * A11y — reduced motion (TM-213). The wobble is purely decorative. Users who ask for reduced
+ * motion get the displacement removed entirely (the filter is dropped), so corners render as the
+ * plain irregular CSS radii with no SVG jitter; fonts/palette/borders are unaffected.
+ */
+@media (prefers-reduced-motion: reduce) {
+    [data-theme="doodle"] .tm-wobble,
+    [data-theme="doodle"] .tm-wobble-soft,
+    [data-theme="doodle"] .auth-card,
+    [data-theme="doodle"] .tm-modal,
+    [data-theme="doodle"] .tm-menu,
+    [data-theme="doodle"] .field input,
+    [data-theme="doodle"] .tm-input,
+    [data-theme="doodle"] .auth button,
+    [data-theme="doodle"] .app-nav button,
+    [data-theme="doodle"] .tm-btn,
+    [data-theme="doodle"] hr {
+        filter: none;
+    }
+}
+
 .app-nav {
     display: flex;
     gap: 1rem;
