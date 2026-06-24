@@ -14,6 +14,7 @@ import {
   signOut,
   signInWithEmailCodeToken,
   startPhoneSignIn,
+  awaitRedirectResult,
 } from "./auth.js";
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 
@@ -198,6 +199,14 @@ els.signIn?.addEventListener("click", () => run(() => signIn(els.email.value.tri
 els.signUp?.addEventListener("click", () => run(() => signUp(els.email.value.trim(), els.password.value)));
 els.google?.addEventListener("click", () => run(() => signInWithGoogle()));
 els.signOut?.addEventListener("click", () => run(() => signOut()));
+
+// Complete a redirect-based sign-in coming back into the page (TM-230). On mobile / inside the
+// Android WebView, Google sign-in uses `signInWithRedirect` (auth.js), so the user returns to a
+// fresh page load after the auth handler round-trip. `onAuthChanged` already reflects a successful
+// return; this only has to surface a FAILED redirect (e.g. the auth handler couldn't restore state —
+// the "Missing initial state" error when third-party storage is blocked) so it doesn't fail
+// silently. Resolves to null on a normal load with no pending redirect, so this is inert then.
+awaitRedirectResult().catch((err) => showError(err));
 
 // Reflect identity / reset on auth change. View visibility (which panel shows) is owned by the
 // router/guard (TM-109); this only updates the form's own concerns: the displayed email, clearing
