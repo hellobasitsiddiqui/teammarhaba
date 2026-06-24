@@ -15,8 +15,10 @@ test("admin signs in, disables a user via the console, and the change persists",
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
 
-  // 2. Sign in as the seeded ADMIN (real Firebase flow against the Auth emulator).
+  // 2. Sign in as the seeded ADMIN (real Firebase flow against the Auth emulator). Email-code is the
+  // default front door now (TM-234); the email+password form lives under "Try another way".
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
 

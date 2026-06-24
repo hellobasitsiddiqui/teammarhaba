@@ -119,6 +119,55 @@ export async function resendVerification() {
 }
 
 /**
+ * POST /api/v1/auth/email-code/request — ask the backend to email a one-time login code to `email`
+ * (TM-234, the default passwordless front door). UNauthenticated by design (you have no token before
+ * you sign in), so it bypasses {@link apiFetch} (whose 401 handling/redirect doesn't apply here).
+ * Resolves on success (204). On a 429 the send cooldown is active — surfaced as an {@link ApiError}
+ * so the UI can show a "please wait before resending" message; any other non-2xx also throws.
+ * @param {string} email the address to send the code to.
+ * @returns {Promise<void>}
+ * @throws {ApiError}
+ */
+export async function requestEmailCode(email) {
+  const response = await fetch(resolveUrl("/api/v1/auth/email-code/request"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/problem+json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) throw await toApiError(response, "Could not send a code. Please try again.");
+}
+
+/**
+ * POST /api/v1/auth/email-code/verify — submit the 6-digit `code` for `email`; on success the
+ * backend returns a Firebase **custom token** (TM-234) the caller exchanges via
+ * {@link signInWithEmailCodeToken}. UNauthenticated (same reasoning as {@link requestEmailCode}); a
+ * wrong code is a real 401 that must reach the UI (not trigger the api.js redirect), an expired code
+ * a 410, and an exhausted/too-fast attempt a 429 — all surfaced as {@link ApiError} with the
+ * backend's message so the form can show a precise reason.
+ * @param {string} email the address the code was requested for.
+ * @param {string} code the 6-digit code the user received.
+ * @returns {Promise<string>} the Firebase custom token to sign in with.
+ * @throws {ApiError}
+ */
+export async function verifyEmailCode(email, code) {
+  const response = await fetch(resolveUrl("/api/v1/auth/email-code/verify"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+  if (!response.ok) throw await toApiError(response, "That code is not valid.");
+  const { customToken } = await response.json();
+  return customToken;
+}
+
+/** Parse an RFC-7807 problem body into an {@link ApiError}, falling back to {@code fallback}. */
+async function toApiError(response, fallback) {
+  const problem = await response.json().catch(() => ({}));
+  const message = problem.detail || problem.title || fallback;
+  return new ApiError(response.status, message);
+}
+
+/**
  * Raised by {@link updateMe} when the backend rejects the request. Carries the HTTP status, a
  * human-readable message (from the RFC-7807 `detail`/`title`), and — for a 400 validation failure —
  * the per-field `errors` array the backend sends (`[{ field, message }]`, see GlobalExceptionHandler),
@@ -164,5 +213,15 @@ export async function updateMe(patch) {
 
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
-  window.tmApi = { apiFetch, getMe, updateMe, resendVerification, redirectToLogin, LOGIN_PATH, ApiError };
+  window.tmApi = {
+    apiFetch,
+    getMe,
+    updateMe,
+    resendVerification,
+    requestEmailCode,
+    verifyEmailCode,
+    redirectToLogin,
+    LOGIN_PATH,
+    ApiError,
+  };
 }
