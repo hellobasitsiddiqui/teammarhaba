@@ -11,6 +11,7 @@
 import { apiFetch } from "./api.js";
 import { currentUser } from "./auth.js";
 import { clear, confirmDialog, el, modal, copyToClipboard, relativeTime, toast } from "./ui.js";
+import { doodle } from "./doodles.js";
 
 const FETCH_SIZE = 100; // matches TM-111's max page size
 const PAGE_SIZES = [10, 25, 50];
@@ -272,7 +273,13 @@ function renderTable() {
 
   const rows = sortUsers(filteredUsers());
   if (!rows.length) {
-    shell.table.append(el("p", { class: "tm-muted", text: state.users.length ? "No users match your filters." : "No users yet." }));
+    const filtered = state.users.length > 0;
+    const message = filtered ? "No users match your filters." : "No users yet.";
+    // A crowd doodle over the empty-state line (TM-215); CSS gates the doodle to the doodle theme.
+    shell.table.append(el("div", { class: "tm-empty" }, [
+      doodle("crowd", { class: "tm-doodle-empty", title: message }),
+      el("p", { class: "tm-muted", text: message }),
+    ]));
     renderPager(0);
     return;
   }
@@ -380,7 +387,8 @@ function buildShell(view) {
 
   clear(view).append(
     el("div", { class: "tm-admin-head" }, [
-      el("h2", { text: "Users" }),
+      // A crowd doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
+      el("h2", {}, [doodle("crowd", { class: "tm-doodle-header", title: "Users" }), "Users"]),
       el("button", { class: "tm-btn tm-btn-sm", type: "button", onClick: loadUsers }, "Refresh"),
     ]),
     stats,

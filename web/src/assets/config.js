@@ -16,15 +16,16 @@
 // is — and reveal a stale surface at a glance.
 //
 // `theme` selects the app-wide visual family (TM-210). It's the `data-theme` axis that scopes the
-// CSS token contract in styles.css; theme.js reads it here at boot and sets it on <html>. This is
-// the placeholder default — "clean" is the only theme that exists today and equals the current
-// look (no visual change). The deploy injects the real per-environment value over it (TM-212), the
-// same seam as `apiBaseUrl`/`buildVersion` above; any unknown value falls back to "clean" in
-// theme.js, so a bad config never breaks the page.
+// CSS token contract in styles.css; theme.js reads it here at boot and sets it on <html>. The
+// default is now "doodle" (TM-215) — the social-events MVP look — so an UNCONFIGURED deploy looks
+// like the MVP, with doodles wired into the real pages. The deploy injects the real per-environment
+// value over it (TM-212), the same seam as `apiBaseUrl`/`buildVersion` above; `clean` stays fully
+// selectable (set theme/THEME = "clean"), and any unknown value falls back to "doodle" in theme.js,
+// so a bad config never breaks the page (never blank).
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
     storageEmulatorHost: null,
     buildVersion: "dev",
-    theme: "clean",
+    theme: "doodle",
 });

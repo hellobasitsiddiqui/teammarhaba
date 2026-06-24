@@ -18,8 +18,9 @@
 //
 // ── How the active theme is chosen (FIXED CONTRACT — TM-212 depends on this) ───────────────────
 //   Read `window.TEAMMARHABA_CONFIG.theme`. Allowed values: "clean" | "doodle".
-//   • unset / missing  → "clean"
-//   • unknown value    → "clean"   (fall back; never break the page)
+//   • unset / missing  → "doodle"  (the default — an unconfigured deploy looks like the MVP; TM-215)
+//   • unknown value    → "doodle"  (fall back to the default; never break the page / never blank)
+//   `clean` stays fully selectable by asking for it explicitly (config/THEME = "clean").
 //   So `resolveTheme(cfg)` always returns a name that exists in the registry.
 //
 // Classic (non-module) script, loaded right after config.js and before paint, so switching the
@@ -44,7 +45,11 @@
   // name can be a *valid request* (passes the contract) before its full registry entry/CSS exists.
   var ALLOWED = ["clean", "doodle"];
 
-  var DEFAULT_THEME = "clean";
+  // The intended default (TM-215): an unconfigured deploy serves "doodle" (the social-events MVP
+  // look). It's also the hard fallback for an unset/unknown config value — a real, registered,
+  // working theme, so the page never renders blank. `clean` is still fully selectable by asking
+  // for it explicitly (config theme / THEME repo var = "clean").
+  var DEFAULT_THEME = "doodle";
 
   /** Resolve the active theme name from a config object, applying the default + fallback rules.
    *  Always returns one of ALLOWED — never throws, never returns an unknown value. */
