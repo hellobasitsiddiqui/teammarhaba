@@ -16,7 +16,9 @@ const PNG_1x1_BASE64 =
 
 async function signIn(page) {
   await page.goto("/#/login");
+  // Email-code is the default front door (TM-234); email+password lives under "Try another way".
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();
