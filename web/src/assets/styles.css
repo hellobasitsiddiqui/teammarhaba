@@ -1,7 +1,31 @@
+/*
+ * ===== Theme token contract (TM-210, extends TM-133) =====
+ *
+ * Two independent axes drive the look, and they compose:
+ *   • dark / light   — TM-133 axis, chosen by the OS via `@media (prefers-color-scheme: dark)`.
+ *   • theme family    — TM-210 axis, chosen by config and reflected as `[data-theme="<name>"]` on
+ *                        <html> by theme.js. Allowed: "clean" (now) | "doodle" (later).
+ *
+ * The base `:root` below holds the token contract — colours, fonts, radii, borders, surfaces.
+ * These ARE the "clean" theme: it needs no override block, so an unset/unknown config (which
+ * theme.js resolves to "clean") renders exactly today's look — no visual change.
+ *
+ * To add a theme family:  add a `[data-theme="<name>"]` block (and its dark variant under the
+ * media query) that overrides only the tokens it changes; everything else inherits these defaults.
+ * Components must read tokens via `var(--token)` only — never hard-code a themed value — so a new
+ * family is a pure token swap with no component edits.
+ */
 :root {
     color-scheme: light dark;
     --fg: #1a1a2e;
     --accent: #0f9d8c;
+    /* Type + shape tokens (TM-210) — part of the contract themes may override. Defaults match the
+       current look (system font stack, the radii/borders already used across the UI below). */
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --border-width: 1px;
+    --page-bg: #f6f7fb;
 }
 
 * {
@@ -24,8 +48,8 @@ body {
     min-height: 100vh;
     display: grid;
     place-items: center;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #f6f7fb;
+    font-family: var(--font-sans);
+    background: var(--page-bg);
     color: var(--fg);
 }
 
@@ -189,7 +213,8 @@ body {
 
 /* ===== Admin console + reusable UI primitives (TM-133) ===== */
 
-/* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. */
+/* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. These
+   surface/border/muted tokens are part of the TM-210 contract a theme family may override. */
 :root {
     --surface: #ffffff;
     --surface-2: #f1f2f8;
@@ -205,11 +230,22 @@ body {
         --surface-2: #181822;
         --border: rgba(255, 255, 255, 0.14);
         --muted: rgba(232, 232, 240, 0.6);
+        --page-bg: #12121a;
     }
 
     body {
-        background: #12121a;
+        background: var(--page-bg);
     }
+}
+
+/*
+ * The "clean" theme family (TM-210). It deliberately adds NO overrides — it inherits every token
+ * from the base `:root` above, so it equals the current look. This empty-by-design block is the
+ * documented seam: a sibling family like `[data-theme="doodle"] { --accent: …; --font-sans: …; }`
+ * (plus its dark variant) drops in alongside it and changes the whole app via tokens alone.
+ */
+[data-theme="clean"] {
+    /* intentionally empty — clean == the base :root token contract */
 }
 
 .app-nav {
