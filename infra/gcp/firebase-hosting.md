@@ -35,7 +35,7 @@ hardcoded in the repo):
 
 **Switching the live theme:** set the **`THEME`** repo variable
 (Settings → Secrets and variables → Actions → Variables) to **`doodle`** or
-**`clean`** and redeploy. It defaults to **`clean`** when the variable is unset.
+**`clean`** and redeploy. It defaults to **`doodle`** when the variable is unset.
 See [CONTRIBUTING.md → Switching the live theme](../../CONTRIBUTING.md#switching-the-live-theme).
 
 ## Rollback (previous release)

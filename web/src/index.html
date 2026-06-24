@@ -14,16 +14,12 @@
     <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
-    <!-- Hidden inline SVG defs for the doodle theme's "wobble" skin (TM-213). These feTurbulence +
-         feDisplacementMap filters make straight CSS edges look hand-drawn; styles.css applies them
-         via filter:url(#wobble…) only under [data-theme="doodle"], to decorative chrome (cards,
-         inputs, buttons, dividers) — never to text — and drops them under prefers-reduced-motion.
-         Inert for every other theme. aria-hidden + zero box so it never affects layout or a11y. -->
+    <!-- Hidden inline SVG def for the doodle theme's "wobble" skin (TM-213). This feTurbulence +
+         feDisplacementMap filter makes straight CSS edges look hand-drawn; styles.css applies it
+         via filter:url(#wobble-soft) only under [data-theme="doodle"], to surfaces, dividers and
+         controls, and drops it under prefers-reduced-motion. Inert for every other theme.
+         aria-hidden + zero box so it never affects layout or a11y. -->
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-        <filter id="wobble">
-            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
-            <feDisplacementMap in="SourceGraphic" in2="noise" scale="4.5" />
-        </filter>
         <filter id="wobble-soft">
             <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
             <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />

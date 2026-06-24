@@ -123,11 +123,12 @@ Settings → Secrets and variables → Actions → Variables → New repository 
 
 Then run the **Deploy** workflow (Actions → Deploy → Run) — the next deploy reads `vars.THEME` and
 bakes it into the live `config.js`. The value is passed through as-is; the web app falls back to
-`clean` for any unknown value, so you don't need to validate it here.
+`doodle` for any unknown value, so you don't need to validate it here.
 
-**Default is `clean`.** If the `THEME` variable is unset, the deploy injects `clean`, so the live
-site has a defined theme day-one without anyone touching the variable. Like the build stamp, the
-value is resolved at deploy time and never hardcoded in the repo.
+**Default is `doodle`.** If the `THEME` variable is unset, the deploy injects `doodle`, so the live
+site has a defined theme day-one without anyone touching the variable. To switch to clean, set
+`THEME=clean` and redeploy. Like the build stamp, the value is resolved at deploy time and never
+hardcoded in the repo.
 
 ## Conventions reference
 

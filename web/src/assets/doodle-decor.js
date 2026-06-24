@@ -13,7 +13,11 @@
 
 import { doodle, doodles } from "./doodles.js";
 
-/** Prepend a header-sized doodle to `host` (once), if `host` exists. */
+/**
+ * Prepend a header-sized doodle to `host` (once), if `host` exists. Pass `title` only when it adds
+ * info beyond the heading text; omit it for a doodle whose label would just repeat the visible
+ * heading, so it renders aria-hidden and screen readers don't announce the same words twice.
+ */
 function decorateHeader(host, name, title) {
   if (!host || host.querySelector(":scope > .tm-doodle")) return;
   const svg = doodle(name, { class: "tm-doodle-header", title });
@@ -34,8 +38,9 @@ function decorate() {
   decorateHeader(document.querySelector(".app h1"), "hello", "Marhaba — welcome");
   dividerAfter(document.querySelector(".app .tagline"), { tag: true });
 
-  // 2) Login card — a small wave on the "Sign in" heading.
-  decorateHeader($("auth-signed-out")?.querySelector("h2"), "hello", "Sign in");
+  // 2) Login card — a small wave on the "Sign in" heading. Decorative: no title (it would just
+  //    repeat the "Sign in" heading text), so it renders aria-hidden.
+  decorateHeader($("auth-signed-out")?.querySelector("h2"), "hello");
 
   // 3) Signed-in home card — a celebration on the "Signed in" heading, then a divider before the
   //    admin link block so the card reads as a little welcome.
