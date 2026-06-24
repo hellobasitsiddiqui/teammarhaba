@@ -38,7 +38,12 @@ async function signInAsAdmin(page) {
   await page.fill("#email", ADMIN.email);
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeAttached();
+  // Wait for auth to ACTUALLY resolve before the caller navigates. #signout-btn is always in the
+  // DOM (markup carries it with the `hidden` attr), so toBeAttached() resolves instantly — before
+  // sign-in completes — and the caller's hash navigation then races the guard back to #/login. At a
+  // phone viewport the sign-out button lives inside the collapsed nav, so toBeVisible() never holds
+  // either. The viewport-independent "signed in" signal is the signed-OUT login panel disappearing.
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
 // Suppress the first-run product tour (its dimmed overlay would cover the controls under test).
