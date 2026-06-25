@@ -289,6 +289,14 @@
         "required" : [ "platform", "token" ],
         "type" : "object"
       },
+      "TestPushRequest" : {
+        "properties" : {
+          "route" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "UpdateMeRequest" : {
         "properties" : {
           "age" : {
@@ -504,6 +512,15 @@
             "type" : "integer"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TestPushRequest"
+              }
+            }
+          }
+        },
         "responses" : {
           "200" : {
             "content" : {

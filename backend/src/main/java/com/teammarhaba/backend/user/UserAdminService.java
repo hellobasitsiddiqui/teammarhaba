@@ -6,6 +6,8 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
+import com.teammarhaba.backend.notify.PushRoutes;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.Map;
@@ -131,7 +133,10 @@ public class UserAdminService {
                     user.getId(),
                     new PushMessage(
                             "Your TeamMarhaba account is active again",
-                            "An admin has re-enabled your account. Welcome back!"));
+                            "An admin has re-enabled your account. Welcome back!",
+                            // TM-290: deep-link the tap to the user's own profile — the natural landing
+                            // spot after a re-enable. A known route from PushRoutes.KNOWN.
+                            "#/profile"));
         } catch (RuntimeException e) {
             log.warn("Re-enable push for user {} failed (account change still applied).", user.getId(), e);
         }
@@ -143,13 +148,24 @@ public class UserAdminService {
      * an organic event. Validates the target exists (404 / no existence leak) and returns the fan-out
      * summary (how many devices were targeted, delivered, pruned, failed). Unlike the re-enable trigger
      * this surfaces send problems to the caller, since it exists precisely to exercise delivery.
+     *
+     * <p>An optional {@code route} (TM-290) lets the operator exercise the deep-link path too: when
+     * supplied it is set on the message's {@code data.route} so a tap navigates there. It must be one of
+     * the app's known hash routes ({@link PushRoutes#KNOWN}); an unknown route is a {@code 400}
+     * ({@link BadRequestException}) rather than emitting an off-list route. A {@code null} route sends a
+     * plain notification (no deep-link), as before.
      */
     @Transactional(readOnly = true)
-    public PushNotificationService.PushFanout sendTestPush(long id) {
+    public PushNotificationService.PushFanout sendTestPush(long id, String route) {
+        if (route != null && !PushRoutes.isKnown(route)) {
+            throw new BadRequestException(
+                    "Unknown push route '" + route + "'. Allowed: " + PushRoutes.KNOWN);
+        }
         User user = users.findById(id).orElseThrow(UserAdminService::notFound);
         return push.sendToUser(
                 user.getId(),
-                new PushMessage("TeamMarhaba test notification", "If you can see this, push is working."));
+                new PushMessage(
+                        "TeamMarhaba test notification", "If you can see this, push is working.", route));
     }
 
     private static ResourceNotFoundException notFound() {
