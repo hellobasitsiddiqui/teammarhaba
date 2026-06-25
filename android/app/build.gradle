@@ -57,7 +57,10 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".debug"
+            // No applicationIdSuffix: the google-services plugin (TM-289) requires the build's
+            // applicationId to have a matching client in google-services.json, which is registered
+            // for app.teammarhaba.webview only. A ".debug" suffix would fail processDebugGoogleServices.
+            // The app ships as a single APK, so a separate debug applicationId isn't needed.
             minifyEnabled false
             // Debug builds are signed with the auto-generated Android debug keystore — no secrets.
         }
