@@ -146,8 +146,12 @@
                             <button id="signin-btn" type="button">Sign in</button>
                             <button id="signup-btn" type="button" class="secondary">Sign up</button>
                         </div>
-                        <button id="google-btn" type="button" class="google" hidden>Continue with Google</button>
                     </fieldset>
+                    <!-- Google sign-in (TM-273): un-parked; handler is in login.js (popup on desktop,
+                         redirect in WebView via TM-230). Its own block, not inside the email+password fieldset. -->
+                    <div class="auth-alt-google">
+                        <button id="google-btn" type="button" class="google">Continue with Google</button>
+                    </div>
                 </div>
             </form>
 
