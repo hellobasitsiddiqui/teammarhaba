@@ -23,7 +23,7 @@ import com.getcapacitor.WebViewListener
  *   1. Register the named JS bridge object `TeamMarhabaWebView` (addJavascriptInterface).
  *   2. Inject `window.TEAMMARHABA_WEBVIEW = true` at the start of every page load.
  *
- * First-party cookies are enabled so the Firebase `/__/auth/**` redirect + reCAPTCHA round-trip can
+ * First-party cookies are enabled so the Firebase `/__/auth/` redirect + reCAPTCHA round-trip can
  * persist state across the navigation (webview-auth-contract §2). Capacitor enables DOM storage on
  * its WebView by default, which Firebase also needs for the redirect "initial state".
  */
