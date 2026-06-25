@@ -81,7 +81,7 @@ jobs:
       - name: Set up Node (for Capacitor CLI)
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Capacitor deps + sync Android
         working-directory: .
@@ -161,7 +161,7 @@ jobs:
       - name: Set up Node (for Capacitor CLI + firebase-tools + the asset fingerprinter)
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '20'
+          node-version: '22'
 
       # The Android Gradle build depends on the Capacitor node_modules + the generated
       # capacitor-cordova-android-plugins module + assets/capacitor.config.json (all gitignored,
