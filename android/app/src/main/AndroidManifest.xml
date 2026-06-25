@@ -53,4 +53,11 @@
          on modern Android. Declared optional so the app still installs on camera-less devices. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- Push notifications (TM-279). Android 13+ (API 33) gates notification posting behind a
+         runtime permission the user must grant; @capacitor/push-notifications' requestPermissions()
+         triggers the system prompt for it. Harmless on API < 33 (auto-granted at install). The FCM
+         messaging service + receivers are merged in from the @capacitor/push-notifications library
+         manifest at build time, so they aren't declared here. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>
