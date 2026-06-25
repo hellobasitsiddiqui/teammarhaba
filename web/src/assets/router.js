@@ -20,6 +20,7 @@ import { enterAdmin } from "./admin.js";
 import { enterProfile } from "./profile.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterHelp } from "./help.js";
+import { enterDiagnostics } from "./diagnostics.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 
@@ -35,7 +36,11 @@ const ONBOARDING = "#/onboarding";
 // in PROTECTED. The onboarding gate (below) still wins over it for a signed-in, not-yet-onboarded
 // user, so the gate can't be side-stepped via #/help.
 const HELP = "#/help";
-const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING]);
+// QA diagnostics view (TM-297) — GPS / FCM-token / native-plugin readouts. PROTECTED (signed-in only):
+// it's a QA enabler reached from the profile/settings area, not a public page, and the push/token
+// readout only makes sense for a signed-in session. It is NOT promoted in the main nav (unobtrusive).
+const DIAGNOSTICS = "#/diagnostics";
+const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING, DIAGNOSTICS]);
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
@@ -53,6 +58,9 @@ let profileActive = false;
 let onboardingActive = false;
 // Same idea for the static Help view (TM-255): mount once on entry, reset on leaving.
 let helpActive = false;
+// Same lifecycle for the QA diagnostics view (TM-297): mount once on entry, refresh its live readouts
+// each entry (handled inside enterDiagnostics), reset on leaving so a future entry re-enters.
+let diagnosticsActive = false;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
@@ -62,7 +70,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === HELP) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -87,12 +95,14 @@ function render() {
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
   const helpView = $("help-view");
+  const diagnosticsView = $("diagnostics-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
   if (profileView) profileView.hidden = route !== PROFILE;
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (helpView) helpView.hidden = route !== HELP;
+  if (diagnosticsView) diagnosticsView.hidden = route !== DIAGNOSTICS;
 
   // While the first-login gate is up (signed in but not onboarded — TM-250), suppress the in-app nav
   // links so the user can't side-step the gate; only the sign-out control stays (never trap a user).
@@ -207,6 +217,16 @@ function guard() {
     }
   } else {
     helpActive = false;
+  }
+  // QA diagnostics view (TM-297): mount on entry; enterDiagnostics() also refreshes the live push/token
+  // readout each call, so re-entering picks up a token registered after the first visit. Reset on leave.
+  if (route === DIAGNOSTICS) {
+    if (!diagnosticsActive) {
+      diagnosticsActive = true;
+      enterDiagnostics();
+    }
+  } else {
+    diagnosticsActive = false;
   }
 }
 
