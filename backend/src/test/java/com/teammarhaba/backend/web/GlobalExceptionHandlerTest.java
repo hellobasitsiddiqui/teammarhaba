@@ -72,6 +72,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private AuditService auditService;
 
+    // DeviceController (TM-283) needs a DeviceTokenService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.device.DeviceTokenService deviceTokenService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")
