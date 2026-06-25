@@ -142,8 +142,11 @@ export async function captureAvatarImage(win = globalThis) {
       resultType: RESULT_TYPE_DATA_URL,
       source: SOURCE_PROMPT,
       quality: 80,
-      // Square-ish edit affordance matches the circular avatar preview; harmless if the OS ignores it.
-      allowEditing: true,
+      // TM-294: keep `allowEditing` OFF. With it on, the OS hands the capture to an external photo
+      // editor whose result never makes it back into the `getPhoto` promise on device, so the avatar
+      // silently never uploaded. We want the picked image to return straight to us as a `dataUrl` and
+      // flow into the existing handlePickedFile → validateAvatarFile → uploadAvatar path untouched.
+      allowEditing: false,
       // Friendly labels for the OS chooser sheet.
       promptLabelHeader: "Profile photo",
       promptLabelPhoto: "Choose from gallery",

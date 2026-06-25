@@ -107,6 +107,28 @@ test("captureAvatarImage returns a File from the plugin's dataUrl", async () => 
   assert.equal(file.type, "image/png");
 });
 
+test("captureAvatarImage requests the photo without the editor detour (allowEditing: false)", async () => {
+  // TM-294 regression guard: `allowEditing: true` routes the capture through an external editor whose
+  // result never returns to the promise on device, so the avatar never uploads. Pin it OFF.
+  let opts = null;
+  const win = {
+    Capacitor: {
+      isNativePlatform: () => true,
+      Plugins: {
+        Camera: {
+          getPhoto: async (o) => {
+            opts = o;
+            return { dataUrl: PNG_DATA_URL };
+          },
+        },
+      },
+    },
+  };
+  await captureAvatarImage(win);
+  assert.equal(opts.allowEditing, false);
+  assert.equal(opts.resultType, "dataUrl");
+});
+
 test("captureAvatarImage resolves null when the user cancels (no throw)", async () => {
   const win = {
     Capacitor: {
