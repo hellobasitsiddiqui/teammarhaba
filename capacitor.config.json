@@ -1,0 +1,12 @@
+{
+  "appId": "app.teammarhaba.webview",
+  "appName": "TeamMarhaba",
+  "webDir": "web/src",
+  "server": {
+    "url": "https://teammarhaba.web.app",
+    "cleartext": false
+  },
+  "android": {
+    "appendUserAgent": "TeamMarhabaWebView"
+  }
+}

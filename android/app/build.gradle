@@ -1,0 +1,133 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// ---- App version --------------------------------------------------------------------------------
+// versionName is the human-readable app version, compared by the auto-update check against the
+// hosted web `buildVersion`. OVERRIDABLE at build time so the release CI (android-release.yml) can
+// STAMP the APK's versionName to match the web buildVersion it was cut from, and bump versionCode
+// (monotonic int) so Android treats a new sideloaded APK as an upgrade. Falls back to committed
+// defaults for a plain local `assembleDebug` (no -P needed). Ported from the TM-231 shell so the
+// existing release workflow's `-PtmVersionName`/`-PtmVersionCode` contract keeps working.
+def tmVersionName = (project.findProperty('tmVersionName') ?: '').toString().trim()
+if (tmVersionName.isEmpty()) { tmVersionName = '1.0.0' }
+def tmVersionCodeProp = (project.findProperty('tmVersionCode') ?: '').toString().trim()
+def tmVersionCode = tmVersionCodeProp.isInteger() ? tmVersionCodeProp.toInteger() : 1
+
+// The hosted web origin the WebView loads (kept consistent with capacitor.config.json server.url).
+def tmAppUrl = 'https://teammarhaba.web.app'
+
+android {
+    namespace = "app.teammarhaba.webview"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "app.teammarhaba.webview"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode tmVersionCode
+        versionName tmVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+        // Surfaced to Kotlin via BuildConfig so the shell never hardcodes the URL inline.
+        buildConfigField "String", "APP_URL", "\"${tmAppUrl}\""
+    }
+
+    // ---- Signing ---------------------------------------------------------------------------------
+    // Release signing reads the keystore + passwords from Gradle properties / env — NEVER committed
+    // (see android/README "Signing & release"). If the props are absent (a plain assembleDebug or a
+    // checkout without the keystore), the release signingConfig is simply not attached, so the build
+    // still configures; `assembleRelease` then produces an UNSIGNED APK. Keeps the project buildable
+    // with zero secrets present. Ported in spirit from the TM-231 shell so android-release.yml works.
+    def keystoreProps = loadReleaseSigningProps()
+    signingConfigs {
+        if (keystoreProps != null) {
+            release {
+                storeFile file(keystoreProps.getProperty('storeFile'))
+                storePassword keystoreProps.getProperty('storePassword')
+                keyAlias keystoreProps.getProperty('keyAlias')
+                keyPassword keystoreProps.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            minifyEnabled false
+            // Debug builds are signed with the auto-generated Android debug keystore — no secrets.
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Attach the release signing config only when its props were supplied; otherwise the
+            // release APK is unsigned (sign it later with apksigner — see android/README).
+            signingConfig signingConfigs.findByName('release')
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+/**
+ * Load the release signing properties WITHOUT ever committing them, from the first available source:
+ *   1. -P Gradle properties (or ~/.gradle/gradle.properties / ORG_GRADLE_PROJECT_* env), keyed
+ *      `teammarhaba.releaseStoreFile` / `…StorePassword` / `…KeyAlias` / `…KeyPassword`.
+ *   2. A `keystore.properties` file next to this module (gitignored) for local convenience.
+ * Returns null when nothing is configured, so debug builds and secret-free checkouts still work.
+ */
+def loadReleaseSigningProps() {
+    def prop = { String name ->
+        def v = project.findProperty(name)
+        (v != null && !v.toString().trim().isEmpty()) ? v.toString() : null
+    }
+    def storeFileProp = prop('teammarhaba.releaseStoreFile')
+    if (storeFileProp != null) {
+        def p = new Properties()
+        p.setProperty('storeFile', storeFileProp)
+        p.setProperty('storePassword', prop('teammarhaba.releaseStorePassword') ?: '')
+        p.setProperty('keyAlias', prop('teammarhaba.releaseKeyAlias') ?: '')
+        p.setProperty('keyPassword', prop('teammarhaba.releaseKeyPassword') ?: '')
+        return p
+    }
+    def localFile = rootProject.file('app/keystore.properties')
+    if (localFile.exists()) {
+        def p = new Properties()
+        localFile.withInputStream { p.load(it) }
+        return p
+    }
+    return null
+}

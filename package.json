@@ -1,0 +1,20 @@
+{
+  "name": "teammarhaba-capacitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capacitor host for the TeamMarhaba hybrid app — wraps the hosted web UI (https://teammarhaba.web.app) as an Android (and future iOS) native shell. The web app stays a no-build static SPA under web/src; Capacitor only adds the native bridge + plugin layer and loads the hosted site via server.url so web deploys keep flowing instantly (TM-278).",
+  "scripts": {
+    "cap": "cap",
+    "cap:sync": "cap sync android",
+    "cap:copy": "cap copy android",
+    "cap:open": "cap open android",
+    "android:assembleDebug": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.4.1",
+    "@capacitor/core": "8.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.1"
+  }
+}
