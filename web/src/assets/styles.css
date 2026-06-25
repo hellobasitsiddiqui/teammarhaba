@@ -83,7 +83,12 @@
 
 body {
     margin: 0;
+    /* 100vh first as the universal fallback; 100dvh (TM-295) overrides it where supported so the
+       app fills the *dynamic* viewport — on mobile WebViews 100vh is the largest possible height
+       (toolbars retracted), which left a dead band under the content when the bars were showing.
+       dvh tracks the visible area as the browser/native chrome grows and shrinks. */
     min-height: 100vh;
+    min-height: 100dvh;
     display: grid;
     place-items: center;
     font-family: var(--font-sans);
@@ -93,7 +98,12 @@ body {
 
 .app {
     text-align: center;
-    padding: 2rem;
+    /* Base padding plus the device safe-area insets (TM-295). With viewport-fit=cover the WebView
+       draws under the status bar / nav bar / notch; adding env(safe-area-inset-*) keeps the centred
+       content clear of them. env() is 0 on every non-notched surface (desktop, normal mobile web),
+       so this collapses to the original 2rem there — no desktop/web regression. */
+    padding: calc(2rem + env(safe-area-inset-top)) calc(2rem + env(safe-area-inset-right))
+             calc(2rem + env(safe-area-inset-bottom)) calc(2rem + env(safe-area-inset-left));
 }
 
 .app h1 {
@@ -965,8 +975,10 @@ body {
 /* Toasts */
 .tm-toasts {
     position: fixed;
-    right: 1rem;
-    bottom: 1rem;
+    /* Offset by the safe-area insets (TM-295) so toasts don't tuck under the home-indicator /
+       gesture bar or a side notch in the WebView. env() is 0 elsewhere → unchanged on desktop/web. */
+    right: calc(1rem + env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -1020,7 +1032,10 @@ body {
     inset: 0;
     display: grid;
     place-items: center;
-    padding: 1rem;
+    /* Inset-aware padding (TM-295): keeps a tall dialog clear of the status bar / home-indicator
+       under viewport-fit=cover. Collapses to a flat 1rem where env() is 0 (desktop/web). */
+    padding: calc(1rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right))
+             calc(1rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left));
     background: var(--overlay);
     z-index: 1100;
 }
@@ -1592,7 +1607,11 @@ html {
  */
 @media (max-width: 30rem) {
     .app {
-        padding: 1.1rem 0.85rem 2rem;
+        /* Tighter phone padding (TM-229) — but keep the safe-area insets folded in (TM-295) so the
+           header/nav clears the notch/status bar and the footer clears the home-indicator/nav bar.
+           env() is 0 without a notch, so this is the plain 1.1rem/0.85rem/2rem on those devices. */
+        padding: calc(1.1rem + env(safe-area-inset-top)) calc(0.85rem + env(safe-area-inset-right))
+                 calc(2rem + env(safe-area-inset-bottom)) calc(0.85rem + env(safe-area-inset-left));
     }
 
     .app h1 {
