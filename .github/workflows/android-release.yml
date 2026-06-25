@@ -11,8 +11,10 @@ name: Android
 #   release        — on a git TAG (v*) or manual `workflow_dispatch`: decode the keystore from the
 #                    TM-245 secrets, run `assembleRelease`, produce the SIGNED APK, stamp its
 #                    versionName to the live web `buildVersion`, and publish APK + /download page to
-#                    Firebase Hosting (reusing deploy.yml's keyless WIF path). FAILS LOUD if the
-#                    signing secrets are absent — it never ships an unsigned/debug APK as a release.
+#                    Firebase Hosting (reusing deploy.yml's keyless WIF path). If the signing secrets
+#                    are absent (the human TM-245 mint not done yet) it SKIPS the build/host with a
+#                    clear warning and stays GREEN — it never ships an unsigned/debug APK as a release,
+#                    and never red-fails just because the secrets aren't configured yet.
 #
 # Secrets consumed by `release` (stored by the human ticket TM-245 — never committed here):
 #   KEYSTORE_BASE64    base64 of the release .jks
@@ -125,11 +127,15 @@ jobs:
         with:
           fetch-depth: 0   # full history + tags so `git describe` names the build (matches deploy.yml)
 
-      # FAIL LOUD if the signing secrets aren't configured yet (the human TM-245 step). Without this
-      # guard `assembleRelease` would happily emit an UNSIGNED APK and we'd publish a non-installable
-      # /update — exactly what the AC forbids. We test the *names* (never echo the values), so nothing
-      # secret reaches the log.
-      - name: Require signing secrets (fail loud if absent — TM-245)
+      # Gate the signed-release path on the presence of the TM-245/TM-286 signing secrets. We DON'T
+      # hard-fail when they're absent: the human keystore-custody step (TM-245) may not be done yet,
+      # and a red workflow on every dispatch would be noise, not signal. Instead we SKIP the build +
+      # host + upload steps with a clear neutral notice (the job stays GREEN), so nothing is shipped
+      # unsigned and the run is unambiguous about *why* no APK was produced. Once the four secrets
+      # exist, the same dispatch/tag goes green WITH a signed APK — no workflow change needed.
+      # We test only the *names* (never echo the values), so nothing secret reaches the log.
+      - name: Check signing secrets (skip gracefully if absent — TM-245)
+        id: secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -142,10 +148,17 @@ jobs:
           [ -z "${KEY_ALIAS}" ]         && missing="${missing} KEY_ALIAS"
           [ -z "${KEY_PASSWORD}" ]      && missing="${missing} KEY_PASSWORD"
           if [ -n "${missing}" ]; then
-            echo "::error::Release signing secrets missing:${missing}. Store them via the human keystore-custody ticket TM-245 before cutting a signed release. Refusing to build an unsigned/debug APK."
-            exit 1
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release signing secrets missing:${missing}. Skipping the signed-release build/host (NOT failing). Store all four via the human keystore-custody ticket TM-245, then re-run to publish a signed APK. Never shipping an unsigned/debug APK as a release."
+            {
+              echo "### Android signed release — SKIPPED"
+              echo "Signing secrets not configured yet (missing:${missing})."
+              echo "Mint + set them via the human ticket **TM-245**, then re-run this workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "All four signing secrets are present."
           fi
-          echo "All four signing secrets are present."
 
       # Capacitor 8 toolchain needs JDK 21 (capacitor.build.gradle targets Java 21).
       - name: Set up JDK 21 (Temurin) + Gradle cache
@@ -189,6 +202,7 @@ jobs:
       # (app/build.gradle → loadReleaseSigningProps) picks them up — never on the command line
       # (argv is visible in `ps`), never echoed.
       - name: Decode keystore
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -196,6 +210,7 @@ jobs:
           echo "KEYSTORE_PATH=${RUNNER_TEMP}/teammarhaba-release.jks" >> "$GITHUB_ENV"
 
       - name: Build signed release APK (assembleRelease)
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         working-directory: android
         env:
           # The signing-property contract (gradle.properties header / README "Signing & release").
@@ -214,6 +229,7 @@ jobs:
       # `*-unsigned.apk`, we abort rather than publish it.
       - name: Locate + verify signed APK
         id: apk
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           set -euo pipefail
           APK="$(find android/app/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk' | head -n1)"
@@ -230,6 +246,7 @@ jobs:
       # THEN drop the signed APK into /downloads/. Deploying the whole site keeps the current web,
       # the /download page, and the APK consistent in one atomic Hosting release.
       - name: Build web bundle (mirror deploy.yml) + stage APK
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           rm -rf web/dist && mkdir -p web/dist
           cp -r web/src/. web/dist/
@@ -239,6 +256,7 @@ jobs:
 
       # Keyless WIF → impersonate gha-deployer (has firebasehosting.admin) — identical to deploy.yml.
       - name: Authenticate to GCP (Workload Identity Federation, keyless)
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           project_id: teammarhaba
@@ -246,11 +264,13 @@ jobs:
           service_account: gha-deployer@teammarhaba.iam.gserviceaccount.com
 
       - name: Set up gcloud
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       # Same config.js injections as deploy.yml so the hosted build stays consistent: backend URL,
       # the build version (which we just stamped INTO the APK — keep them identical), and theme.
       - name: Inject backend API base URL into config.js
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           URL=$(gcloud run services describe teammarhaba-backend --project=teammarhaba --region=europe-west2 --format='value(status.url)')
           if [ -z "$URL" ]; then echo "::error::could not resolve backend Cloud Run URL"; exit 1; fi
@@ -258,6 +278,7 @@ jobs:
           grep apiBaseUrl web/dist/assets/config.js
 
       - name: Inject web build version into config.js
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           DESCRIBE="${{ steps.ver.outputs.versionName }}"
           echo "Build version: ${DESCRIBE}"
@@ -265,6 +286,7 @@ jobs:
           grep buildVersion web/dist/assets/config.js
 
       - name: Inject web theme into config.js
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         env:
           THEME: ${{ vars.THEME }}
         run: |
@@ -279,23 +301,25 @@ jobs:
       # Fingerprint /assets/** for cache-busting (same as deploy.yml). It only touches /assets/*.{js,
       # css}; the /download page and /downloads/*.apk are untouched, so their URLs stay stable.
       - name: Fingerprint web assets (cache-bust)
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           node web/tools/fingerprint.mjs web/dist
           ls web/dist/assets
 
       - name: Deploy to Firebase Hosting (live channel)
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 
       - name: Upload signed release APK as a build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ always() }}
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         with:
           name: app-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
 
       - name: Summary
-        if: ${{ always() }}
+        if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
           {
             echo "### Android signed release"
