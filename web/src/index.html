@@ -252,5 +252,11 @@
          require a fingerprint / device PIN to unlock on cold-start and on resume. Completely inert on
          the web build (no native bridge → init() returns immediately, nothing is mounted). -->
     <script type="module" src="/assets/biometric-lock.js"></script>
+    <!-- Native splash screen (TM-299): inside the Capacitor Android shell the launch splash covers the
+         blank flash while the hosted SPA loads over the network; this hides it once the app has
+         actually painted (real ready, not a timer — capacitor.config sets launchAutoHide:false so the
+         web layer owns the hide). Fully inert on the browser/PWA build (no native SplashScreen plugin
+         → no-op), so the web experience is unaffected. -->
+    <script type="module" src="/assets/splash.js"></script>
 </body>
 </html>

@@ -8,5 +8,17 @@
   },
   "android": {
     "appendUserAgent": "TeamMarhabaWebView"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": false,
+      "backgroundColor": "#0f9d8cff",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": true,
+      "androidSpinnerStyle": "small",
+      "spinnerColor": "#ffffffff",
+      "splashFullScreen": true,
+      "splashImmersive": false
+    }
   }
 }
