@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "58443206078",
+    "project_id": "teammarhaba",
+    "storage_bucket": "teammarhaba.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:58443206078:android:cb40005de7489147853def",
+        "android_client_info": {
+          "package_name": "app.teammarhaba.webview"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "58443206078-1v8p34i926uh1pc4un6rafje3ugkma56.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQZ2UaHUTnm34RCf5iVYOsl8i4XuNt2_w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "58443206078-1v8p34i926uh1pc4un6rafje3ugkma56.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
