@@ -1,16 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">TeamMarhaba</string>
-
-    <!-- Offline / error -->
-    <string name="offline_retry">Retry</string>
-
-    <!-- Auto-update prompt (TM-231) -->
-    <string name="update_title">Update available</string>
-    <string name="update_message">A newer version of TeamMarhaba is available.\n\nInstalled: %1$s\nLatest: %2$s</string>
-    <string name="update_download">Download</string>
-    <string name="update_later">Later</string>
-
-    <!-- Permissions -->
-    <string name="camera_permission_rationale">Camera access is needed to take a photo for your avatar.</string>
+    <string name="title_activity_main">TeamMarhaba</string>
+    <string name="package_name">app.teammarhaba.webview</string>
+    <string name="custom_url_scheme">app.teammarhaba.webview</string>
 </resources>
