@@ -70,6 +70,9 @@ class SmtpEmailCodeMailerTest {
         // Both alternatives (plain-text + HTML) carry the 6-digit code.
         String body = extractText(message);
         assertThat(body).contains(CODE);
+
+        // Attribution byline (TM-254): the email footer credits 10xAI and links to the site.
+        assertThat(body).contains("A product of 10xAI").contains("10xai.co.uk");
     }
 
     @Test

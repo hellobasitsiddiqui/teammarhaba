@@ -19,6 +19,7 @@ import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterProfile } from "./profile.js";
 import { enterOnboarding } from "./onboarding.js";
+import { enterHelp } from "./help.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 
@@ -30,6 +31,10 @@ const PROFILE = "#/profile";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
 // here and can't reach any other app view until they complete it.
 const ONBOARDING = "#/onboarding";
+// Static Help guide (TM-255) — PUBLIC: reachable signed-in or signed-out, so it's deliberately NOT
+// in PROTECTED. The onboarding gate (below) still wins over it for a signed-in, not-yet-onboarded
+// user, so the gate can't be side-stepped via #/help.
+const HELP = "#/help";
 const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING]);
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
@@ -46,6 +51,8 @@ let adminActive = false;
 let profileActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
 let onboardingActive = false;
+// Same idea for the static Help view (TM-255): mount once on entry, reset on leaving.
+let helpActive = false;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
@@ -55,7 +62,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === HELP) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -79,11 +86,13 @@ function render() {
   const adminView = $("admin-view");
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
+  const helpView = $("help-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
   if (profileView) profileView.hidden = route !== PROFILE;
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
+  if (helpView) helpView.hidden = route !== HELP;
 
   // While the first-login gate is up (signed in but not onboarded — TM-250), suppress the in-app nav
   // links so the user can't side-step the gate; only the sign-out control stays (never trap a user).
@@ -96,6 +105,11 @@ function render() {
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
+  // The Help-page link (TM-255) is normally always shown (public, signed-in or out), but is hidden
+  // while the first-login gate is up so a gated user can't side-step it via the nav (the guard also
+  // bounces them back to the gate, but hiding the link keeps the gated nav clean).
+  const navHelpLink = $("nav-help-link");
+  if (navHelpLink) navHelpLink.hidden = gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
@@ -183,6 +197,16 @@ function guard() {
     }
   } else {
     onboardingActive = false;
+  }
+  // Static Help view (TM-255): mount its content once on entry (idempotent — there's no per-visit
+  // data to load), reset on leaving so a future entry re-mounts if needed.
+  if (route === HELP) {
+    if (!helpActive) {
+      helpActive = true;
+      enterHelp();
+    }
+  } else {
+    helpActive = false;
   }
 }
 
