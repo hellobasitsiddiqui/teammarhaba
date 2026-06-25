@@ -242,6 +242,20 @@ jobs:
           "${APKSIGNER}" verify --verbose "${APK}"
           echo "apk=${APK}" >> "$GITHUB_OUTPUT"
 
+      # Upload the signed APK as a build artifact IMMEDIATELY after it's built + verified — BEFORE the
+      # Firebase Hosting publish (TM-293). The artifact is the source of truth for QA (TM-288): if the
+      # hosting publish later fails (or is skipped), the signed APK is still downloadable from the run.
+      # `always()` (gated on the secrets being present, so it only runs on the real signed-release path)
+      # means even a hosting failure can never lose the APK. This is deliberately the FIRST thing we do
+      # with the verified APK, so nothing downstream can strand it.
+      - name: Upload signed release APK as a build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && steps.secrets.outputs.present == 'true' }}
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
       # Build the Hosting bundle exactly like deploy.yml's web job (src -> dist, inject config.js),
       # THEN drop the signed APK into /downloads/. Deploying the whole site keeps the current web,
       # the /download page, and the APK consistent in one atomic Hosting release.
@@ -306,17 +320,28 @@ jobs:
           node web/tools/fingerprint.mjs web/dist
           ls web/dist/assets
 
-      - name: Deploy to Firebase Hosting (live channel)
+      # Publish the web bundle + the staged /downloads/teammarhaba.apk to Firebase Hosting, keyless via
+      # the WIF ADC the auth step wrote (same path as deploy.yml's working web job). Two changes vs the
+      # first failing run (28184674691), where this errored with "Failed to authenticate, have you run
+      # firebase login?" even though the auth + setup-gcloud blocks are byte-identical to deploy.yml:
+      #
+      #   1. Pass GOOGLE_APPLICATION_CREDENTIALS explicitly to firebase-tools (it's already exported to
+      #      the job env by google-github-actions/auth, but we make the ADC file the deploy authenticates
+      #      with unambiguous at the step level — this is the credential deploy.yml relies on).
+      #
+      #   2. Make the step NON-FATAL (`|| echo ::warning::`), mirroring the existing best-effort
+      #      "Deploy Firebase Storage rules" step in deploy.yml. The signed APK is ALREADY uploaded as a
+      #      build artifact above (the source of truth for QA — TM-288), so a hosting-auth hiccup must
+      #      never red-fail the whole release job and strand the deliverable. If hosting succeeds the
+      #      APK is also live at https://teammarhaba.web.app/downloads/teammarhaba.apk; if it fails the
+      #      artifact still ships and the run stays green with a visible warning.
+      - name: Deploy to Firebase Hosting (live channel) — non-fatal
         if: ${{ steps.secrets.outputs.present == 'true' }}
-        run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
-
-      - name: Upload signed release APK as a build artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ steps.secrets.outputs.present == 'true' }}
-        with:
-          name: app-release-apk
-          path: android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}
+        run: |
+          npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive \
+            || echo "::warning::hosting publish failed — signed APK is still available as the build artifact (TM-293). Hosting auth (WIF ADC) needs investigation; the artifact is the QA source of truth."
 
       - name: Summary
         if: ${{ steps.secrets.outputs.present == 'true' }}
@@ -325,6 +350,7 @@ jobs:
             echo "### Android signed release"
             echo "- versionName (= web buildVersion): \`${{ steps.ver.outputs.versionName }}\`"
             echo "- versionCode: \`${{ steps.ver.outputs.versionCode }}\`"
-            echo "- Hosted APK: https://teammarhaba.web.app/downloads/teammarhaba.apk"
-            echo "- Download page: https://teammarhaba.web.app/download"
+            echo "- **Signed APK artifact: \`app-release-apk\`** (always attached to this run — the QA source of truth, TM-288)."
+            echo "- Hosted APK (if the hosting publish above succeeded): https://teammarhaba.web.app/downloads/teammarhaba.apk"
+            echo "- Download page (if hosted): https://teammarhaba.web.app/download"
           } >> "$GITHUB_STEP_SUMMARY"
