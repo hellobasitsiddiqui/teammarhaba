@@ -14,6 +14,20 @@
 // fallback via `allowDeviceCredential` (AC #4), and reports enrolment via `checkBiometry()` so we can
 // hide/disable the feature when nothing is enrolled (AC #4) — no crash.
 //
+// IMPORTANT — WHY WE CALL `internalAuthenticate`, NOT `authenticate` (TM-300 root cause):
+// Because we read the plugin off the NATIVE bridge (window.Capacitor.Plugins.BiometricAuthNative)
+// rather than importing the npm module (see the hosted-origin note above), only the plugin's
+// native @PluginMethod methods are exposed: `checkBiometry` and `internalAuthenticate`. The friendly
+// `authenticate()` wrapper is NOT a native method — it lives only in the plugin's JS layer
+// (BiometricAuthBase), which the hosted web app never imports. So on a real device
+// `plugin.authenticate` is `undefined`; the previous code called it, hit its own "not a function"
+// guard, and silently passed through WITHOUT ever showing a prompt — which is exactly why biometric
+// "did nothing" on device (TM-282 QA finding). We call the bridged `internalAuthenticate` directly.
+// It takes the same options and rejects with a CapacitorException whose `.code` is the BiometryError
+// string (userCancel/systemCancel/biometryLockout/authenticationFailed/...), which classifyAuthError
+// already understands. We keep a fallback to `authenticate` for environments where the JS wrapper is
+// present (e.g. the plugin's web simulator).
+//
 // The pure decisions (usable? lock engaged? error class?) live in biometric-policy.js and are
 // unit-tested; this module only does the live bridge calls + plumbing.
 
@@ -41,6 +55,28 @@ export function getPlugin(win = globalThis) {
   const plugins = win.Capacitor && win.Capacitor.Plugins;
   const plugin = plugins && plugins[PLUGIN_NAME];
   return plugin || null;
+}
+
+/**
+ * Pick the callable that actually presents the auth prompt.
+ *
+ * Over the NATIVE bridge the only exposed prompt method is `internalAuthenticate` (a native
+ * @PluginMethod). The friendlier `authenticate()` is a JS-only wrapper that isn't bridged, so it's
+ * `undefined` on device — calling it was the TM-300 bug. We prefer `internalAuthenticate`, but fall
+ * back to `authenticate` for environments where the JS wrapper IS present (e.g. the web simulator or a
+ * future bundled build).
+ * @param {object|null} plugin
+ * @returns {((opts: object) => Promise<unknown>)|null}
+ */
+export function getAuthenticateFn(plugin) {
+  if (!plugin) return null;
+  if (typeof plugin.internalAuthenticate === "function") {
+    return plugin.internalAuthenticate.bind(plugin);
+  }
+  if (typeof plugin.authenticate === "function") {
+    return plugin.authenticate.bind(plugin);
+  }
+  return null;
 }
 
 /**
@@ -88,24 +124,30 @@ export async function isBiometricAvailable(win = globalThis) {
  */
 export async function authenticate(opts = {}, win = globalThis) {
   const plugin = getPlugin(win);
-  // Not in the shell → there is no biometric surface. "Pass through" so a browser build never blocks
-  // a sensitive action behind a prompt it can't show (web is unaffected — AC). The backend remains
-  // the real authority on every privileged call.
-  if (!plugin || typeof plugin.authenticate !== "function") {
+  const authFn = getAuthenticateFn(plugin);
+  // Not in the shell / no prompt method → there is no biometric surface. "Pass through" so a browser
+  // build never blocks a sensitive action behind a prompt it can't show (web is unaffected — AC). The
+  // backend remains the real authority on every privileged call.
+  if (!authFn) {
     return { ok: true, reason: "not-native" };
   }
   try {
-    await plugin.authenticate({
+    // These option keys match the native @PluginMethod contract exactly: `reason`, `androidTitle`,
+    // `androidSubtitle`, `cancelTitle`, `allowDeviceCredential`.
+    await authFn({
       reason: opts.reason ?? "Confirm it's you",
       androidTitle: opts.title ?? "Confirm it's you",
       androidSubtitle: opts.subtitle,
       cancelTitle: opts.cancelTitle ?? "Cancel",
       // Fall back to device PIN/pattern/password (AC #4): the user can always get in if the device is
-      // secured, even with no fingerprint enrolled.
+      // secured, even with no fingerprint enrolled. (The native default is `false`, so passing this
+      // explicitly is required.)
       allowDeviceCredential: opts.allowDeviceCredential !== false,
     });
     return { ok: true };
   } catch (err) {
+    // Native rejects with a CapacitorException whose `.code` is the BiometryError string
+    // (userCancel/systemCancel/biometryLockout/authenticationFailed/biometryNotEnrolled/...).
     const code = err && typeof err.code === "string" ? err.code : "failed";
     return { ok: false, reason: classifyAuthError(code), code };
   }
