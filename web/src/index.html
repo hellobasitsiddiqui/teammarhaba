@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover (TM-295) lets the WebView draw edge-to-edge under the status bar / nav bar /
+         notch; styles.css then pads the app shell back in with env(safe-area-inset-*) so content is never
+         clipped. width/initial-scale unchanged from TM-229. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>TeamMarhaba</title>
     <!-- Hand-lettered fonts for the "doodle" theme family (TM-213). Loaded for every page but only
          referenced under [data-theme="doodle"] (see styles.css); other themes never use them, so
@@ -28,7 +31,7 @@
 
     <main class="app">
         <h1>TeamMarhaba</h1>
-        <p class="tagline">Walking skeleton — web surface.</p>
+        <p class="tagline">Find your people. Plan the meetup. Make it happen.</p>
         <p id="status" class="status">loading…</p>
 
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out.
