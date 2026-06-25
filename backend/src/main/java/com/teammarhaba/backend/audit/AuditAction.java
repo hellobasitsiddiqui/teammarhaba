@@ -36,5 +36,11 @@ public enum AuditAction {
     ONBOARDING_COMPLETED,
 
     /** A user accepted a terms version via {@code POST /api/v1/me/accept-terms} (TM-163). */
-    TERMS_ACCEPTED
+    TERMS_ACCEPTED,
+
+    /** A user registered (or refreshed) a push device token via {@code POST /api/v1/me/devices} (TM-283). */
+    DEVICE_TOKEN_REGISTERED,
+
+    /** A device token was deregistered — sign-out or FCM-reported invalidation (TM-283/TM-284). */
+    DEVICE_TOKEN_DEREGISTERED
 }

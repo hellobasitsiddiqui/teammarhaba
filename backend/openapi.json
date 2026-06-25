@@ -62,6 +62,22 @@
         },
         "type" : "object"
       },
+      "DeviceResponse" : {
+        "properties" : {
+          "platform" : {
+            "enum" : [ "ANDROID", "IOS", "WEB" ],
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "EmailCodeRequest" : {
         "properties" : {
           "email" : {
@@ -235,6 +251,21 @@
             "type" : "integer"
           }
         },
+        "type" : "object"
+      },
+      "RegisterDeviceRequest" : {
+        "properties" : {
+          "platform" : {
+            "enum" : [ "ANDROID", "IOS", "WEB" ],
+            "type" : "string"
+          },
+          "token" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "platform", "token" ],
         "type" : "object"
       },
       "UpdateMeRequest" : {
@@ -622,6 +653,53 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/devices" : {
+      "post" : {
+        "operationId" : "register",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterDeviceRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "device-controller" ]
+      }
+    },
+    "/api/v1/me/devices/{token}" : {
+      "delete" : {
+        "operationId" : "deregister",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "device-controller" ]
       }
     },
     "/api/v1/me/onboarding" : {
