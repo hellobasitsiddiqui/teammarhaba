@@ -47,4 +47,10 @@
          does not grant it. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Camera/gallery avatar capture (TM-281, @capacitor/camera). CAMERA is requested at runtime by
+         the plugin when the user picks "Take a photo"; the system photo picker needs no storage perm
+         on modern Android. Declared optional so the app still installs on camera-less devices. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>
