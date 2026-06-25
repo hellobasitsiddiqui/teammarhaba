@@ -36,11 +36,13 @@ android {
     }
 
     // ---- Signing ---------------------------------------------------------------------------------
-    // Release signing reads the keystore + passwords from Gradle properties / env — NEVER committed
-    // (see android/README "Signing & release"). If the props are absent (a plain assembleDebug or a
-    // checkout without the keystore), the release signingConfig is simply not attached, so the build
-    // still configures; `assembleRelease` then produces an UNSIGNED APK. Keeps the project buildable
-    // with zero secrets present. Ported in spirit from the TM-231 shell so android-release.yml works.
+    // Release signing reads the keystore + passwords from Gradle properties OR plain env vars
+    // (ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD) —
+    // NEVER committed (see loadReleaseSigningProps below + android/README "Signing & release"). If
+    // nothing is configured (a plain dev checkout with zero secrets), the `release` build type falls
+    // back to the auto-generated debug keystore (below), so `assembleRelease` still produces an
+    // INSTALLABLE APK for local testing. The release CI (TM-287/android-release.yml) requires the real
+    // secrets and fails loud without them, so a debug-signed APK is never shipped as a real release.
     def keystoreProps = loadReleaseSigningProps()
     signingConfigs {
         if (keystoreProps != null) {
@@ -62,9 +64,15 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Attach the release signing config only when its props were supplied; otherwise the
-            // release APK is unsigned (sign it later with apksigner — see android/README).
-            signingConfig signingConfigs.findByName('release')
+            // Signing precedence (TM-286):
+            //   1. The real `release` config when its keystore props/env were supplied (CI + local
+            //      release builds) — produces the properly-signed, distributable APK.
+            //   2. SAFE FALLBACK to the auto-generated `debug` keystore when NO secrets are present
+            //      (a plain dev checkout) — so `assembleRelease` still yields an INSTALLABLE APK for
+            //      local testing instead of a non-installable unsigned one. This is dev-only; the CI
+            //      release job (TM-287/android-release.yml) fails loud if the real secrets are absent,
+            //      so a debug-signed APK can never be shipped as a real release.
+            signingConfig signingConfigs.findByName('release') ?: signingConfigs.getByName('debug')
         }
     }
 
@@ -103,17 +111,29 @@ try {
 }
 
 /**
- * Load the release signing properties WITHOUT ever committing them, from the first available source:
+ * Load the release signing properties WITHOUT ever committing them. Sources are tried in order; the
+ * first that supplies a keystore path wins:
  *   1. -P Gradle properties (or ~/.gradle/gradle.properties / ORG_GRADLE_PROJECT_* env), keyed
- *      `teammarhaba.releaseStoreFile` / `…StorePassword` / `…KeyAlias` / `…KeyPassword`.
- *   2. A `keystore.properties` file next to this module (gitignored) for local convenience.
- * Returns null when nothing is configured, so debug builds and secret-free checkouts still work.
+ *      `teammarhaba.releaseStoreFile` / `…StorePassword` / `…KeyAlias` / `…KeyPassword`. This is the
+ *      contract the release CI (TM-287/android-release.yml) already feeds via ORG_GRADLE_PROJECT_*.
+ *   2. Plain ENVIRONMENT VARIABLES (TM-286): `ANDROID_KEYSTORE_PATH` / `ANDROID_KEYSTORE_PASSWORD` /
+ *      `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`. Lets any CI / local shell that exports the
+ *      keystore path + passwords sign without learning Gradle's ORG_GRADLE_PROJECT_* prefix.
+ *   3. A `keystore.properties` file next to this module (gitignored) for local convenience.
+ * Returns null when nothing is configured, so debug builds and secret-free checkouts still work
+ * (the release build type then falls back to debug signing — see the `release` buildType above).
  */
 def loadReleaseSigningProps() {
     def prop = { String name ->
         def v = project.findProperty(name)
         (v != null && !v.toString().trim().isEmpty()) ? v.toString() : null
     }
+    def env = { String name ->
+        def v = System.getenv(name)
+        (v != null && !v.trim().isEmpty()) ? v : null
+    }
+
+    // 1. Gradle-property contract (CI passes these via ORG_GRADLE_PROJECT_*; or -P / ~/.gradle).
     def storeFileProp = prop('teammarhaba.releaseStoreFile')
     if (storeFileProp != null) {
         def p = new Properties()
@@ -123,6 +143,20 @@ def loadReleaseSigningProps() {
         p.setProperty('keyPassword', prop('teammarhaba.releaseKeyPassword') ?: '')
         return p
     }
+
+    // 2. Plain environment variables (TM-286 named contract).
+    def envStoreFile = env('ANDROID_KEYSTORE_PATH')
+    if (envStoreFile != null) {
+        def p = new Properties()
+        p.setProperty('storeFile', envStoreFile)
+        p.setProperty('storePassword', env('ANDROID_KEYSTORE_PASSWORD') ?: '')
+        p.setProperty('keyAlias', env('ANDROID_KEY_ALIAS') ?: '')
+        // Key password defaults to the store password when unset (common single-password keystores).
+        p.setProperty('keyPassword', env('ANDROID_KEY_PASSWORD') ?: env('ANDROID_KEYSTORE_PASSWORD') ?: '')
+        return p
+    }
+
+    // 3. Local gitignored keystore.properties for convenience.
     def localFile = rootProject.file('app/keystore.properties')
     if (localFile.exists()) {
         def p = new Properties()

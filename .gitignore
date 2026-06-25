@@ -42,6 +42,12 @@ gha-creds-*.json
 *.pem
 *.p12
 
+# Android release signing — keystore + its passwords NEVER committed (TM-286/TM-245). The keystore is
+# minted by a human, base64'd into the KEYSTORE_BASE64 GitHub secret, and decoded only on the CI runner.
+*.jks
+*.keystore
+keystore.properties
+
 # IDE
 .idea/
 *.iml
