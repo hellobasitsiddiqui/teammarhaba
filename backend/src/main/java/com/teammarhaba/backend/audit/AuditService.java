@@ -20,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuditService {
 
+    /** Audit {@code target_type} for account/profile events (mirrors {@code UserService.TARGET_USER}). */
+    private static final String TARGET_USER = "User";
+
     private final AuditRepository events;
 
     public AuditService(AuditRepository events) {
@@ -58,6 +61,17 @@ public class AuditService {
     @Transactional(readOnly = true)
     public Page<AuditEvent> search(String actorUid, String targetType, String targetId, Pageable pageable) {
         return events.search(blankToNull(actorUid), blankToNull(targetType), blankToNull(targetId), pageable);
+    }
+
+    /**
+     * Paged profile-change history for one account (TM-185): the {@code PROFILE_UPDATED} events
+     * targeting {@code uid}, ordered by the {@code pageable} (the endpoints default to newest-first).
+     * Used by {@code GET /api/v1/me/history} and the admin per-user history view.
+     */
+    @Transactional(readOnly = true)
+    public Page<AuditEvent> profileHistory(String uid, Pageable pageable) {
+        return events.findByTargetTypeAndTargetIdAndAction(
+                TARGET_USER, uid, AuditAction.PROFILE_UPDATED, pageable);
     }
 
     private static String blankToNull(String value) {
