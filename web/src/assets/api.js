@@ -238,6 +238,48 @@ export async function submitOnboarding(body) {
   return response.json();
 }
 
+/**
+ * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
+ * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
+ * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending
+ * the same token re-points it at the caller and refreshes its platform/timestamp (no duplicate).
+ *
+ * @param {string} token the opaque push registration token.
+ * @param {"ANDROID"|"IOS"|"WEB"} platform the device platform.
+ * @returns {Promise<{token: string, platform: string, updatedAt: string}>} the stored registration.
+ * @throws {Error} on a non-2xx response (a 401 will already have refreshed/redirected via apiFetch).
+ */
+export async function registerDevice(token, platform) {
+  const response = await apiFetch("/api/v1/me/devices", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ token, platform }),
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/devices failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * DELETE /api/v1/me/devices/{token} — deregister a device push token on sign-out / invalidation
+ * (TM-279 → TM-283). Idempotent: removing an unknown/already-removed token is still success (204),
+ * so a retried sign-out never errors. The token rides in the path (FCM tokens are URL-safe, but we
+ * encode defensively). Resolves on success; throws on any other non-2xx.
+ *
+ * @param {string} token the push registration token to remove.
+ * @returns {Promise<void>}
+ */
+export async function deregisterDevice(token) {
+  const response = await apiFetch(`/api/v1/me/devices/${encodeURIComponent(token)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/problem+json" },
+  });
+  if (!response.ok) {
+    throw new Error(`DELETE /api/v1/me/devices/{token} failed: ${response.status}`);
+  }
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
   window.tmApi = {
@@ -248,6 +290,8 @@ if (typeof window !== "undefined") {
     resendVerification,
     requestEmailCode,
     verifyEmailCode,
+    registerDevice,
+    deregisterDevice,
     redirectToLogin,
     LOGIN_PATH,
     ApiError,

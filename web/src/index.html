@@ -243,5 +243,10 @@
     <!-- Doodle decoration for the static panels (TM-215): mounts a few tasteful TM-214 doodles into
          the landing/login/home headers + dividers. Visual only; CSS gates them to the doodle theme. -->
     <script type="module" src="/assets/doodle-decor.js"></script>
+    <!-- Push-notifications client (TM-279): inside the Capacitor Android shell, requests the OS
+         notification permission on login and registers the device's FCM token with
+         POST /api/v1/me/devices (deregisters on sign-out). Fully inert on the browser/PWA build —
+         gated on the WebView signal + the native Capacitor runtime, so the web app is unaffected. -->
+    <script type="module" src="/assets/push.js"></script>
 </body>
 </html>
