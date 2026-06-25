@@ -38,13 +38,19 @@ public class FcmPushSender implements PushSender {
 
     @Override
     public PushDelivery send(String token, PushMessage message) {
-        Message fcm = Message.builder()
+        Message.Builder builder = Message.builder()
                 .setToken(token)
                 .setNotification(Notification.builder()
                         .setTitle(message.title())
                         .setBody(message.body())
-                        .build())
-                .build();
+                        .build());
+        // TM-290: carry the deep-link destination in the FCM data payload so a notification tap
+        // navigates the app there (read by web/src/assets/push-deeplink.js, TM-285). The route is
+        // already constrained to a known hash route by PushMessage; a null route adds nothing.
+        if (message.route() != null) {
+            builder.putData("route", message.route());
+        }
+        Message fcm = builder.build();
         try {
             messaging.send(fcm);
             return PushDelivery.DELIVERED;

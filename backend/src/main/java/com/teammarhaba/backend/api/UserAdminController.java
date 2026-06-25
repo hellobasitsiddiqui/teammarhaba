@@ -77,13 +77,18 @@ public class UserAdminController {
     }
 
     /**
-     * Manual/test send-push trigger (TM-284): deliver a fixed test notification to the account's devices
-     * and return how it fanned out. Lets an admin verify the push path end-to-end against a real device
-     * without waiting for an organic event. {@code 404} if the account is absent (no existence leak).
+     * Manual/test send-push trigger (TM-284): deliver a test notification to the account's devices and
+     * return how it fanned out. Lets an admin verify the push path end-to-end against a real device
+     * without waiting for an organic event. An optional {@link TestPushRequest} body (TM-290) supplies a
+     * deep-link {@code route} so the tap path can be exercised too; an unknown route is a {@code 400}.
+     * {@code 404} if the account is absent (no existence leak).
      */
     @PostMapping("/{id}/test-push")
-    public PushFanoutResponse testPush(@PathVariable long id) {
-        return PushFanoutResponse.from(adminService.sendTestPush(id));
+    public PushFanoutResponse testPush(
+            @PathVariable long id, @RequestBody(required = false) TestPushRequest request) {
+        // TM-290: optional body lets the operator pick a deep-link route; no body = plain test push.
+        String route = request == null ? null : request.route();
+        return PushFanoutResponse.from(adminService.sendTestPush(id, route));
     }
 
     /** Build a safe {@link Pageable}: clamp page/size and validate the sort field against an allow-list. */

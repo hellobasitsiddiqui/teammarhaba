@@ -13,6 +13,8 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
+import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.List;
@@ -148,8 +150,11 @@ class UserAdminServiceTest {
 
         service.update(1L, true, null, "admin-uid");
 
-        // The real send-push trigger (TM-284): re-enable fans a push out to the account's devices.
-        verify(push).sendToUser(org.mockito.ArgumentMatchers.eq(target.getId()), any(PushMessage.class));
+        // The real send-push trigger (TM-284): re-enable fans a push out to the account's devices, and
+        // (TM-290) deep-links the tap to the user's profile.
+        org.mockito.ArgumentCaptor<PushMessage> msg = org.mockito.ArgumentCaptor.forClass(PushMessage.class);
+        verify(push).sendToUser(org.mockito.ArgumentMatchers.eq(target.getId()), msg.capture());
+        assertThat(msg.getValue().route()).isEqualTo("#/profile");
     }
 
     @Test
@@ -174,6 +179,45 @@ class UserAdminServiceTest {
         service.update(1L, true, null, "admin-uid"); // must not throw
 
         assertThat(target.isEnabled()).isTrue();
+    }
+
+    @Test
+    void testPushSetsTheRequestedKnownRouteOnTheMessage() {
+        User target = account("target");
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+        when(push.sendToUser(org.mockito.ArgumentMatchers.any(), any(PushMessage.class)))
+                .thenReturn(new PushFanout(1, 1, 0, 0));
+
+        // TM-290: a known route flows through to the message's data.route.
+        service.sendTestPush(1L, "#/admin");
+
+        org.mockito.ArgumentCaptor<PushMessage> msg = org.mockito.ArgumentCaptor.forClass(PushMessage.class);
+        verify(push).sendToUser(org.mockito.ArgumentMatchers.eq(target.getId()), msg.capture());
+        assertThat(msg.getValue().route()).isEqualTo("#/admin");
+    }
+
+    @Test
+    void testPushWithNoRouteSendsAPlainNotification() {
+        User target = account("target");
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+        when(push.sendToUser(org.mockito.ArgumentMatchers.any(), any(PushMessage.class)))
+                .thenReturn(new PushFanout(0, 0, 0, 0));
+
+        service.sendTestPush(1L, null);
+
+        org.mockito.ArgumentCaptor<PushMessage> msg = org.mockito.ArgumentCaptor.forClass(PushMessage.class);
+        verify(push).sendToUser(org.mockito.ArgumentMatchers.eq(target.getId()), msg.capture());
+        assertThat(msg.getValue().route()).isNull();
+    }
+
+    @Test
+    void testPushRejectsAnUnknownRouteWithoutSending() {
+        // TM-290: an off-allow-list route is a 400 and never reaches the send path (no off-list route
+        // emitted). The user lookup needn't even happen — the route is rejected first.
+        assertThatThrownBy(() -> service.sendTestPush(1L, "#/evil"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(push);
     }
 
     @Test
