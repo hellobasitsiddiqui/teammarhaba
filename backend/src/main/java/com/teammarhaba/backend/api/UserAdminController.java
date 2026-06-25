@@ -13,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET /admin/users} — a page of accounts (paginate + sort; size capped).</li>
  *   <li>{@code GET /admin/users/{id}} — one account (404 if absent — no existence leak).</li>
  *   <li>{@code PATCH /admin/users/{id}} — enable/disable and/or change role (self-protected).</li>
+ *   <li>{@code POST /admin/users/{id}/test-push} — manual send-push trigger (TM-284): deliver a test
+ *       notification to the account's devices and report the fan-out, to verify push end-to-end.</li>
  * </ul>
  *
  * <p>Lives in the {@code api} package so it inherits the package-driven {@code /api/v1} prefix
@@ -71,6 +74,16 @@ public class UserAdminController {
             @RequestBody @Valid UpdateUserRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
         return UserResponse.from(adminService.update(id, request.enabled(), request.role(), caller.uid()));
+    }
+
+    /**
+     * Manual/test send-push trigger (TM-284): deliver a fixed test notification to the account's devices
+     * and return how it fanned out. Lets an admin verify the push path end-to-end against a real device
+     * without waiting for an organic event. {@code 404} if the account is absent (no existence leak).
+     */
+    @PostMapping("/{id}/test-push")
+    public PushFanoutResponse testPush(@PathVariable long id) {
+        return PushFanoutResponse.from(adminService.sendTestPush(id));
     }
 
     /** Build a safe {@link Pageable}: clamp page/size and validate the sort field against an allow-list. */

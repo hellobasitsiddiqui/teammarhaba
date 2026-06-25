@@ -2,6 +2,7 @@ package com.teammarhaba.backend.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -10,6 +11,8 @@ import static org.mockito.Mockito.when;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
+import com.teammarhaba.backend.notify.PushMessage;
+import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.List;
@@ -27,7 +30,8 @@ class UserAdminServiceTest {
     private final UserRepository users = mock(UserRepository.class);
     private final RoleService roleService = mock(RoleService.class);
     private final AuditService audit = mock(AuditService.class);
-    private final UserAdminService service = new UserAdminService(users, roleService, audit);
+    private final PushNotificationService push = mock(PushNotificationService.class);
+    private final UserAdminService service = new UserAdminService(users, roleService, audit, push);
 
     private static User account(String uid) {
         return new User(uid, uid + "@example.com", null);
@@ -134,6 +138,42 @@ class UserAdminServiceTest {
         service.update(1L, true, null, "self");
 
         assertThat(self.isEnabled()).isTrue();
+    }
+
+    @Test
+    void reEnablingAnAccountPushesToTheUsersDevices() throws Exception {
+        User target = account("target");
+        target.setEnabled(false); // start disabled so true is an effective re-enable
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, true, null, "admin-uid");
+
+        // The real send-push trigger (TM-284): re-enable fans a push out to the account's devices.
+        verify(push).sendToUser(org.mockito.ArgumentMatchers.eq(target.getId()), any(PushMessage.class));
+    }
+
+    @Test
+    void disablingAnAccountDoesNotPush() throws Exception {
+        User target = account("target"); // enabled by default
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, false, null, "admin-uid");
+
+        verifyNoInteractions(push);
+    }
+
+    @Test
+    void aPushFailureDoesNotFailTheReEnable() throws Exception {
+        User target = account("target");
+        target.setEnabled(false);
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+        org.mockito.Mockito.doThrow(new RuntimeException("fcm down"))
+                .when(push)
+                .sendToUser(any(), any(PushMessage.class));
+
+        service.update(1L, true, null, "admin-uid"); // must not throw
+
+        assertThat(target.isEnabled()).isTrue();
     }
 
     @Test
