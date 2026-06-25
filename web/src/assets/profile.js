@@ -23,6 +23,7 @@ import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
+import { buildSecuritySettings } from "./biometric-settings.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -545,6 +546,11 @@ function buildShell(view) {
 
   const status = el("div", { id: "profile-status" });
 
+  // Security settings — the TM-282 biometric app-lock toggle. Self-renders + hides itself entirely
+  // when not on a native device with usable biometry, so it's inert on the web build and on devices
+  // with no enrolled biometric / no secure lock screen.
+  const security = buildSecuritySettings();
+
   clear(view).append(
     el("div", { class: "tm-admin-head" }, [
       // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
@@ -554,6 +560,7 @@ function buildShell(view) {
     summary,
     status,
     form,
+    security,
   );
 
   shell = { form, fields, save: saveBtn, reset, summary, status, avatar };

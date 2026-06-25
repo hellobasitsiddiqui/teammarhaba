@@ -37,6 +37,19 @@ by default, so the Firebase `/__/auth/**` redirect + reCAPTCHA round-trip persis
 (see `docs/agents/webview-auth-contract.md`). Avatar upload (`<input id="profile-avatar-file">`) is
 serviced by Capacitor's `BridgeActivity` `onShowFileChooser` natively.
 
+## Native plugins
+
+| Plugin | Purpose | Wiring |
+|---|---|---|
+| `@aparajita/capacitor-biometric-auth` | Biometric app-lock + sensitive-action confirm (TM-282) — wraps Android `BiometricPrompt`, with device-credential (PIN/pattern/password) fallback | `package.json`; `USE_BIOMETRIC` in `AndroidManifest.xml`; web side reads it via `window.Capacitor.Plugins.BiometricAuthNative` |
+| `@capacitor/app` | App foreground/background `appStateChange` events, used to re-lock on resume (TM-282) | `package.json`; web reads `window.Capacitor.Plugins.App` |
+
+Because the WebView loads the **hosted** site (`server.url`), the web JS cannot `import` these npm
+packages — it calls them through the `window.Capacitor.Plugins.*` bridge that Capacitor injects, and
+degrades to a safe no-op in a plain browser (so the web build is unaffected). The biometric logic
+lives in `web/src/assets/biometric*.js`; the pure, unit-tested decisions are in
+`web/src/assets/biometric-policy.js` (`web/tools/biometric-policy.test.mjs`).
+
 ## Project layout
 
 ```

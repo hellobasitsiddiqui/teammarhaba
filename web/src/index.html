@@ -248,5 +248,9 @@
          POST /api/v1/me/devices (deregisters on sign-out). Fully inert on the browser/PWA build —
          gated on the WebView signal + the native Capacitor runtime, so the web app is unaffected. -->
     <script type="module" src="/assets/push.js"></script>
+    <!-- Biometric app-lock (TM-282): on the native Capacitor shell, if the user enabled app-lock,
+         require a fingerprint / device PIN to unlock on cold-start and on resume. Completely inert on
+         the web build (no native bridge → init() returns immediately, nothing is mounted). -->
+    <script type="module" src="/assets/biometric-lock.js"></script>
 </body>
 </html>

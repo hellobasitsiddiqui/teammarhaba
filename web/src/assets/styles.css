@@ -1777,3 +1777,124 @@ html {
 .help-support-link:focus-visible {
     text-decoration: underline;
 }
+
+/* ----------------------------------------------------------------------------------------------
+ * Biometric security (TM-282): the app-lock full-screen overlay + the settings switch.
+ * All colours read theme tokens (var(--token)) so both themes + dark mode are covered for free.
+ * -------------------------------------------------------------------------------------------- */
+
+/* Full-screen opaque lock. OPAQUE (not a dim) so app content is never visible behind it while the
+ * device is locked. Sits above everything including modals/toasts. */
+.tm-lock-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: var(--page-bg);
+}
+
+.tm-lock-overlay[hidden] {
+    display: none;
+}
+
+.tm-lock-card {
+    width: 100%;
+    max-width: 22rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.tm-lock-title {
+    margin: 0;
+    font-size: 1.3rem;
+    color: var(--fg);
+}
+
+.tm-lock-hint {
+    margin: 0;
+    color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+
+.tm-lock-unlock {
+    min-height: 44px;
+    min-width: 10rem;
+}
+
+/* Security settings section on the profile page. */
+.tm-security-settings {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: var(--border-width) solid var(--fg-line);
+}
+
+.tm-security-settings h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-switch-hint {
+    margin: 0.4rem 0 0;
+    font-size: 0.9rem;
+}
+
+/* Accessible toggle switch: a real checkbox (visually hidden, keyboard + a11y intact) driving a
+ * pill track + thumb via :checked. */
+.tm-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+}
+
+.tm-switch-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.tm-switch-track {
+    position: relative;
+    width: 2.6rem;
+    height: 1.5rem;
+    flex: none;
+    border-radius: var(--radius-pill);
+    background: var(--fg-line-strong);
+    transition: background 0.15s ease;
+}
+
+.tm-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(1.5rem - 4px);
+    height: calc(1.5rem - 4px);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.15s ease;
+}
+
+.tm-switch-input:checked + .tm-switch-track {
+    background: var(--accent);
+}
+
+.tm-switch-input:checked + .tm-switch-track .tm-switch-thumb {
+    transform: translateX(1.1rem);
+}
+
+.tm-switch-input:focus-visible + .tm-switch-track {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tm-switch-text {
+    color: var(--fg);
+}

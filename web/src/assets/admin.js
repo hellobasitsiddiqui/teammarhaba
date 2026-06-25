@@ -12,6 +12,7 @@ import { apiFetch } from "./api.js";
 import { currentUser } from "./auth.js";
 import { clear, confirmDialog, el, modal, copyToClipboard, relativeTime, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
+import { confirmSensitiveAction } from "./biometric-confirm.js";
 
 const FETCH_SIZE = 100; // matches TM-111's max page size
 const PAGE_SIZES = [10, 25, 50];
@@ -167,6 +168,16 @@ async function changeRole(user) {
     danger: !promoting,
   });
   if (!ok) return;
+  // Sensitive action (TM-282): on a native device with the biometric gate available, require a
+  // fingerprint/PIN confirm before changing a role. No-op on the web build (passes straight through).
+  const verified = await confirmSensitiveAction({
+    reason: promoting ? "Confirm: make this user an admin" : "Confirm: remove admin access",
+    title: "Confirm role change",
+  });
+  if (!verified) {
+    toast("Role change cancelled — not verified", { type: "info" });
+    return;
+  }
   await applyPatch(user, { role: next }, {
     successMsg: `Role changed to ${next}`,
     undo: () => applyPatch(user, { role: user.role }, { successMsg: "Reverted" }),
