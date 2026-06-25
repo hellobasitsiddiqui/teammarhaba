@@ -300,7 +300,10 @@ jobs:
           if gcloud secrets describe teammarhaba-mail-app-password --project="${PROJECT}" >/dev/null 2>&1; then
             echo "Secret teammarhaba-mail-app-password found — wiring real email-code delivery (TM-249)."
             MAIL_SECRETS="MAIL_PASSWORD=teammarhaba-mail-app-password:latest"
-            MAIL_ENV="MAIL_HOST=smtp.gmail.com,MAIL_PORT=587,MAIL_USERNAME=no-reply@10xai.co.uk"
+            # Interim (TM-271): auth + From are basit@10xai.co.uk because the app password belongs to
+            # that account; no-reply@ caused an auth/From mismatch -> sends failed. APP_AUTH_EMAILCODE_SMTP_FROM
+            # overrides app.auth.email-code.smtp.from. Move both back to a dedicated no-reply@ identity per TM-271.
+            MAIL_ENV="MAIL_HOST=smtp.gmail.com,MAIL_PORT=587,MAIL_USERNAME=basit@10xai.co.uk,APP_AUTH_EMAILCODE_SMTP_FROM=basit@10xai.co.uk"
             echo "- Email-code delivery: **ON** (mail secret present)." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::warning::Secret teammarhaba-mail-app-password NOT found — deploying WITHOUT mail (logging fallback). Create it (TM-252) to turn email delivery on; see infra/gcp/secrets-env.md."
