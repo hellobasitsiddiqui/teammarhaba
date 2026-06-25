@@ -86,10 +86,23 @@ testing (`./gradlew installDebug`).
 ## Signing & release
 
 The release signing config in `app/build.gradle` reads the keystore + passwords from Gradle
-properties / env — **never committed**. Supply them via `~/.gradle/gradle.properties`, `-P` flags, or
-`ORG_GRADLE_PROJECT_*` env (CI), keyed `teammarhaba.releaseStoreFile` / `…StorePassword` /
-`…KeyAlias` / `…KeyPassword`. A local `android/app/keystore.properties` (gitignored) is also honoured.
-If the props are absent, `assembleRelease` still builds but produces an **unsigned** APK.
+properties **or plain env vars** — **never committed**. Supply them any one of these ways:
+
+1. **`~/.gradle/gradle.properties`** / **`-P` flags** / **`ORG_GRADLE_PROJECT_*` env** (the release CI
+   path), keyed `teammarhaba.releaseStoreFile` / `…StorePassword` / `…KeyAlias` / `…KeyPassword`.
+2. **Plain `ANDROID_*` env vars** (TM-286) — convenient for any shell/CI that already exports them:
+   ```bash
+   export ANDROID_KEYSTORE_PATH=/abs/path/teammarhaba-release.jks
+   export ANDROID_KEYSTORE_PASSWORD=••••
+   export ANDROID_KEY_ALIAS=teammarhaba
+   export ANDROID_KEY_PASSWORD=••••   # optional; defaults to ANDROID_KEYSTORE_PASSWORD
+   ```
+3. A local **`android/app/keystore.properties`** (gitignored) is also honoured.
+
+**Fallback:** if none of the above are set, `assembleRelease` falls back to the auto-generated **debug**
+keystore so the build still produces an **installable** APK for local testing (no more unsigned APK).
+This is dev-only — the release CI (`android-release.yml`) fails loud when the real secrets are absent,
+so a debug-signed APK can never ship as a real release.
 
 The release CI job (`android-release.yml`, `release`, on a `v*` tag or manual dispatch) decodes the
 keystore from the TM-245 secrets, stamps `versionName` to the live web `buildVersion` via
