@@ -80,6 +80,16 @@
             <version>9.9.0</version>
         </dependency>
 
+        <!-- SendGrid (TM-249): the real transport for the passwordless email-code login. The
+             SendGridEmailCodeMailer bean is created only when SENDGRID_API_KEY is configured
+             (app.auth.email-code.sendgrid.api-key); without it the LoggingEmailCodeMailer stub
+             ships, so dev/test/CI/e2e need no provider. Not in the Spring Boot BOM, so pinned. -->
+        <dependency>
+            <groupId>com.sendgrid</groupId>
+            <artifactId>sendgrid-java</artifactId>
+            <version>4.10.3</version>
+        </dependency>
+
         <!-- Caffeine: bounded, expiring in-memory caches for the email-code auth state and the
              per-IP request limiter (TM-247). Version managed by the Spring Boot BOM. Used directly
              (not via Spring's CacheManager) so each store has its own expiry + maximumSize, which

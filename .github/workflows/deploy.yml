@@ -297,6 +297,13 @@ jobs:
       # repo, or the logs (we pass the secret *name*, not the value, so there is
       # nothing for the runner to mask).
       - name: Deploy to Cloud Run
+        env:
+          # SendGrid login-code transport (TM-249). The Secret Manager secret
+          # `teammarhaba-sendgrid-api-key` is created by the human (one-time prereq); only once
+          # the repo variable SENDGRID_SECRET_ENABLED=true is set do we reference it. Until then
+          # this is empty and the deploy ships WITHOUT the secret — the backend falls back to the
+          # logging stub (still green), so a fresh/replay env deploys fine before the secret exists.
+          SENDGRID_SECRET: ${{ vars.SENDGRID_SECRET_ENABLED == 'true' && ',SENDGRID_API_KEY=teammarhaba-sendgrid-api-key:latest' || '' }}
         run: |
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
@@ -307,7 +314,7 @@ jobs:
             --min-instances=0 --max-instances=3 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
-            --set-secrets=DB_PASSWORD=teammarhaba-db-app-password:latest \
+            --set-secrets="DB_PASSWORD=teammarhaba-db-app-password:latest${SENDGRID_SECRET}" \
             --set-env-vars=SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }} \
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \

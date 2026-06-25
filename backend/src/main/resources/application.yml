@@ -72,6 +72,17 @@ app:
       ip-request-limit: ${EMAIL_CODE_IP_REQUEST_LIMIT:20}       # max request calls per client IP per window (429 over)
       ip-request-window: ${EMAIL_CODE_IP_REQUEST_WINDOW:1m}     # fixed window for the per-IP limit
       max-tracked-ips: ${EMAIL_CODE_MAX_TRACKED_IPS:100000}     # hard cap on IPs the limiter tracks (bounds the limiter)
+      # Real email transport (TM-249). The api-key is the ONLY secret (from SENDGRID_API_KEY); when it
+      # is set, SendGridEmailCodeMailer wins over the logging stub and actually emails the code. When
+      # unset (dev/test/CI/e2e), the LoggingEmailCodeMailer stub ships and no provider is needed. A
+      # present-but-blank key fails startup loudly (@NotBlank in SendGridProperties) so a half-set prod
+      # can't silently fall back to logging. from/subject are non-secret tunables with safe defaults;
+      # the sender domain is 10xai.co.uk (human does SendGrid domain authentication on it via DNS).
+      sendgrid:
+        api-key: ${SENDGRID_API_KEY:}                           # SECRET — Secret Manager in prod; unset locally
+        from: ${EMAIL_CODE_FROM:no-reply@10xai.co.uk}           # verified sender on the 10xai.co.uk domain
+        from-name: ${EMAIL_CODE_FROM_NAME:TeamMarhaba}          # display name on the From header
+        subject: ${EMAIL_CODE_SUBJECT:Your TeamMarhaba sign-in code}
 
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:
