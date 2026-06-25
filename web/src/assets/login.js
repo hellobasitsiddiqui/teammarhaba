@@ -17,6 +17,7 @@ import {
   awaitRedirectResult,
 } from "./auth.js";
 import { requestEmailCode, verifyEmailCode } from "./api.js";
+import { isWebViewEnv } from "./auth-env.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -199,6 +200,17 @@ els.signIn?.addEventListener("click", () => run(() => signIn(els.email.value.tri
 els.signUp?.addEventListener("click", () => run(() => signUp(els.email.value.trim(), els.password.value)));
 els.google?.addEventListener("click", () => run(() => signInWithGoogle()));
 els.signOut?.addEventListener("click", () => run(() => signOut()));
+
+// Hide Google sign-in inside the Android WebView (TM-275). Google deliberately BLOCKS its OAuth
+// flow inside embedded WebViews ("disallowed_useragent"), so the button can only ever error there —
+// email-code, SMS, and email+password all work in the WebView, so we simply don't offer Google.
+// Google stays available on desktop and mobile-browser (non-WebView) where it works. `isWebViewEnv`
+// reads the native shell's signal (`window.TEAMMARHABA_WEBVIEW` / the JS bridge); on a normal page
+// load it's false, so this is inert there. Interim measure until a native Google Sign-In path
+// exists; the canonical fix is tracked separately.
+if (isWebViewEnv()) {
+  els.google?.closest(".auth-alt-google")?.remove();
+}
 
 // Complete a redirect-based sign-in coming back into the page (TM-230). On mobile / inside the
 // Android WebView, Google sign-in uses `signInWithRedirect` (auth.js), so the user returns to a
