@@ -4,9 +4,13 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
+import com.teammarhaba.backend.notify.PushMessage;
+import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,17 +36,25 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UserAdminService {
 
+    private static final Logger log = LoggerFactory.getLogger(UserAdminService.class);
+
     /** Audit {@code target_type} for account actions — the kind of thing acted on. */
     private static final String TARGET_TYPE = "User";
 
     private final UserRepository users;
     private final RoleService roleService;
     private final AuditService audit;
+    private final PushNotificationService push;
 
-    public UserAdminService(UserRepository users, RoleService roleService, AuditService audit) {
+    public UserAdminService(
+            UserRepository users,
+            RoleService roleService,
+            AuditService audit,
+            PushNotificationService push) {
         this.users = users;
         this.roleService = roleService;
         this.audit = audit;
+        this.push = push;
     }
 
     /** A page of active accounts. Soft-deleted rows are excluded by the entity's {@code @SQLRestriction}. */
@@ -76,6 +88,7 @@ public class UserAdminService {
 
         // Only an *effective* change is applied and audited — a no-op request writes no event.
         if (enabled != null && enabled != user.isEnabled()) {
+            boolean reEnabled = enabled; // false→true: the account is being switched back on
             user.setEnabled(enabled);
             audit.record(
                     callerUid,
@@ -83,6 +96,9 @@ public class UserAdminService {
                     TARGET_TYPE,
                     String.valueOf(id),
                     Map.of("enabled", enabled));
+            if (reEnabled) {
+                notifyAccountReEnabled(user);
+            }
         }
         if (role != null && role != user.getRole()) {
             Role previous = user.getRole();
@@ -101,6 +117,39 @@ public class UserAdminService {
                     Map.of("from", previous.name(), "to", role.name()));
         }
         return user;
+    }
+
+    /**
+     * The real send-push trigger (TM-284): when an admin re-enables an account, notify that user's
+     * devices. It runs behind the {@link PushNotificationService} seam and is best-effort — a push
+     * problem must never fail or roll back the admin action that actually changed the account state,
+     * so any error here is swallowed (the service itself already prunes dead tokens and logs failures).
+     */
+    private void notifyAccountReEnabled(User user) {
+        try {
+            push.sendToUser(
+                    user.getId(),
+                    new PushMessage(
+                            "Your TeamMarhaba account is active again",
+                            "An admin has re-enabled your account. Welcome back!"));
+        } catch (RuntimeException e) {
+            log.warn("Re-enable push for user {} failed (account change still applied).", user.getId(), e);
+        }
+    }
+
+    /**
+     * Manual/test send-push trigger (TM-284): deliver a fixed test notification to an account's devices,
+     * so an admin/operator can verify the end-to-end push path against a real device without waiting for
+     * an organic event. Validates the target exists (404 / no existence leak) and returns the fan-out
+     * summary (how many devices were targeted, delivered, pruned, failed). Unlike the re-enable trigger
+     * this surfaces send problems to the caller, since it exists precisely to exercise delivery.
+     */
+    @Transactional(readOnly = true)
+    public PushNotificationService.PushFanout sendTestPush(long id) {
+        User user = users.findById(id).orElseThrow(UserAdminService::notFound);
+        return push.sendToUser(
+                user.getId(),
+                new PushMessage("TeamMarhaba test notification", "If you can see this, push is working."));
     }
 
     private static ResourceNotFoundException notFound() {

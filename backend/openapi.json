@@ -253,6 +253,27 @@
         },
         "type" : "object"
       },
+      "PushFanoutResponse" : {
+        "properties" : {
+          "delivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pruned" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "targeted" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "RegisterDeviceRequest" : {
         "properties" : {
           "platform" : {
@@ -462,6 +483,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users/{id}/test-push" : {
+      "post" : {
+        "operationId" : "testPush",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PushFanoutResponse"
                 }
               }
             },
