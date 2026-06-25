@@ -20,6 +20,7 @@ import { getMe, updateMe, ApiError } from "./api.js";
 import { currentUser } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
 import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
+import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 
@@ -284,6 +285,9 @@ async function save(event) {
  */
 function buildAvatar() {
   const configured = isStorageConfigured();
+  // On a Capacitor native platform (TM-278 Android shell) we offer the native capture/gallery picker
+  // (TM-281) instead of the bare web file input. Off-device this is false, so the web flow is unchanged.
+  const native = configured && isNativeCameraAvailable();
 
   const initial = el("span", { class: "tm-avatar-initial", "aria-hidden": "true", text: "🙂" });
   const image = el("img", { class: "tm-avatar-img", alt: "", hidden: true });
@@ -296,6 +300,9 @@ function buildAvatar() {
     accept: "image/*",
     "aria-describedby": "profile-avatar-error profile-avatar-hint",
     disabled: !configured,
+    // On native we drive uploads through the camera button instead; hide the bare file input so there's
+    // a single, OS-appropriate entry point. The label's `for=` still points at it for a11y parity.
+    hidden: native,
   });
 
   const progressBar = el("div", { class: "tm-avatar-progress-bar" });
@@ -313,12 +320,15 @@ function buildAvatar() {
   );
 
   const error = el("p", { id: "profile-avatar-error", class: "tm-field-error", role: "alert", hidden: true });
+  const sizeHint = `JPG, PNG or GIF, up to ${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB.`;
   const hint = el("p", {
     id: "profile-avatar-hint",
     class: "tm-muted tm-avatar-note",
-    text: configured
-      ? `JPG, PNG or GIF, up to ${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB.`
-      : "Avatar uploads aren't available in this environment yet.",
+    text: !configured
+      ? "Avatar uploads aren't available in this environment yet."
+      : native
+        ? `Take a photo or choose one from your gallery. ${sizeHint}`
+        : sizeHint,
   });
 
   /** Paint the preview from the live Firebase photoURL (image if present, else the initial glyph). */
@@ -346,8 +356,11 @@ function buildAvatar() {
     progress.setAttribute("aria-valuenow", String(pct));
   };
 
-  fileInput.addEventListener("change", async () => {
-    const file = fileInput.files && fileInput.files[0];
+  // Single upload path shared by BOTH the web file input and the native camera button (TM-281): a
+  // picked image (web `<input>` or native capture/gallery) is validated then handed to the EXISTING
+  // `uploadAvatar` — there is no parallel upload mechanism. `busy(state)` lets the caller disable its
+  // own control (the file input or the camera button) while bytes transfer.
+  const handlePickedFile = async (file, busy) => {
     if (!file) return;
     setError("");
 
@@ -356,11 +369,10 @@ function buildAvatar() {
     if (invalid) {
       setError(invalid);
       toast(invalid, { type: "error" });
-      fileInput.value = "";
       return;
     }
 
-    fileInput.disabled = true;
+    busy(true);
     setProgress(0);
     try {
       await uploadAvatar(file, setProgress);
@@ -372,12 +384,55 @@ function buildAvatar() {
       setError(msg);
       toast(msg, { type: "error" });
     } finally {
-      fileInput.disabled = false;
+      busy(false);
       progress.hidden = true;
       progressBar.style.width = "0%";
-      fileInput.value = ""; // allow re-picking the same file after an error.
     }
+  };
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    await handlePickedFile(file, (b) => {
+      fileInput.disabled = b;
+    });
+    fileInput.value = ""; // allow re-picking the same file after success or error.
   });
+
+  // Native capture/gallery button (TM-281) — only built on a Capacitor native platform. It opens the
+  // OS picker (camera or photos), and routes the captured image through the SAME `handlePickedFile`
+  // path. Cancel is a graceful no-op (captureAvatarImage resolves null); a permission denial throws a
+  // friendly Error we surface inline + as a toast.
+  let cameraBtn = null;
+  if (native) {
+    cameraBtn = el(
+      "button",
+      {
+        id: "profile-avatar-camera",
+        class: "tm-btn tm-btn-sm",
+        type: "button",
+        "aria-describedby": "profile-avatar-error profile-avatar-hint",
+        onClick: async () => {
+          setError("");
+          cameraBtn.disabled = true;
+          try {
+            const file = await captureAvatarImage();
+            if (!file) return; // user cancelled — leave the current avatar untouched.
+            await handlePickedFile(file, (b) => {
+              cameraBtn.disabled = b;
+            });
+          } catch (err) {
+            const msg = err?.message || "Couldn't open the camera. Please try again.";
+            setError(msg);
+            toast(msg, { type: "error" });
+          } finally {
+            cameraBtn.disabled = false;
+          }
+        },
+      },
+      "Take or choose photo",
+    );
+  }
 
   refresh();
 
@@ -386,6 +441,7 @@ function buildAvatar() {
     el("div", { class: "tm-avatar-meta" }, [
       el("label", { class: "tm-field-label", for: "profile-avatar-file", text: "Avatar" }),
       fileInput,
+      cameraBtn,
       progress,
       hint,
       error,
