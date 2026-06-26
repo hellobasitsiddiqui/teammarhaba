@@ -17,9 +17,17 @@ import { basename, extname, join } from "node:path";
 const HASH_LEN = 10;
 
 /** Strip `//` line and block comments so dependency detection ignores doc examples like
- *  `import { x } from "./api.js"` that appear inside header comments. */
+ *  `import { x } from "./api.js"` that appear inside header comments.
+ *
+ *  Line comments are stripped BEFORE block comments — order matters: a `//` line comment can legally
+ *  contain a `/*` sequence (e.g. the literal text `web/tools/*.test.mjs`). If block comments were
+ *  stripped first, that stray `/*` would open a PHANTOM block comment that swallows everything up to
+ *  the next real `*\/` — including any genuine `import ... from "./x.js"` statements in between, so
+ *  those deps would silently go undetected and their specifiers would never be rewritten to the
+ *  hashed name (the TM-307 push-env → auth-env regression). Stripping the line first removes the
+ *  stray `/*` as part of its own line so it can't open anything. */
 function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+  return src.replace(/(^|[^:"'`])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 /** The relative `.js` specifiers a module REALLY imports (from real import/export-from statements). */
@@ -94,6 +102,30 @@ export function fingerprint(distDir) {
     html = html.split(`/assets/${orig}`).join(`/assets/${nn}`);
   }
   writeFileSync(indexPath, html);
+
+  // Post-build guard (TM-307): every relative `.js` import specifier in every EMITTED module must
+  // resolve to a file that actually exists in `assets/`. If a specifier was missed by the transitive
+  // rewrite it stays raw (e.g. `./auth-env.js`), 404s at runtime (the SPA serves index.html as
+  // text/html), and breaks the module graph — silently, with a green build. We scan the real emitted
+  // files (not pre-rewrite content) and fail loudly with the offending file + specifier so a missed
+  // rewrite can never ship again. Comments are stripped first so doc examples don't trip the guard.
+  const emitted = new Set(readdirSync(assetsDir));
+  const violations = [];
+  for (const nn of hashedName.values()) {
+    if (!nn.endsWith(".js")) continue;
+    const code = stripComments(readFileSync(join(assetsDir, nn), "utf8"));
+    const specs = new Set();
+    for (const m of code.matchAll(/\b(?:import|export)\b[^'"]*?\bfrom\s*['"](\.\/[^'"]+\.js)['"]/g)) specs.add(m[1]);
+    for (const m of code.matchAll(/\bimport\s*['"](\.\/[^'"]+\.js)['"]/g)) specs.add(m[1]);
+    for (const spec of specs) {
+      if (!emitted.has(spec.slice(2))) violations.push(`${nn} imports ${spec} (no such file in dist/assets)`);
+    }
+  }
+  if (violations.length) {
+    throw new Error(
+      `fingerprint: emitted module(s) reference unfingerprinted/missing assets (would 404 at runtime):\n  - ${violations.join("\n  - ")}`,
+    );
+  }
 
   writeFileSync(join(distDir, "asset-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
