@@ -33,6 +33,12 @@ const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: ${JSON.stringify(API_BASE_URL)},
     authEmulatorHost: ${JSON.stringify(AUTH_EMULATOR_HOST)},
     storageEmulatorHost: ${JSON.stringify(STORAGE_EMULATOR_HOST)},
+    // Suppress the first-run product tour (TM-135) in the harness. Seeded accounts start each run with
+    // empty localStorage, so they look "first-run" every time; since TM-307 lands a signed-in user on
+    // #/home first, the site tour now auto-starts and its full-screen .tm-tour-blocker overlay
+    // intercepts clicks (e.g. the admin disable-confirm dialog). Off in prod (flag absent) — tours.js
+    // honours this; replaying a tour from the Help menu is unaffected.
+    suppressAutoTours: true,
 });
 `;
 

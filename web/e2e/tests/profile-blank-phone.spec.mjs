@@ -14,9 +14,12 @@ test("saving the profile with a blank phone succeeds (TM-188 regression)", async
   // A value unique to this run so the assertion can't pass on stale data.
   const city = `Phoneless-${Date.now()}`;
 
-  // 1. Sign in (real Firebase flow against the Auth emulator).
+  // 1. Sign in (real Firebase flow against the Auth emulator). Email-code is the default front door
+  // (TM-234); the email+password form (#password / #signin-btn) lives under "Try another way", so we
+  // must reveal it first — the other password-based specs (admin-walkthrough, profile-edit) all do.
   await page.goto("/#/login");
   await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();

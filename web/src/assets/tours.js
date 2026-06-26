@@ -57,9 +57,24 @@ function schedule(fn) {
   pending = setTimeout(fn, 350);
 }
 
+/**
+ * Opt-in suppression of the first-run AUTO tours (the site tour + per-page tours). Off by default,
+ * so production is unaffected; the e2e harness sets `suppressAutoTours: true` in the injected runtime
+ * config (serve.mjs) so the seeded test accounts — which start each run with empty localStorage, i.e.
+ * look "first-run" every time — don't get the tour overlay (`.tm-tour-blocker`) intercepting clicks
+ * mid-flow. Replaying a tour on demand from the Help menu (`runTour(..., {force:true})`) is unaffected.
+ */
+function autoToursSuppressed() {
+  try {
+    return Boolean(window.TEAMMARHABA_CONFIG?.suppressAutoTours);
+  } catch {
+    return false;
+  }
+}
+
 /** Decide whether to auto-run a tour for the current (route, auth) state. */
 function maybeAutoTour() {
-  if (isTourActive() || !currentUser()) return;
+  if (autoToursSuppressed() || isTourActive() || !currentUser()) return;
   const route = window.location.hash;
 
   // The site tour takes priority on first login; page tours wait until it's done.
