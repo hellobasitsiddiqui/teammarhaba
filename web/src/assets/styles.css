@@ -155,6 +155,111 @@ body {
     color: var(--fg);
 }
 
+/* "Get the app" store badges (TM-276) — a small Android + iOS badge pair in the footer.
+   Built from theme tokens ONLY (surfaces, borders, --fg/--muted, the radius/border scale), so the
+   pair renders correctly across clean / doodle / sketch with no hard-coded colours and no external
+   badge images (CSP/offline-safe inline SVG glyphs). Its own footer block above the build/privacy
+   lines, centred to match the rest of the footer. */
+.app-store-badges {
+    margin: 1.25rem 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.app-store-badges-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+}
+
+.app-store-badges-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+}
+
+/* A store-style badge: a pill-ish card with a platform glyph + two stacked lines. Anchor (Android)
+   and button (iOS placeholder) share the look via this class. */
+.store-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.95rem;
+    min-width: 9.5rem;
+    text-align: left;
+    text-decoration: none;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.store-badge:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+}
+
+.store-badge:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.store-badge-glyph {
+    flex: 0 0 auto;
+    color: var(--fg);
+}
+
+.store-badge-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+.store-badge-line1 {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.store-badge-line2 {
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+/* iOS "Coming soon" placeholder — visibly disabled, non-interactive, announced unavailable via the
+   `disabled`/`aria-disabled` attributes on the <button>. Dimmed and shows a not-allowed cursor; the
+   hover/focus affordances above are suppressed so it never looks clickable. */
+.store-badge-disabled,
+.store-badge-disabled:hover {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: var(--surface-card);
+    border-color: var(--fg-line-strong);
+    box-shadow: none;
+}
+
+/* Narrow widths: stack the two badges vertically and let each fill the row for an easy tap target. */
+@media (max-width: 28rem) {
+    .app-store-badges-row {
+        flex-direction: column;
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .store-badge {
+        justify-content: center;
+        min-width: 0;
+    }
+}
+
 /* Account nav (TM-109) */
 .app-nav {
     display: flex;
