@@ -34,20 +34,10 @@ on:
   schedule:
     - cron: '0 4 * * *'   # ~04:00 UTC nightly
 
-  # ADVISORY PR signal: only on PRs that actually touch the mobile-relevant paths (web/ — the webview
-  # content — or android/), path-filtered so unrelated PRs don't pay for the emulator. This is a
-  # SEPARATE workflow (not a ci.yml job), so it is NOT a required/blocking check — it informs, it
-  # doesn't gate. Keep it off the branch-protection required list.
-  pull_request:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - 'android/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'android/maestro/**'
-      - '.github/workflows/mobile-e2e.yml'
+  # NOTE: per-PR trigger removed (TM-318). The SMS flow needs CDP e2e-flag injection in the harness
+  # before it passes unattended; until that lands the emulator suite runs nightly + on-demand only,
+  # so it never shows a red advisory check on every web/android PR. Re-add a path-filtered
+  # pull_request trigger once TM-318 makes the suite green.
 
 # Cancel an in-flight PR run when the PR is updated; serialize per-ref otherwise. Keyed by ref so a
 # PR run never cancels the nightly and vice-versa.
