@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Native splash window background (TM-299). Matches the @capacitor/splash-screen
+         backgroundColor in capacitor.config.json (#0f9d8c — the TeamMarhaba teal accent) so the
+         Android 12+ splash window and the legacy splash ImageView share the same colour and there's
+         no white flash before the hosted web UI paints. Placeholder brand colour — swap if real
+         brand art/colour is provided later. -->
+    <color name="splashBackground">#0f9d8c</color>
+</resources>

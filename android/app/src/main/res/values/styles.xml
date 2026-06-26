@@ -16,7 +16,15 @@
     </style>
 
 
+    <!-- Launch theme (TM-299). Uses the Android 12+ SplashScreen API: the window background is the
+         TeamMarhaba teal (matching capacitor.config.json SplashScreen.backgroundColor and the
+         @drawable/splash bitmap) so the very first frame is branded teal, not a white flash, while the
+         hosted web UI loads. The legacy splash bitmap is kept as android:background for pre-12 devices.
+         @capacitor/splash-screen then holds/hides the splash on the real web-ready signal (launchAutoHide
+         is false). -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
