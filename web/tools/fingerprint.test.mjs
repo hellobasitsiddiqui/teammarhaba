@@ -75,6 +75,50 @@ test("is deterministic — identical input yields identical hashes", () => {
   }
 });
 
+test("rewrites a dep-of-a-dep's specifier even when a line comment contains a `/*` (TM-307)", () => {
+  // env.js is imported only by mid.js (a dep-of-a-dep, never referenced by index.html). mid.js has a
+  // line comment containing `/*` (here `tools/*.test.mjs`). The old comment-stripper ran the block-
+  // comment regex first, so that stray `/*` opened a phantom block comment that swallowed the real
+  // `import ... from "./env.js"` below it — the specifier was never detected nor rewritten, shipping a
+  // raw `./env.js` that 404s at runtime (the actual TM-307 push-env → auth-env failure).
+  const dist = makeDist({
+    "index.html": '<script type="module" src="/assets/a.js"></script>',
+    "assets/a.js": 'import { m } from "./mid.js";\nexport const a = m;\n',
+    "assets/mid.js":
+      '// run via `node --test tools/*.test.mjs` before importing\nimport { e } from "./env.js";\nexport const m = e + 1;\n',
+    "assets/env.js": "export const e = 1;\n",
+  });
+  try {
+    const manifest = fingerprint(dist);
+    const mid = readFileSync(join(dist, "assets", manifest["mid.js"]), "utf8");
+    assert.ok(
+      mid.includes(`from "./${manifest["env.js"]}"`),
+      "mid.js must import env.js by its HASHED name, not the raw ./env.js",
+    );
+    assert.ok(!mid.includes('from "./env.js"'), "raw ./env.js specifier must not survive");
+  } finally {
+    rmSync(dist, { recursive: true, force: true });
+  }
+});
+
+test("fails the build when an emitted module references a missing/raw asset (TM-307 guard)", () => {
+  // A module importing a `./x.js` that does not exist in dist must abort the build — this is the guard
+  // that would have caught the original TM-307 raw `./auth-env.js` before it ever deployed.
+  const dist = makeDist({
+    "index.html": '<script type="module" src="/assets/a.js"></script>',
+    "assets/a.js": 'import { z } from "./missing.js";\nexport const a = z;\n',
+  });
+  try {
+    assert.throws(
+      () => fingerprint(dist),
+      /unfingerprinted\/missing assets/,
+      "build should fail on a raw/unresolvable import specifier",
+    );
+  } finally {
+    rmSync(dist, { recursive: true, force: true });
+  }
+});
+
 test("changing a dependency busts the dependent's hash too (transitive)", () => {
   const base = fingerprint(makeDist(FIXTURE));
   const changed = makeDist({ ...FIXTURE, "assets/b.js": "export const b = 2;\n" });
