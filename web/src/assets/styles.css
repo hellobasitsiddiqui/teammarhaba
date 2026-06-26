@@ -81,6 +81,50 @@
     display: none !important;
 }
 
+/*
+ * ===== Touch responsiveness (TM-305) =====
+ *
+ * Mobile-feel polish for every tappable control (buttons, links, the nav hamburger, label-wrapped
+ * inputs). Theme-safe: it sets no colours and no geometry that a theme owns — only interaction
+ * behaviour — so clean / doodle / sketch are all unaffected visually.
+ *
+ *   • `touch-action: manipulation` removes the legacy ~300ms tap delay and the double-tap-to-zoom
+ *     gesture on these controls, so a tap registers immediately (the single biggest "unresponsive"
+ *     cause inside a WebView).
+ *   • `-webkit-tap-highlight-color: transparent` drops the default grey flash; we replace it below
+ *     with an explicit, theme-token `:active` state so feedback is intentional, not a UA artefact.
+ *
+ * Scoped to actual controls (not `*`) so we never change scroll/zoom behaviour of content regions.
+ */
+button,
+a,
+label.field,
+[role="button"],
+.linkish {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * Immediate pressed feedback (TM-305). A tiny scale-down on `:active` reads as a physical press the
+ * instant the finger lands — no colour change, so it composes with every theme (including the doodle
+ * / sketch `filter: url(#wobble-soft)` on buttons, since transform and filter stack). Dropped under
+ * reduced-motion. transform-only keeps it cheap (compositor) and theme-neutral.
+ */
+button:active:not(:disabled),
+.linkish:active,
+[role="button"]:active {
+    transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:active:not(:disabled),
+    .linkish:active,
+    [role="button"]:active {
+        transform: none;
+    }
+}
+
 body {
     margin: 0;
     /* 100vh first as the universal fallback; 100dvh (TM-295) overrides it where supported so the
@@ -341,7 +385,16 @@ body {
 
 .auth-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
+}
+
+/* TM-305: keep each wrapped button a comfortable, equal-width tap target. When the row wraps on a
+   narrow phone (e.g. Sign in / Resend / Use a different email), `flex: 1` with a sensible basis stops
+   any single button collapsing to a hairline or sitting awkwardly off to one side — they stay aligned
+   in a tidy grid-like flow. Theme-neutral (layout only). */
+.auth-actions button {
+    flex: 1 1 8rem;
 }
 
 .auth button {
@@ -375,6 +428,61 @@ body {
 .auth button:disabled {
     opacity: 0.6;
     cursor: progress;
+}
+
+/* TM-305: "Try another way" disclosure (#try-another-btn.linkish). It was never given its own rule,
+   so `.auth button` above painted it as a full-width accent-filled primary button — visually it
+   competed with the real "Email me a code" CTA and sat mis-aligned in the card. It's a quiet
+   disclosure toggle, so reset it to a centred, underlined text link that uses theme tokens only
+   (--accent), keeping it theme-safe. min-height keeps it a ≥44px tap target on touch. */
+.auth button.linkish {
+    flex: none;
+    align-self: center;
+    min-height: 44px;
+    padding: 0.4rem 0.6rem;
+    color: var(--accent);
+    background: transparent;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.auth button.linkish:hover:not(:disabled) {
+    filter: none;
+    text-decoration: none;
+}
+
+/* TM-305: the "Try another way" alternative blocks were bare <fieldset>s — default UA fieldset
+   margin/border/padding didn't match the card and could nudge content off-centre / overflow on a
+   narrow phone. Normalise them to the card's own rhythm with a light themed divider. Layout + token
+   colours only, so clean / doodle / sketch all stay correct. */
+.auth-alt {
+    margin: 0;
+    padding: 0.75rem;
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius);
+    min-width: 0;
+}
+
+.auth-alt legend {
+    padding: 0 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+/* TM-305: the alternatives container + each step stack cleanly with the card's gap rhythm so the
+   revealed SMS / email-password / Google blocks line up under the primary form rather than bunching. */
+#auth-alternatives,
+.auth-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.auth-alt-google button.google {
+    margin-top: 0;
 }
 
 .auth-error {
