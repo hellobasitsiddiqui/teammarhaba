@@ -146,7 +146,7 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -uo pipefail
+            set -u  # dash (android-emulator-runner runs script via sh) has no pipefail
             adb devices
             echo "Installing debug APK: ${{ steps.apk.outputs.apk }}"
             adb install -r -t "${{ steps.apk.outputs.apk }}"
