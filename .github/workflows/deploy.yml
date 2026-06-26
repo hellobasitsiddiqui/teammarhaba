@@ -354,7 +354,7 @@ jobs:
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
             --no-allow-unauthenticated \
-            --min-instances=0 --max-instances=3 \
+            --min-instances=1 --max-instances=1 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
             --set-secrets="${SECRETS}" \
