@@ -94,10 +94,15 @@ export function shouldEngageLock({ isNative, lockEnabled, biometryUsable }) {
 /**
  * Classify an authenticate() failure code into how the UI should react.
  *   - "dismissed": the user cancelled — stay locked, no error, allow retry.
- *   - "unavailable": biometry/credential vanished (lockout, not enrolled) — fail OPEN so the user is
- *     never permanently locked out by a sensor problem (the backend is the real security boundary;
- *     this lock is a convenience layer).
- *   - "failed": a genuine non-match — stay locked, allow retry.
+ *   - "unavailable": biometry/credential genuinely doesn't exist on this device (not enrolled, no
+ *     secure lock screen) — fail OPEN so the user is never permanently locked out by a device that
+ *     can't authenticate at all (the backend is the real security boundary; this lock is a
+ *     convenience layer).
+ *   - "failed": a genuine non-match — OR a temporary lockout (`biometryLockout`) — stay locked, allow
+ *     retry. A lockout is NOT "unavailable": the credential still exists, the OS is just throttling
+ *     after too many attempts. Failing open on it would let anyone bypass the lock by deliberately
+ *     failing biometry a few times. Stay locked and let the OS cooldown / device-credential fallback
+ *     take over.
  * @param {string} code a BiometryErrorType string.
  * @returns {"dismissed"|"unavailable"|"failed"}
  */
@@ -106,11 +111,11 @@ export function classifyAuthError(code) {
   if (
     code === "biometryNotAvailable" ||
     code === "biometryNotEnrolled" ||
-    code === "biometryLockout" ||
     code === "noDeviceCredential" ||
     code === "passcodeNotSet"
   ) {
     return "unavailable";
   }
+  // "biometryLockout" and any genuine non-match fall through to "failed": stay locked (see above).
   return "failed";
 }

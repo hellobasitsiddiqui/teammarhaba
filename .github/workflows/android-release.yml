@@ -2,7 +2,7 @@ name: Android
 
 # Android APK CI + release (TM-246). Two independent jobs:
 #
-#   compile-check  — on PRs that TOUCH android/: JDK 17 + Android SDK, `./gradlew assembleDebug`.
+#   compile-check  — on PRs that TOUCH android/: JDK 21 + Android SDK, `./gradlew assembleDebug`.
 #                    Closes the gap from TM-231 (the Kotlin shell shipped with NO Android CI — the
 #                    bootstrap sandbox had no SDK). Path-filtered so unrelated PRs don't pay for it,
 #                    and kept OFF the required PR gate (it's a separate workflow, not a `ci.yml` job)

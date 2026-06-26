@@ -5,6 +5,9 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -43,6 +46,13 @@ public class DeviceTokenService {
     /** Audit {@code target_type} for device-token events. */
     private static final String TARGET_DEVICE = "DeviceToken";
 
+    /**
+     * Hex chars of the token's SHA-256 digest kept as the audit target id (TM-292). Enough to identify
+     * a token across events (and tie a register to its later deregister) without ever recording the raw
+     * FCM token — which is a sender-usable credential, so it must not land in the audit log.
+     */
+    private static final int TOKEN_FINGERPRINT_HEX_LEN = 16;
+
     private final DeviceTokenRepository tokens;
     private final UserService users;
     private final AuditService audit;
@@ -75,7 +85,7 @@ public class DeviceTokenService {
                 caller.uid(),
                 AuditAction.DEVICE_TOKEN_REGISTERED,
                 TARGET_DEVICE,
-                token,
+                fingerprint(token),
                 Map.of("platform", platform.name()));
         return saved;
     }
@@ -92,7 +102,8 @@ public class DeviceTokenService {
     public void deregister(VerifiedUser caller, String token) {
         Long callerUserId = users.provision(caller).getId();
         if (tokens.deleteByTokenAndUserId(token, callerUserId) > 0) {
-            audit.record(caller.uid(), AuditAction.DEVICE_TOKEN_DEREGISTERED, TARGET_DEVICE, token);
+            audit.record(
+                    caller.uid(), AuditAction.DEVICE_TOKEN_DEREGISTERED, TARGET_DEVICE, fingerprint(token));
         }
     }
 
@@ -118,6 +129,26 @@ public class DeviceTokenService {
             DeviceToken existing = tokens.findByToken(token).orElseThrow(() -> race);
             existing.refresh(userId, platform, when);
             return existing;
+        }
+    }
+
+    /**
+     * A short, stable, non-reversible fingerprint of an FCM token for the audit trail (TM-292) — the
+     * leading {@value #TOKEN_FINGERPRINT_HEX_LEN} hex chars of its SHA-256 digest. The raw token is a
+     * sender-usable credential and must never be stored in audit logs; the digest still lets us
+     * correlate a token's events (e.g. a register and its later deregister) without exposing it.
+     */
+    private static String fingerprint(String token) {
+        try {
+            byte[] out = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(out.length * 2);
+            for (byte b : out) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.substring(0, TOKEN_FINGERPRINT_HEX_LEN);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the JLS — unreachable on any conformant JVM.
+            throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
 }

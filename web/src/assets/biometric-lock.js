@@ -10,6 +10,9 @@
 //   - While locked we mount a full-screen opaque overlay (`#tm-biometric-lock`) that covers the app
 //     content (so nothing sensitive is visible behind it) and immediately invoke the prompt; on
 //     success we remove the overlay.
+//   - To avoid a content flash, the overlay is mounted EAGERLY the instant we know native + lock
+//     enabled — BEFORE the async usability check resolves — then torn back down if the device turns
+//     out not to be lockable (TM-292). The cover is therefore always up before any async work.
 //
 // Fail-safe: this is a CONVENIENCE layer, not the security boundary — the backend (default-deny,
 // TM-79) is. So if biometry becomes unavailable (sensor lockout, un-enrolled mid-session) we fail
@@ -102,7 +105,18 @@ async function promptUnlock() {
   }
 }
 
-/** Engage the lock: show the overlay + immediately prompt. */
+/**
+ * Mount the opaque overlay NOW, synchronously, without prompting yet (TM-292). Called the instant we
+ * know we're native + lock-enabled, BEFORE the async usability check resolves, so app content is never
+ * briefly visible on cold-start/resume. `maybeLock()` either upgrades this to a full {@link lock} (and
+ * prompts) or tears it back down via {@link unlock} if the device turns out not to be lockable.
+ */
+function coverEagerly() {
+  if (locked) return;
+  showOverlay(promptUnlock);
+}
+
+/** Engage the lock: show the overlay (if not already up) + immediately prompt. */
 function lock() {
   if (locked) return;
   locked = true;
@@ -119,13 +133,25 @@ function unlock() {
 /**
  * Decide + engage the lock for the CURRENT moment (boot or resume): only when native + enabled +
  * usable. Re-checks usability each time because enrolment can change between sessions.
+ *
+ * To avoid a content flash (TM-292), we cover the screen EAGERLY — the moment we know native + enabled
+ * — and only THEN await the usability check, tearing the cover back down if the device can't be locked.
+ * The overlay is therefore up before any async work, never after it.
  */
 async function maybeLock() {
+  const native = isNativeShell();
   const enabled = isAppLockEnabled(safeStorage());
-  if (!enabled) return;
+  if (!native || !enabled) return;
+  // Cover first, ask questions later: mount the opaque overlay before the async usability check so
+  // app content can't flash on cold-start/resume.
+  coverEagerly();
   const usable = await isBiometricAvailable();
-  if (shouldEngageLock({ isNative: isNativeShell(), lockEnabled: enabled, biometryUsable: usable })) {
+  if (shouldEngageLock({ isNative: native, lockEnabled: enabled, biometryUsable: usable })) {
     lock();
+  } else if (!locked) {
+    // Not lockable on this device (no biometry/credential): tear the eager cover back down — the
+    // backend is the real boundary, so we never trap the user behind a lock that can't be opened.
+    hideOverlay();
   }
 }
 

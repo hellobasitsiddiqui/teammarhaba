@@ -3,10 +3,12 @@ package com.teammarhaba.backend.device;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 
 /**
  * {@link DeviceTokenService} behaviour exercised against a real Postgres (TM-283), focusing on the
@@ -24,6 +26,9 @@ class DeviceTokenServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private UserRepository users;
+
+    @Autowired
+    private AuditService audit;
 
     private static VerifiedUser user(String uid) {
         return new VerifiedUser(uid, uid + "@example.com");
@@ -82,5 +87,24 @@ class DeviceTokenServiceIntegrationTest extends AbstractIntegrationTest {
                 .singleElement()
                 .satisfies(t -> assertThat(t.getUserId()).isEqualTo(ownerB));
         assertThat(tokens.findByUserId(ownerA)).isEmpty();
+    }
+
+    @Test
+    void auditTargetIsAFingerprintNotTheRawToken() {
+        // TM-292: the raw FCM token is a sender-usable credential — it must never land in the audit
+        // log. The DEVICE_TOKEN_REGISTERED event's target id is a short SHA-256 hex fingerprint.
+        String rawToken = "fcm-secret-token-svc-audit";
+        service.register(user("svc-uid-audit"), rawToken, DevicePlatform.ANDROID);
+
+        var event = audit.search("svc-uid-audit", "DeviceToken", null, PageRequest.of(0, 10))
+                .stream()
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(event.getTargetId())
+                .isNotEqualTo(rawToken)
+                .doesNotContain(rawToken)
+                .hasSize(16)
+                .matches("[0-9a-f]{16}");
     }
 }

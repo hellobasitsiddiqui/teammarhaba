@@ -18,10 +18,16 @@ import org.slf4j.LoggerFactory;
  * failures:
  *
  * <ul>
- *   <li>{@link MessagingErrorCode#UNREGISTERED} (and a token-shaped {@code INVALID_ARGUMENT}) →
- *       {@link PushDelivery#UNREGISTERED}, so the caller prunes the token.</li>
- *   <li>any other {@link FirebaseMessagingException} → {@link PushDelivery#FAILED} (logged, token kept).</li>
+ *   <li>{@link MessagingErrorCode#UNREGISTERED} → {@link PushDelivery#UNREGISTERED}, so the caller
+ *       prunes the token.</li>
+ *   <li>any other {@link FirebaseMessagingException} (including {@code INVALID_ARGUMENT}) →
+ *       {@link PushDelivery#FAILED} (logged, token kept).</li>
  * </ul>
+ *
+ * <p><b>Why {@code INVALID_ARGUMENT} is NOT a prune (TM-292):</b> FCM returns {@code INVALID_ARGUMENT}
+ * for a malformed <em>request</em> as well as a malformed token — e.g. an oversized payload or a bad
+ * field. If a message-level bug trips it, treating it as {@code UNREGISTERED} would mass-evict every
+ * healthy token during a single fan-out. We only ever prune on the unambiguous {@code UNREGISTERED}.
  *
  * <p>A real FCM transport is only swapped out in tests by registering a recording {@link PushSender}
  * bean (see {@code PushSenderConfig}'s {@code @ConditionalOnMissingBean}); production uses this one.
@@ -69,14 +75,15 @@ public class FcmPushSender implements PushSender {
     }
 
     /**
-     * Map an FCM {@link MessagingErrorCode} to a {@link PushDelivery}. A token is gone for good when FCM
-     * says {@code UNREGISTERED}, or when it rejects the token itself as {@code INVALID_ARGUMENT} — both
-     * mean this token will never deliver and should be pruned. Anything else (including a {@code null}
-     * code) is a keep-the-token failure. Package-private so the mapping is unit-testable without
-     * constructing the SDK's final exception type.
+     * Map an FCM {@link MessagingErrorCode} to a {@link PushDelivery}. A token is gone for good only when
+     * FCM says {@code UNREGISTERED} (app uninstalled / token revoked) — that one alone is pruned.
+     * Everything else (including {@code INVALID_ARGUMENT}, which can mean a malformed <em>message</em>
+     * rather than a bad token, and a {@code null} code) is a keep-the-token failure: pruning on a
+     * message-level error would mass-evict healthy tokens across a fan-out (TM-292). Package-private so
+     * the mapping is unit-testable without constructing the SDK's final exception type.
      */
     static PushDelivery classify(MessagingErrorCode code) {
-        if (code == MessagingErrorCode.UNREGISTERED || code == MessagingErrorCode.INVALID_ARGUMENT) {
+        if (code == MessagingErrorCode.UNREGISTERED) {
             return PushDelivery.UNREGISTERED;
         }
         return PushDelivery.FAILED;
