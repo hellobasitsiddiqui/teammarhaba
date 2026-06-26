@@ -92,13 +92,15 @@ test("authenticate: a native reject maps via classifyAuthError (userCancel → d
   assert.deepEqual(res, { ok: false, reason: "dismissed", code: "userCancel" });
 });
 
-test("authenticate: biometryLockout → unavailable (fail open)", async () => {
+test("authenticate: biometryLockout → failed (stay locked, TM-292)", async () => {
+  // A temporary OS lockout must NOT fail open — the credential still exists, so unlocking on it would
+  // let anyone bypass the app-lock by deliberately failing biometry a few times. Stay locked.
   const plugin = {
     internalAuthenticate: () => Promise.reject(Object.assign(new Error("lockout"), { code: "biometryLockout" })),
   };
   const res = await authenticate({ reason: "x" }, nativeWin(plugin));
   assert.equal(res.ok, false);
-  assert.equal(res.reason, "unavailable");
+  assert.equal(res.reason, "failed");
   assert.equal(res.code, "biometryLockout");
 });
 

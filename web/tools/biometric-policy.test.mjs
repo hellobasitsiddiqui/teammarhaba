@@ -97,12 +97,17 @@ test("classifyAuthError: user-dismiss codes → 'dismissed'", () => {
   }
 });
 
-test("classifyAuthError: unavailable/lockout/not-enrolled → 'unavailable' (fail open)", () => {
+test("classifyAuthError: no biometry/credential on device → 'unavailable' (fail open)", () => {
   assert.equal(classifyAuthError("biometryNotAvailable"), "unavailable");
   assert.equal(classifyAuthError("biometryNotEnrolled"), "unavailable");
-  assert.equal(classifyAuthError("biometryLockout"), "unavailable");
   assert.equal(classifyAuthError("noDeviceCredential"), "unavailable");
   assert.equal(classifyAuthError("passcodeNotSet"), "unavailable");
+});
+
+test("classifyAuthError: lockout → 'failed' (stay locked, TM-292)", () => {
+  // A temporary OS lockout is NOT "unavailable" — the credential still exists, so failing open would
+  // let anyone bypass the lock by deliberately failing biometry a few times. Stay locked.
+  assert.equal(classifyAuthError("biometryLockout"), "failed");
 });
 
 test("classifyAuthError: genuine non-match / unknown → 'failed'", () => {

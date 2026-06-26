@@ -16,8 +16,9 @@ import org.mockito.ArgumentCaptor;
 
 /**
  * {@link FcmPushSender} error-code mapping (TM-284): a successful send is {@code DELIVERED}, and the FCM
- * {@link MessagingErrorCode} classification routes {@code UNREGISTERED} (and a token-shaped
- * {@code INVALID_ARGUMENT}) to a prune signal while everything else keeps the token. The mapping is
+ * {@link MessagingErrorCode} classification routes {@code UNREGISTERED} alone to a prune signal while
+ * everything else — including {@code INVALID_ARGUMENT}, which can be a malformed message (TM-292) —
+ * keeps the token. The mapping is
  * asserted directly via the package-private {@link FcmPushSender#classify} — the SDK's exception type is
  * {@code final}, so its construction is avoided rather than mocked. No real FCM is contacted.
  *
@@ -79,10 +80,11 @@ class FcmPushSenderTest {
     }
 
     @Test
-    void invalidArgumentCodeAlsoMapsToUnregistered() {
-        // FCM rejecting the token itself means it will never deliver — prune it.
+    void invalidArgumentMapsToFailedAndIsNotPruned() {
+        // TM-292: INVALID_ARGUMENT can mean a malformed MESSAGE, not a bad token. Pruning on it would
+        // mass-evict every healthy token during a fan-out, so we keep the token.
         assertThat(FcmPushSender.classify(MessagingErrorCode.INVALID_ARGUMENT))
-                .isEqualTo(PushDelivery.UNREGISTERED);
+                .isEqualTo(PushDelivery.FAILED);
     }
 
     @Test
