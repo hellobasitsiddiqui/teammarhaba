@@ -44,6 +44,27 @@ if (emulatorHost) {
   connectAuthEmulator(auth, `http://${emulatorHost}`, { disableWarnings: true });
 }
 
+// Phone-auth e2e hook (TM-302): disable reCAPTCHA app-verification so an emulator/CI harness can
+// drive SMS sign-in with a Firebase *test phone number* (+ its fixed code) — no interactive
+// reCAPTCHA challenge, no real SMS. Firebase test numbers bypass the SMS send but NOT the reCAPTCHA
+// gate, which escalates to a visual puzzle in a scripted WebView; this flag is the documented way to
+// skip it for test numbers (real numbers still require a real code).
+//
+// SAFETY — this must never weaken reCAPTCHA on the public web app. It is honoured ONLY when the test
+// is *requested* (an explicit flag a harness sets before load — never set in any real config) AND the
+// context *cannot* be the public site: either the Auth emulator is wired in, or we're running inside
+// the native Capacitor shell (the https web app returns isNativePlatform()===false, and the release
+// APK has WebView debugging off, so the flag is unreachable in production). Both must hold.
+const phoneE2eRequested =
+  (window.TEAMMARHABA_CONFIG && window.TEAMMARHABA_CONFIG.phoneTestMode === true) ||
+  window.__TM_E2E_PHONE_TEST__ === true;
+const phoneE2eContextSafe =
+  Boolean(emulatorHost) ||
+  Boolean(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+if (phoneE2eRequested && phoneE2eContextSafe) {
+  auth.settings.appVerificationDisabledForTesting = true;
+}
+
 // Keep the user signed in across reloads (best-effort; never block init on it).
 //
 // TM-307: in the Android WebView against real Firebase, the default persistence backend isn't
