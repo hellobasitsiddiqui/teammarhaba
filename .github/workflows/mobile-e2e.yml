@@ -1,0 +1,224 @@
+name: Mobile E2E
+
+# Android emulator e2e (TM-302) — boots a real emulator, sideloads the debug APK, runs the
+# Maestro flows, and uploads screenshots/video as the evidence artifact. This is the mobile
+# sibling of the browser e2e (e2e.yml / Playwright, TM-134): slow, ADVISORY, and deliberately
+# kept OFF the required PR gate (it's a separate workflow, not a ci.yml job), so a 10-minute
+# emulator boot never blocks merging non-mobile changes.
+#
+# The Maestro flows themselves are authored in the sibling ticket TM-314 under android/maestro/.
+# This job is written to MERGE BEFORE those flows land: if android/maestro/ is missing or has no
+# .yaml/.yml flows, the run logs a clear "no flows yet" notice and stays GREEN (the emulator boot
+# + APK build + install are still proven). Once TM-314 adds flows, the same workflow runs them
+# with no change needed here.
+#
+# Toolchain mirrors android-release.yml's working compile-check (the established pattern):
+#   - JDK 21 Temurin (Capacitor 8 / capacitor.build.gradle targets Java 21)
+#   - Node 22 + `npm ci` + `npx cap sync android` BEFORE the Gradle build (cap sync generates the
+#     gitignored capacitor-cordova-android-plugins module + assets/capacitor.config.json — TM-278)
+#   - android-actions/setup-android exports ANDROID_HOME/ANDROID_SDK_ROOT, so no local.properties
+#     / sdk.dir wrangling is needed.
+# No release/signing logic here — this is a test job, it builds the DEBUG APK only.
+
+on:
+  # On demand from the Actions tab, with an optional Jira evidence ticket (same affordance as e2e.yml).
+  workflow_dispatch:
+    inputs:
+      evidence_ticket:
+        description: "Jira ticket key to attach screenshot/video evidence to (e.g. TM-190). Blank = skip."
+        required: false
+        default: ""
+
+  # Nightly, NOT per-merge — the emulator suite is slow and doesn't gate every merge (matches e2e.yml).
+  # Offset from e2e.yml's 03:00 so the two slow nightlies don't contend for runners.
+  schedule:
+    - cron: '0 4 * * *'   # ~04:00 UTC nightly
+
+  # ADVISORY PR signal: only on PRs that actually touch the mobile-relevant paths (web/ — the webview
+  # content — or android/), path-filtered so unrelated PRs don't pay for the emulator. This is a
+  # SEPARATE workflow (not a ci.yml job), so it is NOT a required/blocking check — it informs, it
+  # doesn't gate. Keep it off the branch-protection required list.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'android/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'android/maestro/**'
+      - '.github/workflows/mobile-e2e.yml'
+
+# Cancel an in-flight PR run when the PR is updated; serialize per-ref otherwise. Keyed by ref so a
+# PR run never cancels the nightly and vice-versa.
+concurrency:
+  group: mobile-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-e2e:
+    name: Android emulator walkthrough (Maestro)
+    runs-on: ubuntu-latest   # emulator-runner needs a Linux runner for KVM hardware accel
+    timeout-minutes: 45      # emulator boot + Maestro can be slow; cap it so a hung run doesn't burn minutes
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # KVM is what makes the emulator usable (hardware-accelerated, not painfully slow ARM-on-x86
+      # emulation). GitHub's ubuntu-latest runners expose /dev/kvm but the device node needs the
+      # right group perms for the runner user — this udev rule grants them. Without this the emulator
+      # falls back to software rendering and routinely times out booting.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # Capacitor 8 toolchain needs JDK 21 (capacitor.build.gradle targets Java 21) — same as the
+      # android-release.yml compile-check.
+      - name: Set up JDK 21 (Temurin) + Gradle cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Node (for Capacitor CLI)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      # cap sync generates the gitignored capacitor-cordova-android-plugins module +
+      # assets/capacitor.config.json that the Android Gradle build depends on — must run BEFORE
+      # assembleDebug (TM-278). Run from repo root.
+      - name: Install Capacitor deps + sync Android
+        run: |
+          npm ci
+          npx cap sync android
+
+      # setup-android installs the SDK + accepts licences and exports ANDROID_HOME/ANDROID_SDK_ROOT,
+      # so Gradle's AGP resolves platform/build-tools itself (no local.properties needed).
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Build debug APK (assembleDebug)
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Locate debug APK
+        id: apk
+        run: |
+          set -euo pipefail
+          APK="$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          if [ -z "${APK}" ] || [ ! -f "${APK}" ]; then
+            echo "::error::No debug APK produced by assembleDebug."
+            exit 1
+          fi
+          echo "Built debug APK: ${APK}"
+          echo "apk=${APK}" >> "$GITHUB_OUTPUT"
+
+      # Install Maestro CLI (the flow runner authored in TM-314). Pinned indirectly via the official
+      # installer; the binary lands in ~/.maestro/bin which we add to PATH.
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "${HOME}/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Boot the emulator (API 34, google_apis — full Play Store image isn't needed for a webview app)
+      # via reactivecircus/android-emulator-runner, and inside its `script` block: install the debug
+      # APK, then run the Maestro flows IF any exist. The whole flow-running step is tolerant of an
+      # empty/missing android/maestro/ so this can merge BEFORE TM-314's flows land — it logs a clear
+      # "no flows yet" notice and exits 0 (the emulator boot + APK install are still proven green).
+      - name: Run Maestro flows on emulator (API 34)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: 34
+          target: google_apis          # google_apis_playstore only needed for Play-Store-gated flows
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -uo pipefail
+            adb devices
+            echo "Installing debug APK: ${{ steps.apk.outputs.apk }}"
+            adb install -r -t "${{ steps.apk.outputs.apk }}"
+
+            mkdir -p maestro-artifacts
+
+            # Tolerant flow discovery: if android/maestro/ is missing or has no flow files, log a clear
+            # notice and pass (this lets the workflow merge before TM-314 authors the flows).
+            if [ ! -d android/maestro ] || [ -z "$(find android/maestro -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null)" ]; then
+              echo "::notice::No Maestro flows found under android/maestro/ yet (authored in TM-314). Emulator booted + debug APK installed OK — skipping flow execution, not failing."
+              echo "no-flows-yet" > maestro-artifacts/NO_FLOWS_YET.txt
+              exit 0
+            fi
+
+            echo "Running Maestro flows from android/maestro/ …"
+            # --format junit + a test-output dir give us machine-readable results; Maestro also writes
+            # per-flow screenshots/video into the debug output dir we point it at.
+            maestro test android/maestro/ \
+              --format junit \
+              --output maestro-artifacts/maestro-report.xml \
+              --debug-output maestro-artifacts/debug
+
+      # Upload whatever the run produced — Maestro report, per-step screenshots, video, and the
+      # NO_FLOWS_YET marker — as the evidence artifact. `always()` so failures still ship evidence.
+      - name: Upload Maestro evidence (screenshots/video/report)
+        id: evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: maestro-evidence
+          path: |
+            maestro-artifacts
+            ~/.maestro/tests
+          if-no-files-found: warn
+
+      # Also keep the debug APK as an artifact so a reviewer can sideload exactly what was tested.
+      - name: Upload debug APK
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+      # Best-effort, non-fatal: attach the run's evidence to a Jira ticket when dispatched with an
+      # `evidence_ticket`. Skips silently if no ticket was given or the JIRA_* secrets aren't set —
+      # never fails the job (same pattern as e2e.yml).
+      - name: Post screenshot evidence to the Jira ticket (best-effort)
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && github.event.inputs.evidence_ticket != '' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET: ${{ github.event.inputs.evidence_ticket }}
+        run: |
+          set -o pipefail
+          if [ -z "$JIRA_BASE_URL" ] || [ -z "$JIRA_USER_EMAIL" ] || [ -z "$JIRA_API_TOKEN" ]; then
+            echo "::warning::Jira secrets not set — skipping evidence post for $TICKET."; exit 0
+          fi
+          if [ ! -d maestro-artifacts ]; then
+            echo "::warning::no maestro-artifacts/ found — nothing to post."; exit 0
+          fi
+          ZIP="/tmp/maestro-evidence-${GITHUB_RUN_ID}.zip"
+          zip -qr "$ZIP" maestro-artifacts || true
+          if [ ! -f "$ZIP" ]; then echo "::warning::failed to build evidence zip — skipping."; exit 0; fi
+          code="$(curl -sS -o /tmp/jira-att.txt -w '%{http_code}' \
+            -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "X-Atlassian-Token: no-check" \
+            -F "file=@${ZIP}" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$TICKET/attachments" || echo "000")"
+          case "$code" in
+            200|201) echo "Posted evidence zip to $TICKET." ;;
+            *) echo "::warning::could not attach evidence to $TICKET (HTTP $code): $(cat /tmp/jira-att.txt 2>/dev/null)" ;;
+          esac
+          exit 0
