@@ -96,6 +96,10 @@ testing (`./gradlew installDebug`).
 > `cap sync android` → `assembleDebug`, and uploads the APK artifact. Touched by TM-287 for the
 > on-gate build wiring.
 
+> **Testing process:** how to actually exercise the app — emulator-first, physical device for
+> sign-off, plus the emulator setup runbook, test credentials, and the CDP runtime-debug technique —
+> is in [`docs/qa/mobile-two-layer.md`](../docs/qa/mobile-two-layer.md).
+
 ## Signing & release
 
 The release signing config in `app/build.gradle` reads the keystore + passwords from Gradle

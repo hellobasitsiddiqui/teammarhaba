@@ -3,6 +3,10 @@
 Hand-run test scripts for verifying each epic in a real browser — for review sign-off and
 exploratory testing. One section per epic, plus a reusable template at the end.
 
+> For the **native Android / Capacitor** app, see the
+> [two-layer mobile testing process](./mobile-two-layer.md) (emulator first, physical device for
+> sign-off) instead of this browser-based doc.
+
 ## Why manual, when we have Playwright?
 
 The Playwright browser-e2e harness (`web/e2e/`, TM-134) is the **automated regression guard for the
