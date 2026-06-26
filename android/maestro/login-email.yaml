@@ -20,9 +20,18 @@ env:
   TEST_EMAIL: "e2e-maestro@teammarhaba.test"
   EMAIL_CODE: "654321" # placeholder — set to the TM-312 fixed code (or pass -e EMAIL_CODE=... )
 ---
-# Cold start: clear app state so we always begin signed-out, then launch.
+# Launch WITHOUT clearState (TM-318). Even though the email flow doesn't itself need the phone-e2e
+# flag, the mobile-e2e harness sets a PERSISTED localStorage flag (tm_e2e_phone_test=1) for the SMS
+# flow BEFORE the suite runs, and `clearState` here would wipe it for every later flow. So we reach
+# the signed-out state by signing out (if a prior flow left a session) instead of clearing app data.
 - launchApp:
-    clearState: true
+    clearState: false
+- tapOn:
+    id: "signout-btn"
+    optional: true
+- assertVisible:
+    id: "auth-signed-out"
+    optional: true
 - takeScreenshot: 01-launch
 
 # The SPA boots into the signed-out auth card. "Email me a code" is the DEFAULT front door (TM-234);

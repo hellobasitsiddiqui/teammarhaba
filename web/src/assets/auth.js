@@ -32,6 +32,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { shouldUseRedirect } from "./auth-env.js";
+import { shouldDisablePhoneAppVerification } from "./phone-e2e.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -55,13 +56,15 @@ if (emulatorHost) {
 // context *cannot* be the public site: either the Auth emulator is wired in, or we're running inside
 // the native Capacitor shell (the https web app returns isNativePlatform()===false, and the release
 // APK has WebView debugging off, so the flag is unreachable in production). Both must hold.
-const phoneE2eRequested =
-  (window.TEAMMARHABA_CONFIG && window.TEAMMARHABA_CONFIG.phoneTestMode === true) ||
-  window.__TM_E2E_PHONE_TEST__ === true;
-const phoneE2eContextSafe =
-  Boolean(emulatorHost) ||
-  Boolean(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-if (phoneE2eRequested && phoneE2eContextSafe) {
+//
+// The full request/context-safe decision lives in the pure, unit-tested `phone-e2e.js` module (same
+// split as auth-env.js). TM-318 added a PERSISTED localStorage request signal (`tm_e2e_phone_test`):
+// the mobile-e2e Maestro harness sets it once over CDP before driving the flows, and — unlike a
+// `window` global or a `Page.addScriptToEvaluateOnNewDocument` hook, both lost on Maestro's
+// `launchApp` relaunch — localStorage survives the relaunches, so the flag is read fresh on every
+// page load. It stays a no-op in production because the context-safe half of the gate still requires
+// the Auth emulator or the native shell (see phone-e2e.js).
+if (shouldDisablePhoneAppVerification(window)) {
   auth.settings.appVerificationDisabledForTesting = true;
 }
 
