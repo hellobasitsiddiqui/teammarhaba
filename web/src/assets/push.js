@@ -45,6 +45,17 @@ const PLATFORM = "ANDROID";
 // The most-recently-registered FCM token, kept so sign-out can deregister exactly that token. Lives
 // only in memory (never persisted/logged) — Firebase/FCM owns token storage and rotation.
 let currentToken = null;
+
+/**
+ * The most-recently-registered FCM device token, or null if none has been received yet (e.g. on the
+ * browser build where push is inert, or before/without a successful native registration). Read-only
+ * accessor over the in-memory token above — used by the QA diagnostics screen (TM-297) to show the
+ * device's token. Never persisted/logged; this just exposes what push.js already holds in memory.
+ * @returns {string|null}
+ */
+export function getCurrentToken() {
+  return currentToken;
+}
 // Guard so the plugin listeners are attached exactly once for the page's lifetime, even though
 // onAuthChanged can fire many times (every sign-in/out + token bootstrap on reload).
 let listenersAttached = false;

@@ -1917,3 +1917,105 @@ html {
 .tm-switch-text {
     color: var(--fg);
 }
+
+/* Diagnostics view (TM-297) — the QA #/diagnostics screen: stacked cards for GPS / Push / Environment.
+   Purely theme-token styled so it renders correctly under clean / doodle / sketch, at phone widths and
+   inside the Android WebView. Cosmetic only — no behaviour depends on these rules. */
+.tm-diag {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tm-diag > h2 {
+    margin: 0 0 0.25rem;
+    color: var(--fg);
+}
+
+.tm-diag-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1rem, 3vw, 1.5rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.tm-diag-card h3 {
+    margin: 0 0 0.6rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-diag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+    padding: 0.3rem 0;
+}
+
+.tm-diag-key {
+    font-weight: 600;
+    color: var(--fg);
+    min-width: 12rem;
+}
+
+.tm-diag-val {
+    color: var(--fg);
+    word-break: break-word;
+}
+
+.tm-diag-subhead {
+    margin: 0.75rem 0 0.25rem;
+    font-weight: 600;
+}
+
+.tm-diag-out {
+    margin-top: 0.75rem;
+}
+
+.tm-diag-error {
+    margin: 0.5rem 0 0;
+    color: var(--danger, #b00020);
+    line-height: 1.5;
+}
+
+.tm-diag-chip {
+    display: inline-block;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tm-diag-chip-on {
+    background: color-mix(in srgb, var(--success) 18%, transparent);
+    color: var(--success);
+}
+
+.tm-diag-chip-off {
+    background: var(--surface-2);
+    color: var(--muted);
+}
+
+.tm-diag-token-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.tm-diag-token {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    background: var(--surface-2);
+    color: var(--fg);
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+    word-break: break-all;
+    max-width: 100%;
+}
+
+/* The Diagnostics link in the profile/settings area (TM-297). */
+.tm-diag-link {
+    margin-top: 1rem;
+}

@@ -561,6 +561,12 @@ function buildShell(view) {
     status,
     form,
     security,
+    // QA diagnostics link (TM-297) — an unobtrusive way into the #/diagnostics screen (GPS / FCM token
+    // / native-plugin status) from the settings area, without promoting it in the main nav. Plain hash
+    // link; nothing here touches the form/avatar above.
+    el("p", { class: "tm-diag-link" }, [
+      el("a", { class: "tm-btn tm-btn-sm", href: "#/diagnostics" }, "Diagnostics"),
+    ]),
   );
 
   shell = { form, fields, save: saveBtn, reset, summary, status, avatar };

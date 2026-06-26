@@ -192,6 +192,13 @@
              signed-in or signed-out (static, framework-free content). -->
         <section id="help-view" class="help-view" aria-label="Help" hidden></section>
 
+        <!-- Diagnostics view (TM-297): the QA-facing #/diagnostics screen — GPS fix, the device's FCM
+             token, and native-plugin status. diagnostics.js (imported by router.js) builds the content
+             into this container on first entry; router.js owns its visibility. Signed-in only and not
+             promoted in the main nav (reached from the profile/settings area); safe in a plain browser
+             (native-only checks show "not on device"). -->
+        <section id="diagnostics-view" class="diagnostics-view" aria-label="Diagnostics" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
