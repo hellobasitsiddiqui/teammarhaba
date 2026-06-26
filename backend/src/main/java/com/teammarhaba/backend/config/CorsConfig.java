@@ -8,9 +8,22 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
- * CORS for the API (TM-104). Applies only to {@code /api/**} — the browser SPA's surface —
- * with origins from {@link CorsProperties} (config-driven, never {@code *}). Allows the
- * {@code Authorization} header so the web client can send the Firebase {@code Bearer} token.
+ * CORS for the API (TM-104) plus the public diagnostics endpoints (TM-308), with origins from
+ * {@link CorsProperties} (config-driven, never {@code *}). Allows the {@code Authorization} header
+ * so the web client can send the Firebase {@code Bearer} token.
+ *
+ * <p>The same allow-list is registered for three path groups so every browser-reachable surface is
+ * covered consistently (one source of truth, no per-controller {@code @CrossOrigin}):
+ *
+ * <ul>
+ *   <li>{@code /api/**} — the browser SPA's authenticated surface.</li>
+ *   <li>{@code /version} — public build provenance the web first page fetches cross-origin to show
+ *       the backend's build next to the web's (TM-142). It lives at the root (unversioned, outside
+ *       {@code /api/**}), so it was previously missing the {@code Access-Control-Allow-Origin}
+ *       header and the browser/WebView fetch was blocked by CORS (TM-308).</li>
+ *   <li>{@code /health} — the public health probe, also read by the web first page; same root-level
+ *       gap, covered here for consistency.</li>
+ * </ul>
  *
  * <p>Credentials (cookies) are intentionally <strong>not</strong> allowed: this is a stateless
  * token API, so there is nothing cookie-based to share. The {@link CorsConfigurationSource}
@@ -29,6 +42,9 @@ public class CorsConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", cors);
+        // Public root-level diagnostics endpoints the web first page fetches cross-origin (TM-308).
+        source.registerCorsConfiguration("/version", cors);
+        source.registerCorsConfiguration("/health", cors);
         return source;
     }
 }
