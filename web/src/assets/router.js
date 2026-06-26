@@ -237,9 +237,51 @@ function onOnboardingComplete() {
   guard();
 }
 
-// Resolve the role (from the token) AND onboarding state (from GET /me) before guarding, so the
-// admin route/nav AND the first-login gate (TM-250) decisions use fresh values. Used for auth-state
-// changes (sign-in/out, reload restore, promotion).
+// How long to wait for the role + onboarding lookups before we stop blocking on them. In the Android
+// WebView against real Firebase, the first `getIdToken()` (token exchange) and the `GET /me` that
+// follow a custom-token sign-in can hang indefinitely (no rejection, just never settling) — and an
+// un-timed `await` on them was the TM-307 dead-end: navigation off `#/login` never fired because the
+// promise it waited on never settled. We guard NAVIGATION-FIRST below, so this is only a backstop for
+// re-guarding with fresh role/onboarding values; if it doesn't arrive in time we proceed with the
+// fail-safe defaults rather than stalling the user on the login card.
+const ROLE_RESOLVE_TIMEOUT_MS = 8000;
+
+/** Resolve `promise`, or `fallback` if it neither resolves nor rejects within `ms`. Never rejects. */
+function settleOrFallback(promise, ms, fallback) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (!done) {
+        done = true;
+        resolve(value);
+      }
+    };
+    const timer = setTimeout(() => finish({ timedOut: true, value: fallback }), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        finish({ timedOut: false, value });
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        finish({ timedOut: false, error: err, value: fallback });
+      });
+  });
+}
+
+// Resolve the role (from the token) AND onboarding state (from GET /me) so the admin route/nav AND the
+// first-login gate (TM-250) decisions use fresh values. Used for auth-state changes (sign-in/out,
+// reload restore, promotion).
+//
+// TM-307: navigation must NOT block on these lookups. Previously this `await`ed both BEFORE the first
+// guard(), so a hanging token-exchange / `GET /me` in the Android WebView left the user stranded on
+// `#/login` with no error (sign-in had succeeded, but the nav never fired). We now:
+//   1. guard() IMMEDIATELY with the current cached role/onboarding values, so a confirmed signed-in
+//      user is navigated off `#/login` straight away (worst case: a brand-new user briefly lands on
+//      `#/home` and is then moved to `#/onboarding` when /me resolves — far better than a dead-end);
+//   2. resolve role + onboarding in the BACKGROUND with a timeout, then re-guard with the fresh
+//      values (this is what moves a not-yet-onboarded user to the gate, or an ADMIN to the console);
+//   3. surface a visible error if the lookups actually fail/time out — never a silent stall.
 async function resolveRoleThenGuard() {
   const signedIn = Boolean(currentUser());
   // Signed-out: reset to safe defaults (no gate, non-admin) and skip the network calls entirely.
@@ -249,14 +291,45 @@ async function resolveRoleThenGuard() {
     guard();
     return;
   }
-  // Resolve both in parallel; each fails safe independently so one hiccup can't block the guard.
-  //  - role: fail safe to non-admin (TM-141 — never strand a signed-in user on the login form).
-  //  - onboarded: fail OPEN (true = not gated) so a /me hiccup can't trap a user behind the gate;
-  //    the backend stays the real authority on what an un-onboarded account may actually do.
-  const [adminResult, onboardedResult] = await Promise.allSettled([getRole(), getMe()]);
-  isAdmin = adminResult.status === "fulfilled" && adminResult.value === "ADMIN";
-  isOnboarded =
-    onboardedResult.status === "fulfilled" ? Boolean(onboardedResult.value?.onboardingCompleted) : true;
+
+  // 1) NAVIGATE FIRST. Don't wait on the network — a confirmed signed-in user must leave `#/login`
+  //    now, using whatever cached role/onboarding values we have (fail-safe: non-admin, not gated).
+  guard();
+
+  // 2) Resolve role + onboarding in the background, each with a timeout so a hung request can't keep
+  //    us from ever applying the real values. Each fails safe independently:
+  //     - role: non-admin (TM-141 — never strand a signed-in user on the login form).
+  //     - onboarded: fail OPEN (true = not gated) so a /me hiccup can't trap a user behind the gate;
+  //       the backend stays the real authority on what an un-onboarded account may actually do.
+  const [adminOutcome, onboardedOutcome] = await Promise.all([
+    settleOrFallback(getRole(), ROLE_RESOLVE_TIMEOUT_MS, "USER"),
+    settleOrFallback(getMe(), ROLE_RESOLVE_TIMEOUT_MS, null),
+  ]);
+
+  // Bail if the user signed out (or switched) while the lookups were in flight — don't apply stale
+  // values or re-guard for a session that no longer exists.
+  if (!currentUser()) return;
+
+  isAdmin = adminOutcome.value === "ADMIN";
+  isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;
+
+  // 3) Surface a visible signal if the onboarding/role resolution failed or timed out, so a degraded
+  //    backend never looks like a silent dead-end. We've still navigated the user into the app on the
+  //    fail-safe defaults (no gate, non-admin), so this is a soft warning, not a hard block.
+  if (adminOutcome.timedOut || onboardedOutcome.timedOut || adminOutcome.error || onboardedOutcome.error) {
+    console.warn("[router] role/onboarding lookup degraded after sign-in:", {
+      roleTimedOut: Boolean(adminOutcome.timedOut),
+      meTimedOut: Boolean(onboardedOutcome.timedOut),
+      roleError: adminOutcome.error?.message,
+      meError: onboardedOutcome.error?.message,
+    });
+    toast("Signed in, but we couldn't fully load your profile. Some features may be limited.", {
+      type: "error",
+    });
+  }
+
+  // Re-guard with the fresh values: moves a not-yet-onboarded user to the gate, an ADMIN to the
+  // console, etc. By now we're already off `#/login`, so this only refines where the user landed.
   guard();
 }
 

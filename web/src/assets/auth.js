@@ -16,6 +16,8 @@ import {
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
+  indexedDBLocalPersistence,
+  inMemoryPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithCustomToken,
@@ -43,9 +45,20 @@ if (emulatorHost) {
 }
 
 // Keep the user signed in across reloads (best-effort; never block init on it).
-setPersistence(auth, browserLocalPersistence).catch((err) =>
-  console.warn("[auth] could not set persistence:", err?.code ?? err)
-);
+//
+// TM-307: in the Android WebView against real Firebase, the default persistence backend isn't
+// guaranteed available — a WebView may have IndexedDB disabled/locked, and localStorage can be
+// restricted depending on the shell's settings. Firebase picks a backend at init and, if its first
+// choice can't be written, a custom-token sign-in can fail to persist (and on some WebViews this can
+// stall the auth-state propagation). We set an explicit, WebView-safe fallback chain — try
+// localStorage first (most reliable inside an Android WebView), then IndexedDB, then in-memory as a
+// last resort — so sign-in still completes and `onAuthStateChanged` fires even on a locked-down
+// WebView. In-memory means no cross-reload persistence (the user re-signs in next launch), which is
+// an acceptable degradation versus a sign-in that can't take effect at all.
+setPersistence(auth, browserLocalPersistence)
+  .catch(() => setPersistence(auth, indexedDBLocalPersistence))
+  .catch(() => setPersistence(auth, inMemoryPersistence))
+  .catch((err) => console.warn("[auth] could not set any persistence backend:", err?.code ?? err));
 
 // Complete any redirect-based sign-in that's coming back to us (TM-230). On mobile / inside the
 // Android WebView we use `signInWithRedirect` for OAuth providers (see `signInWithGoogle`), which
