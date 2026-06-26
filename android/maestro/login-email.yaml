@@ -1,0 +1,64 @@
+# TM-314 — Email-code login happy path (Maestro)
+#
+# Drives the native Capacitor Android app (appId app.teammarhaba.webview), which loads the hosted
+# web SPA at https://teammarhaba.web.app. Mirrors the manually-verified journey:
+#   enter email → "Email me a code" → 6-digit code → "Sign in" → lands on #/home (signed-in panel).
+#
+# TEST CREDENTIALS / CODE SOURCE — depends on TM-312:
+#   TM-312 adds a fixed-code test-email hook: any address on the @teammarhaba.test allow-list gets a
+#   FIXED 6-digit code (no real mailbox, no SMTP) so CI can sign in deterministically. Set the address
+#   + code below from the TM-312 contract once it lands. Until TM-312 is merged+deployed, this flow
+#   CANNOT read a real code from pure Maestro — use the documented interim instead (see README
+#   "Email-code interim: Gmail-read"): a harness step reads the latest code from a Gmail inbox and
+#   feeds it in via a Maestro env var (${EMAIL_CODE}).
+#
+# Run-time inputs (override on the CLI with -e KEY=VALUE):
+#   TEST_EMAIL  — defaults to a @teammarhaba.test address (TM-312 allow-list)
+#   EMAIL_CODE  — the fixed TM-312 code, or the Gmail-read code in the interim
+appId: app.teammarhaba.webview
+env:
+  TEST_EMAIL: "e2e-maestro@teammarhaba.test"
+  EMAIL_CODE: "654321" # placeholder — set to the TM-312 fixed code (or pass -e EMAIL_CODE=... )
+---
+# Cold start: clear app state so we always begin signed-out, then launch.
+- launchApp:
+    clearState: true
+- takeScreenshot: 01-launch
+
+# The SPA boots into the signed-out auth card. "Email me a code" is the DEFAULT front door (TM-234);
+# the password field is hidden until "Try another way".
+- assertVisible: "Sign in"
+- assertVisible:
+    text: "Email me a code"
+- takeScreenshot: 02-signed-out
+
+# Step 1 — enter the email and request a code.
+- tapOn:
+    id: "email" # <input id="email" type="email">
+- inputText: ${TEST_EMAIL}
+- tapOn:
+    text: "Email me a code"
+- takeScreenshot: 03-code-requested
+
+# The code step appears and names the address it was "sent" to.
+- assertVisible:
+    text: ".*emailed a 6-digit code.*"
+- assertVisible: ${TEST_EMAIL}
+
+# Step 2 — enter the 6-digit code and sign in.
+- tapOn:
+    id: "emailcode-code" # <input id="emailcode-code">
+- inputText: ${EMAIL_CODE}
+- takeScreenshot: 04-code-entered
+- tapOn:
+    id: "emailcode-verify-btn" # "Sign in"
+
+# Signed-in end state: the signed-out form is gone and the sign-out control + signed-in panel show.
+# (#signout-btn becomes visible; #auth-signed-in shows "You are signed in as ...".)
+- assertVisible:
+    id: "signout-btn"
+- assertNotVisible:
+    id: "auth-signed-out"
+- assertVisible:
+    text: ".*You are signed in as.*"
+- takeScreenshot: 05-home-signed-in

@@ -1,0 +1,48 @@
+# TM-314 — Biometric app-lock prompt (Maestro, best-effort)
+#
+# The biometric app-lock (@aparajita/capacitor-biometric-auth, TM-282) adds a "Require fingerprint to
+# open the app" switch in the Security section of #/profile. Flipping it ON first asks the user to
+# authenticate once (so they prove the biometric works) — this raises the Android BiometricPrompt.
+#
+# This flow is BEST-EFFORT: it drives to the toggle and asserts the BiometricPrompt / Security UI
+# appears. It cannot complete a real fingerprint on a generic emulator without an enrolled fingerprint
+# (`adb -e emu finger touch 1`); the README documents that prerequisite. Selectors that depend on
+# device state are guarded with `optional: true`.
+#
+# Requires a signed-in session (reuses login-sms.yaml).
+appId: app.teammarhaba.webview
+---
+- runFlow: login-sms.yaml
+- assertVisible:
+    id: "signout-btn"
+- takeScreenshot: 01-signed-in
+
+# Navigate to profile (where the Security / app-lock section lives).
+- tapOn:
+    text: "Profile"
+    optional: true
+- takeScreenshot: 02-profile
+
+# Assert the Security section / app-lock switch is present (it reveals itself async once biometric
+# availability is confirmed — see biometric-settings.js). Best-effort: absent on a device with no
+# enrolled biometric.
+- assertVisible:
+    text: ".*(Require fingerprint|Security|app lock|App lock).*"
+    optional: true
+- takeScreenshot: 03-security-section
+
+# Flip the app-lock switch ON → should raise the BiometricPrompt to confirm.
+- tapOn:
+    id: "biometric-app-lock"
+    optional: true
+- takeScreenshot: 04-toggle-tapped
+
+# Best-effort assert the BiometricPrompt surfaced (system dialog text is locale/OEM-dependent).
+- assertVisible:
+    text: ".*(fingerprint|biometric|Confirm|Use PIN|Cancel|Verify).*"
+    optional: true
+- takeScreenshot: 05-biometric-prompt
+
+# Clean up.
+- back
+- takeScreenshot: 06-after-dismiss

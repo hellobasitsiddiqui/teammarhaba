@@ -1,0 +1,55 @@
+# TM-314 — Push + location runtime permission prompts (Maestro, best-effort)
+#
+# Two native runtime permissions the app requests:
+#   • Push notifications (TM-279, @capacitor/push-notifications): on Android 13+ (API 33), the app
+#     calls requestPermissions() on LOGIN, which raises the POST_NOTIFICATIONS system dialog.
+#   • Location / GPS (TM-280, @capacitor/geolocation): requestPermissions() raises the
+#     ACCESS_COARSE/FINE_LOCATION system dialog when the user opts into "find events near you".
+#
+# This flow is BEST-EFFORT: it asserts the system permission dialogs appear and exercises Maestro's
+# OS-permission controls. Because system-dialog wording is locale/OEM/API-level dependent (and on
+# API < 33 the push prompt is auto-granted at install with no dialog), the dialog assertions are
+# guarded with `optional: true`. The flow never hard-fails on missing OS chrome.
+#
+# Requires a fresh (post-clearState) sign-in so the push prompt fires on the login transition.
+appId: app.teammarhaba.webview
+---
+# 1. Sign in fresh — the push permission request fires on this login transition (TM-279).
+- runFlow: login-sms.yaml
+- takeScreenshot: 01-after-login
+
+# 2. Push (POST_NOTIFICATIONS) — assert the dialog, then allow it via Maestro's OS-permission control.
+#    `text:` matches the Android 13+ notifications dialog loosely; absent on API < 33 (optional).
+- assertVisible:
+    text: ".*(notification|Allow|notifications).*"
+    optional: true
+- takeScreenshot: 02-push-prompt
+# Grant whatever runtime permission is currently prompting (no-op if none).
+- runFlow:
+    when:
+      visible:
+        text: ".*Allow.*"
+    commands:
+      - tapOn:
+          text: "Allow"
+          optional: true
+- takeScreenshot: 03-after-push-grant
+
+# 3. Location / GPS — opt into a "nearby" affordance to trigger the location permission request, then
+#    assert + allow the location dialog. The nearby control's label varies, so it's best-effort.
+- tapOn:
+    text: ".*(near you|nearby|near me|find events).*"
+    optional: true
+- takeScreenshot: 04-location-trigger
+- assertVisible:
+    text: ".*(location|While using|Only this time|precise).*"
+    optional: true
+- runFlow:
+    when:
+      visible:
+        text: ".*(While using|Allow).*"
+    commands:
+      - tapOn:
+          text: ".*(While using|Allow).*"
+          optional: true
+- takeScreenshot: 05-after-location-grant

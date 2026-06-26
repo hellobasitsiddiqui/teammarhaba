@@ -1,0 +1,92 @@
+# TM-314 — SMS login happy path (Maestro)
+#
+# Drives the native Capacitor Android app (appId app.teammarhaba.webview) loading the hosted SPA.
+# Mirrors the manually-verified SMS journey:
+#   "Try another way" → phone → "Text me a code" → SMS code → "Sign in" → lands on #/home.
+#
+# Uses Firebase's fixed TEST PHONE NUMBER (no real SMS, no quota burn):
+#   +16505550100 / fixed code 123456  (configured in the project, see TM-241).
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# CRITICAL — the e2e reCAPTCHA-bypass flag contract (window.__TM_E2E_PHONE_TEST__)
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Firebase test phone numbers skip the SMS send but NOT the reCAPTCHA app-verification gate, which in
+# a scripted WebView escalates to a visual puzzle and stalls the flow. web/src/assets/auth.js sets
+# `auth.settings.appVerificationDisabledForTesting = true` ONLY when BOTH hold (TM-309, merged+
+# deployed):
+#   1. the test is REQUESTED — `window.__TM_E2E_PHONE_TEST__ === true`
+#      (or TEAMMARHABA_CONFIG.phoneTestMode === true), AND
+#   2. the context is SAFE — Auth emulator wired in, OR inside the native Capacitor shell
+#      (`window.Capacitor.isNativePlatform() === true`). Condition 2 is satisfied automatically here
+#      because we run inside the real Capacitor app.
+#
+# So this flow only needs to ensure condition 1: the flag must be `true` on `window` BEFORE auth.js
+# evaluates (it is read once at module-load — see the comment block in auth.js). That is the part
+# pure Maestro CANNOT do: Maestro's `runScript`/`evalScript` execute in Maestro's OWN JS sandbox, not
+# inside the app's WebView, so they cannot set a `window` global the SPA will read. There is also no
+# deep link / URL query param the app honours to set it (server.url is fixed in capacitor.config.json
+# and the SPA reads the flag from `window`, not the URL).
+#
+# CHOSEN APPROACH — harness pre-injection (the TM-302 contract this flow ASSUMES):
+#   The TM-302 e2e harness, before this flow runs, attaches to the app's WebView over the Chrome
+#   DevTools Protocol (CDP) and runs `Page.addScriptToEvaluateOnNewDocument` with
+#   `window.__TM_E2E_PHONE_TEST__ = true;` so the global is present on every document BEFORE any SPA
+#   script (including auth.js) runs. This requires a DEBUG build (WebView debugging enabled —
+#   `WebView.setWebContentsDebuggingEnabled(true)`); the release APK has it off, so the flag is
+#   unreachable in production (the second safety condition above is moot there anyway). The harness
+#   then hands off to Maestro to drive the UI below. See README "e2e-flag injection contract".
+#
+# This flow ASSERTS that contract is in place: if the flag was NOT injected, the reCAPTCHA gate fires
+# and the "Text a code" step never appears within the timeout — making the missing pre-injection a
+# loud, diagnosable failure rather than a silent hang.
+appId: app.teammarhaba.webview
+env:
+  TEST_PHONE: "+16505550100" # Firebase fixed test number (TM-241)
+  SMS_CODE: "123456"         # its fixed code
+---
+- launchApp:
+    clearState: true
+- takeScreenshot: 01-launch
+
+# Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
+- assertVisible: "Sign in"
+- tapOn:
+    text: "Try another way"
+- assertVisible:
+    id: "sms-send-btn"
+- takeScreenshot: 02-alternatives-revealed
+
+# The consent/disclosure line must be visible BEFORE we send (TM-242) — the deliberate act of
+# choosing SMS having seen it is the consent Firebase requires.
+- assertVisible:
+    id: "sms-disclosure"
+
+# Step 1 — enter the test phone number and request the code.
+- tapOn:
+    id: "phone" # <input id="phone" type="tel">
+- inputText: ${TEST_PHONE}
+- tapOn:
+    id: "sms-send-btn" # "Text me a code"
+- takeScreenshot: 03-sms-requested
+
+# If the e2e flag was injected, no reCAPTCHA puzzle fires and the code step appears. If it was NOT
+# injected, this assertion times out — that's the intended loud failure for a missing harness inject.
+- assertVisible:
+    id: "sms-step-code"
+
+# Step 2 — enter the fixed code and sign in.
+- tapOn:
+    id: "sms-code" # <input id="sms-code">
+- inputText: ${SMS_CODE}
+- takeScreenshot: 04-code-entered
+- tapOn:
+    id: "sms-verify-btn" # "Sign in"
+
+# Signed-in end state.
+- assertVisible:
+    id: "signout-btn"
+- assertNotVisible:
+    id: "auth-signed-out"
+- assertVisible:
+    text: ".*You are signed in as.*"
+- takeScreenshot: 05-home-signed-in

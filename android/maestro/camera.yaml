@@ -1,0 +1,44 @@
+# TM-314 — Native camera / gallery picker prompt (Maestro, best-effort)
+#
+# The native camera plugin (@capacitor/camera, TM-281) services the avatar flow on the profile page.
+# Tapping the avatar control on #/profile opens the OS "Camera vs Photos" picker (CameraSource.PROMPT)
+# and, on first use, the Android CAMERA runtime-permission dialog.
+#
+# This flow is BEST-EFFORT: it drives to the avatar control and asserts that the native picker /
+# permission UI appears. It does NOT complete a capture (no deterministic image on a headless
+# emulator), and the exact avatar-control label/order on #/profile can vary, so the profile-step
+# selectors are guarded with `optional: true` and the OS-dialog text is matched loosely.
+#
+# Requires a signed-in session (reuses login-sms.yaml).
+appId: app.teammarhaba.webview
+---
+# 1. Sign in, then navigate to the profile page.
+- runFlow: login-sms.yaml
+- assertVisible:
+    id: "signout-btn"
+- takeScreenshot: 01-signed-in
+
+# Open the profile route. The signed-in nav exposes a profile/avatar entry; tap it if present.
+- tapOn:
+    text: "Profile"
+    optional: true
+- takeScreenshot: 02-profile
+
+# 2. Trigger the avatar picker. The control that adds/changes a photo varies in label
+#    ("Add a photo" / "Change photo" / the avatar itself) — try the common affordances best-effort.
+- tapOn:
+    text: ".*(photo|avatar|picture).*"
+    optional: true
+- takeScreenshot: 03-avatar-tapped
+
+# 3. Best-effort assert the native picker / camera permission UI surfaced. On first use Android shows
+#    the CAMERA runtime prompt; otherwise the OS picker ("Camera" / "Photos"/"Files") appears. We
+#    match either loosely and never hard-fail the OS-chrome text (it is locale/OEM-dependent).
+- assertVisible:
+    text: ".*(Camera|Allow|Photos|Take photo|Choose|While using).*"
+    optional: true
+- takeScreenshot: 04-camera-or-picker-prompt
+
+# Clean up: dismiss the OS picker/prompt so the run leaves a known state.
+- back
+- takeScreenshot: 05-after-dismiss
