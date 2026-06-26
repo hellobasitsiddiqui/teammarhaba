@@ -136,6 +136,19 @@ public class EmailCodeService {
         String email = normalise(rawEmail);
         Instant now = clock.instant();
 
+        // Inbox-free test-email hook (TM-312): an allow-listed address gets a FIXED, known code and the
+        // real send is SKIPPED, so the email-code login can be driven end-to-end in CI without reading an
+        // inbox. Off by default (empty allow-list => disabled), so prod is a no-op and real users are
+        // unaffected. We bypass the send cooldown for the test path too, so the e2e harness can re-request
+        // freely; the per-IP limiter (EmailCodeRateLimiter) still applies in front. (Marking these
+        // accounts accountType=test is follow-up TM-311, not in scope here.)
+        if (props.test().matches(email)) {
+            String fixedCode = props.test().fixedCode();
+            pending.put(email, new PendingCode(hash(fixedCode), now.plus(props.ttl()), props.maxVerifyAttempts()));
+            log.info("Issued the FIXED test login code for an allow-listed test address (no email sent).");
+            return;
+        }
+
         Instant previous = lastSent.getIfPresent(email);
         if (previous != null && Duration.between(previous, now).compareTo(props.sendCooldown()) < 0) {
             throw new EmailCodeException(

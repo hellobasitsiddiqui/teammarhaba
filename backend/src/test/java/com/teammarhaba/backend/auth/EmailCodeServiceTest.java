@@ -66,6 +66,11 @@ class EmailCodeServiceTest {
 
     /** Build properties with the given {@code maxOutstanding}; everything else fixed for the suite. */
     private static EmailCodeProperties props(long maxOutstanding) {
+        return props(maxOutstanding, EmailCodeProperties.TestEmail.disabled());
+    }
+
+    /** As {@link #props(long)} but with an explicit test-email hook config (TM-312). */
+    private static EmailCodeProperties props(long maxOutstanding, EmailCodeProperties.TestEmail test) {
         return new EmailCodeProperties(
                 6,
                 Duration.ofMinutes(10),
@@ -74,7 +79,8 @@ class EmailCodeServiceTest {
                 maxOutstanding,
                 20,
                 Duration.ofMinutes(1),
-                100_000);
+                100_000,
+                test);
     }
 
     @Test
@@ -218,6 +224,120 @@ class EmailCodeServiceTest {
         // Verify with a differently-cased address for the same mailbox.
         String token = service.verify("ada@example.com", mailer.lastCode);
         assertThat(token).isEqualTo("custom-token-ada");
+    }
+
+    // --- Inbox-free test-email hook (TM-312) ---
+
+    @Test
+    void allowListedDomainAddress_getsFixedCode_noSend_andVerifies() throws Exception {
+        // Allow-list the @teammarhaba.test domain with a fixed code; real send must be skipped.
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+        EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
+
+        String testEmail = "e2e@teammarhaba.test";
+        UserRecord rec = recordWithUid("uid-test");
+        when(firebaseAuth.getUserByEmail(testEmail)).thenReturn(rec);
+        when(firebaseAuth.createCustomToken("uid-test")).thenReturn("token-test");
+
+        svc.request(testEmail);
+
+        // No email went out for the allow-listed address.
+        assertThat(mailer.sends).isEmpty();
+        assertThat(mailer.lastCode).isNull();
+
+        // The fixed code verifies (and only the fixed code).
+        String token = svc.verify(testEmail, "123456");
+        assertThat(token).isEqualTo("token-test");
+    }
+
+    @Test
+    void allowListedExplicitAddress_getsFixedCode_caseInsensitive() throws Exception {
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of(), List.of("ci-bot@teammarhaba.test"), "654321");
+        EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
+
+        String testEmail = "ci-bot@teammarhaba.test";
+        UserRecord rec = recordWithUid("uid-ci");
+        when(firebaseAuth.getUserByEmail(testEmail)).thenReturn(rec);
+        when(firebaseAuth.createCustomToken("uid-ci")).thenReturn("token-ci");
+
+        // Request with differing case + whitespace; the explicit allow-list matches after normalise.
+        svc.request("  CI-Bot@TeamMarhaba.test ");
+        assertThat(mailer.sends).isEmpty();
+
+        assertThat(svc.verify(testEmail, "654321")).isEqualTo("token-ci");
+    }
+
+    @Test
+    void allowListedAddress_wrongCodeStillRejected() {
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+        EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
+
+        svc.request("e2e@teammarhaba.test");
+
+        assertThatThrownBy(() -> svc.verify("e2e@teammarhaba.test", "000000"))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+    }
+
+    @Test
+    void nonAllowListedAddress_unaffectedByEnabledHook() throws Exception {
+        // Hook ON for @teammarhaba.test, but a real address must keep random code + real send.
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+        EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
+
+        svc.request(EMAIL); // ada@example.com — not allow-listed
+
+        // A real (random) code was emailed, and it is NOT the fixed code.
+        assertThat(mailer.sends).containsExactly(EMAIL);
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+
+        // The fixed code does NOT work for a real address; the emailed code does.
+        assertThatThrownBy(() -> svc.verify(EMAIL, "123456"))
+                .isInstanceOf(EmailCodeException.class);
+    }
+
+    @Test
+    void lookalikeDomain_isNotAllowListed() {
+        // "evil-teammarhaba.test" must NOT match the "@teammarhaba.test" suffix — real send path applies.
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+        EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
+
+        svc.request("attacker@evil-teammarhaba.test");
+
+        assertThat(mailer.sends).containsExactly("attacker@evil-teammarhaba.test");
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+    }
+
+    @Test
+    void emptyAllowList_isDisabled_soFixedCodeNeverWorks() {
+        // Default disabled() => no address takes the test path, even one that "looks" like a test address.
+        // The `service` built in setUp uses props(50), i.e. TestEmail.disabled().
+        assertThat(EmailCodeProperties.TestEmail.disabled().isEnabled()).isFalse();
+
+        service.request("anyone@teammarhaba.test");
+
+        assertThat(mailer.sends).containsExactly("anyone@teammarhaba.test");
+        assertThat(mailer.lastCode).matches("\\d{6}");
+    }
+
+    /** A fresh provider mock returning the shared firebaseAuth — for tests that build their own service. */
+    @SuppressWarnings("unchecked")
+    private ObjectProvider<FirebaseAuth> provider() {
+        ObjectProvider<FirebaseAuth> p = mock(ObjectProvider.class);
+        when(p.getObject()).thenReturn(firebaseAuth);
+        return p;
+    }
+
+    private static UserRecord recordWithUid(String uid) {
+        UserRecord r = mock(UserRecord.class);
+        when(r.getUid()).thenReturn(uid);
+        return r;
     }
 
     /** Flip one digit so the result is guaranteed different from {@code code}. */

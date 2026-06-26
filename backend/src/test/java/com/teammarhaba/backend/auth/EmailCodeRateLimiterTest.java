@@ -24,7 +24,15 @@ class EmailCodeRateLimiterTest {
     /** length/ttl/cooldown/attempts are irrelevant here; the per-IP knobs are what matter. */
     private static EmailCodeProperties props(int ipLimit, Duration window, long maxTrackedIps) {
         return new EmailCodeProperties(
-                6, Duration.ofMinutes(10), Duration.ofSeconds(60), 5, 100_000, ipLimit, window, maxTrackedIps);
+                6,
+                Duration.ofMinutes(10),
+                Duration.ofSeconds(60),
+                5,
+                100_000,
+                ipLimit,
+                window,
+                maxTrackedIps,
+                EmailCodeProperties.TestEmail.disabled());
     }
 
     @Test
