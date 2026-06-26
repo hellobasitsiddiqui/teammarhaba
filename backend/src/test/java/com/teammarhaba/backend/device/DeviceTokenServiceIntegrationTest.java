@@ -50,6 +50,25 @@ class DeviceTokenServiceIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void deregisterRemovesOnlyTheCallersOwnToken() {
+        // User B owns a token; user A (a different account) holds its value and tries to deregister it.
+        service.register(user("svc-owner-b"), "b-token", DevicePlatform.ANDROID);
+        Long ownerB = users.findByFirebaseUid("svc-owner-b").orElseThrow().getId();
+
+        // A's deregister of B's token must be a no-op — no cross-account push silence (TM-291).
+        service.deregister(user("svc-owner-a"), "b-token");
+        assertThat(tokens.findByToken("b-token"))
+                .as("user A must not be able to deregister user B's token")
+                .isPresent()
+                .get()
+                .satisfies(t -> assertThat(t.getUserId()).isEqualTo(ownerB));
+
+        // The rightful owner B can still deregister their own token.
+        service.deregister(user("svc-owner-b"), "b-token");
+        assertThat(tokens.findByToken("b-token")).isEmpty();
+    }
+
+    @Test
     void reregisteringATokenRepointsItToTheNewOwner() {
         service.register(user("svc-owner-a"), "shared-token", DevicePlatform.ANDROID);
         Long ownerA = users.findByFirebaseUid("svc-owner-a").orElseThrow().getId();

@@ -23,10 +23,19 @@ import org.springframework.transaction.annotation.Transactional;
  * device. The caller's account is provisioned just-in-time (as elsewhere) so registration works on a
  * brand-new account's first call.
  *
- * <p><b>Deregister</b> removes a token by value — used both by the client on sign-out / token
- * invalidation and by TM-284's prune path when FCM reports a token {@code unregistered}. Both routes
- * go through {@link #prune(String)}; the public {@link #deregister(VerifiedUser, String)} adds the
- * caller's identity to the audit trail.
+ * <p><b>Re-pointing a token on register is deliberate and is <i>not</i> the cross-account hijack
+ * surface (TM-291).</b> An FCM registration token is a per-app-install secret minted on the device
+ * by Firebase; a caller can only ever present a token their own device currently holds. The
+ * legitimate flow is a shared/handed-down device — user B signs out, user A signs in, the same
+ * token re-registers and must migrate to A (otherwise pushes for A would land on B's now-stale
+ * registration). Possession of the live token is therefore a sound proxy for device control, so we
+ * keep the upsert re-point rather than rejecting a foreign-owned token. The actual hijack/silence
+ * risk in this epic was the <em>deregister</em> path below, which is now owner-scoped.
+ *
+ * <p><b>Deregister is owner-scoped (TM-291).</b> {@link #deregister(VerifiedUser, String)} removes a
+ * token only when it belongs to the caller, so user A can never deregister user B's token and
+ * silence their pushes. The unscoped {@link #prune(String)} remains <em>solely</em> for TM-284's
+ * FCM-{@code unregistered} cleanup, which must evict a dead token regardless of owner.
  */
 @Service
 public class DeviceTokenService {
@@ -72,13 +81,17 @@ public class DeviceTokenService {
     }
 
     /**
-     * Deregister one of the caller's device tokens on sign-out / invalidation (TM-283). Prunes the
-     * token by value; idempotent — deregistering an unknown/already-removed token is a no-op (and not
-     * audited), so a client retrying sign-out never errors. Only an actual removal is audited.
+     * Deregister one of the caller's <em>own</em> device tokens on sign-out / invalidation (TM-283,
+     * owner-scoped per TM-291). Deletes the token only when it belongs to the caller, so a user can
+     * never remove another account's token and silence their pushes. Idempotent — deregistering an
+     * unknown, already-removed, or foreign-owned token is a no-op (and not audited), so a client
+     * retrying sign-out never errors and a hijack attempt leaves no trace of success. Only an actual
+     * removal of the caller's own token is audited.
      */
     @Transactional
     public void deregister(VerifiedUser caller, String token) {
-        if (prune(token)) {
+        Long callerUserId = users.provision(caller).getId();
+        if (tokens.deleteByTokenAndUserId(token, callerUserId) > 0) {
             audit.record(caller.uid(), AuditAction.DEVICE_TOKEN_DEREGISTERED, TARGET_DEVICE, token);
         }
     }
@@ -86,8 +99,10 @@ public class DeviceTokenService {
     /**
      * Prune a token by value, regardless of owner (TM-283). This is the seam the send-push service
      * (TM-284) calls when FCM reports a token {@code unregistered}, so a dead token is evicted on the
-     * next send attempt. Returns {@code true} iff a row was actually removed, so callers can avoid
-     * logging/auditing a no-op.
+     * next send attempt. It is intentionally <em>not</em> owner-scoped — a dead token must be removed
+     * no matter who owns it — and for that reason must never back a caller-driven deregister (use the
+     * owner-scoped {@link #deregister} for that, TM-291). Returns {@code true} iff a row was actually
+     * removed, so callers can avoid logging/auditing a no-op.
      */
     @Transactional
     public boolean prune(String token) {
