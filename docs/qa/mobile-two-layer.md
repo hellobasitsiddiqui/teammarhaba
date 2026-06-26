@@ -114,9 +114,11 @@ hook vs. an image puzzle before) and how cold-login / warm-restart were confirme
 Firebase test phone numbers bypass the SMS send but **not** the reCAPTCHA gate. In a scripted
 emulator WebView the session scores as bot-like, so reCAPTCHA serves an interactive image puzzle
 instead of passing silently. To drive SMS on Layer 1 without a human solving a captcha, the build
-sets `auth.settings.appVerificationDisabledForTesting = true`, gated behind the injected e2e flag
-**`window.__TM_E2E_PHONE_TEST__`** (TM-309) — honoured because we run inside the native Capacitor
-shell. With the hook active, `+16505550100` + `123456` signs in with no captcha and no real SMS.
+sets `auth.settings.appVerificationDisabledForTesting = true`, gated behind an injected e2e flag
+(TM-309) — honoured because we run inside the native Capacitor shell. The CI harness injects the flag
+as a **persisted** `localStorage["tm_e2e_phone_test"]="1"` over CDP (TM-318) so it survives the app
+relaunches Maestro performs (a `window.__TM_E2E_PHONE_TEST__` global would be wiped on relaunch). With
+the hook active, `+16505550100` + `123456` signs in with no captcha and no real SMS.
 
 > The hook is **test-only** and gated — not a production change. On a real device (Layer 2)
 > reCAPTCHA passes silently for a legitimate device, so the hook isn't needed for device sign-off.

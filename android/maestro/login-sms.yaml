@@ -8,35 +8,37 @@
 #   +16505550100 / fixed code 123456  (configured in the project, see TM-241).
 #
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
-# CRITICAL — the e2e reCAPTCHA-bypass flag contract (window.__TM_E2E_PHONE_TEST__)
+# CRITICAL — the e2e reCAPTCHA-bypass flag contract (PERSISTED localStorage["tm_e2e_phone_test"])
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 # Firebase test phone numbers skip the SMS send but NOT the reCAPTCHA app-verification gate, which in
 # a scripted WebView escalates to a visual puzzle and stalls the flow. web/src/assets/auth.js sets
-# `auth.settings.appVerificationDisabledForTesting = true` ONLY when BOTH hold (TM-309, merged+
-# deployed):
-#   1. the test is REQUESTED — `window.__TM_E2E_PHONE_TEST__ === true`
-#      (or TEAMMARHABA_CONFIG.phoneTestMode === true), AND
+# `auth.settings.appVerificationDisabledForTesting = true` ONLY when BOTH hold (TM-309 / TM-318):
+#   1. the test is REQUESTED — any of `localStorage["tm_e2e_phone_test"] === "1"` (TM-318),
+#      `window.__TM_E2E_PHONE_TEST__ === true`, or `TEAMMARHABA_CONFIG.phoneTestMode === true`, AND
 #   2. the context is SAFE — Auth emulator wired in, OR inside the native Capacitor shell
 #      (`window.Capacitor.isNativePlatform() === true`). Condition 2 is satisfied automatically here
 #      because we run inside the real Capacitor app.
 #
-# So this flow only needs to ensure condition 1: the flag must be `true` on `window` BEFORE auth.js
-# evaluates (it is read once at module-load — see the comment block in auth.js). That is the part
-# pure Maestro CANNOT do: Maestro's `runScript`/`evalScript` execute in Maestro's OWN JS sandbox, not
-# inside the app's WebView, so they cannot set a `window` global the SPA will read. There is also no
-# deep link / URL query param the app honours to set it (server.url is fixed in capacitor.config.json
-# and the SPA reads the flag from `window`, not the URL).
+# So this flow only needs to ensure condition 1: the flag must be set BEFORE auth.js evaluates (it is
+# read once at module-load — see the comment block in auth.js). That is the part pure Maestro CANNOT
+# do: Maestro's `runScript`/`evalScript` execute in Maestro's OWN JS sandbox, not inside the app's
+# WebView, so they cannot reach the SPA's `window`/`localStorage`. There is also no deep link / URL
+# query param the app honours to set it (server.url is fixed in capacitor.config.json).
 #
-# CHOSEN APPROACH — harness pre-injection (the TM-302 contract this flow ASSUMES):
-#   The TM-302 e2e harness, before this flow runs, attaches to the app's WebView over the Chrome
-#   DevTools Protocol (CDP) and runs `Page.addScriptToEvaluateOnNewDocument` with
-#   `window.__TM_E2E_PHONE_TEST__ = true;` so the global is present on every document BEFORE any SPA
-#   script (including auth.js) runs. This requires a DEBUG build (WebView debugging enabled —
-#   `WebView.setWebContentsDebuggingEnabled(true)`); the release APK has it off, so the flag is
-#   unreachable in production (the second safety condition above is moot there anyway). The harness
-#   then hands off to Maestro to drive the UI below. See README "e2e-flag injection contract".
+# CHOSEN APPROACH — harness PERSISTED-flag pre-injection (the TM-318 contract this flow ASSUMES):
+#   The mobile-e2e CI harness, before any flow runs, attaches to the app's WebView over the Chrome
+#   DevTools Protocol (CDP) and runs `localStorage.setItem('tm_e2e_phone_test','1')`. A PERSISTED key
+#   is used (not a `window` global, and not `Page.addScriptToEvaluateOnNewDocument`) because BOTH of
+#   those are wiped by the app relaunch Maestro performs on `launchApp` — localStorage survives the
+#   relaunch, so auth.js reads the flag fresh on every page load. This requires a DEBUG build (WebView
+#   debugging enabled — `WebView.setWebContentsDebuggingEnabled(true)`); the release APK has it off,
+#   so the flag is unreachable in production (the second safety condition above is moot there anyway).
 #
-# This flow ASSERTS that contract is in place: if the flag was NOT injected, the reCAPTCHA gate fires
+# CONSEQUENCE — this flow MUST NOT `clearState` (TM-318): clearing app data wipes the localStorage
+# flag the harness set, so the reCAPTCHA bypass would not apply. We therefore launch WITHOUT clearing
+# state and sign the user out (if a prior flow left a session) to reach the signed-out front door.
+#
+# This flow ASSERTS the contract is in place: if the flag was NOT injected, the reCAPTCHA gate fires
 # and the "Text a code" step never appears within the timeout — making the missing pre-injection a
 # loud, diagnosable failure rather than a silent hang.
 appId: app.teammarhaba.webview
@@ -44,9 +46,21 @@ env:
   TEST_PHONE: "+16505550100" # Firebase fixed test number (TM-241)
   SMS_CODE: "123456"         # its fixed code
 ---
+# Launch WITHOUT clearState so the harness-injected localStorage flag (tm_e2e_phone_test=1) survives —
+# clearState would wipe it and re-arm the reCAPTCHA gate (TM-318).
 - launchApp:
-    clearState: true
+    clearState: false
 - takeScreenshot: 01-launch
+
+# Reach a clean signed-out state without clearing app data: if a previous flow (or warm session) left
+# us signed in, sign out first. Both steps are optional so a fresh, already-signed-out launch skips
+# them. (We must NOT clearState here — see the header note.)
+- tapOn:
+    id: "signout-btn"
+    optional: true
+- assertVisible:
+    id: "auth-signed-out"
+    optional: true
 
 # Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
 - assertVisible: "Sign in"
