@@ -2019,3 +2019,16 @@ html {
 .tm-diag-link {
     margin-top: 1rem;
 }
+/* Appearance / theme switcher section on the profile page (TM-298). Mirrors the
+   .tm-security-settings divider so the in-app theme picker reads as its own settings block. */
+.tm-theme-settings {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: var(--border-width) solid var(--fg-line);
+}
+
+.tm-theme-settings h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}

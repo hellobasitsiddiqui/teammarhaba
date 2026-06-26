@@ -24,6 +24,7 @@ import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js"
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
+import { buildThemeSettings } from "./theme-settings.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -551,6 +552,10 @@ function buildShell(view) {
   // with no enrolled biometric / no secure lock screen.
   const security = buildSecuritySettings();
 
+  // In-app theme switcher (TM-298) — a self-contained "Appearance" section; lets mobile users change
+  // the theme (clean/doodle/sketch) where the dev `?theme=` URL override is unreachable in the WebView.
+  const appearance = buildThemeSettings();
+
   clear(view).append(
     el("div", { class: "tm-admin-head" }, [
       // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
@@ -560,6 +565,7 @@ function buildShell(view) {
     summary,
     status,
     form,
+    appearance,
     security,
     // QA diagnostics link (TM-297) — an unobtrusive way into the #/diagnostics screen (GPS / FCM token
     // / native-plugin status) from the settings area, without promoting it in the main nav. Plain hash
