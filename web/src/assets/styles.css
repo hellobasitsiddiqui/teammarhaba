@@ -2061,6 +2061,209 @@ html {
     text-decoration: underline;
 }
 
+/* ===== Annotated help guide (TM-178) ===== */
+/* The static "annotated screenshot" guide that lives inside the #/help page: a DOM-drawn MOCK of each
+   key screen with positioned callout notes + arrows. Everything is theme-token-styled so it follows
+   clean / doodle / sketch + dark mode automatically — there is no captured image to re-shoot when the
+   UI changes. Layout is percentage-based over a fixed-aspect "stage" so the mock + its callouts scale
+   together and never need pixel-pushing. */
+.tm-guide-heading {
+    margin: 0 0 0.4rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-guide-intro {
+    margin: 0 0 1rem;
+    color: var(--muted);
+    line-height: 1.55;
+}
+
+.tm-guide-figure {
+    margin: 0 0 1.5rem;
+}
+
+.tm-guide-figure-title {
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 0.5rem;
+}
+
+/* The stage: a fixed-aspect canvas the mock + callouts are positioned over (percentages of this box). */
+.tm-guide-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border: var(--border-width, 1px) solid var(--fg-line, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 8px);
+    background: var(--surface, #fff);
+    overflow: hidden;
+}
+
+.tm-guide-mock {
+    position: absolute;
+    inset: 0;
+}
+
+/* A labelled box on the mock — the representative "screenshot" regions. */
+.tm-guide-region {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: var(--w);
+    height: var(--h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.4rem;
+    box-sizing: border-box;
+    font-size: clamp(0.55rem, 2.2vw, 0.8rem);
+    color: var(--fg);
+    background: var(--surface-card, #fff);
+    border: var(--border-width, 1px) solid var(--fg-line-strong, rgba(0, 0, 0, 0.2));
+    border-radius: var(--radius-sm, 6px);
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.tm-guide-region-brand {
+    font-weight: 700;
+    color: var(--accent);
+    background: transparent;
+    border-color: transparent;
+    justify-content: flex-start;
+}
+
+.tm-guide-region-nav {
+    background: var(--accent-soft, transparent);
+    border-color: var(--accent-line, rgba(0, 0, 0, 0.2));
+}
+
+.tm-guide-region-card {
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 0.6rem;
+    white-space: normal;
+}
+
+/* A callout note overlaid on the stage, anchored at (--at-x,--at-y) and offset to one side. */
+.tm-guide-callout {
+    position: absolute;
+    left: var(--at-x);
+    top: var(--at-y);
+    width: min(15rem, 60%);
+    display: flex;
+    gap: 0.4rem;
+    align-items: flex-start;
+    padding: 0.45rem 0.55rem;
+    box-sizing: border-box;
+    font-size: clamp(0.6rem, 2.4vw, 0.8rem);
+    line-height: 1.4;
+    color: var(--fg);
+    background: var(--surface-card, #fff);
+    border: var(--border-width, 1px) solid var(--accent-line, rgba(0, 0, 0, 0.25));
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.12));
+    z-index: 2;
+}
+
+/* Side placement: translate the note relative to its anchor point. */
+.tm-guide-callout-bottom { transform: translate(-50%, 0.6rem); }
+.tm-guide-callout-top { transform: translate(-50%, calc(-100% - 0.6rem)); }
+.tm-guide-callout-left { transform: translate(calc(-100% - 0.6rem), -50%); }
+.tm-guide-callout-right { transform: translate(0.6rem, -50%); }
+
+.tm-guide-callout-num {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-pill, 999px);
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    font-weight: 700;
+    font-size: 0.7rem;
+}
+
+.tm-guide-callout-title {
+    display: block;
+    margin-bottom: 0.1rem;
+}
+
+/* The little arrow pointing from the note back at the anchor point. A CSS triangle, theme-coloured. */
+.tm-guide-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 0.4rem solid transparent;
+}
+
+.tm-guide-callout-bottom .tm-guide-arrow {
+    top: -0.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-top .tm-guide-arrow {
+    bottom: -0.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-left .tm-guide-arrow {
+    right: -0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-right .tm-guide-arrow {
+    left: -0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+/* The accessible, linear restatement of the callouts beneath the picture. Always reads cleanly even
+   when the absolutely-positioned notes overlap on a small screen — the screen-reader path. */
+.tm-guide-notes {
+    margin: 0.75rem 0 0;
+    padding-left: 1.25rem;
+    color: var(--fg);
+}
+
+.tm-guide-notes li {
+    margin: 0.4rem 0;
+    line-height: 1.5;
+}
+
+/* On very narrow screens the floating callouts get cramped; hide the decorative overlay notes and lean
+   on the numbered list, which carries the same content accessibly. The numbered regions stay visible. */
+@media (max-width: 30rem) {
+    .tm-guide-callout {
+        position: static;
+        transform: none;
+        width: auto;
+        margin: 0;
+    }
+
+    .tm-guide-callout .tm-guide-arrow {
+        display: none;
+    }
+
+    /* Pull the now-static callouts out of the stage flow: keep the stage as the clean picture and let
+       the numbered list below do the talking. */
+    .tm-guide-stage .tm-guide-callout {
+        display: none;
+    }
+}
+
 /* ----------------------------------------------------------------------------------------------
  * Biometric security (TM-282): the app-lock full-screen overlay + the settings switch.
  * All colours read theme tokens (var(--token)) so both themes + dark mode are covered for free.

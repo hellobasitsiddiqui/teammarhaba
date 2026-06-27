@@ -13,6 +13,7 @@
 // and at phone widths + inside the Android WebView.
 
 import { clear, el } from "./ui.js";
+import { buildGuide } from "./help-guide.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -94,6 +95,13 @@ function build(view) {
           " to keep them.",
         ),
       ),
+
+      // Static annotated-screenshot guide (TM-178): an illustrated, NON-interactive walkthrough — a
+      // labelled mock of each key screen with arrows + callouts, the static counterpart to the live
+      // product tour (TM-135). buildGuide() renders its own headed block (a "Visual guide" <h3>),
+      // so it's appended directly here rather than wrapped in another section() heading. It's plain
+      // DOM with no live-overlay dependency, so it works as part of this static page.
+      buildGuide(el("div", { class: "help-section help-guide-section" })),
 
       section(
         "Get support",
