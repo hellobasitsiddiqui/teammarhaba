@@ -234,6 +234,9 @@ function guard() {
 function onOnboardingComplete() {
   isOnboarded = true;
   onboardingActive = false; // allow a future re-mount (e.g. a later sign-out → new gated user)
+  // The profile gate flips the same server onboarding flag the tour gates on (TM-171): keep tours in
+  // step so the first-run tour won't auto-pop right after the gate lifts.
+  window.tmTours?.setOnboardingCompleted?.(true);
   guard();
 }
 
@@ -312,6 +315,12 @@ async function resolveRoleThenGuard() {
 
   isAdmin = adminOutcome.value === "ADMIN";
   isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;
+
+  // Hand the resolved onboarding flag to the tours module (TM-171) so the first-run tour gates on
+  // the server's durable "already onboarded" state — reusing the /me we just fetched rather than
+  // making tours.js pay a second round trip. Only seed on a real /me result; on a timeout/error we
+  // leave it "unknown" so tours.js resolves it itself (or simply defers the auto-tour).
+  if (onboardedOutcome.value) window.tmTours?.setOnboardingCompleted?.(isOnboarded);
 
   // 3) Surface a visible signal if the onboarding/role resolution failed or timed out, so a degraded
   //    backend never looks like a silent dead-end. We've still navigated the user into the app on the
