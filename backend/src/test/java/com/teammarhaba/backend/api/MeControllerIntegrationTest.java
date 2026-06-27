@@ -295,6 +295,26 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void onboardingCompleteIsIdempotentWhenAlreadyComplete() throws Exception {
+        // TM-171: the first-login tour calls POST /me/onboarding-complete on finish/skip to durably
+        // suppress itself — possibly for a user the TM-250 profile gate already marked complete. A
+        // repeat call must stay 200 and keep the flag true (no error, no flip back to false).
+        var who = caller("uid-onboard-twice", "rumi@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
+    }
+
+    @Test
     void onboardingGatePersistsNameLocationAgeAndCompletesInOneShot() throws Exception {
         // TM-250: the first-login profile gate. One atomic POST sets name (→ displayName),
         // location (→ city) and age, flips onboardingCompleted, and self-attests the age.

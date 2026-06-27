@@ -71,7 +71,11 @@ function visible(node) {
 
 /**
  * Run a tour.
- * @param {{id: string, steps: Array}} tour
+ * @param {{id: string, steps: Array, onComplete?: Function}} tour the tour data; the optional
+ *   `onComplete` is invoked once the tour is *completed* (the user reaches Done or hits Skip) — NOT
+ *   when it's merely paused (closed mid-tour to resume later). This is the seam the app uses to
+ *   durably mark first-run onboarding finished server-side (TM-171). Best-effort: the engine stays
+ *   generic and never awaits it, so a slow/failed callback can't wedge the UI teardown.
  * @param {{force?: boolean}} [opts] force re-run even if completed, starting from step 0.
  * @returns {boolean} whether a tour actually started.
  */
@@ -127,7 +131,17 @@ export function runTour(tour, { force = false } = {}) {
     teardown();
   }
   const pause = () => finish(false); // closing mid-tour resumes here next time
-  const complete = () => finish(true); // finished or skipped → don't auto-show again
+  const complete = () => {
+    finish(true); // finished or skipped → don't auto-show again (localStorage seen-once)
+    // Notify the app that this tour is durably done (e.g. mark onboarding complete server-side,
+    // TM-171). Fire-and-forget AFTER teardown so the overlay is already gone; never let a throwing
+    // or async callback break the engine's generic contract.
+    try {
+      tour.onComplete?.();
+    } catch {
+      /* a misbehaving completion hook must not wedge the tour engine — non-fatal. */
+    }
+  };
 
   function next() {
     if (index < steps.length - 1) {

@@ -242,6 +242,28 @@ export async function submitOnboarding(body) {
 }
 
 /**
+ * POST /api/v1/me/onboarding-complete — mark first-run onboarding finished for the caller (TM-163
+ * endpoint; wired to the first-login tour in TM-171). Idempotent server-side: completing an already-
+ * complete account is a no-op. Used by the product tour to durably suppress the auto first-run tour
+ * across devices/sessions once the user has finished or skipped it (localStorage alone is per-device
+ * and resets when storage is cleared). Returns the updated {@link MeResponse} (now
+ * `onboardingCompleted: true`); throws with the HTTP status on any non-2xx (a 401 will already have
+ * refreshed/redirected via {@link apiFetch}).
+ *
+ * @returns {Promise<Object>} the updated MeResponse.
+ */
+export async function completeOnboarding() {
+  const response = await apiFetch("/api/v1/me/onboarding-complete", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/onboarding-complete failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
  * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
  * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending
@@ -290,6 +312,7 @@ if (typeof window !== "undefined") {
     getMe,
     updateMe,
     submitOnboarding,
+    completeOnboarding,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,
