@@ -286,6 +286,11 @@
     <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
          signed-out users to #/login and returns them after sign-in, drives the nav. -->
     <script type="module" src="/assets/router.js"></script>
+    <!-- Email-verification banner (TM-169): shows a dismissible "verify your email" banner with a
+         Resend action to any signed-in user whose Firebase emailVerified flag (read off GET /me) is
+         false; clears itself once the token refreshes post-verification. Calls the resend-verification
+         endpoint (TM-165). Inert when signed out / already verified. -->
+    <script type="module" src="/assets/verify-banner.js"></script>
     <!-- Nav avatar (TM-166): paints the signed-in user's Firebase photoURL into #nav-avatar. -->
     <script type="module" src="/assets/nav-avatar.js"></script>
     <!-- Responsive nav toggle (TM-229): hamburger open/close for the collapsed nav on narrow

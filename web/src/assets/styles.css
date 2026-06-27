@@ -2245,3 +2245,82 @@ html {
     font-size: 1.05rem;
     color: var(--fg);
 }
+
+/* Email-verification banner (TM-169). A dismissible "verify your email" prompt with a Resend action,
+   shown to a signed-in user whose Firebase emailVerified flag is false. Built from theme tokens ONLY
+   (surfaces, the accent wash/stripe, --fg/--muted, the radius/border scale) so it renders correctly
+   across clean / doodle / sketch with no hard-coded colours. The doodle/sketch wobble filter on
+   surfaces is inherited automatically. */
+.tm-verify-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.75rem 0 0;
+    padding: 0.6rem 0.85rem;
+    color: var(--fg);
+    background: var(--accent-soft);
+    border: var(--border-width) solid var(--accent-line);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+}
+
+.tm-verify-banner-icon {
+    flex: none;
+}
+
+.tm-verify-banner-text {
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+.tm-verify-banner-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+}
+
+/* Resend reuses the quiet-action look (accent text on a card surface), a ≥44px tap target on touch. */
+.tm-verify-banner-resend {
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.7rem;
+    min-height: 2rem;
+    cursor: pointer;
+}
+
+.tm-verify-banner-resend:hover {
+    background: var(--surface);
+}
+
+.tm-verify-banner-resend:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.7;
+}
+
+.tm-verify-banner-dismiss {
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 0.25rem;
+}
+
+/* Stack the actions under the message on narrow screens so nothing is clipped. */
+@media (max-width: 30rem) {
+    .tm-verify-banner {
+        flex-wrap: wrap;
+    }
+    .tm-verify-banner-text {
+        flex-basis: 100%;
+    }
+}

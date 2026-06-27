@@ -104,9 +104,12 @@ export async function getMe() {
 /**
  * POST /api/v1/me/resend-verification — ask the backend to re-trigger the caller's Firebase
  * email-verification (TM-165). The backend rate-limits per user and refuses (422) if the address is
- * already verified, so the UI can show a precise message. Resolves on success (204); throws with the
- * HTTP status otherwise (a 401 will already have redirected to login).
+ * already verified, so the UI can show a precise message. Resolves on success (204); on a non-2xx it
+ * throws an {@link ApiError} carrying the HTTP `.status` (422 already-verified, 429 cooldown, else a
+ * generic failure) so the verify banner (TM-169) can render the right friendly state. A 401 will have
+ * already redirected to login via {@link apiFetch}.
  * @returns {Promise<void>}
+ * @throws {ApiError}
  */
 export async function resendVerification() {
   const response = await apiFetch("/api/v1/me/resend-verification", {
@@ -114,7 +117,7 @@ export async function resendVerification() {
     headers: { Accept: "application/problem+json" },
   });
   if (!response.ok) {
-    throw new Error(`POST /api/v1/me/resend-verification failed: ${response.status}`);
+    throw await toApiError(response, "Could not send the verification email. Please try again.");
   }
 }
 
