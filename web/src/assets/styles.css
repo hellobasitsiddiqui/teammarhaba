@@ -1115,6 +1115,27 @@ body {
     border-color: transparent;
 }
 
+/* Account-state "unknown" variant (TM-168): used when a Firebase-sourced flag couldn't be read
+   (credential-free dev, or the admin list projection). Neutral — never reads as pass or fail. */
+.tm-badge-unknown {
+    color: var(--muted);
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    border-color: transparent;
+}
+
+/* Inline cluster of account-state badges (TM-168). */
+.tm-badge-group {
+    display: inline-flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Account-state badge row under the profile summary (TM-168). */
+.tm-profile-badges:not(:empty) {
+    margin: 0.25rem 0 0.75rem;
+}
+
 /* Buttons */
 .tm-btn {
     padding: 0.45rem 0.8rem;

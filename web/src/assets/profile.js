@@ -23,6 +23,7 @@ import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
+import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
 import { buildThemeSettings } from "./theme-settings.js";
 
@@ -189,6 +190,14 @@ function fillForm(profile) {
     shell.summary.textContent = profile?.email
       ? `Signed in as ${profile.email}`
       : "Your profile";
+  }
+  // Account-state badges (TM-168): email-verified / age-verified / MFA from the /me state block.
+  // `includeUnknown` so the user always sees all three — including any the backend couldn't read —
+  // rather than having a badge silently vanish.
+  if (shell.badges) {
+    clear(shell.badges);
+    const group = renderAccountBadges(profile, { includeUnknown: true });
+    if (group) shell.badges.append(group);
   }
 }
 
@@ -527,6 +536,9 @@ function buildShell(view) {
   });
 
   const summary = el("p", { class: "tm-muted", id: "profile-summary", text: "Your profile" });
+
+  // Account-state badges (TM-168) sit just under the summary; populated by fillForm once /me loads.
+  const badges = el("div", { class: "tm-profile-badges", id: "profile-badges" });
   // NB: must NOT be named `save` — that would shadow the module-level `save` submit handler, so the
   // form's `onSubmit: save` would bind this button element instead of the handler and the form would
   // do a native submit / page reload instead of PATCHing (TM-199).
@@ -563,6 +575,7 @@ function buildShell(view) {
       el("a", { class: "tm-btn tm-btn-sm", href: "#/home" }, "Back to home"),
     ]),
     summary,
+    badges,
     status,
     form,
     appearance,
@@ -575,7 +588,7 @@ function buildShell(view) {
     ]),
   );
 
-  shell = { form, fields, save: saveBtn, reset, summary, status, avatar };
+  shell = { form, fields, save: saveBtn, reset, summary, badges, status, avatar };
 }
 
 /** Reflect load/error state: hide the form while loading or on a load error, show a retry. */
