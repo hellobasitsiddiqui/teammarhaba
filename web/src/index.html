@@ -311,6 +311,11 @@
     <!-- Doodle decoration for the static panels (TM-215): mounts a few tasteful TM-214 doodles into
          the landing/login/home headers + dividers. Visual only; CSS gates them to the doodle theme. -->
     <script type="module" src="/assets/doodle-decor.js"></script>
+    <!-- Signed-out theme switcher (TM-332): mounts the SAME "Appearance" picker (TM-298) into the login
+         card so a signed-out user (and the Android WebView, where the ?theme= URL override is
+         unreachable) can change the theme. Reuses theme-settings.js — same tm-theme key, live applyTheme,
+         no reload; the Profile instance keeps working and the two stay in sync. -->
+    <script type="module" src="/assets/login-theme.js"></script>
     <!-- Push-notifications client (TM-279): inside the Capacitor Android shell, requests the OS
          notification permission on login and registers the device's FCM token with
          POST /api/v1/me/devices (deregisters on sign-out). Fully inert on the browser/PWA build —
