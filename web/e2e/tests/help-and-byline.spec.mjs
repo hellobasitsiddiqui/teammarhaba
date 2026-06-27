@@ -39,6 +39,26 @@ test.describe("Help section (TM-255)", () => {
     await expect(support).toBeVisible();
   });
 
+  test("the annotated visual guide renders inside the Help page (TM-178)", async ({ page }) => {
+    await page.goto("/#/help");
+    const help = page.locator("#help-view");
+    await expect(help).toBeVisible();
+
+    // The static annotated-screenshot guide section (AC1/AC2): a "Visual guide" heading, a drawn
+    // mock stage with accessible alt text, at least one positioned callout, and the linear notes list.
+    await expect(help.getByRole("heading", { name: "Visual guide" })).toBeVisible();
+
+    const stage = help.locator(".tm-guide-stage").first();
+    await expect(stage).toBeVisible();
+    // The mock exposes the whole picture to assistive tech via role=img + a descriptive alt (AC4).
+    await expect(stage).toHaveAttribute("aria-label", /mock of the TeamMarhaba home screen/i);
+
+    // At least one callout note with an arrow is drawn over the mock (AC1).
+    await expect(help.locator(".tm-guide-callout").first()).toBeVisible();
+    // And the accessible linear restatement of the callouts is present (AC4).
+    await expect(help.locator(".tm-guide-notes li").first()).toBeVisible();
+  });
+
   test("Help is reachable from the nav link (signed out)", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();

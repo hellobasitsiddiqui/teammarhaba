@@ -7,6 +7,7 @@ import { isTourActive, isTourCompleted, runTour } from "./tour.js";
 import { currentUser, onAuthChanged } from "./auth.js";
 import { completeOnboarding, getMe } from "./api.js";
 import { el } from "./ui.js";
+import { SITE_HIGHLIGHTS, PAGE_HIGHLIGHTS } from "./tour-highlights.js";
 
 // The signed-in caller's server-side onboarding-complete flag (TM-171), the DURABLE source of truth
 // for "has this user already seen the first-run tour", read from GET /me. localStorage (the tour
@@ -72,44 +73,21 @@ function markOnboardingCompleteOnServer() {
 // cards; steps whose target is hidden (e.g. the admin link for a non-admin) are skipped automatically.
 // `onComplete` (TM-171) fires when the user finishes or skips the tour — marking onboarding complete
 // server-side so the first-run tour is durably suppressed across devices, not just this browser.
+//
+// The step copy/targets are the shared highlight points (tour-highlights.js / TM-178) so the live tour
+// and the static annotated help guide can't drift apart; here we only attach the tour's id + lifecycle
+// hook. The highlights are a readonly source, so spread into a fresh mutable array for the engine.
 const SITE_TOUR = {
   id: "site",
   onComplete: markOnboardingCompleteOnServer,
-  steps: [
-    {
-      title: "Welcome to TeamMarhaba 👋",
-      body: "A quick 30-second tour of the basics. You can skip anytime — and replay it from Help whenever you like.",
-    },
-    { target: "#me", title: "This is you", body: "Your identity, verified by the backend. Your profile lives here." },
-    {
-      target: "#nav-admin",
-      title: "Admin console",
-      body: "Admins manage user accounts here — roles, access, enable/disable.",
-    },
-    { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from Help." },
-    { target: "#signout-btn", title: "That's it!", body: "Sign out here when you're done. Welcome aboard 🎉" },
-  ],
+  steps: [...SITE_HIGHLIGHTS],
 };
 
-// Per-page tours, keyed by hash route — auto-started once on first visit to that page.
+// Per-page tours, keyed by hash route — auto-started once on first visit to that page. Built from the
+// same shared highlight points (tour-highlights.js / TM-178); we just stamp each route's tour id on.
 const PAGE_TOURS = {
-  "#/admin": {
-    id: "admin",
-    steps: [
-      { title: "Admin users console", body: "Everything you need to manage who can access the app." },
-      { target: ".tm-stats", title: "At a glance", body: "Live totals: users, admins, enabled and disabled accounts." },
-      { target: ".tm-toolbar", title: "Find anyone", body: "Search by email or name, filter by role/status, and sort." },
-      {
-        target: ".tm-table tbody .tm-actions",
-        title: "Per-user actions",
-        body: "Enable/disable an account or change its role — each behind a confirm, with undo.",
-      },
-    ],
-  },
-  "#/home": {
-    id: "home",
-    steps: [{ target: "#me", title: "Your home", body: "Your verified identity and profile, fetched from the backend." }],
-  },
+  "#/admin": { id: "admin", steps: [...PAGE_HIGHLIGHTS["#/admin"]] },
+  "#/home": { id: "home", steps: [...PAGE_HIGHLIGHTS["#/home"]] },
 };
 
 const HOME_ROUTES = new Set(["", "#", "#/", "#/home"]);
