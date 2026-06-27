@@ -1,6 +1,6 @@
 // In-app theme switcher UI (TM-298) — the theme picker shown on the #/profile page.
 //
-// Theme is otherwise config-only (config.js `theme`, default "doodle") with a dev `?theme=` URL
+// Theme is otherwise config-only (config.js `theme`, default "sketch") with a dev `?theme=` URL
 // override that's UNREACHABLE in the WebView app (no address bar), so mobile users had no way to
 // change the look. This adds a user-facing "Appearance" section with a select letting them pick
 // clean / doodle / sketch.
@@ -41,7 +41,7 @@ function currentTheme(api) {
   const fromDom = document.documentElement.dataset.theme;
   if (api && api.ALLOWED.indexOf(fromDom) !== -1) return fromDom;
   // Fall back to the configured/default theme if the DOM hasn't been stamped for any reason.
-  return api ? api.activeTheme(window.TEAMMARHABA_CONFIG) : "doodle";
+  return api ? api.activeTheme(window.TEAMMARHABA_CONFIG) : "sketch";
 }
 
 /**

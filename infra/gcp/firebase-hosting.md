@@ -34,8 +34,8 @@ hardcoded in the repo):
 - **Active theme** — the `THEME` repo variable (`window.TEAMMARHABA_CONFIG.theme`, TM-212).
 
 **Switching the live theme:** set the **`THEME`** repo variable
-(Settings → Secrets and variables → Actions → Variables) to **`doodle`** or
-**`clean`** and redeploy. It defaults to **`doodle`** when the variable is unset.
+(Settings → Secrets and variables → Actions → Variables) to **`sketch`**, **`doodle`** or
+**`clean`** and redeploy. It defaults to **`sketch`** (the hand-drawn wireframe) when the variable is unset.
 See [CONTRIBUTING.md → Switching the live theme](../../CONTRIBUTING.md#switching-the-live-theme).
 
 ## Rollback (previous release)

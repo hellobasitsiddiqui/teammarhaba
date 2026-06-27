@@ -10,9 +10,9 @@ import { ADMIN, TARGET } from "../fixtures.mjs";
 // pixels. It rides the existing E2E workflow (main + manual dispatch), never the PR gate.
 //
 // How it flips themes WITHOUT a redeploy: the TM-216 dev override in theme.js. serve.mjs injects an
-// e2e config with NO `theme` key, so config resolves to the default ("doodle"). Adding `?theme=clean`
-// (or `?theme=doodle`) to the URL query forces that theme at boot, layered over config. Because the
-// app hash-routes (`/#/...`), the query must sit BEFORE the hash: `/?theme=clean#/login`.
+// e2e config with NO `theme` key, so config resolves to the default ("sketch" since TM-323). Adding
+// `?theme=clean` (or `?theme=doodle`) to the URL query forces that theme at boot, layered over
+// config. Because the app hash-routes (`/#/...`), the query must sit BEFORE the hash: `/?theme=clean#/login`.
 //
 // Waits mirror the existing specs (TM-198 lesson — always wait for the async load to settle before
 // asserting): we wait for each view's container to be visible, and for signed-in pages we wait for
@@ -71,27 +71,27 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("the app boots in the configured theme", () => {
-  test("with no override, config resolves to the default doodle theme", async ({ page }) => {
+  test("with no override, config resolves to the default sketch theme", async ({ page }) => {
     // serve.mjs injects a config WITHOUT `theme`, so resolveTheme() falls back to DEFAULT_THEME.
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "doodle");
+    await expectTheme(page, "sketch");
 
-    // The contract helpers are published for reuse, and the default is doodle.
+    // The contract helpers are published for reuse, and the default is sketch (TM-323).
     const contract = await page.evaluate(() => ({
       def: window.TeamMarhabaTheme?.DEFAULT_THEME,
       allowed: window.TeamMarhabaTheme?.ALLOWED,
     }));
-    expect(contract.def).toBe("doodle");
+    expect(contract.def).toBe("sketch");
     expect(contract.allowed).toEqual(["clean", "doodle", "sketch"]);
   });
 
   test("an unknown override value is ignored (falls back to the configured theme)", async ({ page }) => {
-    // `?theme=neon` isn't ALLOWED → ignored → config's default (doodle) wins. A bad value never
+    // `?theme=neon` isn't ALLOWED → ignored → config's default (sketch) wins. A bad value never
     // breaks or blanks the page.
     await page.goto("/?theme=neon#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "doodle");
+    await expectTheme(page, "sketch");
   });
 });
 

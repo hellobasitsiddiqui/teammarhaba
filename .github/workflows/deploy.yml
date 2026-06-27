@@ -113,12 +113,13 @@ jobs:
           grep buildVersion web/dist/assets/config.js
 
       # Inject the active visual theme into the BUILT config.js (same seam as the backend URL /
-      # build version above), so an operator switches the live theme — `clean` or `doodle` — by
-      # setting the THEME repo variable and redeploying, with NO code change (TM-212). Surfaces as
-      # window.TEAMMARHABA_CONFIG.theme; the web app (TM-210) falls back to `doodle` for any unknown
-      # value, so we pass THEME through as-is and DON'T validate it here. Defaults to `doodle` when
-      # the THEME variable is unset (vars.THEME -> empty -> `doodle`), so an unconfigured deploy
-      # serves the social-events MVP look (TM-215); set the THEME repo var to `clean` to switch back.
+      # build version above), so an operator switches the live theme — `clean`, `doodle` or `sketch`
+      # — by setting the THEME repo variable and redeploying, with NO code change (TM-212). Surfaces
+      # as window.TEAMMARHABA_CONFIG.theme; the web app (TM-210) falls back to `sketch` for any
+      # unknown value, so we pass THEME through as-is and DON'T validate it here. Defaults to `sketch`
+      # when the THEME variable is unset (vars.THEME -> empty -> `sketch`), so an unconfigured deploy
+      # serves the hand-drawn wireframe product direction (TM-323); set the THEME repo var to `clean`
+      # or `doodle` to switch.
       # Robust to whether config.js
       # already carries a `theme` field (TM-210 adds `theme: "clean"`): if present we overwrite it
       # (exactly like apiBaseUrl/buildVersion); if not, we insert it after apiBaseUrl so the live
@@ -127,7 +128,7 @@ jobs:
         env:
           THEME: ${{ vars.THEME }}
         run: |
-          THEME="${THEME:-doodle}"
+          THEME="${THEME:-sketch}"
           echo "Theme: ${THEME}"
           if grep -q "theme:" web/dist/assets/config.js; then
             sed -i "s/theme: \"[^\"]*\"/theme: \"${THEME}\"/" web/dist/assets/config.js

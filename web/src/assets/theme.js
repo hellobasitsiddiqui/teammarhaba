@@ -18,9 +18,9 @@
 //
 // ── How the active theme is chosen (FIXED CONTRACT — TM-212 depends on this) ───────────────────
 //   Read `window.TEAMMARHABA_CONFIG.theme`. Allowed values: "clean" | "doodle" | "sketch".
-//   • unset / missing  → "doodle"  (the default — an unconfigured deploy looks like the MVP; TM-215)
-//   • unknown value    → "doodle"  (fall back to the default; never break the page / never blank)
-//   `clean` stays fully selectable by asking for it explicitly (config/THEME = "clean").
+//   • unset / missing  → "sketch"  (the default — the hand-drawn wireframe product direction; TM-323)
+//   • unknown value    → "sketch"  (fall back to the default; never break the page / never blank)
+//   `clean`/`doodle` stay fully selectable by asking for them explicitly (config/THEME = "clean").
 //   So `resolveTheme(cfg)` always returns a name that exists in the registry.
 //
 // ── Dev/test override (TM-216) ────────────────────────────────────────────────────────────────
@@ -38,17 +38,16 @@
   "use strict";
 
   // Registry of known theme names. Structured as a map so each can carry metadata later (e.g. a
-  // human label, asset hints); the value is just a descriptor for now. "doodle" is reserved here
-  // as an allowed config value so TM-212 can inject it before its CSS lands — it still resolves to
-  // a known name and falls through to the base look until its token block exists.
+  // human label, asset hints); the value is just a descriptor for now. All three families have a
+  // live token block in styles.css, so any is a valid config value that renders fully.
   var THEMES = {
     clean: { label: "Clean" },
     // Now live (TM-213): the doodle token block + wobble skin exist in styles.css, so doodle is a
     // first-class registered family, not just an allowed-but-unstyled request.
     doodle: { label: "Doodle" },
-    // Now live (TM-236): a graph-paper "sketch / blueprint" family — a light-blue ruled grid
-    // behind a hand-drawn wireframe (reuses the #wobble-soft skin). Its token block lives in
-    // styles.css; doodle stays the default, sketch is an additional selectable option.
+    // Now the DEFAULT (TM-323): a hand-drawn pencil-sketch WIREFRAME family — grayscale "napkin
+    // mockup" (sketchy ink-pencil borders/buttons, hand-lettered faces, faint ruled paper, reuses
+    // the #wobble-soft skin). Its token block lives in styles.css; clean/doodle stay selectable.
     sketch: { label: "Sketch" },
   };
 
@@ -56,11 +55,12 @@
   // name can be a *valid request* (passes the contract) before its full registry entry/CSS exists.
   var ALLOWED = ["clean", "doodle", "sketch"];
 
-  // The intended default (TM-215): an unconfigured deploy serves "doodle" (the social-events MVP
-  // look). It's also the hard fallback for an unset/unknown config value — a real, registered,
-  // working theme, so the page never renders blank. `clean` is still fully selectable by asking
-  // for it explicitly (config theme / THEME repo var = "clean").
-  var DEFAULT_THEME = "doodle";
+  // The intended default (TM-323): an unconfigured deploy serves "sketch" (the hand-drawn
+  // pencil-sketch WIREFRAME look — the product direction). It's also the hard fallback for an
+  // unset/unknown config value — a real, registered, working theme, so the page never renders
+  // blank. `clean`/`doodle` are still fully selectable by asking for them explicitly
+  // (config theme / THEME repo var = "clean"|"doodle").
+  var DEFAULT_THEME = "sketch";
 
   /** Resolve the active theme name from a config object, applying the default + fallback rules.
    *  Always returns one of ALLOWED — never throws, never returns an unknown value. */
