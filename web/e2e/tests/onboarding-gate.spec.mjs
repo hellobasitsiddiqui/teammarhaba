@@ -73,9 +73,20 @@ test("a brand-new user is gated, completes the profile, and then enters the app"
   await page.click("#onboarding-form button[type=submit]");
   await saved;
 
-  // ENTERED: the gate lifts → the app home view shows, the gate is gone, the nav links return.
+  // The onboarding gate lifts, but a brand-new user now hits the SECOND gate — terms acceptance
+  // (TM-170): they haven't accepted the current terms version yet. Accept it to reach the app.
+  await expect(page.locator("#terms-view")).toBeVisible();
+  await expect(page.locator("#auth-signed-in")).toBeHidden();
+  const accepted = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/me/accept-terms") && r.request().method() === "POST",
+  );
+  await page.click("#terms-accept");
+  await accepted;
+
+  // ENTERED: both gates cleared → the app home view shows, the gates are gone, the nav links return.
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await expect(page.locator("#onboarding-view")).toBeHidden();
+  await expect(page.locator("#terms-view")).toBeHidden();
   await expect(page.locator("#nav-profile")).toBeVisible();
 
   // It persisted: name → display_name, location → city, age, and the onboarding flag are on the row.

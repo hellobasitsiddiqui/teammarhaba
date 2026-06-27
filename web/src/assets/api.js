@@ -264,6 +264,31 @@ export async function completeOnboarding() {
 }
 
 /**
+ * POST /api/v1/me/accept-terms — record the caller's acceptance of a terms/privacy `version`
+ * (TM-170 client → TM-163 endpoint). The server stamps the acceptance time and returns the updated
+ * {@link MeResponse}, now carrying `termsAcceptedVersion === version`, so the caller can drop the
+ * acceptance gate and proceed. Identity comes from the Bearer token, never the body.
+ *
+ * @param {string} version the terms version being accepted (e.g. the `currentTermsVersion` from /me).
+ * @returns {Promise<Object>} the updated MeResponse.
+ * @throws {ApiError} on a non-2xx response (a 401 will already have refreshed/redirected via apiFetch).
+ */
+export async function acceptTerms(version) {
+  const response = await apiFetch("/api/v1/me/accept-terms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ version }),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Accept terms failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
  * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
  * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending
@@ -313,6 +338,7 @@ if (typeof window !== "undefined") {
     updateMe,
     submitOnboarding,
     completeOnboarding,
+    acceptTerms,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,

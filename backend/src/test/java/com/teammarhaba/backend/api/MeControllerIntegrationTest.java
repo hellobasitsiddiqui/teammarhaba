@@ -261,6 +261,20 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.termsAcceptedAt").doesNotExist());
     }
 
+    /**
+     * GET /me always reports the currently published terms version (TM-170) from the
+     * app.terms.current-version config constant, so the client can gate the app until the user's
+     * accepted version matches. A fresh user has never accepted, so currentTermsVersion is present
+     * while termsAcceptedVersion is absent — exactly the "needs acceptance" signal the gate keys on.
+     */
+    @Test
+    void meExposesCurrentTermsVersionForTheGate() throws Exception {
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-current-terms", "grace@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currentTermsVersion").value("2026-06-01"))
+                .andExpect(jsonPath("$.termsAcceptedVersion").doesNotExist());
+    }
+
     @Test
     void onboardingCompleteSetsFlagAndVerifiesAgeWhenAgeOnRecord() throws Exception {
         var who = caller("uid-onboard", "ada@example.com");

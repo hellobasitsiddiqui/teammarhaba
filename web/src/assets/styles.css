@@ -1533,6 +1533,36 @@ body {
     margin-top: 1rem;
 }
 
+/* Terms/privacy acceptance gate (TM-170). Reuses the onboarding card; theme-safe (tokens only,
+   so it reads right across clean / doodle / sketch). The version line is a quiet status; the
+   Terms/Privacy links use the accent token like the other in-app links. */
+.tm-terms-version {
+    margin-top: 0.25rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-terms-links {
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.tm-terms-links a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.tm-terms-links a:hover,
+.tm-terms-links a:focus-visible {
+    color: var(--fg);
+}
+
+.tm-terms-card .tm-form-actions {
+    margin-top: 1.5rem;
+}
+
 /* Single-column form: the gate has only three fields, so don't split them into the profile grid. */
 .tm-onboarding-form .tm-form-grid {
     grid-template-columns: 1fr;

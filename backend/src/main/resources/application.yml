@@ -93,6 +93,12 @@ springdoc:
 # Prod can tighten any value via the environment. A non-positive ttl/length/limit fails startup
 # loudly (Bean Validation in EmailCodeProperties) rather than silently weakening the flow.
 app:
+  # Current published terms/privacy version (TM-170). The client gates the app until the user's
+  # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
+  # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as
+  # `currentTermsVersion`. Blank/unset falls back to the shipped default in TermsProperties.
+  terms:
+    current-version: ${APP_TERMS_CURRENT_VERSION:2026-06-01}
   auth:
     email-code:
       length: ${EMAIL_CODE_LENGTH:6}            # digits in the one-time code (matches the SMS UX)

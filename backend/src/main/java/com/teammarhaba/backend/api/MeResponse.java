@@ -25,6 +25,10 @@ import java.time.Instant;
  * @param onboardingCompleted  whether first-run onboarding is finished (TM-163); defaults to {@code false}
  * @param termsAcceptedVersion the terms version the user accepted (TM-163), or {@code null} if never
  * @param termsAcceptedAt      when that terms version was accepted (TM-163), or {@code null} if never
+ * @param currentTermsVersion  the <strong>currently published</strong> terms version (TM-170), from the
+ *                             {@code app.terms.current-version} config constant. The client gates the app
+ *                             whenever this differs from {@code termsAcceptedVersion} (never-accepted or a
+ *                             newer version bumped), forcing (re-)acceptance. Always present.
  * @param ageVerified          whether the user has self-attested their age (TM-163); defaults to {@code false}
  * @param accountState         read-only account state sourced live from Firebase (TM-164): email/phone
  *                             verified, MFA enrolled, photo URL, last login. Never our own truth — read
@@ -50,6 +54,7 @@ public record MeResponse(
         boolean onboardingCompleted,
         String termsAcceptedVersion,
         Instant termsAcceptedAt,
+        String currentTermsVersion,
         boolean ageVerified,
         AccountState accountState,
         Instant lastActiveAt) {}

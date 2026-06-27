@@ -129,6 +129,9 @@
           "city" : {
             "type" : "string"
           },
+          "currentTermsVersion" : {
+            "type" : "string"
+          },
           "displayName" : {
             "type" : "string"
           },
