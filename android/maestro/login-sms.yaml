@@ -55,12 +55,15 @@ env:
 # Reach a clean signed-out state without clearing app data: if a previous flow (or warm session) left
 # us signed in, sign out first. Both steps are optional so a fresh, already-signed-out launch skips
 # them. (We must NOT clearState here — see the header note.)
-- tapOn:
-    id: "signout-btn"
-    optional: true
-- assertVisible:
-    id: "auth-signed-out"
-    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "auth-signed-in"
+    commands:
+      - tapOn:
+          id: "nav-toggle"
+      - tapOn:
+          id: "signout-btn"
 
 # Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
 - assertVisible: "Sign in"
@@ -79,6 +82,7 @@ env:
 - tapOn:
     id: "phone" # <input id="phone" type="tel">
 - inputText: ${TEST_PHONE}
+- hideKeyboard   # IME covers the send button after typing; dismiss before tapping
 - tapOn:
     id: "sms-send-btn" # "Text me a code"
 - takeScreenshot: 03-sms-requested
@@ -92,13 +96,21 @@ env:
 - tapOn:
     id: "sms-code" # <input id="sms-code">
 - inputText: ${SMS_CODE}
+- hideKeyboard   # same: IME covers the Sign in button
 - takeScreenshot: 04-code-entered
 - tapOn:
     id: "sms-verify-btn" # "Sign in"
 
-# Signed-in end state.
+# First-run product tour (TM-135) auto-fires on home; its .tm-tour-blocker overlay covers the page.
+# Not suppressed in the native app (suppressAutoTours is web-harness-only), so dismiss it here.
+- tapOn:
+    text: "Skip"
+    optional: true
+
+# Signed-in end state. NB: signout-btn is inside the collapsed mobile nav menu (nav-toggle), so it
+# is NOT directly visible — assert the home "signed in" marker that is.
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - assertNotVisible:
     id: "auth-signed-out"
 - assertVisible:

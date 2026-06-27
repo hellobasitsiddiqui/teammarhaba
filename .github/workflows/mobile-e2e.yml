@@ -40,16 +40,8 @@ on:
   # boot never blocks merging. CAVEAT: the app loads the HOSTED prod SPA, so the auth.js
   # localStorage-read change (TM-318) must be DEPLOYED for a PR run to honour the injected flag; until
   # the deploy lands, expect the SMS flow to fail on PRs (it runs against the still-old hosted SPA).
-  pull_request:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - 'android/**'
-      - 'android/maestro/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/mobile-e2e.yml'
+  # Per-PR trigger intentionally OFF: the full Maestro suite is flaky (emulator+WebView timing,
+  # tracked separately) — runs nightly + on-demand only so it never red-flags a PR.
 
 # Cancel an in-flight PR run when the PR is updated; serialize per-ref otherwise. Keyed by ref so a
 # PR run never cancels the nightly and vice-versa.

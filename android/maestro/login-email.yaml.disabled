@@ -26,13 +26,18 @@ env:
 # the signed-out state by signing out (if a prior flow left a session) instead of clearing app data.
 - launchApp:
     clearState: false
-- tapOn:
-    id: "signout-btn"
-    optional: true
-- assertVisible:
-    id: "auth-signed-out"
-    optional: true
 - takeScreenshot: 01-launch
+# If a previous flow left a session, sign out via the nav menu (signout-btn lives inside nav-toggle
+# on the mobile layout). Conditional so a fresh signed-out launch skips it.
+- runFlow:
+    when:
+      visible:
+        id: "auth-signed-in"
+    commands:
+      - tapOn:
+          id: "nav-toggle"
+      - tapOn:
+          id: "signout-btn"
 
 # The SPA boots into the signed-out auth card. "Email me a code" is the DEFAULT front door (TM-234);
 # the password field is hidden until "Try another way".
@@ -45,6 +50,7 @@ env:
 - tapOn:
     id: "email" # <input id="email" type="email">
 - inputText: ${TEST_EMAIL}
+- hideKeyboard
 - tapOn:
     text: "Email me a code"
 - takeScreenshot: 03-code-requested
@@ -58,6 +64,7 @@ env:
 - tapOn:
     id: "emailcode-code" # <input id="emailcode-code">
 - inputText: ${EMAIL_CODE}
+- hideKeyboard
 - takeScreenshot: 04-code-entered
 - tapOn:
     id: "emailcode-verify-btn" # "Sign in"

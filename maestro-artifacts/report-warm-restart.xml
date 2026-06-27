@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name="Test Suite" device="teammarhaba" tests="1" failures="1" time="98.0">
+    <testcase id="warm-restart" name="warm-restart" classname="warm-restart" file="android/maestro/warm-restart.yaml" time="98.0" status="ERROR">
+      <failure>Assertion is false: id: auth-signed-in is visible</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
