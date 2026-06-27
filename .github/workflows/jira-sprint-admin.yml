@@ -1,40 +1,48 @@
 # TM-320 — Jira sprint admin from CI.
 #
-# Sprint start / close / set-goal are UI-only through the Atlassian MCP connector (no sprint tool), so
-# the agent normally has to ask a human to click in the board UI. The Jira Agile REST API supports all
-# of it; this workflow drives it via the existing JIRA_* secrets (same ones jira-merge-to-done.yml
-# uses) — the token never leaves CI. Manual dispatch only.
+# Sprint create / start / close / set-goal are UI-only through the Atlassian MCP connector (no sprint
+# tool), so the agent normally has to ask a human to click in the board UI. The Jira Agile REST API
+# supports all of it; this workflow drives it via the existing JIRA_* secrets (same ones
+# jira-merge-to-done.yml uses) — the token never leaves CI. Manual dispatch only.
 name: Jira sprint admin
 
 on:
   workflow_dispatch:
     inputs:
-      sprint_id:
-        description: "Sprint ID (numeric, e.g. 302)"
-        required: true
       action:
         description: "What to do"
         required: true
         type: choice
         options:
+          - create        # create a NEW sprint (by name) and start it immediately
+          - start         # activate an existing future sprint
           - close
-          - start
           - set-goal
+      sprint_id:
+        description: "Sprint ID (numeric) — required for start/close/set-goal; ignored for create"
+        required: false
+      name:
+        description: "Sprint name — required for create (e.g. 'Sprint 14 — First Impressions')"
+        required: false
       goal:
-        description: "Sprint goal (for set-goal; optional when starting)"
+        description: "Sprint goal (for create / set-goal; optional when starting)"
         required: false
       start_date:
-        description: "Start date ISO8601 (start only; default: now)"
+        description: "Start date ISO8601 (create/start; default: now)"
         required: false
       end_date:
-        description: "End date ISO8601 (start only; default: now + 14 days)"
+        description: "End date ISO8601 (create/start; default: now + 7 days)"
         required: false
+      board_id:
+        description: "Scrum board id for create (default: 1)"
+        required: false
+        default: "1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: jira-sprint-admin-${{ inputs.sprint_id }}
+  group: jira-sprint-admin
   cancel-in-progress: false
 
 jobs:
@@ -46,11 +54,13 @@ jobs:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          SPRINT_ID: ${{ inputs.sprint_id }}
           ACTION: ${{ inputs.action }}
+          SPRINT_ID: ${{ inputs.sprint_id }}
+          NAME: ${{ inputs.name }}
           GOAL: ${{ inputs.goal }}
           START_DATE: ${{ inputs.start_date }}
           END_DATE: ${{ inputs.end_date }}
+          BOARD_ID: ${{ inputs.board_id }}
         run: |
           set -euo pipefail
 
@@ -58,43 +68,51 @@ jobs:
             echo "::error::JIRA_BASE_URL / JIRA_USER_EMAIL / JIRA_API_TOKEN secrets are not all set."
             exit 1
           fi
-          case "$SPRINT_ID" in
-            ''|*[!0-9]*) echo "::error::sprint_id must be numeric (got '$SPRINT_ID')."; exit 1 ;;
-          esac
+
+          AUTH="${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}"
+          api() {  # api METHOD PATH [JSON_BODY]
+            local method="$1" path="$2" body="${3:-}"
+            if [ -n "$body" ]; then
+              curl -sS -o /tmp/resp.json -w '%{http_code}' -u "$AUTH" -X "$method" \
+                -H 'Content-Type: application/json' --data "$body" "${JIRA_BASE_URL}${path}"
+            else
+              curl -sS -o /tmp/resp.json -w '%{http_code}' -u "$AUTH" -X "$method" "${JIRA_BASE_URL}${path}"
+            fi
+          }
+          ok() { case "$1" in 2*) return 0 ;; *) return 1 ;; esac }
+
+          SD="${START_DATE:-$(date -u +%Y-%m-%dT%H:%M:%S.000Z)}"
+          ED="${END_DATE:-$(date -u -d '+7 days' +%Y-%m-%dT%H:%M:%S.000Z)}"
 
           case "$ACTION" in
-            close)
-              BODY="$(jq -n '{state:"closed"}')"
-              ;;
-            start)
-              SD="${START_DATE:-$(date -u +%Y-%m-%dT%H:%M:%S.000Z)}"
-              ED="${END_DATE:-$(date -u -d '+14 days' +%Y-%m-%dT%H:%M:%S.000Z)}"
+            create)
+              if [ -z "${NAME:-}" ]; then echo "::error::create requires the 'name' input."; exit 1; fi
+              CREATE_BODY="$(jq -n --arg n "$NAME" --argjson b "${BOARD_ID:-1}" '{name:$n, originBoardId:$b}')"
+              code="$(api POST /rest/agile/1.0/sprint "$CREATE_BODY")"
+              echo "create HTTP ${code}"; cat /tmp/resp.json; echo
+              ok "$code" || { echo "::error::create failed (HTTP ${code})"; exit 1; }
+              NEWID="$(jq -r '.id' /tmp/resp.json)"
+              echo "::notice::created sprint ${NEWID} ('${NAME}') — now starting it"
               if [ -n "${GOAL:-}" ]; then
-                BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" --arg g "$GOAL" '{state:"active",startDate:$sd,endDate:$ed,goal:$g}')"
+                START_BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" --arg g "$GOAL" '{state:"active",startDate:$sd,endDate:$ed,goal:$g}')"
               else
-                BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" '{state:"active",startDate:$sd,endDate:$ed}')"
+                START_BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" '{state:"active",startDate:$sd,endDate:$ed}')"
               fi
+              code="$(api POST "/rest/agile/1.0/sprint/${NEWID}" "$START_BODY")"
+              echo "start HTTP ${code}"; cat /tmp/resp.json; echo
+              ok "$code" || { echo "::error::created sprint ${NEWID} but failed to start (HTTP ${code})"; exit 1; }
+              echo "::notice::sprint ${NEWID} ('${NAME}') created + started. Use this id to pull issues in."
               ;;
-            set-goal)
-              if [ -z "${GOAL:-}" ]; then echo "::error::set-goal requires the 'goal' input."; exit 1; fi
-              BODY="$(jq -n --arg g "$GOAL" '{goal:$g}')"
+            start|close|set-goal)
+              case "${SPRINT_ID:-}" in ''|*[!0-9]*) echo "::error::${ACTION} requires a numeric sprint_id."; exit 1 ;; esac
+              case "$ACTION" in
+                close)    BODY="$(jq -n '{state:"closed"}')" ;;
+                start)    if [ -n "${GOAL:-}" ]; then BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" --arg g "$GOAL" '{state:"active",startDate:$sd,endDate:$ed,goal:$g}')"; else BODY="$(jq -n --arg sd "$SD" --arg ed "$ED" '{state:"active",startDate:$sd,endDate:$ed}')"; fi ;;
+                set-goal) if [ -z "${GOAL:-}" ]; then echo "::error::set-goal requires the 'goal' input."; exit 1; fi; BODY="$(jq -n --arg g "$GOAL" '{goal:$g}')" ;;
+              esac
+              code="$(api POST "/rest/agile/1.0/sprint/${SPRINT_ID}" "$BODY")"
+              echo "${ACTION} HTTP ${code}"; cat /tmp/resp.json; echo
+              ok "$code" && echo "::notice::sprint ${SPRINT_ID}: ${ACTION} OK" || { echo "::error::sprint ${ACTION} failed (HTTP ${code})"; exit 1; }
               ;;
-            *)
-              echo "::error::unknown action '$ACTION'"; exit 1 ;;
-          esac
-
-          echo "POST ${JIRA_BASE_URL}/rest/agile/1.0/sprint/${SPRINT_ID}"
-          echo "body: ${BODY}"
-          code="$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
-            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
-            -X POST -H 'Content-Type: application/json' \
-            --data "${BODY}" \
-            "${JIRA_BASE_URL}/rest/agile/1.0/sprint/${SPRINT_ID}" || echo "000")"
-
-          echo "HTTP ${code}"
-          cat /tmp/resp.json 2>/dev/null || true
-          echo
-          case "$code" in
-            2*) echo "::notice::sprint ${SPRINT_ID}: ${ACTION} OK (HTTP ${code})" ;;
-            *)  echo "::error::sprint ${ACTION} failed (HTTP ${code})"; exit 1 ;;
+            *) echo "::error::unknown action '$ACTION'"; exit 1 ;;
           esac
