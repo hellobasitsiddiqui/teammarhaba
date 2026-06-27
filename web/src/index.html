@@ -187,6 +187,12 @@
              completed. -->
         <section id="onboarding-view" class="onboarding-view" aria-label="Complete your profile" hidden></section>
 
+        <!-- Terms/privacy acceptance gate (TM-170): the #/terms view a signed-in, onboarded user who
+             hasn't accepted the current terms version is forced to (a new user, or anyone after a
+             version bump). terms.js (imported by router.js) builds the version + accept UI into this
+             container; router.js owns visibility + the gating that blocks the app until accepted. -->
+        <section id="terms-view" class="terms-view" aria-label="Accept terms" hidden></section>
+
         <!-- Help view (TM-255): the static #/help guide. help.js (imported by router.js) builds the
              content into this container on first entry; router.js owns its visibility. Reachable
              signed-in or signed-out (static, framework-free content). -->

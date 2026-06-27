@@ -19,6 +19,8 @@ import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterProfile } from "./profile.js";
 import { enterOnboarding } from "./onboarding.js";
+import { enterTerms } from "./terms.js";
+import { needsTermsAcceptance } from "./terms-gate.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
 import { getMe } from "./api.js";
@@ -32,6 +34,10 @@ const PROFILE = "#/profile";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
 // here and can't reach any other app view until they complete it.
 const ONBOARDING = "#/onboarding";
+// Terms/privacy acceptance gate (TM-170) — protected; a signed-in, onboarded user who hasn't
+// accepted the current terms version (new user, or anyone after a version bump) is forced here and
+// can't reach any other app view until they accept. Sits AFTER the onboarding gate in the chain.
+const TERMS = "#/terms";
 // Static Help guide (TM-255) — PUBLIC: reachable signed-in or signed-out, so it's deliberately NOT
 // in PROTECTED. The onboarding gate (below) still wins over it for a signed-in, not-yet-onboarded
 // user, so the gate can't be side-stepped via #/help.
@@ -40,7 +46,7 @@ const HELP = "#/help";
 // it's a QA enabler reached from the profile/settings area, not a public page, and the push/token
 // readout only makes sense for a signed-in session. It is NOT promoted in the main nav (unobtrusive).
 const DIAGNOSTICS = "#/diagnostics";
-const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING, DIAGNOSTICS]);
+const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
@@ -50,12 +56,20 @@ let isAdmin = false;
 // guard. Fails OPEN (true = not gated) on a lookup error: a backend hiccup must never trap a user
 // behind the gate with no way through — the backend is still the real authority on what they can do.
 let isOnboarded = true;
+// Whether the signed-in caller still needs to accept the current terms version (TM-170). Resolved
+// from GET /api/v1/me alongside onboarding on each auth change (the pure rule in terms-gate.js),
+// so the gate decision is synchronous in the guard. Fails CLOSED here? No — fails OPEN (false = not
+// gated): a /me hiccup leaves currentTermsVersion absent and needsTermsAcceptance() returns false,
+// so a backend hiccup never traps a user behind the terms gate. The backend stays the real authority.
+let needsTerms = false;
 // Whether the admin console is currently mounted/loaded, so we (re)load it only on entry.
 let adminActive = false;
 // Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
 let profileActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
 let onboardingActive = false;
+// Same lifecycle for the terms gate view (TM-170): mount once, (re)load on entry.
+let termsActive = false;
 // Same idea for the static Help view (TM-255): mount once on entry, reset on leaving.
 let helpActive = false;
 // Same lifecycle for the QA diagnostics view (TM-297): mount once on entry, refresh its live readouts
@@ -70,7 +84,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -94,6 +108,7 @@ function render() {
   const adminView = $("admin-view");
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
+  const termsView = $("terms-view");
   const helpView = $("help-view");
   const diagnosticsView = $("diagnostics-view");
   if (loginView) loginView.hidden = route !== LOGIN;
@@ -101,12 +116,14 @@ function render() {
   if (adminView) adminView.hidden = route !== ADMIN;
   if (profileView) profileView.hidden = route !== PROFILE;
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
+  if (termsView) termsView.hidden = route !== TERMS;
   if (helpView) helpView.hidden = route !== HELP;
   if (diagnosticsView) diagnosticsView.hidden = route !== DIAGNOSTICS;
 
-  // While the first-login gate is up (signed in but not onboarded — TM-250), suppress the in-app nav
-  // links so the user can't side-step the gate; only the sign-out control stays (never trap a user).
-  const gated = signedIn && !isOnboarded;
+  // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
+  // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
+  // (and the public Help link, so they can read the terms) stays. Never trap a user.
+  const gated = signedIn && (!isOnboarded || needsTerms);
 
   // Nav reflects auth state: a sign-in link when signed out, the sign-out control when in.
   const navSignIn = $("nav-signin");
@@ -162,6 +179,25 @@ function guard() {
     go(intended);
     return;
   }
+  // Terms/privacy acceptance gate (TM-170). After onboarding, a signed-in user who hasn't accepted
+  // the current terms version is forced to #/terms and can't reach any other app view until they
+  // accept. #/help is allowed through so they can actually READ the terms/privacy via the links in
+  // the gate card (Help is the public legal/privacy surface, TM-242). Like the onboarding gate, the
+  // INTENDED route is preserved so the user lands where they were headed once they accept.
+  if (signedIn && isOnboarded && needsTerms && route !== TERMS && route !== HELP) {
+    if (route !== LOGIN && !sessionStorage.getItem(INTENDED_KEY)) {
+      sessionStorage.setItem(INTENDED_KEY, route);
+    }
+    go(TERMS);
+    return;
+  }
+  // Conversely, a user who has accepted (or isn't gated) has no business on the terms gate — move on.
+  if (signedIn && !needsTerms && route === TERMS) {
+    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
+    sessionStorage.removeItem(INTENDED_KEY);
+    go(intended);
+    return;
+  }
   if (signedIn && route === LOGIN) {
     // Land where the user was headed if they deep-linked a protected route before signing in;
     // otherwise by role — an ADMIN goes to the console, everyone else to home (TM-141).
@@ -208,6 +244,17 @@ function guard() {
   } else {
     onboardingActive = false;
   }
+  // Terms acceptance gate view (TM-170): mount on entry, passing the `done` callback the gate invokes
+  // after a successful acceptance. `done` flips our local needsTerms flag (the server now records this
+  // version as accepted) and re-guards, which moves the now-accepted user on to their intended route.
+  if (route === TERMS) {
+    if (!termsActive) {
+      termsActive = true;
+      enterTerms(onTermsComplete);
+    }
+  } else {
+    termsActive = false;
+  }
   // Static Help view (TM-255): mount its content once on entry (idempotent — there's no per-visit
   // data to load), reset on leaving so a future entry re-mounts if needed.
   if (route === HELP) {
@@ -237,6 +284,13 @@ function onOnboardingComplete() {
   // The profile gate flips the same server onboarding flag the tour gates on (TM-171): keep tours in
   // step so the first-run tour won't auto-pop right after the gate lifts.
   window.tmTours?.setOnboardingCompleted?.(true);
+  guard();
+}
+
+/** Invoked by the terms gate once the user accepts (TM-170): drop the gate + re-route. */
+function onTermsComplete() {
+  needsTerms = false;
+  termsActive = false; // allow a future re-mount (e.g. a later version bump → re-gated user)
   guard();
 }
 
@@ -272,9 +326,9 @@ function settleOrFallback(promise, ms, fallback) {
   });
 }
 
-// Resolve the role (from the token) AND onboarding state (from GET /me) so the admin route/nav AND the
-// first-login gate (TM-250) decisions use fresh values. Used for auth-state changes (sign-in/out,
-// reload restore, promotion).
+// Resolve the role (from the token) AND onboarding + terms-acceptance state (from GET /me) so the
+// admin route/nav, the first-login gate (TM-250) AND the terms gate (TM-170) decisions use fresh
+// values. Used for auth-state changes (sign-in/out, reload restore, promotion).
 //
 // TM-307: navigation must NOT block on these lookups. Previously this `await`ed both BEFORE the first
 // guard(), so a hanging token-exchange / `GET /me` in the Android WebView left the user stranded on
@@ -291,6 +345,7 @@ async function resolveRoleThenGuard() {
   if (!signedIn) {
     isAdmin = false;
     isOnboarded = true;
+    needsTerms = false;
     guard();
     return;
   }
@@ -315,6 +370,10 @@ async function resolveRoleThenGuard() {
 
   isAdmin = adminOutcome.value === "ADMIN";
   isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;
+  // Terms gate (TM-170): the SAME /me result tells us whether the user still needs to accept the
+  // current terms version. The pure rule (terms-gate.js) fails open (false) on a null/degraded /me,
+  // so a backend hiccup never traps a user behind the terms gate.
+  needsTerms = needsTermsAcceptance(onboardedOutcome.value);
 
   // Hand the resolved onboarding flag to the tours module (TM-171) so the first-run tour gates on
   // the server's durable "already onboarded" state — reusing the /me we just fetched rather than

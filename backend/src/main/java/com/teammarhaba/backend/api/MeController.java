@@ -8,6 +8,7 @@ import com.teammarhaba.backend.auth.FirebaseAccountStateService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.config.TermsProperties;
 import com.teammarhaba.backend.user.ProfileUpdate;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
@@ -43,7 +44,9 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code POST /me/onboarding} — the first-login profile gate (TM-250): atomically persists the
  *       three required minimum fields (name/location/age) and marks onboarding complete.</li>
  *   <li>{@code POST /me/accept-terms} — records the accepted terms version + acceptance time
- *       (TM-163).</li>
+ *       (TM-163). {@code GET /me} also reports the <strong>currently published</strong> terms version
+ *       ({@code currentTermsVersion}, TM-170) so the client can gate the app until the user has
+ *       accepted that version.</li>
  * </ul>
  *
  * <p>Identity ({@code uid}/{@code email}) always comes from the verified token, never the client.
@@ -61,16 +64,19 @@ public class MeController {
     private final EmailVerificationService emailVerificationService;
     private final FirebaseAccountStateService accountStateService;
     private final AuditService auditService;
+    private final TermsProperties termsProperties;
 
     MeController(
             UserService userService,
             EmailVerificationService emailVerificationService,
             FirebaseAccountStateService accountStateService,
-            AuditService auditService) {
+            AuditService auditService,
+            TermsProperties termsProperties) {
         this.userService = userService;
         this.emailVerificationService = emailVerificationService;
         this.accountStateService = accountStateService;
         this.auditService = auditService;
+        this.termsProperties = termsProperties;
     }
 
     /**
@@ -177,11 +183,11 @@ public class MeController {
      * {@code accountState} degrades to {@link AccountState#unknown()} (clients re-read it from
      * {@code GET /me}). {@code lastActiveAt} reflects whatever is on the row.
      */
-    private static MeResponse toResponse(User user) {
+    private MeResponse toResponse(User user) {
         return toResponse(user, AccountState.unknown());
     }
 
-    private static MeResponse toResponse(User user, AccountState accountState) {
+    private MeResponse toResponse(User user, AccountState accountState) {
         return new MeResponse(
                 user.getFirebaseUid(),
                 user.getEmail(),
@@ -198,6 +204,7 @@ public class MeController {
                 user.isOnboardingCompleted(),
                 user.getTermsAcceptedVersion(),
                 user.getTermsAcceptedAt(),
+                termsProperties.currentVersion(),
                 user.isAgeVerified(),
                 accountState,
                 user.getLastActiveAt());
