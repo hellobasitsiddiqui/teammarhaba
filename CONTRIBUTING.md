@@ -108,27 +108,27 @@ revision (roll back by revision). SemVer: **patch** = fix, **minor** = feature, 
 
 ## Switching the live theme
 
-The web app ships two visual themes — `clean` and `doodle` — and the active one is chosen by an
-operator at deploy time, with **no code change** (TM-212). The deploy injects the theme into the
+The web app ships three visual themes — `clean`, `doodle` and `sketch` — and the active one is chosen
+by an operator at deploy time, with **no code change** (TM-212). The deploy injects the theme into the
 built `web/src/assets/config.js` the same way it injects the backend API URL and build stamp, so it
 surfaces as `window.TEAMMARHABA_CONFIG.theme`.
 
-**To switch the live theme, set the `THEME` repo variable to `doodle` or `clean` and redeploy.**
+**To switch the live theme, set the `THEME` repo variable to `sketch`, `doodle` or `clean` and redeploy.**
 
 ```
 Settings → Secrets and variables → Actions → Variables → New repository variable
   Name:  THEME
-  Value: doodle      # or: clean
+  Value: sketch      # or: doodle, clean
 ```
 
 Then run the **Deploy** workflow (Actions → Deploy → Run) — the next deploy reads `vars.THEME` and
 bakes it into the live `config.js`. The value is passed through as-is; the web app falls back to
-`doodle` for any unknown value, so you don't need to validate it here.
+`sketch` for any unknown value, so you don't need to validate it here.
 
-**Default is `doodle`.** If the `THEME` variable is unset, the deploy injects `doodle`, so the live
-site has a defined theme day-one without anyone touching the variable. To switch to clean, set
-`THEME=clean` and redeploy. Like the build stamp, the value is resolved at deploy time and never
-hardcoded in the repo.
+**Default is `sketch`** (the hand-drawn pencil-sketch wireframe — the product direction; TM-323). If
+the `THEME` variable is unset, the deploy injects `sketch`, so the live site has a defined theme
+day-one without anyone touching the variable. To switch, set `THEME=doodle` or `THEME=clean` and
+redeploy. Like the build stamp, the value is resolved at deploy time and never hardcoded in the repo.
 
 ## Conventions reference
 
