@@ -13,6 +13,7 @@ import { currentUser } from "./auth.js";
 import { clear, confirmDialog, el, modal, copyToClipboard, relativeTime, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { confirmSensitiveAction } from "./biometric-confirm.js";
+import { renderAccountBadges } from "./account-badges.js";
 
 const FETCH_SIZE = 100; // matches TM-111's max page size
 const PAGE_SIZES = [10, 25, 50];
@@ -200,6 +201,11 @@ function openDetail(user) {
       el("dd", {}, [roleBadge(user.role)]),
       el("dt", { text: "Status" }),
       el("dd", {}, [statusBadge(user.enabled)]),
+      // Account-state badges (TM-168): email-verified / age-verified / MFA, reusing the same shared
+      // primitive as the profile page. Renders only the flags the admin user projection actually
+      // carries (TM-111's UserResponse) — `includeUnknown:false` so absent flags show nothing rather
+      // than a row of "unknown" pills; lights up automatically if the projection later exposes them.
+      ...accountStateRow(user),
       el("dt", { text: "ID" }),
       el("dd", { text: String(user.id) }),
     ]),
@@ -248,6 +254,15 @@ function roleBadge(role) {
 
 function statusBadge(enabled) {
   return el("span", { class: `tm-badge ${enabled ? "tm-badge-ok" : "tm-badge-off"}`, text: enabled ? "Enabled" : "Disabled" });
+}
+
+// A `<dt>/<dd>` pair carrying the account-state badges (TM-168) for the detail dialog — but only
+// when the user object actually carries at least one of the flags, so a projection without them
+// (today's admin UserResponse) adds no empty row. Returns [] (spread away) when nothing to show.
+function accountStateRow(user) {
+  const group = renderAccountBadges(user, { includeUnknown: false });
+  if (!group) return [];
+  return [el("dt", { text: "Verification" }), el("dd", {}, [group])];
 }
 
 function renderStats() {
