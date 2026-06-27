@@ -46,6 +46,24 @@ async function signInAsAdmin(page) {
   // "signed in" signal is the signed-OUT login panel disappearing. (Asserting too early would let
   // the caller's hash navigation race the guard back to #/login.)
   await expect(page.locator("#auth-signed-out")).toBeHidden();
+
+  // ...BUT signed-in alone isn't enough to navigate to a protected view yet (TM-325). The router
+  // (router.js) navigates off #/login IMMEDIATELY on auth change using fail-safe cached values
+  // (non-admin, NOT gated), then resolves role + the first-run gates (onboarding TM-250, terms
+  // TM-170) from GET /api/v1/me in the BACKGROUND and re-guards. Until that resolves, an immediate
+  // `location.hash = "#/admin"` races AHEAD of the gate resolution: the late /me flips needsTerms/
+  // isOnboarded and the re-guard bounces the session to #/onboarding or #/terms, stranding the
+  // admin view hidden for the whole timeout. The desktop admin-walkthrough spec dodges this by
+  // waiting for #nav-admin to be VISIBLE before navigating — but at a phone viewport #nav-admin
+  // lives inside the collapsed hamburger nav, so toBeVisible() never holds.
+  //
+  // The viewport-independent equivalent of that desktop signal is the #nav-admin link's `hidden`
+  // ATTRIBUTE (set by render() in router.js, not the CSS collapse): the router removes it only once
+  // the session is signed-in AND the ADMIN role has resolved AND NEITHER first-run gate is up
+  // (`!(signedIn && isAdmin) || gated`). So waiting for that attribute to clear proves /me has
+  // resolved and the session is un-gated + role-resolved — exactly the "app-ready" point a real
+  // (slower) phone user reaches before they can open the admin console. Covers BOTH gates at once.
+  await expect(page.locator("#nav-admin")).not.toHaveAttribute("hidden", /.*/);
 }
 
 // Suppress the first-run product tour (its dimmed overlay would cover the controls under test).
