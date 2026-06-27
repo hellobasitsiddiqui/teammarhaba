@@ -217,7 +217,7 @@
                  byline lines below so it never disturbs them; the row stacks on narrow widths
                  (see .app-store-badges in styles.css). The Android WebView inherits this footer
                  automatically (same index.html) — handy as an in-app pointer to share the app. -->
-            <div class="app-store-badges" aria-label="Get the app">
+            <div id="app-store-badges" class="app-store-badges" aria-label="Get the app">
                 <span class="app-store-badges-label">Get the app</span>
                 <div class="app-store-badges-row">
                     <!-- Android — links to the real /download page (hosted-APK landing, TM-246). -->
@@ -281,6 +281,9 @@
     <script src="/assets/theme.js"></script>
     <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
     <script src="/assets/build-info.js"></script>
+    <!-- Hide the "Get the app" store badges inside the Android WebView (TM-330): inert in a browser,
+         removes the nonsensical in-app "Download for Android" CTA inside the native shell. -->
+    <script type="module" src="/assets/app-badges.js"></script>
     <!-- Firebase Auth bootstrap (TM-105). ES module: initialises Firebase + exposes window.tmAuth. -->
     <script type="module" src="/assets/auth.js"></script>
     <!-- Auth UI controller (TM-106). -->
