@@ -1,11 +1,21 @@
-# Hosted downloads
+# Hosted downloads (legacy path — see TM-331)
 
 This directory is published to Firebase Hosting under `/downloads/` (TM-246).
 
-The signed Android release APK is published here as **`teammarhaba.apk`** by the
-`android-release.yml` workflow (the signed-release job, on a git tag or manual
-`workflow_dispatch`). The `/download` landing page (`web/src/download/index.html`) points at
-`https://teammarhaba.web.app/downloads/teammarhaba.apk`.
+> **TM-331 — the signed APK is no longer hosted here.** A Firebase Hosting deploy replaces the
+> *whole* site, so a web-only `deploy.yml` run rebuilds `web/dist` from `web/src` (which has no
+> binary) and **wiped** any `/downloads/teammarhaba.apk` the release job had placed in Hosting —
+> leaving the SPA `index.html` served (and downloaded) under that path renamed `.apk`. The signed
+> APK is now published to a **deploy-immune Google Cloud Storage bucket**, *outside* the Hosting
+> site, so web deploys can never touch it:
+>
+> - Bucket object: `gs://teammarhaba-downloads/teammarhaba.apk`
+> - Public URL: <https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk>
+>
+> The `/download` landing page (`web/src/download/index.html`) points at that public URL. The
+> upload is done by the `release` job in `.github/workflows/android-release.yml` (on a git tag or
+> manual `workflow_dispatch`). One-time bucket creation + IAM is documented in
+> `infra/gcp/firebase-hosting.md` ("APK download bucket — TM-331").
 
 > Note (TM-278): the Capacitor adoption replaced the hand-rolled TM-231 WebView shell with a
 > Capacitor `BridgeActivity`. The in-app auto-update prompt that previously lived in
@@ -13,6 +23,6 @@ The signed Android release APK is published here as **`teammarhaba.apk`** by the
 > epic follow-up; the hosted APK path above is unchanged.
 
 The APK itself is **never committed** — it's a build artifact produced from the keystore secrets
-(stored by the human ticket **TM-245**) and uploaded straight to Hosting by CI. This file only
-keeps the directory present in the repo so a plain web deploy serves a real (if APK-less) path,
-and the `/download` page's HEAD probe degrades gracefully until the first release lands.
+(stored by the human ticket **TM-245**) and uploaded straight to the GCS bucket by CI. This
+directory is kept only so a plain web deploy still serves a real (if APK-less) `/downloads/` path;
+the live APK no longer lives here.
