@@ -108,6 +108,42 @@ test.describe("login page renders under both themes", () => {
   }
 });
 
+// Signed-out theme switcher (TM-332). The in-app picker (TM-298) used to live ONLY on the Profile
+// page, so it was unreachable until you signed in (and in the Android WebView, where the ?theme= URL
+// override doesn't exist, there was NO way to change the theme). It's now also mounted on the login
+// card. This proves a SIGNED-OUT user can change the theme there, it applies live (no reload), and it
+// persists across a reload — using the real UI control, not the ?theme= override.
+test.describe("signed-out user can change the theme from the login page", () => {
+  test("changing the login-card theme applies live and persists across reload", async ({ page }) => {
+    // Boot with NO override → config default (sketch). The login card is anonymous-reachable.
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await expectTheme(page, "sketch");
+
+    // The signed-out picker is the login-card instance (id-suffixed so it can co-exist with the
+    // profile one). Its <label> is bound to the <select>, so select-by-label proves the a11y wiring.
+    const select = page.locator("#theme-select-login");
+    await expectControlUsable(page, select);
+    await expect(page.getByLabel("Theme")).toBeVisible();
+
+    // Change to "clean" via the real control (a signed-out user driving the UI, not ?theme=).
+    await select.selectOption("clean");
+    await expectTheme(page, "clean"); // applied live, no reload
+    // Persisted to the same tm-theme override key the dev param writes.
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("tm-theme")))
+      .toBe("clean");
+
+    // Reload with NO ?theme= query — the persisted tm-theme override must still win over the config
+    // default, proving the signed-out change survives a relaunch (the WebView cold-start case).
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await expectTheme(page, "clean");
+    // The picker reflects the persisted choice on load.
+    await expect(page.locator("#theme-select-login")).toHaveValue("clean");
+  });
+});
+
 // The authenticated pages (home, profile, admin) under both themes. One sign-in per theme, then
 // walk the three views. Sign in as ADMIN so the admin nav/view is available too.
 //

@@ -23,6 +23,10 @@ import { el, toast } from "./ui.js";
 // contract; writing here is identical to what the dev `?theme=`/`tm-theme` path already does.
 const OVERRIDE_STORAGE_KEY = "tm-theme";
 
+// Broadcast a theme change to every mounted instance of this control so their <select>s stay in sync
+// (the same picker is mounted on both the Profile page and the login card — TM-332).
+const THEME_EVENT = "tm-theme-changed";
+
 function safeStorage() {
   try {
     return window.localStorage ?? null;
@@ -46,28 +50,42 @@ function currentTheme(api) {
 
 /**
  * Build the appearance/theme settings section element. Returns the section node (hidden if the theme
- * contract isn't available, so the profile page is never broken by a missing dependency).
+ * contract isn't available, so the host page is never broken by a missing dependency).
+ *
+ * The same control is mounted in two places — the Profile page (TM-298, signed-in) and the login
+ * card (TM-332, signed-out). Both can co-exist in the DOM at once (views are hidden, not removed), so
+ * element ids are made unique via `idSuffix` to avoid duplicate-id collisions and keep each <label>
+ * bound to its own <select>. The default (no suffix) preserves the original `theme-select`/
+ * `theme-settings` ids so the existing Profile instance is byte-for-byte unchanged. There is ONE theme
+ * source of truth: every instance reads/writes the same `tm-theme` key and calls the same
+ * `applyTheme`, so changing the theme in either place updates both live.
+ *
+ * @param {{ idSuffix?: string }} [opts] `idSuffix` namespaces the section/select/hint ids (e.g. "login").
  * @returns {HTMLElement}
  */
-export function buildThemeSettings() {
+export function buildThemeSettings({ idSuffix = "" } = {}) {
   const api = themeApi();
 
+  const sectionId = idSuffix ? `theme-settings-${idSuffix}` : "theme-settings";
+  const selectId = idSuffix ? `theme-select-${idSuffix}` : "theme-select";
+  const hintId = idSuffix ? `theme-select-hint-${idSuffix}` : "theme-select-hint";
+
   const select = el("select", {
-    id: "theme-select",
+    id: selectId,
     class: "tm-input",
-    "aria-describedby": "theme-select-hint",
+    "aria-describedby": hintId,
   });
 
   const section = el(
     "section",
-    { class: "tm-theme-settings", id: "theme-settings", "aria-label": "Appearance" },
+    { class: "tm-theme-settings", id: sectionId, "aria-label": "Appearance" },
     [
       el("h3", { text: "Appearance" }),
       el("div", { class: "tm-form-field" }, [
-        el("label", { class: "tm-field-label", for: "theme-select", text: "Theme" }),
+        el("label", { class: "tm-field-label", for: selectId, text: "Theme" }),
         select,
         el("p", {
-          id: "theme-select-hint",
+          id: hintId,
           class: "tm-muted tm-field-hint",
           text: "Changes the app's look instantly. Saved on this device.",
         }),
@@ -93,6 +111,16 @@ export function buildThemeSettings() {
   // Reflect the active theme as selected on load.
   select.value = currentTheme(api);
 
+  // Keep this instance's <select> in sync when ANOTHER mounted instance changes the theme (the same
+  // control is mounted on both Profile and login — TM-332). The change handler broadcasts THEME_EVENT;
+  // every instance updates its own select so they never drift out of step. No-op for a lone instance.
+  document.addEventListener(THEME_EVENT, (e) => {
+    const applied = e?.detail?.theme;
+    if (applied && api.ALLOWED.indexOf(applied) !== -1 && select.value !== applied) {
+      select.value = applied;
+    }
+  });
+
   select.addEventListener("change", () => {
     const chosen = select.value;
     // Guard: never apply/persist anything outside the registry (defence-in-depth — the options are
@@ -113,6 +141,9 @@ export function buildThemeSettings() {
         return;
       }
     }
+    // Tell any sibling instance (e.g. the login-card picker while the profile picker is also mounted)
+    // to reflect the new value, so the two pickers never show different themes.
+    document.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: { theme: applied } }));
     const label = (api.THEMES[applied] && api.THEMES[applied].label) || applied;
     toast(`Theme set to ${label}.`, { type: "success" });
   });
