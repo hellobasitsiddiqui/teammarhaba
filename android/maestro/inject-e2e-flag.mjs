@@ -8,34 +8,45 @@
 // DevTools Protocol before handing off to Maestro.
 //
 // Runs on Node 22 (global `fetch` + global `WebSocket`, no deps). Expects an `adb forward` already in
-// place mapping a local TCP port to the WebView's devtools socket; pass that port as $CDP_PORT (the
-// CI step below sets up the forward and invokes this). The script:
-//   1. GET http://localhost:$CDP_PORT/json  → find the page target's webSocketDebuggerUrl
-//   2. Runtime.evaluate  localStorage.setItem('tm_e2e_phone_test','1')
-//   3. Runtime.evaluate  localStorage.getItem(...)  → verify it stuck
-//   4. Page.reload       so auth.js re-reads the flag on the next document load
-// Exits non-zero (failing the CI step) if no page target is found or the verify read != "1".
+// place mapping a local TCP port to the WebView's devtools socket; pass that port as $CDP_PORT.
+//
+// IMPORTANT (the race this guards against): right after the app launches, the WebView document is
+// `about:blank` (no origin) until the SPA navigates to https://teammarhaba.web.app. `localStorage` on
+// an origin-less document throws `SecurityError: Access is denied for this document`. So we (1) wait
+// for the page target whose URL is the hosted SPA, and (2) wait for `location.origin` to be a real
+// http(s) origin, before writing the key.
 
 const PORT = process.env.CDP_PORT || "9222";
 const KEY = "tm_e2e_phone_test";
 const VALUE = "1";
+const HOSTED = "teammarhaba.web.app";
 
-/** Resolve the WebView page target's CDP websocket URL from the /json discovery endpoint. */
-async function findPageTarget() {
-  const res = await fetch(`http://localhost:${PORT}/json`);
-  if (!res.ok) throw new Error(`CDP /json returned HTTP ${res.status}`);
-  const targets = await res.json();
-  // Prefer an actual "page" target; fall back to the first target with a ws debugger URL.
-  const page =
-    targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ||
-    targets.find((t) => t.webSocketDebuggerUrl);
-  if (!page) {
-    throw new Error(
-      `No CDP page target with a webSocketDebuggerUrl found (got ${targets.length} target(s)). ` +
-        `Is the WebView up and is WebView debugging enabled (debug build)?`,
-    );
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll /json until a page target on the hosted SPA appears; return its webSocketDebuggerUrl. */
+async function findHostedPageTarget(maxWaitMs = 90000) {
+  const start = Date.now();
+  let lastSeen = "(none)";
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(`http://localhost:${PORT}/json`);
+      if (res.ok) {
+        const targets = await res.json();
+        lastSeen = targets.map((t) => `${t.type}:${t.url}`).join(", ") || "(no targets)";
+        const hosted = targets.find(
+          (t) => t.type === "page" && t.webSocketDebuggerUrl && typeof t.url === "string" && t.url.includes(HOSTED),
+        );
+        if (hosted) return hosted.webSocketDebuggerUrl;
+      }
+    } catch {
+      /* devtools endpoint not ready yet — keep polling */
+    }
+    await sleep(2000);
   }
-  return page.webSocketDebuggerUrl;
+  throw new Error(
+    `No CDP page target on ${HOSTED} after ${maxWaitMs}ms. Last targets seen: ${lastSeen}. ` +
+      `Is the WebView loading the hosted SPA, and is this a DEBUG build (WebView debugging on)?`,
+  );
 }
 
 /** Minimal CDP client over the discovered websocket: send commands, await matching responses. */
@@ -72,7 +83,7 @@ function connect(wsUrl) {
     });
   }
 
-  /** Run a JS expression in the page and return the evaluated value. */
+  /** Run a JS expression in the page and return the evaluated value (or throw on JS exception). */
   async function evaluate(expression) {
     const result = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (result.exceptionDetails) {
@@ -84,11 +95,26 @@ function connect(wsUrl) {
   return { ws, ready, send, evaluate };
 }
 
+/** Wait until the attached document has a real http(s) origin (not about:blank → no localStorage). */
+async function waitForRealOrigin(cdp, maxWaitMs = 45000) {
+  const start = Date.now();
+  let last = "(unknown)";
+  while (Date.now() - start < maxWaitMs) {
+    last = await cdp.evaluate("location.origin").catch(() => null);
+    if (typeof last === "string" && /^https?:/.test(last)) return last;
+    await sleep(1000);
+  }
+  throw new Error(`WebView never reached a real http(s) origin (last: ${last}); localStorage would be inaccessible.`);
+}
+
 async function main() {
-  const wsUrl = await findPageTarget();
-  console.log(`[inject-e2e-flag] attaching to WebView target: ${wsUrl}`);
+  const wsUrl = await findHostedPageTarget();
+  console.log(`[inject-e2e-flag] attaching to hosted WebView target: ${wsUrl}`);
   const cdp = connect(wsUrl);
   await cdp.ready;
+
+  const origin = await waitForRealOrigin(cdp);
+  console.log(`[inject-e2e-flag] document origin is ${origin}; writing the flag.`);
 
   // Set the persisted flag, then read it back to confirm it stuck.
   await cdp.evaluate(`localStorage.setItem(${JSON.stringify(KEY)}, ${JSON.stringify(VALUE)})`);

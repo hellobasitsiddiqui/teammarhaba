@@ -15,7 +15,7 @@ appId: app.teammarhaba.webview
 # 1. Sign in, then navigate to the profile page.
 - runFlow: login-sms.yaml
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - takeScreenshot: 01-signed-in
 
 # Open the profile route. The signed-in nav exposes a profile/avatar entry; tap it if present.

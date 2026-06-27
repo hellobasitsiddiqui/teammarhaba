@@ -55,3 +55,7 @@ keystore.properties
 
 # macOS
 .DS_Store
+
+# Local Maestro e2e run artifacts (generated)
+maestro-artifacts/
+/0*.png

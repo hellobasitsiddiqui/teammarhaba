@@ -17,7 +17,7 @@ appId: app.teammarhaba.webview
 # 1. Establish a signed-in session via the SMS happy path (clears state + signs in).
 - runFlow: login-sms.yaml
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - takeScreenshot: 01-signed-in-before-restart
 
 # 2. Relaunch WITHOUT clearing state — simulates the user re-opening the app.
@@ -28,7 +28,7 @@ appId: app.teammarhaba.webview
 # 3. End state: still signed in — the signed-in panel is shown and the signed-out form never reappears.
 #    No email/SMS step is presented; the session was restored from persistence.
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - assertVisible:
     text: ".*You are signed in as.*"
 - assertNotVisible:

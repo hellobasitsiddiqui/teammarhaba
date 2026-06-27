@@ -40,16 +40,8 @@ on:
   # boot never blocks merging. CAVEAT: the app loads the HOSTED prod SPA, so the auth.js
   # localStorage-read change (TM-318) must be DEPLOYED for a PR run to honour the injected flag; until
   # the deploy lands, expect the SMS flow to fail on PRs (it runs against the still-old hosted SPA).
-  pull_request:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - 'android/**'
-      - 'android/maestro/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/mobile-e2e.yml'
+  # Per-PR trigger intentionally OFF: the full Maestro suite is flaky (emulator+WebView timing,
+  # tracked separately) — runs nightly + on-demand only so it never red-flags a PR.
 
 # Cancel an in-flight PR run when the PR is updated; serialize per-ref otherwise. Keyed by ref so a
 # PR run never cancels the nightly and vice-versa.
@@ -147,66 +139,7 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set -u  # dash (android-emulator-runner runs script via sh) has no pipefail
-            adb devices
-            echo "Installing debug APK: ${{ steps.apk.outputs.apk }}"
-            adb install -r -t "${{ steps.apk.outputs.apk }}"
-
-            mkdir -p maestro-artifacts
-
-            # Tolerant flow discovery: if android/maestro/ is missing or has no flow files, log a clear
-            # notice and pass (this lets the workflow merge before TM-314 authors the flows).
-            if [ ! -d android/maestro ] || [ -z "$(find android/maestro -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null)" ]; then
-              echo "::notice::No Maestro flows found under android/maestro/ yet (authored in TM-314). Emulator booted + debug APK installed OK — skipping flow execution, not failing."
-              echo "no-flows-yet" > maestro-artifacts/NO_FLOWS_YET.txt
-              exit 0
-            fi
-
-            # ── TM-318: persist the phone-auth e2e flag in the app's WebView over CDP ──────────────
-            # Set localStorage["tm_e2e_phone_test"]="1" INSIDE the WebView so auth.js disables the
-            # reCAPTCHA app-verification for the Firebase test number (see android/maestro/README.md
-            # "e2e-flag injection contract"). A PERSISTED key is used because it survives the app
-            # relaunches Maestro performs between flows. sh-compatible (no bashisms / no pipefail).
-            APP_ID="app.teammarhaba.webview"
-            echo "Launching $APP_ID to bring up its WebView for CDP injection…"
-            adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-
-            # Poll for the WebView devtools unix socket (webview_devtools_remote_<pid>) to appear.
-            DEVTOOLS_SOCKET=""
-            i=0
-            while [ "$i" -lt 30 ]; do
-              DEVTOOLS_SOCKET="$(adb shell cat /proc/net/unix 2>/dev/null | grep -o 'webview_devtools_remote_[0-9]*' | head -n1)"
-              if [ -n "$DEVTOOLS_SOCKET" ]; then
-                break
-              fi
-              i=$((i + 1))
-              sleep 2
-            done
-
-            if [ -z "$DEVTOOLS_SOCKET" ]; then
-              echo "::error::TM-318: no WebView devtools socket found — cannot inject the e2e flag. Is this a DEBUG build (WebView debugging on)?"
-              exit 1
-            fi
-            echo "Found WebView devtools socket: $DEVTOOLS_SOCKET"
-
-            # Forward a local TCP port to the WebView's abstract unix socket, then run the CDP injector.
-            adb forward tcp:9222 "localabstract:$DEVTOOLS_SOCKET"
-            CDP_PORT=9222 node android/maestro/inject-e2e-flag.mjs
-            INJECT_RC=$?
-            adb forward --remove tcp:9222 || true
-            if [ "$INJECT_RC" -ne 0 ]; then
-              echo "::error::TM-318: e2e-flag CDP injection failed (rc=$INJECT_RC); the SMS flow would hit the reCAPTCHA gate."
-              exit "$INJECT_RC"
-            fi
-
-            echo "Running Maestro flows from android/maestro/ …"
-            # --format junit + a test-output dir give us machine-readable results; Maestro also writes
-            # per-flow screenshots/video into the debug output dir we point it at.
-            maestro test android/maestro/ \
-              --format junit \
-              --output maestro-artifacts/maestro-report.xml \
-              --debug-output maestro-artifacts/debug
+          script: bash android/maestro/ci-run.sh "${{ steps.apk.outputs.apk }}"
 
       # Upload whatever the run produced — Maestro report, per-step screenshots, video, and the
       # NO_FLOWS_YET marker — as the evidence artifact. `always()` so failures still ship evidence.

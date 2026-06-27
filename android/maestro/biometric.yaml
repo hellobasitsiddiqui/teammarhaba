@@ -14,7 +14,7 @@ appId: app.teammarhaba.webview
 ---
 - runFlow: login-sms.yaml
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - takeScreenshot: 01-signed-in
 
 # Navigate to profile (where the Security / app-lock section lives).
