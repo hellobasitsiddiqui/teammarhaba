@@ -54,6 +54,14 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Gallery "choose from photo" read access (TM-335). The system photo picker needs no permission,
+         but on some devices/Android versions the @capacitor/camera gallery path falls back to a flow
+         that requires read-media access. Declared defensively: READ_MEDIA_IMAGES is the Android 13+
+         (API 33) scoped permission; READ_EXTERNAL_STORAGE covers API <= 32 (capped so it isn't
+         requested on 33+ where it's a no-op). Requested at runtime by the plugin when needed. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
     <!-- Push notifications (TM-279). Android 13+ (API 33) gates notification posting behind a
          runtime permission the user must grant; @capacitor/push-notifications' requestPermissions()
          triggers the system prompt for it. Harmless on API < 33 (auto-granted at install). The FCM

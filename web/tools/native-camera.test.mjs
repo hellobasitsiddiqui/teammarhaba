@@ -12,6 +12,7 @@ import { test } from "node:test";
 import {
   isNativeCameraAvailable,
   dataUrlToFile,
+  dataUrlToFileAsync,
   filenameFor,
   classifyCameraError,
   captureAvatarImage,
@@ -70,6 +71,30 @@ test("dataUrlToFile rejects a non-image or malformed data URL", () => {
   assert.throws(() => dataUrlToFile("data:text/plain;base64,aGVsbG8="), /wasn't an image/i);
   assert.throws(() => dataUrlToFile("not-a-data-url"), /unexpected format/i);
   assert.throws(() => dataUrlToFile(null), /No image/i);
+});
+
+// ---- dataUrlToFileAsync (TM-335: off-main-thread decode) -------------------------------------
+
+test("dataUrlToFileAsync decodes a base64 image data URL into a File with the right type/name", async () => {
+  const file = await dataUrlToFileAsync(PNG_DATA_URL);
+  assert.ok(file instanceof File);
+  assert.equal(file.type, "image/png");
+  assert.equal(file.name, "avatar.png");
+  assert.ok(file.size > 0, "decoded bytes should be non-empty");
+});
+
+test("dataUrlToFileAsync produces the same bytes as the synchronous decoder", async () => {
+  const asyncFile = await dataUrlToFileAsync(PNG_DATA_URL);
+  const syncFile = dataUrlToFile(PNG_DATA_URL);
+  assert.equal(asyncFile.size, syncFile.size);
+  const [a, b] = await Promise.all([asyncFile.arrayBuffer(), syncFile.arrayBuffer()]);
+  assert.deepEqual(new Uint8Array(a), new Uint8Array(b));
+});
+
+test("dataUrlToFileAsync rejects a non-image or malformed data URL (same friendly errors)", async () => {
+  await assert.rejects(() => dataUrlToFileAsync("data:text/plain;base64,aGVsbG8="), /wasn't an image/i);
+  await assert.rejects(() => dataUrlToFileAsync("not-a-data-url"), /unexpected format/i);
+  await assert.rejects(() => dataUrlToFileAsync(null), /No image/i);
 });
 
 // ---- classifyCameraError --------------------------------------------------------------------
