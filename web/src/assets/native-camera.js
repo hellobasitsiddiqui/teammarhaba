@@ -66,20 +66,37 @@ export function filenameFor(mimeType) {
 }
 
 /**
+ * Validate that `dataUrl` is a well-formed `data:` URL carrying an image, returning its mime type.
+ * Shared by the sync and async converters so both reject a malformed/non-image capture identically.
+ * @param {string} dataUrl
+ * @returns {string} the image mime type, e.g. "image/jpeg".
+ * @throws {Error} with a friendly message on a malformed or non-image data URL.
+ */
+function imageMimeFromDataUrl(dataUrl) {
+  if (typeof dataUrl !== "string") throw new Error("No image was returned.");
+  const match = /^data:([^;,]+)(;base64)?,/s.exec(dataUrl);
+  if (!match) throw new Error("The captured image was in an unexpected format.");
+  const mime = match[1] || "application/octet-stream";
+  if (!mime.startsWith("image/")) throw new Error("That capture wasn't an image.");
+  return mime;
+}
+
+/**
  * Convert a `data:` URL (what the Camera plugin returns with `resultType: dataUrl`) into a `File`, so
  * the captured image can flow straight into the existing `uploadAvatar(file)` path. Throws on a
  * malformed/non-image data URL so the caller surfaces a friendly error rather than uploading garbage.
+ *
+ * SYNCHRONOUS variant — decodes the base64 char-by-char on the calling thread. For a 1 MB+ image this
+ * is a long synchronous block (TM-335: on a WebView this blocked the main thread and triggered ANR).
+ * Kept for unit-testability and as a fallback; the device capture path uses `dataUrlToFileAsync`.
  * @param {string} dataUrl e.g. "data:image/jpeg;base64,/9j/4AAQ..."
  * @returns {File}
  */
 export function dataUrlToFile(dataUrl) {
-  if (typeof dataUrl !== "string") throw new Error("No image was returned.");
-  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl);
-  if (!match) throw new Error("The captured image was in an unexpected format.");
-  const mime = match[1] || "application/octet-stream";
-  if (!mime.startsWith("image/")) throw new Error("That capture wasn't an image.");
-  const isBase64 = Boolean(match[2]);
-  const data = match[3];
+  const mime = imageMimeFromDataUrl(dataUrl);
+  const match = /^data:[^;,]+(;base64)?,(.*)$/s.exec(dataUrl);
+  const isBase64 = Boolean(match[1]);
+  const data = match[2];
 
   let bytes;
   if (isBase64) {
@@ -90,6 +107,31 @@ export function dataUrlToFile(dataUrl) {
     bytes = new TextEncoder().encode(decodeURIComponent(data));
   }
   return new File([bytes], filenameFor(mime), { type: mime });
+}
+
+/**
+ * Async `data:` URL → `File`, off the main thread (TM-335). Lets the browser/WebView decode the base64
+ * `data:` URL natively via `fetch(dataUrl).blob()` instead of the synchronous `atob` + per-byte loop in
+ * `dataUrlToFile`, which blocked the WebView main thread for a 1 MB+ image and raised Android ANR
+ * ("TeamMarhaba isn't responding") — a user tapping "Close app" on that dialog lost the in-flight
+ * upload, so the avatar "didn't persist". We still validate the mime up front so a malformed/non-image
+ * capture throws the SAME friendly error before any decode work.
+ * @param {string} dataUrl e.g. "data:image/jpeg;base64,/9j/4AAQ..."
+ * @returns {Promise<File>}
+ * @throws {Error} with a friendly message on a malformed/non-image data URL or a decode failure.
+ */
+export async function dataUrlToFileAsync(dataUrl) {
+  // Validate (and reject non-images) synchronously and cheaply before doing any decode work.
+  const mime = imageMimeFromDataUrl(dataUrl);
+  let blob;
+  try {
+    const res = await fetch(dataUrl);
+    blob = await res.blob();
+  } catch {
+    throw new Error("The captured image was in an unexpected format.");
+  }
+  const type = blob.type && blob.type.startsWith("image/") ? blob.type : mime;
+  return new File([blob], filenameFor(type), { type });
 }
 
 /**
@@ -160,5 +202,8 @@ export async function captureAvatarImage(win = globalThis) {
 
   const dataUrl = photo && photo.dataUrl;
   if (!dataUrl) return null; // nothing chosen — treat as a cancel.
-  return dataUrlToFile(dataUrl);
+  // TM-335: decode off the main thread (`fetch().blob()`) so a 1 MB+ capture doesn't block the WebView
+  // main thread and trigger an Android ANR that could drop the in-flight upload. Validation/friendly
+  // errors are preserved by dataUrlToFileAsync.
+  return dataUrlToFileAsync(dataUrl);
 }
