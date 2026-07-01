@@ -51,6 +51,7 @@
 - **Seed the repo COMPLETE from the start** (don't seed minimal then retrofit — TeamMarhaba had to sync-retrofit via TM-87 / TM-89):
   - `.claude/skills/` — `jira-task-claim`, `jira-ticket-writer`, `jira-epic-breakdown`, `jira-mcp-gotchas`.
   - `docs/agents/` — `AGENT-CLAIM-PROTOCOL`, `DEPENDENCY-DAG`, `SPRINTS`, **`blackboard.md`** (pre-seeded with known env workarounds).
+  - *(Mobile shells, if any, document their own run-steps per-platform — Android in `android/README.md`, iOS (Simulator-only) in `ios/README.md`; not repeated here.)*
   - `CLAUDE.md` with **all conventions baked in** (see C).
   - `CLAUDE.md` `@import docs/agents/runtime/blackboard.md` (auto-load) + blackboard read as a **claim-loop step**.
 - Minimal branch protection + the PR→merge flow.

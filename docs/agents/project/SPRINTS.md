@@ -134,6 +134,32 @@ Completes **Epic 1 (Foundation)**: the CI/security-hardening, repo-hygiene, and 
 
 ---
 
+## iOS-Simulator epic (TM-348) — deferred scope
+
+The iOS-Simulator epic (TM-348) brings the Capacitor iOS shell up to a **Simulator-only** ceiling: it
+builds + runs in the iOS Simulator on a Mac with Xcode, loading the same hosted SPA (see
+[`ios/README.md`](../../../ios/README.md) and the [`ADR-0005` addendum](../../decisions/ADR-0005-mobile-capacitor-hybrid.md)).
+Recording its exclusions here in the standard convention so the ceiling is legible from the sprint log.
+
+**Not in this epic (deliberately deferred → a future iOS-distribution epic):**
+- **Code-signing + provisioning, Apple Developer Program, TestFlight / App Store distribution** — no
+  signing identity, no archive/upload/notarization pipeline (the iOS counterpart of the Android
+  signed-APK release path, TM-286/287). A Simulator needs none.
+- **Real APNs push** — no `aps-environment` entitlement, no device token; the Simulator can only take
+  local `xcrun simctl push` payloads. A real APNs round-trip needs a signed build on a physical
+  device + an APNs key.
+- **Physical-device QA** — the iOS counterpart of Android's real-device manual test (TM-288); the
+  Simulator can't reproduce Safari ITP, real biometrics, a real camera, or real push delivery.
+- **A macOS runner for the `test-suite.yml` `ios` journey job** — that job is still a `ubuntu-latest`
+  no-op (a Linux runner can't boot a Simulator); standing up the macOS smoke lane is the TM-353
+  follow-on. (The compile gate `ios-simulator.yml` already runs on `macos-latest`.)
+
+The deferred device/distribution slice fits the **Anatomy** naming scheme as a later **ABLE BODY**-era
+release concern (real distribution = "stands on its own and ships"), not the current Simulator-only
+build proof.
+
+---
+
 ## Mechanics (read before creating sprints)
 
 - **Adding tickets to a sprint works via the API** — set `customfield_10020 = <sprintId>` on each issue. The connector has no list-sprints tool, so discover the id by reading the field off an issue already in a sprint, or probe (`SCRUM Sprint 1` = **id 1** here).

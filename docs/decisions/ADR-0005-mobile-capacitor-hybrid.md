@@ -51,3 +51,23 @@ Rationale:
 - Epic **TM-277** and tasks TM-278…TM-288.
 - Supersedes the thin hand-rolled WebView approach of **TM-231** (shell now Capacitor-owned).
 - Relates **ADR-0004** (Firebase Authentication) and `docs/agents/webview-auth-contract.md`.
+
+---
+
+## Addendum — iOS ships to the **Simulator only** (2026-07-02, epic TM-348)
+
+The original decision above framed iOS as "the same web code + APNs, a cheap follow-on" (lines 32 / 40 / 47). The **iOS-Simulator epic (TM-348)** actually delivers that follow-on — but with a hard ceiling that those lines under-specified, recorded here so nobody reads the shipped iOS work as more than it is.
+
+**What TM-348 delivers (the ceiling):** a Capacitor 8 iOS project (`ios/App`, scaffolded in **TM-349** / PR #270) that builds and runs **in the iOS Simulator on a Mac with Xcode**, loading the same hosted SPA (`server.url = https://teammarhaba.web.app`) through a `WKWebView`, with the same WebView env-signal contract the Android shell provides (see `ios/README.md` and `docs/agents/webview-auth-contract.md`). The CI gate is a Debug **`xcodebuild`** compile for the `iphonesimulator` SDK with signing disabled, on a **`macos-latest`** runner (`.github/workflows/ios-simulator.yml`).
+
+**Explicitly DEFERRED to a separate later epic (NOT in TM-348):**
+
+- **Code-signing & provisioning** — no signing identity, no provisioning profile, no team. The Simulator needs none (`CODE_SIGNING_ALLOWED=NO`), so none is wired.
+- **Apple Developer Program membership** — not enrolled.
+- **TestFlight / App Store distribution** — no archive/upload/notarization pipeline (the iOS analogue of the Android signed-APK release path in ADR TM-286/287 does **not** exist yet).
+- **Real APNs push** — deferred, and importantly **the Simulator cannot prove it at all.** This refines line 40 ("same code + APNs"): APNs is *not* a Simulator capability. The iOS shell registers **no** push entitlement / `aps-environment`, and `AppDelegate` does no `registerForRemoteNotifications` — so there is **no real device token**. Push can only be exercised as **local `xcrun simctl push` payloads**; a genuine APNs round-trip needs a signed build on a physical device + an APNs key. See the degradation matrix in `ios/README.md`.
+- **Physical-device QA** — no real-iPhone sign-off (the iOS counterpart of Android's TM-288 real-device test). The Simulator can't reproduce Safari ITP, real biometrics, a real camera, real push delivery, or real cellular.
+
+**Net:** the Simulator is a **build + web-behaviour + degraded-native** proof, **not** a signing / distribution / real-push / real-device proof — exactly the same "emulator catches most; device is the gate" split ADR-0004 / `docs/qa/mobile-two-layer.md` already draw for Android. The deferred items above are a **future iOS-distribution epic** (see `docs/agents/project/SPRINTS.md` → deferred scope), not TM-348.
+
+- iOS-Simulator epic **TM-348**; scaffold **TM-349** (PR #270); Simulator smoke-lane follow-on **TM-353**.
