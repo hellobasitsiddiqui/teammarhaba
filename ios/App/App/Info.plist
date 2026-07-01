@@ -4,6 +4,25 @@
 <dict>
     <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
+	<!-- Usage-description strings (TM-350). iOS silently suppresses a permission prompt (or crashes on
+	     first access) if the matching NSxxxUsageDescription is missing, so these mirror the runtime
+	     permissions declared in android/app/src/main/AndroidManifest.xml. Copy is seeded from the
+	     existing product strings (web/src/assets/geolocation.js RATIONALE, native-camera.js prompt
+	     labels) so the on-device explanation matches what the app already tells users. -->
+	<key>NSCameraUsageDescription</key>
+	<string>TeamMarhaba uses your camera to take a profile photo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>TeamMarhaba lets you choose a profile photo from your library.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>TeamMarhaba uses your location to show events and content near you.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>TeamMarhaba uses Face ID to unlock the app and confirm sensitive actions.</string>
+	<!-- NSPhotoLibraryAddUsageDescription is intentionally OMITTED: the avatar flow calls
+	     Camera.getPhoto with resultType 'dataUrl' and never sets saveToGallery, so nothing writes to
+	     the photo library. Uncomment the entry below only if saveToGallery is ever enabled:
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>TeamMarhaba saves photos you capture to your library.</string>
+	-->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
