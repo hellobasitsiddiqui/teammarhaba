@@ -59,8 +59,10 @@ while :; do
   echo "------ iteration ${ITER}  (elapsed $(( NOW - START_EPOCH ))s / ${DURATION_SECONDS}s, ${REMAINING}s left) ------"
 
   ITER_START=$(date +%s)
-  # Force screenshots on so there's always per-iteration evidence for the workflow to attach.
-  if npx playwright test --project="${PROJECT}" --grep "@golden" --screenshot=on; then
+  # The Playwright config already forces screenshots on for every test (playwright.config.mjs:
+  # `screenshot: "on"`), so each iteration always yields per-step evidence for the workflow to
+  # attach — no CLI flag needed (and `--screenshot` isn't a valid CLI option in PW 1.49).
+  if npx playwright test --project="${PROJECT}" --grep "@golden"; then
     ITER_RESULT="PASS"
     PASS=$(( PASS + 1 ))
   else
