@@ -12,6 +12,12 @@ features (contacts CRUD, tags, CSV, …) live in Epic 3 (FLESH), not here.
 **Keep this current:** update the row when a ticket lands; add a row when a new generic feature is
 identified. This file is part of the agent OS (kept on replay).
 
+> **See also — [`NEW-FEATURE-CHECKLIST.md`](../conventions/NEW-FEATURE-CHECKLIST.md):** the flip side of
+> this inventory. Where this file tracks *what the base product has*, the checklist enumerates the
+> ~23 cross-cutting subsystems every **new** user-facing feature must wire into (router, first-run
+> gates, theme tokens, the `el()` kit, `/api/v1` + Flyway + OpenAPI, e2e tags, the deep-link triple
+> allow-list…) and the ~7–9 tickets it fans out to. Read it at feature-epic planning.
+
 ## Auth & accounts
 | Feature | Status | Where / ticket |
 |---|:--:|---|
