@@ -6,7 +6,7 @@ The `golden`, `soak`, and `load` suites of the on-demand test-suite library (epi
 | suite  | script            | owner ticket | status         |
 | ------ | ----------------- | ------------ | -------------- |
 | golden | `golden.sh`       | TM-341       | ✅ implemented |
-| soak   | `soak.sh`         | TM-342       | not yet        |
+| soak   | `soak.sh`         | TM-342       | ✅ implemented |
 | load   | `load.sh`         | TM-343       | not yet        |
 
 Until a script exists the workflow exits with a clear **"not implemented yet"** error naming the expected
@@ -14,6 +14,13 @@ path — so the owning ticket just drops its script in here with no workflow cha
 
 `golden.sh` runs the single `@golden` end-to-end journey (`tests/golden-path.spec.mjs`) on the requested
 surface's project (`chromium` / `mobile-chromium`) — the whole happy path in one run as living evidence.
+
+`soak.sh` LOOPS that same `@golden` journey back-to-back until `DURATION_MINUTES` (default 10) elapses,
+to surface what a single pass can't — leaks, gradual degradation, intermittent flakiness. It records
+pass/fail + wall-clock seconds per iteration, then emits a summary (iterations, pass/fail, min/max/avg)
+and flags either a failed iteration (hard, exit non-zero) or **upward latency drift** — last-quartile
+average iteration time exceeding the first quartile's by more than `DRIFT_PCT` (default 20%), the
+signature of a leak building under sustained load (drift alone is a loud warning, not a hard fail).
 
 ## Contract (what the workflow passes in)
 
