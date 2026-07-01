@@ -24,7 +24,7 @@ async function signIn(page) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
-test("a user uploads an avatar; photoURL is set and shown, and survives a reload", async ({ page }) => {
+test("@avatar a user uploads an avatar; photoURL is set and shown, and survives a reload", async ({ page }) => {
   await signIn(page);
 
   // Open the self-service profile page; its avatar control is enabled (Storage emulator configured).
@@ -67,7 +67,7 @@ test("a user uploads an avatar; photoURL is set and shown, and survives a reload
   expect(afterReload).toBe(photoURL);
 });
 
-test("re-uploading a second avatar keeps the image loading (TM-335 self-delete regression)", async ({ page }) => {
+test("@avatar re-uploading a second avatar keeps the image loading (TM-335 self-delete regression)", async ({ page }) => {
   // TM-335: the object path is fixed per-uid, so a re-upload overwrites `avatars/{uid}`. The previous
   // cleanup compared the token'd download URLs (which differ every getDownloadURL() call) and deleted
   // the object it had just uploaded — so the SECOND avatar 404'd. This exercises two consecutive
@@ -120,7 +120,7 @@ test("re-uploading a second avatar keeps the image loading (TM-335 self-delete r
   await expect(previewImg).toHaveAttribute("src", finalURL);
 });
 
-test("a non-image file is rejected client-side before any upload", async ({ page }) => {
+test("@avatar a non-image file is rejected client-side before any upload", async ({ page }) => {
   await signIn(page);
   await page.click("#nav-profile");
   await expect(page.locator("#profile-form")).toBeVisible();

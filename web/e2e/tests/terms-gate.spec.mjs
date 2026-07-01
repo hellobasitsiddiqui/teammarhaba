@@ -58,7 +58,7 @@ async function completeOnboarding(page) {
   await saved;
 }
 
-test("a brand-new user is terms-gated, accepts, and then enters the app", async ({ page }) => {
+test("@terms a brand-new user is terms-gated, accepts, and then enters the app", async ({ page }) => {
   const email = `e2e-terms-${Date.now()}@teammarhaba.test`;
 
   await signInFreshUser(page, email);
@@ -101,7 +101,7 @@ test("a brand-new user is terms-gated, accepts, and then enters the app", async 
   }
 });
 
-test("a returning user who already accepted the current terms is NOT terms-gated", async ({ page }) => {
+test("@terms a returning user who already accepted the current terms is NOT terms-gated", async ({ page }) => {
   // The seeded ADMIN accepted the current terms version in global-setup, so signing in skips the gate.
   await page.goto("/#/login");
   await page.fill("#email", ADMIN.email);

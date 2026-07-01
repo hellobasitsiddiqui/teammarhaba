@@ -10,7 +10,7 @@ import { ADMIN, dbConfig } from "../fixtures.mjs";
 // edits the caller's OWN record, so the role is irrelevant. The earlier profile specs never set a
 // phone, so ADMIN's phone is null/empty going in; we also clear the field explicitly to be sure.
 
-test("saving the profile with a blank phone succeeds (TM-188 regression)", async ({ page }) => {
+test("@profile saving the profile with a blank phone succeeds (TM-188 regression)", async ({ page }) => {
   // A value unique to this run so the assertion can't pass on stale data.
   const city = `Phoneless-${Date.now()}`;
 

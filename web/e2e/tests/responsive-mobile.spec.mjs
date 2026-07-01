@@ -79,7 +79,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe("login at a phone viewport", () => {
+test.describe("@responsive login at a phone viewport", () => {
   test("no horizontal page scroll and the primary login control is usable", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -102,7 +102,7 @@ test.describe("login at a phone viewport", () => {
   });
 });
 
-test.describe("the account nav collapses behind a hamburger", () => {
+test.describe("@responsive the account nav collapses behind a hamburger", () => {
   test("opens to reveal nav items and closes after navigating", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -132,7 +132,7 @@ test.describe("the account nav collapses behind a hamburger", () => {
   });
 });
 
-test.describe("admin users console at a phone viewport", () => {
+test.describe("@responsive admin users console at a phone viewport", () => {
   test("table renders, scrolls inside its wrapper, and the page does not scroll sideways", async ({
     page,
   }) => {
@@ -163,7 +163,7 @@ test.describe("admin users console at a phone viewport", () => {
   });
 });
 
-test.describe("edit-profile at a phone viewport", () => {
+test.describe("@responsive edit-profile at a phone viewport", () => {
   test("the form fits and Save changes is usable", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
