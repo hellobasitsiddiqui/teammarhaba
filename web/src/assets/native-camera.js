@@ -18,6 +18,17 @@
 //
 // The pure helpers (`dataUrlToFile`, `classifyCameraError`, `filenameFor`) carry the logic that can be
 // unit-tested without a device/browser — see web/tools/native-camera.test.mjs.
+//
+// TM-337 — DON'T LET THE PICKER TRIP THE BIOMETRIC APP-LOCK:
+// Launching the native picker BACKGROUNDS the Capacitor app, so on return `@capacitor/app` emits
+// `appStateChange { isActive: true }` and the biometric app-lock (TM-282) used to engage → the user
+// got re-prompted for a fingerprint mid-avatar-flow even though they never left the app. This is an
+// in-app-INITIATED excursion, not the user leaving. We bracket the picker call with the biometric
+// lock's trusted-excursion API (the same suppression the TM-334 prompt uses) so the resume it causes
+// doesn't re-lock. It's a safe no-op off the native shell / when the lock isn't active, so the web
+// flow is untouched. Fingerprinter-safe `./x.js` import.
+
+import { beginTrustedExcursion, endTrustedExcursion } from "./biometric-lock.js";
 
 // Camera plugin enums, inlined so we don't depend on importing the plugin's JS. These mirror the
 // `@capacitor/camera` `CameraResultType` / `CameraSource` string values the bridge expects.
@@ -178,6 +189,10 @@ export async function captureAvatarImage(win = globalThis) {
   const Camera = cap && cap.Plugins && cap.Plugins.Camera;
   if (!Camera) throw new Error("The camera isn't available on this device.");
 
+  // TM-337: tell the biometric app-lock this background/foreground is an app-initiated excursion, so
+  // the resume the picker causes doesn't re-lock the app. Cleared in `finally` on success, cancel AND
+  // error. No-op off the native shell / when the lock isn't active.
+  beginTrustedExcursion();
   let photo;
   try {
     photo = await Camera.getPhoto({
@@ -198,6 +213,8 @@ export async function captureAvatarImage(win = globalThis) {
     const verdict = classifyCameraError(err);
     if (verdict.cancelled) return null; // graceful no-op.
     throw new Error(verdict.message);
+  } finally {
+    endTrustedExcursion();
   }
 
   const dataUrl = photo && photo.dataUrl;

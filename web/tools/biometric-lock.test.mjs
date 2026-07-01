@@ -223,6 +223,130 @@ test("eager cover (coverEagerly) shows the overlay before any async work, withou
   assert.equal(h.calls.authenticate, 0, "but no prompt yet");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TM-337: trusted in-app excursions (native camera/gallery) must NOT trip the lock.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("TM-337: an excursion background→foreground does NOT lock or prompt", async () => {
+  const h = makeHarness({ authResult: { ok: true } });
+
+  // Start unlocked (as after a successful login). We're about to open the native picker.
+  assert.equal(h.controller.isLocked(), false);
+
+  // Launching the picker: mark the excursion, the app backgrounds, then foregrounds on return.
+  h.controller.beginTrustedExcursion();
+  h.emit(false); // app backgrounds as the picker takes over
+  await tick();
+  h.emit(true); // picker returned → app foregrounds (this used to slam the lock on)
+  await tick();
+  h.controller.endTrustedExcursion(); // finally: picker resolved
+
+  assert.equal(h.controller.isLocked(), false, "in-app excursion did NOT engage the lock");
+  assert.equal(h.calls.authenticate, 0, "and did NOT prompt for biometrics");
+});
+
+test("TM-337: after an excursion ends, a LATER genuine background→foreground DOES lock", async () => {
+  const h = makeHarness({ authResult: { ok: true } });
+  assert.equal(h.controller.isLocked(), false);
+
+  // Excursion happens and completes.
+  h.controller.beginTrustedExcursion();
+  h.emit(false);
+  await tick();
+  h.emit(true);
+  await tick();
+  h.controller.endTrustedExcursion();
+  assert.equal(h.controller.isLocked(), false, "excursion itself did not lock");
+
+  // Time passes beyond the settle window, then the user genuinely leaves and comes back.
+  h.advance(UNLOCK_SETTLE_MS + 1);
+  h.emit(false);
+  await tick();
+  h.emit(true);
+  await tick();
+
+  assert.equal(h.controller.isLocked(), true, "a real resume after the excursion still locks");
+  assert.equal(h.calls.authenticate, 1, "and prompts");
+});
+
+test("TM-337: the excursion's trailing foreground (settle window) does not re-lock", async () => {
+  const h = makeHarness({ authResult: { ok: true } });
+  assert.equal(h.controller.isLocked(), false);
+
+  // The trailing `isActive:true` can arrive a beat AFTER endTrustedExcursion() (the picker resolves,
+  // finally runs, THEN the OS delivers the foreground event). It must be swallowed by the settle
+  // window opened on end — exactly like the prompt's trailing resume.
+  h.controller.beginTrustedExcursion();
+  h.emit(false);
+  await tick();
+  h.controller.endTrustedExcursion(); // picker resolved first...
+  h.emit(true); // ...then the late foreground lands (within the settle window)
+  await tick();
+
+  assert.equal(h.controller.isLocked(), false, "trailing excursion resume did not re-lock");
+  assert.equal(h.calls.authenticate, 0, "no prompt");
+});
+
+test("TM-337: nested/overlapping excursions are reference-counted (inner end doesn't unshield)", async () => {
+  const h = makeHarness({ authResult: { ok: true } });
+  assert.equal(h.controller.isLocked(), false);
+
+  h.controller.beginTrustedExcursion(); // outer
+  h.controller.beginTrustedExcursion(); // inner (overlapping)
+  h.controller.endTrustedExcursion(); // inner ends — outer still open
+
+  // A resume while the outer excursion is still open must NOT lock.
+  h.emit(false);
+  await tick();
+  h.emit(true);
+  await tick();
+  assert.equal(h.controller.isLocked(), false, "still shielded while an excursion remains open");
+
+  h.controller.endTrustedExcursion(); // outer ends
+  h.advance(UNLOCK_SETTLE_MS + 1);
+  h.emit(false);
+  await tick();
+  h.emit(true);
+  await tick();
+  assert.equal(h.controller.isLocked(), true, "once all excursions end, a real resume locks again");
+});
+
+test("TM-337: endTrustedExcursion without a matching begin never underflows / mis-suppresses", async () => {
+  const h = makeHarness({ authResult: { ok: true } });
+
+  // A stray end (defensive) must not push the counter negative and permanently suppress locking.
+  h.controller.endTrustedExcursion();
+  h.controller.endTrustedExcursion();
+
+  h.emit(false);
+  await tick();
+  h.emit(true);
+  await tick();
+  assert.equal(h.controller.isLocked(), true, "stray ends don't disable locking");
+});
+
+test("TM-337 + TM-334: an excursion during a biometric prompt doesn't clear the prompt suppression", async () => {
+  // Both suppressions can be in flight at once; ending one must not let the other's resume re-lock.
+  const h = makeHarness({ authResult: { ok: true } });
+
+  // Cold-start lock → prompt in flight.
+  await h.controller.maybeLock();
+  await tick();
+  assert.equal(h.controller.isLocked(), true, "locked on boot");
+  assert.equal(h.calls.authenticate, 1, "prompted once");
+
+  // Overlap a trusted excursion, then end it BEFORE the prompt's paired resume arrives.
+  h.controller.beginTrustedExcursion();
+  h.controller.endTrustedExcursion();
+
+  // Now replay the prompt's own background→resolve→foreground pair — it must still be suppressed and
+  // resolve to a clean unlock (the excursion end must not have consumed the prompt's suppression).
+  await h.emitPromptCycle();
+
+  assert.equal(h.controller.isLocked(), false, "prompt unlock still succeeds");
+  assert.equal(h.calls.authenticate, 1, "no re-prompt — prompt suppression intact across excursion end");
+});
+
 test("TM-334: a stray foreground with no prior prompt background still locks (no false suppression)", async () => {
   // Defends the edge where promptInFlight bookkeeping could wrongly swallow a real resume. After a
   // clean unlock + settle, a fresh genuine resume must lock.
