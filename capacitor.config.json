@@ -9,6 +9,9 @@
   "android": {
     "appendUserAgent": "TeamMarhabaWebView"
   },
+  "ios": {
+    "appendUserAgent": "TeamMarhabaWebView"
+  },
   "plugins": {
     "SplashScreen": {
       "launchAutoHide": false,
