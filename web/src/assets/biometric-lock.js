@@ -32,6 +32,19 @@
 // a successful unlock, so the trailing foreground that arrives just after unlock() can't re-lock. A
 // genuine background→foreground with no prompt in flight (and outside the settle window) still locks.
 //
+// TM-337 — TRUSTED IN-APP EXCURSIONS (generalising the TM-334 mechanism):
+// The biometric prompt is not the only in-app action that backgrounds/foregrounds the Activity.
+// Launching the native camera / gallery picker for the avatar (native-camera.js `captureAvatarImage`)
+// backgrounds the Capacitor app the same way, so on return `appStateChange { isActive: true }` fires
+// and the resume handler used to slam the lock on — re-prompting the user mid-flow even though they
+// never actually left the app. This is the SAME class of synthetic resume as the prompt's own.
+// So we generalise the prompt's `promptInFlight` concept into a shared `suppressResumeLock` counter
+// used by BOTH the biometric prompt AND explicitly-marked "trusted in-app excursions"
+// (`beginTrustedExcursion()` / `endTrustedExcursion()`). While ANY suppression is in flight, a resume
+// must NOT engage the lock; ending an excursion also opens the same post-unlock SETTLE window so the
+// excursion's trailing foreground can't re-lock. A genuine "user left and came back" (no suppression
+// active, outside the settle window) still locks — only the app-initiated excursion window is spared.
+//
 // Fail-safe: this is a CONVENIENCE layer, not the security boundary — the backend (default-deny,
 // TM-79) is. So if biometry becomes unavailable (sensor lockout, un-enrolled mid-session) we fail
 // OPEN and unlock, rather than trapping the user in an app they can never get back into. A genuine
@@ -84,9 +97,23 @@ export function createLockController(deps) {
   // matching foreground (`isActive:true`). We arm this on the prompt's background so we only clear
   // promptInFlight on the *paired* resume, never on a stray/early event.
   let awaitingPromptResume = false;
+  // TM-337: count of trusted in-app excursions currently in flight (e.g. the native camera/gallery
+  // picker). Bracketed by beginTrustedExcursion()/endTrustedExcursion(); a counter (not a boolean) so
+  // nested/overlapping excursions can't clear each other early. While > 0, a resume must NOT lock.
+  let excursionDepth = 0;
   // Timestamp of the last successful unlock — resumes within UNLOCK_SETTLE_MS of it are ignored, so
-  // the prompt's trailing foreground that arrives just after unlock() can't re-lock.
+  // the prompt's (or an excursion's) trailing foreground that arrives just after unlock()/end can't
+  // re-lock.
   let unlockedAt = -Infinity;
+
+  /**
+   * TM-334 + TM-337: is a synthetic (app-initiated) resume currently expected? True while the
+   * biometric prompt is in flight OR any trusted in-app excursion is open. The single predicate the
+   * resume chokepoint consults, so the prompt and external excursions share one suppression path.
+   */
+  function resumeSuppressed() {
+    return promptInFlight || excursionDepth > 0;
+  }
 
   /** Run the biometric prompt; on success unlock, otherwise keep the overlay up (unless fail-open). */
   async function promptUnlock() {
@@ -148,6 +175,29 @@ export function createLockController(deps) {
   }
 
   /**
+   * TM-337: mark the START of a trusted in-app excursion (e.g. we're about to launch the native
+   * camera/gallery picker, which will background then foreground the app). While one is open, the
+   * resume handler must NOT engage the lock — this is an app-initiated excursion, not the user
+   * leaving. Reference-counted so overlapping excursions are safe. Idempotent-safe to pair with
+   * endTrustedExcursion() in a `finally`.
+   */
+  function beginTrustedExcursion() {
+    excursionDepth += 1;
+  }
+
+  /**
+   * TM-337: mark the END of a trusted in-app excursion. Opens the same post-unlock SETTLE window as a
+   * successful unlock so the excursion's trailing `isActive:true` (which can arrive a beat AFTER the
+   * picker returns and we've already decremented) can't re-lock. Only the last matching end clears the
+   * suppression; never underflows below zero.
+   */
+  function endTrustedExcursion() {
+    if (excursionDepth === 0) return;
+    excursionDepth -= 1;
+    if (excursionDepth === 0) unlockedAt = now();
+  }
+
+  /**
    * Decide + engage the lock for the CURRENT moment (boot or resume): only when native + enabled +
    * usable. Re-checks usability each time because enrolment can change between sessions.
    *
@@ -182,27 +232,31 @@ export function createLockController(deps) {
    */
   function onAppStateChange(isActive) {
     if (!isActive) {
-      // Backgrounded. If a prompt is in flight, THIS is the prompt backgrounding the activity — note
-      // it so we clear the suppression only on the paired foreground that follows.
+      // Backgrounded. If the biometric prompt is in flight, THIS is the prompt backgrounding the
+      // activity — note it so we clear the prompt suppression only on the paired foreground that
+      // follows. (A trusted excursion needs no such pairing: its suppression is bracketed explicitly
+      // by begin/endTrustedExcursion, so its background is simply ignored while the excursion is open.)
       if (promptInFlight) awaitingPromptResume = true;
       return;
     }
     // Foregrounded.
-    if (promptInFlight) {
-      // This is the prompt's own resume (success or cancel just dismissed it). Do NOT re-lock. If
-      // this is the resume paired with the prompt's background, consume the suppression now so the
-      // NEXT genuine resume is handled normally.
-      if (awaitingPromptResume) {
+    // TM-334 + TM-337: any app-initiated synthetic resume — the biometric prompt dismissing OR the
+    // return from a trusted in-app excursion (camera/gallery) — must NOT re-lock.
+    if (resumeSuppressed()) {
+      // If this is the resume paired with the biometric prompt's own background, consume the prompt
+      // suppression now so the NEXT genuine resume is handled normally. Excursion suppression is
+      // cleared by endTrustedExcursion(), not here.
+      if (promptInFlight && awaitingPromptResume) {
         promptInFlight = false;
         awaitingPromptResume = false;
       }
       return;
     }
-    // TM-334: a successful unlock can be immediately followed by a trailing foreground (the prompt
-    // dismissal) that arrives a beat after we've already cleared promptInFlight. Ignore resumes for a
-    // brief settle window after unlock so that trailing event can't re-lock.
+    // TM-334: a successful unlock (or the end of an excursion) can be immediately followed by a
+    // trailing foreground that arrives a beat after we've already cleared the suppression. Ignore
+    // resumes for a brief settle window so that trailing event can't re-lock.
     if (now() - unlockedAt < UNLOCK_SETTLE_MS) return;
-    // A genuine background→foreground with no prompt in flight: engage the lock.
+    // A genuine background→foreground with nothing in flight: engage the lock.
     return maybeLock();
   }
 
@@ -210,6 +264,9 @@ export function createLockController(deps) {
     onAppStateChange,
     maybeLock,
     coverEagerly,
+    // TM-337: trusted in-app excursion suppression, shared with the TM-334 prompt path.
+    beginTrustedExcursion,
+    endTrustedExcursion,
     // Exposed for tests/inspection.
     isLocked: () => locked,
     promptUnlock,
@@ -311,6 +368,25 @@ export function init() {
   controller.maybeLock();
 }
 
+/**
+ * TM-337: mark the start of a trusted in-app excursion (about to launch the native camera/gallery
+ * picker) so the resume it causes does NOT re-lock the app. Safe no-op when the lock isn't active:
+ * off the native shell `init()` never built a controller, and in a plain browser there's nothing to
+ * suppress — so the web avatar flow is completely unaffected. MUST be paired with
+ * endTrustedExcursion() (call it in a `finally`).
+ */
+export function beginTrustedExcursion() {
+  if (controller) controller.beginTrustedExcursion();
+}
+
+/**
+ * TM-337: mark the end of a trusted in-app excursion (the picker returned/cancelled/errored). Safe
+ * no-op when the lock isn't active. Idempotent against a begin that was itself a no-op.
+ */
+export function endTrustedExcursion() {
+  if (controller) controller.endTrustedExcursion();
+}
+
 // Auto-init at module load — the router/index wires this in via a <script type="module"> import.
 if (typeof window !== "undefined") {
   if (document.readyState === "loading") {
@@ -318,5 +394,5 @@ if (typeof window !== "undefined") {
   } else {
     init();
   }
-  window.tmBiometricLock = { init };
+  window.tmBiometricLock = { init, beginTrustedExcursion, endTrustedExcursion };
 }
