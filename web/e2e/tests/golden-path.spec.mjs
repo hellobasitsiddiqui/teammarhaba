@@ -172,7 +172,11 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await page.fill("#profile-city", city);
   await page.selectOption("#profile-notificationPref", "BOTH");
   await page.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Profile saved");
+  // Scope to the NEWEST success toast (.last()): this is a long journey, so an earlier success toast
+  // (e.g. onboarding's "Welcome to TeamMarhaba!") may still be lingering, and an un-scoped
+  // #tm-toasts .tm-toast-success would be a strict-mode violation (multiple matches). The single-
+  // step sibling specs don't accumulate toasts, so they assert unscoped — here we take the latest.
+  await expect(page.locator("#tm-toasts .tm-toast-success").last()).toContainText("Profile saved");
   await shot("profile-saved");
 
   // It persisted: the users row carries the new city + preference.
@@ -200,7 +204,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
     mimeType: "image/png",
     buffer: Buffer.from(PNG_1x1_BASE64, "base64"),
   });
-  await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Avatar updated");
+  await expect(page.locator("#tm-toasts .tm-toast-success").last()).toContainText("Avatar updated");
   const previewImg = page.locator(".tm-profile-avatar .tm-avatar-img");
   await expect(previewImg).toBeVisible();
   const firstURL = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
