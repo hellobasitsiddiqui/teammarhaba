@@ -187,8 +187,8 @@ async function refreshPush(win = globalThis) {
     if (copyEl) copyEl.disabled = false;
   } else {
     tokenEl.textContent = isNativePlatform(win)
-      ? "No token yet — sign in on the device to register with FCM."
-      : "Not on device — push only registers inside the Android app.";
+      ? "No token yet — sign in on the device to register for push."
+      : "Not on device — push only registers inside the app.";
     if (copyEl) copyEl.disabled = true;
   }
 
