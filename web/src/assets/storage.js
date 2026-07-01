@@ -25,6 +25,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
 import { updateProfile } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { app, auth } from "./auth.js";
+import { avatarPath, legacyAvatarPathToDelete } from "./avatar-cleanup.js";
 
 // Client-side guardrails that MIRROR the Storage security rules (storage.rules). The rules are the
 // real authority — these just let us fail fast in the browser with a friendly message instead of
@@ -78,11 +79,6 @@ export function validateAvatarFile(file) {
   if (!file.type || !file.type.startsWith(ACCEPTED_PREFIX)) return "That file isn't an image.";
   if (file.size > MAX_AVATAR_BYTES) return "Image must be 5 MB or smaller.";
   return "";
-}
-
-/** The per-uid object path for a user's avatar. Single source so upload + cleanup agree. */
-function avatarPath(uid) {
-  return `avatars/${uid}`;
 }
 
 /**
@@ -142,17 +138,21 @@ export async function uploadAvatar(file, onProgress) {
   return downloadURL;
 }
 
-/** Best-effort delete of a superseded avatar object. Swallows errors (cleanup must never fail upload). */
+/**
+ * Best-effort delete of a superseded avatar object. Swallows errors (cleanup must never fail upload).
+ *
+ * TM-335: the object path is fixed per-uid (`avatars/{uid}`), so a re-upload OVERWRITES the same path.
+ * getDownloadURL() mints a fresh `?token=` each call, so the previous and new download URLs differ
+ * even though they point at the SAME object — comparing the token'd URLs (as before) would then delete
+ * the object we JUST uploaded, 404-ing the avatar. So we compare by object PATH and NEVER delete the
+ * current per-uid path (the overwrite already replaced its bytes); we only delete a genuinely
+ * DIFFERENT legacy path. See avatar-cleanup.js for the pure decision logic.
+ */
 async function cleanupPreviousAvatar(store, uid, previousPhotoURL, newURL) {
-  if (!previousPhotoURL || previousPhotoURL === newURL) return;
-  // Only touch objects that look like OUR Storage download URLs for this user — never an external
-  // photoURL (e.g. a Google account photo from social sign-in).
-  const marker = encodeURIComponent(avatarPath(uid));
-  const isOurObject = /firebasestorage\.googleapis\.com|\/v0\/b\//.test(previousPhotoURL) &&
-    previousPhotoURL.includes(marker);
-  if (!isOurObject) return;
+  const legacyPath = legacyAvatarPathToDelete(uid, previousPhotoURL, newURL);
+  if (!legacyPath) return; // no previous, external URL, or the current per-uid path — nothing to do.
   try {
-    await deleteObject(ref(store, avatarPath(uid)));
+    await deleteObject(ref(store, legacyPath));
   } catch (err) {
     console.warn("[storage] could not delete previous avatar (non-fatal):", err?.code ?? err);
   }
