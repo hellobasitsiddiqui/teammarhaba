@@ -38,50 +38,45 @@ hardcoded in the repo):
 **`clean`** and redeploy. It defaults to **`sketch`** (the hand-drawn wireframe) when the variable is unset.
 See [CONTRIBUTING.md → Switching the live theme](../../CONTRIBUTING.md#switching-the-live-theme).
 
-## APK download bucket (TM-331)
+## APK download host — GitHub Release asset (TM-331)
 
-The signed Android APK is hosted **outside** Firebase Hosting, in a public Google Cloud Storage
-bucket, so it is **immune to web deploys**. A Firebase Hosting deploy replaces the *whole* site:
-`deploy.yml`'s web job rebuilds `web/dist` from `web/src` (no binary) and a `firebase deploy --only
-hosting` would wipe any `/downloads/teammarhaba.apk` placed in Hosting — the TM-331 bug, where the
-`/download` page then served the SPA `index.html` renamed `.apk`. Hosting the APK in its own bucket
-removes that whole class of failure: web deploys never touch the bucket.
+The signed Android APK is hosted **outside** Firebase Hosting, as a **GitHub Release asset**, so it
+is **immune to web deploys**. A Firebase Hosting deploy replaces the *whole* site: `deploy.yml`'s web
+job rebuilds `web/dist` from `web/src` (no binary) and a `firebase deploy --only hosting` would wipe
+any `/downloads/teammarhaba.apk` placed in Hosting — the TM-331 bug, where the `/download` page then
+served the SPA `index.html` renamed `.apk`. Hosting the APK on a GitHub Release removes that whole
+class of failure: web deploys never touch a Release asset.
 
-- **Object:** `gs://teammarhaba-downloads/teammarhaba.apk`
-- **Public URL:** `https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk`
-- **Publisher:** the `release` job in `.github/workflows/android-release.yml` runs
-  `gcloud storage cp … --content-type=application/vnd.android.package-archive --cache-control=no-cache`
-  on every signed release, overwriting the object in place. It authenticates with the *same* keyless
-  WIF identity (`gha-deployer`) as every other deploy step — no new credential.
+- **Public URL:** `https://github.com/hellobasitsiddiqui/teammarhaba/releases/latest/download/teammarhaba.apk`
+  (GitHub redirects `/releases/latest/download/<name>` to whichever Release is marked *latest*.)
+- **Publisher:** the `release` job in `.github/workflows/android-release.yml` publishes the signed
+  APK as an asset named exactly `teammarhaba.apk` on every signed release, using the `gh` CLI with the
+  built-in `GITHUB_TOKEN` (`contents: write`). It tags the Release with the same `git describe`
+  versionName it stamps into the APK + web `buildVersion`, creating the Release and marking it latest
+  the first time (`gh release create <tag> --latest …`) and clobbering the asset on a re-run
+  (`gh release upload <tag> teammarhaba.apk --clobber`). No GCS, no bucket, no new credential.
 - **Consumer:** the `/download` page (`web/src/download/index.html`) links its "Download the app"
-  button straight at the public URL.
+  button straight at the public `/releases/latest/download/teammarhaba.apk` URL.
 
-### One-time setup (human/infra — required before the first release upload)
+### Why a Release asset (not a public GCS bucket)
 
-Run once with an owner/admin identity (the CI `gha-deployer` SA can't create the bucket itself):
+The first cut of TM-331 hosted the APK in a public GCS bucket. Making the bucket world-readable
+needs an `allUsers` `roles/storage.objectViewer` binding, which the org policy
+`iam.allowedPolicyMemberDomains` (domain-restricted sharing) **rejects** — the bind fails with
+`HTTPError 412`. The **repository is public**, so a Release asset is already a public,
+unauthenticated download with **no IAM, no bucket, and no org-policy exception**, and is no security
+downgrade versus the intended public bucket.
 
-```bash
-PROJECT=teammarhaba
-BUCKET=teammarhaba-downloads
-SA=gha-deployer@${PROJECT}.iam.gserviceaccount.com
+### Setup
 
-# 1) Create the bucket (uniform access; europe-west2 to match the rest of the stack).
-gcloud storage buckets create "gs://${BUCKET}" \
-  --project="${PROJECT}" --location=europe-west2 --uniform-bucket-level-access
+**None.** No bucket to create, no IAM to grant. The workflow uses the built-in `GITHUB_TOKEN`; the
+only requirement is the `release` job's `permissions: contents: write` (already set). Until the
+first signed release runs (blocked on the TM-245 keystore secrets), the `/releases/latest/download/`
+URL 404s and the `/download` page degrades gracefully.
 
-# 2) Make objects in it publicly readable (anonymous GET — this is a public download).
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
-  --member=allUsers --role=roles/storage.objectViewer
-
-# 3) Let CI (gha-deployer) write the APK. Scoped to THIS bucket, not project-wide.
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
-  --member="serviceAccount:${SA}" --role=roles/storage.objectAdmin
-```
-
-> Org policy note: the same domain-restricted-sharing exception that lets Cloud Run bind `allUsers`
-> (TM-96) is needed for the public `objectViewer` binding above. Until the bucket exists + the SA
-> binding is in place, the workflow's APK-upload step **warns and stays green** (the signed APK is
-> still attached to the run as the `app-release-apk` artifact), so this step never blocks a release.
+> **Production host follow-up (TM-336):** a `github.com` Release URL is fine for the current
+> direct-download MVP, but the proper production host (a custom domain / CDN in front of the APK) is
+> tracked in **TM-336**.
 
 ## Rollback (previous release)
 

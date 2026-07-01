@@ -10,13 +10,14 @@ name: Android
 #
 #   release        — on a git TAG (v*) or manual `workflow_dispatch`: decode the keystore from the
 #                    TM-245 secrets, run `assembleRelease`, produce the SIGNED APK, stamp its
-#                    versionName to the live web `buildVersion`, publish the SIGNED APK to a
-#                    DEPLOY-IMMUNE GCS bucket (gs://teammarhaba-downloads/teammarhaba.apk — TM-331,
-#                    so a later web deploy can't wipe it) and publish the /download page to
-#                    Firebase Hosting (reusing deploy.yml's keyless WIF path). If the signing secrets
-#                    are absent (the human TM-245 mint not done yet) it SKIPS the build/host with a
-#                    clear warning and stays GREEN — it never ships an unsigned/debug APK as a release,
-#                    and never red-fails just because the secrets aren't configured yet.
+#                    versionName to the live web `buildVersion`, publish the SIGNED APK as a
+#                    DEPLOY-IMMUNE GitHub Release asset (releases/latest/download/teammarhaba.apk —
+#                    TM-331, so a later web deploy can't wipe it — a release asset lives outside
+#                    Firebase Hosting entirely) and publish the /download page to Firebase Hosting
+#                    (reusing deploy.yml's keyless WIF path). If the signing secrets are absent (the
+#                    human TM-245 mint not done yet) it SKIPS the build/host with a clear warning and
+#                    stays GREEN — it never ships an unsigned/debug APK as a release, and never
+#                    red-fails just because the secrets aren't configured yet.
 #
 # Secrets consumed by `release` (stored by the human ticket TM-245 — never committed here):
 #   KEYSTORE_BASE64    base64 of the release .jks
@@ -121,7 +122,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # create/upload the GitHub Release asset (the deploy-immune APK host — TM-331)
       id-token: write   # keyless WIF auth to GCP/Firebase (same as deploy.yml)
     steps:
       - name: Checkout
@@ -260,14 +261,15 @@ jobs:
 
       # Build the Hosting bundle exactly like deploy.yml's web job (src -> dist, inject config.js).
       # NOTE (TM-331): we DELIBERATELY no longer stage the APK into web/dist/downloads/ here. The APK
-      # is hosted OUTSIDE Firebase Hosting (a GCS bucket — see the "Publish the signed APK to GCS"
-      # step below) precisely because a Firebase Hosting deploy REPLACES the whole site: a later
-      # web-only deploy.yml run rebuilds web/dist from web/src (which has no binary) and wipes any
-      # /downloads/teammarhaba.apk this job had placed in Hosting (the TM-331 bug — the /download page
-      # then served the SPA index.html renamed .apk). Hosting the APK in the deploy-immune bucket and
-      # pointing the /download page at the bucket's stable public URL makes the binary survive every
-      # web deploy. We still publish the web bundle below so the /download page + buildVersion stay in
-      # sync, but the APK itself lives in GCS, not in this Hosting release.
+      # is hosted OUTSIDE Firebase Hosting (a GitHub Release asset — see the "Publish the signed APK
+      # as a GitHub Release asset" step below) precisely because a Firebase Hosting deploy REPLACES the
+      # whole site: a later web-only deploy.yml run rebuilds web/dist from web/src (which has no binary)
+      # and wipes any /downloads/teammarhaba.apk this job had placed in Hosting (the TM-331 bug — the
+      # /download page then served the SPA index.html renamed .apk). Hosting the APK as a Release asset
+      # and pointing the /download page at the stable releases/latest/download/ URL makes the binary
+      # survive every web deploy. We still publish the web bundle below so the /download page +
+      # buildVersion stay in sync, but the APK itself lives on a GitHub Release, not in this Hosting
+      # release.
       - name: Build web bundle (mirror deploy.yml)
         if: ${{ steps.secrets.outputs.present == 'true' }}
         run: |
@@ -287,43 +289,63 @@ jobs:
         if: ${{ steps.secrets.outputs.present == 'true' }}
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      # Publish the signed APK to the DEPLOY-IMMUNE GCS bucket (TM-331) — the canonical home of the
-      # downloadable binary. This is the fix's core: the bucket lives OUTSIDE the Firebase Hosting
-      # site, so a web-only deploy.yml run (which replaces the whole Hosting site) can never touch or
-      # wipe it. The /download page links straight at this object's stable public URL
-      # (https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk), so "Download for
-      # Android" always returns a real APK (PK magic), never the SPA index.html.
+      # Publish the signed APK as a DEPLOY-IMMUNE GitHub Release asset (TM-331) — the canonical home of
+      # the downloadable binary. This is the fix's core: a Release asset lives OUTSIDE the Firebase
+      # Hosting site entirely, so a web-only deploy.yml run (which replaces the whole Hosting site) can
+      # never touch or wipe it. The /download page links straight at the stable "latest" URL
+      # (https://github.com/hellobasitsiddiqui/teammarhaba/releases/latest/download/teammarhaba.apk),
+      # which GitHub redirects to whichever Release is marked latest, so "Download for Android" always
+      # returns a real APK (PK magic), never the SPA index.html.
       #
-      # Auth: reuses the keyless WIF ADC the auth step above wrote (impersonating gha-deployer) —
-      # no new credential. The bucket + the gha-deployer objectAdmin grant are a ONE-TIME human/infra
-      # step (see infra/gcp/firebase-hosting.md "APK download bucket (TM-331)"); until that's done this
-      # upload fails, so it is NON-FATAL (mirrors the hosting publish below): the signed APK is already
-      # attached as the app-release-apk artifact (the QA source of truth, TM-288/TM-293), so a missing
-      # bucket warns but never red-fails the release.
+      # Why a Release asset and not the GCS bucket the first cut used: the public bucket needed an
+      # `allUsers` objectViewer binding, which the org policy `iam.allowedPolicyMemberDomains` rejects
+      # (HTTPError 412 — domain-restricted sharing). The repo is PUBLIC, so a Release asset is already a
+      # public, unauthenticated download with NO IAM, NO bucket and NO org-policy exception, and no
+      # security downgrade. (The proper production host — a custom domain / CDN — is tracked in TM-336.)
       #
-      # Content-type + cache headers are set on the object so the browser treats it as an installable
-      # APK and clients always re-check for the newest release rather than serving a stale cached one:
-      #   - Content-Type: application/vnd.android.package-archive  (so it downloads/installs as an APK)
-      #   - Cache-Control: no-cache  (the object is overwritten in place each release; always revalidate)
-      - name: Publish the signed APK to GCS (deploy-immune — TM-331)
-        id: gcs
+      # Auth: the built-in GITHUB_TOKEN (github.token) with `contents: write` — no GCP/WIF credential
+      # and no gcloud needed for this step. We tag the Release with the SAME versionName git-describe
+      # value we stamped into the APK + config.js (steps.ver.outputs.versionName), so the Release tag,
+      # the APK's versionName and the live web buildVersion all line up. `gh release create --latest`
+      # makes releases/latest/download/ resolve; if the tag's Release already exists we fall back to
+      # `gh release upload --clobber` to overwrite the asset in place.
+      #
+      # We rename the built APK to exactly `teammarhaba.apk` first so the asset filename (and therefore
+      # the /latest/download/teammarhaba.apk URL) is stable regardless of the Gradle output name.
+      #
+      # NON-FATAL (mirrors the hosting publish below): the signed APK is already attached as the
+      # app-release-apk artifact (the QA source of truth, TM-288/TM-293), so a Release-publish hiccup
+      # warns but never red-fails the release.
+      - name: Publish the signed APK as a GitHub Release asset (deploy-immune — TM-331)
+        id: release
         if: ${{ steps.secrets.outputs.present == 'true' }}
         env:
-          APK_BUCKET: teammarhaba-downloads
-          APK_OBJECT: teammarhaba.apk
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.versionName }}
         run: |
           set -uo pipefail
-          DEST="gs://${APK_BUCKET}/${APK_OBJECT}"
-          if gcloud storage cp "${{ steps.apk.outputs.apk }}" "${DEST}" \
-               --content-type="application/vnd.android.package-archive" \
-               --cache-control="no-cache" \
-               --quiet; then
-            PUBLIC_URL="https://storage.googleapis.com/${APK_BUCKET}/${APK_OBJECT}"
-            echo "Signed APK published to ${DEST} -> ${PUBLIC_URL}"
-            echo "public_url=${PUBLIC_URL}" >> "$GITHUB_OUTPUT"
-            echo "- **Hosted APK (deploy-immune GCS): ${PUBLIC_URL}**" >> "$GITHUB_STEP_SUMMARY"
+          # Normalise the asset filename so the /latest/download/teammarhaba.apk URL is stable.
+          ASSET="${RUNNER_TEMP}/teammarhaba.apk"
+          cp "${{ steps.apk.outputs.apk }}" "${ASSET}"
+          PUBLIC_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/teammarhaba.apk"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            # Release for this tag already exists (e.g. a re-run of the same tag) — clobber the asset.
+            if gh release upload "${TAG}" "${ASSET}" --clobber; then
+              echo "Signed APK uploaded to existing release ${TAG} -> ${PUBLIC_URL}"
+              echo "public_url=${PUBLIC_URL}" >> "$GITHUB_OUTPUT"
+              echo "- **Hosted APK (deploy-immune GitHub Release ${TAG}): ${PUBLIC_URL}**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::Could not upload the APK to the existing release ${TAG}. The signed APK is still attached as the app-release-apk artifact (TM-288)."
+            fi
           else
-            echo "::warning::Could not publish the APK to ${DEST}. Create the bucket + grant gha-deployer roles/storage.objectAdmin (one-time infra step — see infra/gcp/firebase-hosting.md 'APK download bucket (TM-331)'), then re-run. The signed APK is still attached as the app-release-apk artifact (TM-288)."
+            # First release for this tag — create it, mark it latest so /releases/latest/download resolves.
+            if gh release create "${TAG}" "${ASSET}" --latest --title "${TAG}" --notes "Signed APK"; then
+              echo "Signed APK published as new release ${TAG} -> ${PUBLIC_URL}"
+              echo "public_url=${PUBLIC_URL}" >> "$GITHUB_OUTPUT"
+              echo "- **Hosted APK (deploy-immune GitHub Release ${TAG}): ${PUBLIC_URL}**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::Could not create release ${TAG} for the APK. Check the release job has 'contents: write' permission. The signed APK is still attached as the app-release-apk artifact (TM-288)."
+            fi
           fi
 
       # Same config.js injections as deploy.yml so the hosted build stays consistent: backend URL,
@@ -396,6 +418,6 @@ jobs:
             echo "- versionName (= web buildVersion): \`${{ steps.ver.outputs.versionName }}\`"
             echo "- versionCode: \`${{ steps.ver.outputs.versionCode }}\`"
             echo "- **Signed APK artifact: \`app-release-apk\`** (always attached to this run — the QA source of truth, TM-288)."
-            echo "- Hosted APK (deploy-immune GCS — TM-331): https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk"
+            echo "- Hosted APK (deploy-immune GitHub Release — TM-331): https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/teammarhaba.apk"
             echo "- Download page (if hosted): https://teammarhaba.web.app/download"
           } >> "$GITHUB_STEP_SUMMARY"
