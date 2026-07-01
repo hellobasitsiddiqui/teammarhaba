@@ -2,9 +2,11 @@
 // and hands its registration token to the backend so the send-push service (TM-284) can target it.
 //
 // WHERE THIS RUNS. The web app is a no-bundler static SPA served from teammarhaba.web.app and loaded
-// either by a normal browser OR inside the Capacitor Android shell (TM-278), which loads the SAME
-// hosted URL via `server.url`. So this one file ships to every surface; it must be INERT on the web
-// and only do real work inside the native shell. Two gates enforce that:
+// either by a normal browser OR inside a Capacitor native shell — the Android shell (TM-278) or the
+// iOS WKWebView shell (TM-348) — which load the SAME hosted URL via `server.url`. So this one file
+// ships to every surface; it must be INERT on the web and only do real work inside the native shell.
+// The device reports which shell it is via push-env's `platformFor` (Capacitor.getPlatform → IOS or
+// ANDROID). Two gates enforce the web-inert contract:
 //   1. `isWebViewEnv()` (auth-env.js) — the shell signals itself (window.TEAMMARHABA_WEBVIEW / the
 //      TeamMarhabaWebView bridge), same signal auth uses for redirect-vs-popup.
 //   2. `Capacitor.isNativePlatform()` + the PushNotifications plugin actually being injected — the
@@ -25,22 +27,20 @@
 //   • On a sign-IN transition (signed-out → signed-in): request the OS notification permission
 //     (Android 13+ POST_NOTIFICATIONS prompt) and, if granted, call register() — which makes the
 //     device fetch its FCM token and fire the `registration` listener.
-//   • `registration` listener → POST the token (+ platform ANDROID) to /api/v1/me/devices. FCM also
-//     re-fires this listener when it ROTATES the token, so refresh is handled by the same path (the
-//     backend upsert is idempotent and re-points the token at the caller).
+//   • `registration` listener → POST the token (+ the platform Capacitor reports — IOS or ANDROID,
+//     via push-env's `platformFor`) to /api/v1/me/devices. FCM/APNs also re-fires this listener when
+//     the token ROTATES, so refresh is handled by the same path (the backend upsert is idempotent
+//     and re-points the token at the caller).
 //   • On a sign-OUT transition (signed-in → signed-out): DELETE the last-registered token so a signed-
 //     out device stops receiving this user's pushes. Best-effort; the backend DELETE is idempotent.
 //
 // Consumers: loaded as a module from index.html; nothing imports from it. Listeners are attached once.
 
 import { onAuthChanged } from "./auth.js";
-import { getPushPlugin, isPushSupported } from "./push-env.js";
+import { getPushPlugin, isPushSupported, platformFor } from "./push-env.js";
 import { routeFromNotification, DEFAULT_ROUTE } from "./push-deeplink.js";
 import { registerDevice, deregisterDevice } from "./api.js";
 import { toast } from "./ui.js";
-
-/** This client only registers Android devices (the only native shell today — TM-277/TM-278). */
-const PLATFORM = "ANDROID";
 
 // The most-recently-registered FCM token, kept so sign-out can deregister exactly that token. Lives
 // only in memory (never persisted/logged) — Firebase/FCM owns token storage and rotation.
@@ -127,17 +127,22 @@ function attachListeners(plugin) {
     if (!value) return;
     currentToken = value;
     try {
-      await registerDevice(value, PLATFORM);
+      // Report the platform Capacitor says we're running in (IOS/ANDROID), so an APNs token from the
+      // iOS shell (TM-348) isn't mislabelled ANDROID and routed down the FCM path by send-push.
+      await registerDevice(value, platformFor());
     } catch (err) {
       // Non-fatal: a failed registration just means no push until next register; never break the app.
       console.warn("[push] could not register device token with backend:", err?.message ?? err);
     }
   });
 
-  // Fired if the device couldn't obtain a token (e.g. Google Play services / FCM not set up — the
-  // human google-services.json prereq). Surfaced quietly; push simply stays off.
+  // Fired if the device couldn't obtain a token — e.g. on Android when Google Play services / FCM
+  // isn't set up (the human google-services.json prereq), or on the iOS SIMULATOR, which cannot talk
+  // to APNs so `registerForRemoteNotifications` always fails (TM-348 ceiling: Simulator only, no real
+  // APNs). Either way it's surfaced quietly and push simply stays off — never fatal, so the app boots
+  // and runs fine with a null token. A null token in QA diagnostics on the Simulator is expected.
   plugin.addListener("registrationError", (err) => {
-    console.warn("[push] FCM registration failed:", err?.error ?? err);
+    console.warn("[push] push registration failed (no token; app continues):", err?.error ?? err);
   });
 
   // TAP (TM-285): fired when the user taps a notification — both when the app was already open (warm)

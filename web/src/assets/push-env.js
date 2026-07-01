@@ -45,3 +45,34 @@ export function getPushPlugin(win = globalThis) {
 export function isPushSupported(win = globalThis) {
   return isWebViewEnv(win) && getPushPlugin(win) !== null;
 }
+
+/** The device-platform values the backend accepts (com.teammarhaba.backend.device.DevicePlatform)
+ * and `api.js registerDevice` is typed for. `WEB` is the safe fallback for any surface that isn't a
+ * recognised native shell (it's inert anyway — push only registers where `isPushSupported`). */
+export const DEVICE_PLATFORM = Object.freeze({ IOS: "IOS", ANDROID: "ANDROID", WEB: "WEB" });
+
+/**
+ * Which `DevicePlatform` this device registers as. Derived from Capacitor's own `getPlatform()` so a
+ * device reports the shell it actually runs in — `'ios'`→`'IOS'` (WKWebView shell, TM-348),
+ * `'android'`→`'ANDROID'` (TM-278), everything else (incl. Capacitor's own `'web'`, or no Capacitor
+ * global at all)→`'WEB'`. This replaces the old hard-coded `ANDROID` in push.js now that iOS is a
+ * real shell: the token a device sends and the platform it claims must match, or the send-push
+ * service (TM-284) would route an APNs token down the Android/FCM path.
+ *
+ * Pure given `win` (reads only `Capacitor.getPlatform`), so it's unit-testable under `node --test`
+ * here in the Firebase-free module — push.js itself can't be imported by the test runner.
+ * @param {object} [win=globalThis] injectable for tests.
+ * @returns {"IOS"|"ANDROID"|"WEB"}
+ */
+export function platformFor(win = globalThis) {
+  const cap = win && win.Capacitor;
+  const name = cap && typeof cap.getPlatform === "function" ? cap.getPlatform() : null;
+  switch (name) {
+    case "ios":
+      return DEVICE_PLATFORM.IOS;
+    case "android":
+      return DEVICE_PLATFORM.ANDROID;
+    default:
+      return DEVICE_PLATFORM.WEB;
+  }
+}

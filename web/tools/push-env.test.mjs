@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { getPushPlugin, isPushSupported } from "../src/assets/push-env.js";
+import { getPushPlugin, isPushSupported, platformFor, DEVICE_PLATFORM } from "../src/assets/push-env.js";
 
 /** A fake PushNotifications plugin proxy (its shape doesn't matter to the gate). */
 const fakePlugin = { register() {}, addListener() {}, checkPermissions() {}, requestPermissions() {} };
@@ -61,4 +61,37 @@ test("native runtime + plugin but NO WebView signal is not push-supported", () =
   const win = makeWin({ webView: false, native: true, plugin: fakePlugin });
   assert.equal(getPushPlugin(win), fakePlugin);
   assert.equal(isPushSupported(win), false);
+});
+
+// ---- platformFor (TM-352): the DevicePlatform a device registers as -------------------------------
+// Replaces push.js's old hard-coded `PLATFORM = "ANDROID"`; maps Capacitor.getPlatform() → the
+// backend DevicePlatform value (ANDROID|IOS|WEB). Pure given `win`, so it's asserted here.
+
+/** A fake `window` whose Capacitor reports `getPlatform()` as `name` (or omits it when null). */
+function makeWinPlatform(name) {
+  return { Capacitor: name === null ? {} : { getPlatform: () => name } };
+}
+
+test("platformFor maps Capacitor 'ios' → 'IOS'", () => {
+  assert.equal(platformFor(makeWinPlatform("ios")), "IOS");
+  assert.equal(platformFor(makeWinPlatform("ios")), DEVICE_PLATFORM.IOS);
+});
+
+test("platformFor maps Capacitor 'android' → 'ANDROID'", () => {
+  assert.equal(platformFor(makeWinPlatform("android")), "ANDROID");
+  assert.equal(platformFor(makeWinPlatform("android")), DEVICE_PLATFORM.ANDROID);
+});
+
+test("platformFor maps Capacitor 'web' → 'WEB'", () => {
+  assert.equal(platformFor(makeWinPlatform("web")), "WEB");
+});
+
+test("platformFor falls back to 'WEB' when getPlatform is absent or there's no Capacitor global", () => {
+  assert.equal(platformFor(makeWinPlatform(null)), "WEB"); // Capacitor present but no getPlatform
+  assert.equal(platformFor({}), "WEB"); // no Capacitor global at all
+  assert.equal(platformFor(undefined), "WEB"); // no window at all
+});
+
+test("platformFor maps an unexpected platform string to 'WEB' (safe default)", () => {
+  assert.equal(platformFor(makeWinPlatform("windows")), "WEB");
 });
