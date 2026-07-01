@@ -42,5 +42,12 @@ public enum AuditAction {
     DEVICE_TOKEN_REGISTERED,
 
     /** A device token was deregistered — sign-out or FCM-reported invalidation (TM-283/TM-284). */
-    DEVICE_TOKEN_DEREGISTERED
+    DEVICE_TOKEN_DEREGISTERED,
+
+    /**
+     * An admin sent a broadcast notification to real users (TM-359 / epic TM-358). One summary row
+     * per send; the full header (title/body/recipient-count/outcome) lives in {@code
+     * notification_broadcasts}.
+     */
+    BROADCAST_SENT
 }
