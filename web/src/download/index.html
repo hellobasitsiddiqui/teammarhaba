@@ -14,15 +14,17 @@
            - is NOT touched by the asset fingerprinter (it only hashes /assets/*.{js,css}), so this
              URL stays stable across deploys, and
            - renders even if /assets/** failed to load.
-         The APK is published by the release workflow to a DEPLOY-IMMUNE Google Cloud Storage bucket,
+         The APK is published by the release workflow as a DEPLOY-IMMUNE GitHub Release asset,
          NOT to Firebase Hosting (TM-331). It lives at
-         https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk, OUTSIDE the Hosting
-         site, because a Firebase Hosting deploy replaces the WHOLE site — a web-only deploy used to
-         wipe the previously-hosted /downloads/teammarhaba.apk binary, leaving the SPA index.html
-         served (and downloaded) under that path renamed .apk. The bucket is never touched by a web
-         deploy, so the link below always returns a real APK. Until the first signed release lands
-         (blocked on the TM-245 keystore secrets) that object 404s; the page below degrades
-         gracefully and says so. -->
+         https://github.com/hellobasitsiddiqui/teammarhaba/releases/latest/download/teammarhaba.apk,
+         OUTSIDE the Hosting site, because a Firebase Hosting deploy replaces the WHOLE site — a
+         web-only deploy used to wipe the previously-hosted /downloads/teammarhaba.apk binary, leaving
+         the SPA index.html served (and downloaded) under that path renamed .apk. A Release asset is
+         never touched by a web deploy, so the link below always returns a real APK. (The GCS bucket
+         the first cut used needed an allUsers binding the org policy rejects — HTTPError 412; a
+         Release asset on this PUBLIC repo is public with no IAM/org-policy. Proper production host is
+         tracked in TM-336.) Until the first signed release lands (blocked on the TM-245 keystore
+         secrets) that URL 404s; the page below degrades gracefully and says so. -->
     <style>
         :root {
             --bg: #0f1226;
@@ -109,9 +111,10 @@
         </header>
 
         <div class="card cta">
-            <!-- Deploy-immune GCS bucket URL (TM-331); the release workflow publishes the signed APK
-                 here, OUTSIDE Firebase Hosting, so a web deploy can never clobber it. -->
-            <a class="btn" href="https://storage.googleapis.com/teammarhaba-downloads/teammarhaba.apk" download>Download the app (.apk)</a>
+            <!-- Deploy-immune GitHub Release asset URL (TM-331); the release workflow publishes the
+                 signed APK here, OUTSIDE Firebase Hosting, so a web deploy can never clobber it.
+                 /releases/latest/download/ redirects to whichever Release is marked latest. -->
+            <a class="btn" href="https://github.com/hellobasitsiddiqui/teammarhaba/releases/latest/download/teammarhaba.apk" download>Download the app (.apk)</a>
             <p class="meta" id="apk-meta">Android 7.0+ &middot; installs from this page</p>
             <p class="note" id="apk-missing" hidden>
                 The installable APK hasn’t been published yet. It goes live the moment the signed
@@ -154,14 +157,15 @@
     <!-- Tiny progressive enhancement: if the APK isn't published yet (404), disable the button and
          reveal the "not published yet" note. No framework, fails safe (if the probe errors, we leave
          the button enabled so a working APK is never hidden).
-         TM-331: the APK now lives on a cross-origin GCS bucket. A cross-origin fetch() can be blocked
-         by CORS (GCS doesn't send permissive CORS headers by default), which throws into the .catch()
-         below — i.e. it fails SAFE: the button stays enabled and links straight at the real APK. The
-         only thing lost cross-origin is the cosmetic "not published yet" hint; the actual download
-         (a plain top-level navigation via the <a download> link) is NOT subject to CORS and always
-         works. The probe stays in default (cors) mode on purpose: where the bucket has a CORS config
-         a real 404 still correctly disables the button; where it doesn't, the fetch rejects and the
-         fail-safe .catch keeps the button live. -->
+         TM-331: the APK now lives on a cross-origin GitHub Release (github.com). A cross-origin
+         fetch() can be blocked by CORS (github.com / the objects.githubusercontent.com redirect
+         target don't send permissive CORS headers for this), which throws into the .catch() below —
+         i.e. it fails SAFE: the button stays enabled and links straight at the real APK. The only
+         thing lost cross-origin is the cosmetic "not published yet" hint; the actual download (a
+         plain top-level navigation via the <a download> link, which follows the /latest/download
+         redirect) is NOT subject to CORS and always works. The probe stays in default (cors) mode on
+         purpose: where CORS allows it a real 404 still correctly disables the button; where it
+         doesn't, the fetch rejects and the fail-safe .catch keeps the button live. -->
     <script>
         (function () {
             var btn = document.querySelector(".btn");
