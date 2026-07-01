@@ -441,6 +441,30 @@
         "tags" : [ "user-admin-controller" ]
       }
     },
+    "/api/v1/admin/users/push-routes" : {
+      "get" : {
+        "operationId" : "pushRoutes",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "items" : {
+                      "type" : "string"
+                    },
+                    "type" : "array"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
     "/api/v1/admin/users/{id}" : {
       "get" : {
         "operationId" : "get",

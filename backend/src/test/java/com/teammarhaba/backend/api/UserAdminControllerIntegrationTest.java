@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.google.firebase.auth.FirebaseAuth;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
@@ -153,5 +154,35 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/users").param("sort", "password").with(admin("admin-s")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Bad request"));
+    }
+
+    // --- Deep-link route allow-list for the broadcast/test-push compose picker (TM-360) ---
+
+    @Test
+    void adminGetsThePushRouteAllowList() throws Exception {
+        // The picker's single source of truth: exactly PushRoutes.KNOWN, wrapped as {"routes":[...]},
+        // sorted for a stable dropdown order. A signed-in ADMIN reads it read-only.
+        mockMvc.perform(get("/api/v1/admin/users/push-routes").with(admin("admin-routes")))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.routes.length()").value(PushRoutes.KNOWN.size()))
+                .andExpect(jsonPath("$.routes",
+                        org.hamcrest.Matchers.containsInAnyOrder(PushRoutes.KNOWN.toArray())))
+                // sorted ascending so the dropdown order is deterministic
+                .andExpect(jsonPath("$.routes[0]").value("#/admin"))
+                .andExpect(jsonPath("$.routes[5]").value("#/profile"));
+    }
+
+    @Test
+    void pushRouteAllowListIsAdminOnly() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/users/push-routes").with(regularUser("plain-user")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void pushRouteAllowListRejectsAnonymous() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/users/push-routes"))
+                .andExpect(status().isUnauthorized());
     }
 }
