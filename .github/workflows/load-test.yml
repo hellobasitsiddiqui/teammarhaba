@@ -1,0 +1,158 @@
+name: Load test (k6)
+
+# k6 load / concurrency-correctness harness (TM-343). Runs on demand ONLY — never on the PR gate
+# and never on a schedule by default: a load test is deliberately heavy and is targeted at a
+# NON-PROD stack that this job stands up itself (Postgres + Firebase Auth emulator + backend), the
+# same way e2e.yml does. It NEVER touches production.
+#
+# This is the runnable job stub the ticket asks for. TM-340's `test-suite.yml suite=load vus=N`
+# dispatch can either call this workflow or inline the `k6 run …` command from
+# `test/load/README.md`; the harness itself (test/load/api-load.js) is the deliverable.
+on:
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: "Virtual users (distinct seeded identities)."
+        required: false
+        default: "20"
+      duration:
+        description: "Steady-state hold (k6 duration, e.g. 1m, 2m)."
+        required: false
+        default: "1m"
+      p95_ms:
+        description: "p95 latency threshold in ms (fails the run if breached)."
+        required: false
+        default: "800"
+      error_rate:
+        description: "Max http_req_failed rate (e.g. 0.01 = 1%)."
+        required: false
+        default: "0.01"
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: k6 load + concurrency-correctness (non-prod)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: teammarhaba
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: devpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d teammarhaba"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # NON-PROD target: the local emulator-backed stack this job stands up. Never prod.
+      FIREBASE_PROJECT_ID: teammarhaba
+      FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      E2E_API_BASE_URL: http://127.0.0.1:8080
+      BASE_URL: http://127.0.0.1:8080
+      AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      VUS: ${{ github.event.inputs.vus }}
+      DURATION: ${{ github.event.inputs.duration }}
+      P95_MS: ${{ github.event.inputs.p95_ms }}
+      ERROR_RATE: ${{ github.event.inputs.error_rate }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21 (Temurin) + Maven cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Set up Node 20
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+          k6 version
+
+      - name: Build backend jar
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+
+      - name: Install e2e deps (firebase-tools + firebase-admin for the seeder)
+        working-directory: web/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Start Firebase Auth emulator
+        working-directory: web/e2e
+        run: |
+          npx firebase emulators:start --only auth --project teammarhaba --config ../../firebase.json > /tmp/firebase-emulator.log 2>&1 &
+          echo "Waiting for the Auth emulator on :9099…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:9099/" > /dev/null && { echo "auth emulator up"; break; }
+            sleep 2
+          done
+
+      - name: Start backend (pointed at the emulator + Postgres)
+        env:
+          SPRING_PROFILES_ACTIVE: dev
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/teammarhaba
+          SPRING_DATASOURCE_USERNAME: app
+          SPRING_DATASOURCE_PASSWORD: devpassword
+        run: |
+          java -jar backend/target/*.jar > /tmp/backend.log 2>&1 &
+          echo "Waiting for the backend on :8080…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:8080/health" > /dev/null && { echo "backend up"; break; }
+            sleep 2
+          done
+          curl -sf "http://127.0.0.1:8080/health" > /dev/null || { echo "backend failed to start"; tail -n 100 /tmp/backend.log; exit 1; }
+
+      - name: Seed N distinct load-test accounts
+        working-directory: web/e2e
+        run: node ../../test/load/seed-users.mjs
+
+      - name: Run k6 load + concurrency-correctness harness
+        run: |
+          k6 run \
+            -e VUS="${VUS}" -e DURATION="${DURATION}" \
+            -e BASE_URL="${BASE_URL}" \
+            -e P95_MS="${P95_MS}" -e ERROR_RATE="${ERROR_RATE}" \
+            -e SUMMARY_JSON=k6-summary.json \
+            test/load/api-load.js
+
+      - name: Upload k6 summary (always — evidence)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: k6-summary
+          path: k6-summary.json
+          if-no-files-found: warn
+
+      - name: Upload service logs (on failure)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: load-test-logs
+          path: |
+            /tmp/backend.log
+            /tmp/firebase-emulator.log
+          if-no-files-found: warn
