@@ -1,10 +1,14 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.UserAdminService;
 import com.teammarhaba.backend.web.BadRequestException;
 import jakarta.validation.Valid;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -31,6 +35,10 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code PATCH /admin/users/{id}} — enable/disable and/or change role (self-protected).</li>
  *   <li>{@code POST /admin/users/{id}/test-push} — manual send-push trigger (TM-284): deliver a test
  *       notification to the account's devices and report the fan-out, to verify push end-to-end.</li>
+ *   <li>{@code GET /admin/users/push-routes} — the deep-link route allow-list ({@link PushRoutes#KNOWN},
+ *       TM-360): the single source of truth the broadcast/test-push compose picker populates from, so
+ *       an admin only ever picks a route the backend will actually accept (rather than a hand-copied
+ *       client list that can silently drift).</li>
  * </ul>
  *
  * <p>Lives in the {@code api} package so it inherits the package-driven {@code /api/v1} prefix
@@ -89,6 +97,21 @@ public class UserAdminController {
         // TM-290: optional body lets the operator pick a deep-link route; no body = plain test push.
         String route = request == null ? null : request.route();
         return PushFanoutResponse.from(adminService.sendTestPush(id, route));
+    }
+
+    /**
+     * The deep-link route allow-list (TM-360) — the app hash routes a push/broadcast may deep-link to
+     * ({@link PushRoutes#KNOWN}). This is the <strong>single source of truth</strong> the compose
+     * picker (test-push here, broadcast in TM-365) populates its dropdown from, so an admin can only
+     * ever pick a route the send path will accept ({@link PushRoutes#isKnown}) — no free text, no
+     * client-side copy that can drift out of step. Returned sorted for a stable dropdown order and
+     * wrapped as {@code {"routes":[...]}} so the shape can grow (e.g. add labels) without a breaking
+     * change. Read-only and ADMIN-gated (inherited from the class); a {@code null} 'no deep-link'
+     * option is a UI concern, not part of the list.
+     */
+    @GetMapping("/push-routes")
+    public Map<String, List<String>> pushRoutes() {
+        return Map.of("routes", List.copyOf(new TreeSet<>(PushRoutes.KNOWN)));
     }
 
     /** Build a safe {@link Pageable}: clamp page/size and validate the sort field against an allow-list. */
