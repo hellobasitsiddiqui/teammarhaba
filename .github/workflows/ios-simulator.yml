@@ -1,0 +1,92 @@
+# iOS Simulator compile check (TM-349, wave-0 of the iOS-Simulator epic TM-348).
+#
+# CEILING: iOS Simulator only — NO signing / provisioning / Apple account / TestFlight. A clean
+# Debug compile for the iOS Simulator SDK (code signing disabled) is the green gate that proves the
+# scaffolded Capacitor iOS shell + WKWebView env-signal contract actually build.
+#
+# NOTE — Capacitor 8 uses Swift Package Manager, NOT CocoaPods. `npx cap add ios` generated an
+# SPM-based project (ios/App/App.xcodeproj + ios/App/CapApp-SPM/Package.swift) with NO Podfile and
+# NO App.xcworkspace. So this workflow builds the .xcodeproj directly and resolves plugin deps via
+# `xcodebuild -resolvePackageDependencies` — there is no `pod install` step because there is nothing
+# to install. (The TM-349 ticket text predates this and assumed the Cap-7 CocoaPods flow.)
+#
+# TM-353 will extend this into the full smoke lane (boot the Simulator + assert the SPA renders and
+# the WebView env signals are live). For now it is a minimal-but-real compile gate.
+name: iOS Simulator
+
+on:
+  # Compile-check only when the iOS project / shared Capacitor config / deps (or this workflow)
+  # change — the path filter is the Actions-minutes win (TM-151 spirit): a PR touching only web/ or
+  # backend/ skips the macOS runner (macOS minutes bill at 10x).
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ios-simulator.yml'
+
+  # …or on demand from the Actions tab → "iOS Simulator" → Run.
+  workflow_dispatch:
+
+# Cancel an in-flight PR compile-check when the PR is updated (fast gate). Keyed by ref.
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Simulator compile check — needs no secrets (signing disabled). Proves the Swift shell +
+  # Capacitor SPM plugins compile into an .app for the iOS Simulator on every ios/ change.
+  # ---------------------------------------------------------------------------------------------
+  simulator-build:
+    name: iOS Simulator build (Debug, no signing)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The Xcode build depends on the Capacitor node_modules (CapApp-SPM/Package.swift points the
+      # plugin packages at ../../../node_modules/@capacitor/* and @aparajita/*) and on the generated
+      # capacitor.config.json / copied web assets — all produced by `cap sync`, all gitignored. So
+      # install deps and sync BEFORE building (mirrors the Android compile-check, TM-278).
+      - name: Set up Node (for Capacitor CLI)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Install Capacitor deps + sync iOS
+        run: |
+          npm ci
+          npx cap sync ios
+
+      # Resolve the Capacitor Swift PM package graph (capacitor-swift-pm@8.4.1 from GitHub + the
+      # local plugin packages) ahead of the build so a resolution failure is reported distinctly.
+      - name: Resolve Swift Package dependencies
+        working-directory: ios/App
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project App.xcodeproj \
+            -scheme App
+
+      # A clean Debug compile for the Simulator SDK is the proof. Signing is fully disabled — a
+      # Simulator destination needs no team / provisioning profile. `generic/platform=iOS Simulator`
+      # builds against the SDK without pinning a specific booted device, so it is stable across
+      # runner Xcode/OS bumps.
+      - name: Build for iOS Simulator (Debug, signing disabled)
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=

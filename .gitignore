@@ -26,6 +26,18 @@ local.properties
 .cxx/
 captures/
 
+# iOS / CocoaPods / Xcode (TM-349). Commit the Xcode project (App.xcodeproj/App.xcworkspace),
+# Info.plist and Swift sources; ignore CocoaPods deps, the copied web assets, and the generated
+# Capacitor config/plugins (mirrors the android/.gitignore committed-vs-generated split). Pods are
+# restored by `pod install` on the macOS CI runner.
+ios/App/Pods/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/capacitor.plugins.json
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
 # Env / secrets
 .env
 .env.*
