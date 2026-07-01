@@ -28,12 +28,14 @@ Notes:
 
 ## Per-sprint testing — always SPLIT (DECIDED 2026-06-23)
 
-Every sprint's testing work is **split into two tickets**, never one mixed manual ticket:
+Every sprint's testing work is **two mandatory tickets** (both required, every sprint), never one mixed manual ticket:
 
-1. **Automated** (`test` / `e2e`) — the deterministic, repeatable checks: form CRUD + persistence, validation, role routing, lifecycle, account-state, file size/type rules → Playwright specs in `web/e2e/`, run by the `E2E` workflow against the Firebase emulators. Screenshots are captured for **every** test and the workflow can post them back to the human ticket (dispatch with `evidence_ticket`).
-2. **Human** (`human` + `test`) — only the residue automation can't cover: **real** email delivery, **real** prod Firebase auth/storage, subjective "does it feel right", and post-deploy smoke (build-stamp matches the deployed commit).
+1. **Automated / agent e2e** (`test` / `e2e`) — the deterministic, repeatable checks: form CRUD + persistence, validation, role routing, lifecycle, account-state, file size/type rules → the **same flows** through CI (web Playwright specs in `web/e2e/` + mobile Maestro), run by the `E2E` workflow against the Firebase emulators. **Screenshots are captured for every test and attached as evidence to this automated ticket** (the workflow can also post them back with `evidence_ticket`). The orchestrator/agent runs it.
+2. **Human manual** (`human` + `test`) — exercise the delivered features end-to-end on the **live app + real device**: only the residue automation can't cover — **real** email delivery, **real** prod Firebase auth/storage, subjective "does it feel right", and post-deploy smoke (build-stamp matches the deployed commit). The human runs it.
 
 **Why:** re-running deterministic checks by hand every sprint is waste and drifts; automate them once, leave humans the judgment calls. Pattern set splitting **TM-190** (human) → **TM-195** (automated). **Sprint close is gated on both green.**
+
+**Not a test ticket:** the cross-ticket **code review** is a *separate* closure gate — it is **not** one of these two test tickets and never substitutes for either (don't count the review ticket as the second "test"). **Create both test tickets at sprint *planning*** (visible from day 1), not at close. Full closure DoD: `GENESIS.md` → "Sprint-closure gate".
 
 ---
 
