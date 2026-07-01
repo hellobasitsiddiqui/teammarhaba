@@ -3,14 +3,17 @@
 The `golden`, `soak`, and `load` suites of the on-demand test-suite library (epic TM-339) are dispatched by
 `.github/workflows/test-suite.yml` (TM-340) to a script in this directory:
 
-| suite  | script            | owner ticket |
-| ------ | ----------------- | ------------ |
-| golden | `golden.sh`       | TM-341       |
-| soak   | `soak.sh`         | TM-342       |
-| load   | `load.sh`         | TM-343       |
+| suite  | script            | owner ticket | status         |
+| ------ | ----------------- | ------------ | -------------- |
+| golden | `golden.sh`       | TM-341       | ✅ implemented |
+| soak   | `soak.sh`         | TM-342       | not yet        |
+| load   | `load.sh`         | TM-343       | not yet        |
 
 Until a script exists the workflow exits with a clear **"not implemented yet"** error naming the expected
 path — so the owning ticket just drops its script in here with no workflow change.
+
+`golden.sh` runs the single `@golden` end-to-end journey (`tests/golden-path.spec.mjs`) on the requested
+surface's project (`chromium` / `mobile-chromium`) — the whole happy path in one run as living evidence.
 
 ## Contract (what the workflow passes in)
 
