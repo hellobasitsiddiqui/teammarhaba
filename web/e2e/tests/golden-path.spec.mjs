@@ -265,12 +265,32 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   const stage = help.locator(".tm-guide-stage").first();
   await expect(stage).toBeVisible();
   await expect(stage).toHaveAttribute("aria-label", /mock of the TeamMarhaba home screen/i);
-  await expect(help.locator(".tm-guide-callout").first()).toBeVisible();
+  // The accessible linear restatement of the callouts (.tm-guide-notes) is present on BOTH viewports.
   await expect(help.locator(".tm-guide-notes li").first()).toBeVisible();
+  // The floating callouts overlaid on the stage are shown at desktop width but DELIBERATELY hidden
+  // at ≤30rem (Pixel 5 ≈ 24.5rem), where the numbered notes list carries the content instead (see
+  // the @media rule in styles.css). So assert the overlay only when the viewport is wide enough —
+  // keeps the spec project-agnostic (green under both chromium and mobile-chromium).
+  const vw = page.viewportSize()?.width ?? 1280;
+  if (vw > 480) {
+    await expect(help.locator(".tm-guide-callout").first()).toBeVisible();
+  }
   await shot("help-visual-guide");
 
-  // ── STEP 9: SIGN OUT → back to the login view. ───────────────────────────────────────────────
+  // ── STEP 9: SIGN OUT. ────────────────────────────────────────────────────────────────────────
+  // We're on the PUBLIC #/help route here, so — unlike the admin-walkthrough spec, which signs out
+  // from the protected #/admin and is therefore bounced to #/login — signing out does NOT force a
+  // route change: #/help stays shown, just signed-out. So assert the sign-out took effect via the
+  // route-independent nav state (the sign-in link returns, the sign-out control is gone), THEN visit
+  // #/login and confirm the signed-out login panel renders — the true "fully signed out" end state.
   await clickNav(page, "#signout-btn");
+  // Route- AND viewport-independent "signed out" signal: the router flips the nav's `hidden`
+  // ATTRIBUTES (the sign-in link gains visibility, the sign-out control is hidden). We assert on the
+  // attribute rather than CSS visibility because at a phone width these live inside the just-closed
+  // hamburger, so toBeVisible()/toBeHidden() (which reflect the CSS collapse) wouldn't hold.
+  await expect(page.locator("#signout-btn")).toHaveAttribute("hidden", /.*/);
+  await expect(page.locator("#nav-signin")).not.toHaveAttribute("hidden", /.*/);
+  await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
   await shot("signed-out");
 });
