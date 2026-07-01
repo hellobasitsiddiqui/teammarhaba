@@ -67,6 +67,59 @@ test("a user uploads an avatar; photoURL is set and shown, and survives a reload
   expect(afterReload).toBe(photoURL);
 });
 
+test("re-uploading a second avatar keeps the image loading (TM-335 self-delete regression)", async ({ page }) => {
+  // TM-335: the object path is fixed per-uid, so a re-upload overwrites `avatars/{uid}`. The previous
+  // cleanup compared the token'd download URLs (which differ every getDownloadURL() call) and deleted
+  // the object it had just uploaded — so the SECOND avatar 404'd. This exercises two consecutive
+  // uploads and asserts the final avatar's bytes are actually fetchable (not a dangling 404).
+  await signIn(page);
+  await page.click("#nav-profile");
+  await expect(page.locator("#profile-form")).toBeVisible();
+  const fileInput = page.locator("#profile-avatar-file");
+  await expect(fileInput).toBeEnabled();
+
+  // A second, distinct-but-valid 1x1 PNG (red pixel) so this upload's bytes differ from the first.
+  const RED_PNG_1x1_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  // First upload.
+  await fileInput.setInputFiles({
+    name: "avatar-1.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1x1_BASE64, "base64"),
+  });
+  await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Avatar updated");
+
+  // Second upload (the re-upload that used to self-delete). Wait for the photoURL to actually change
+  // so we know the second upload's updateProfile has landed before asserting.
+  const firstURL = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
+  await fileInput.setInputFiles({
+    name: "avatar-2.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(RED_PNG_1x1_BASE64, "base64"),
+  });
+  await expect
+    .poll(async () => page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null))
+    .not.toBe(firstURL);
+
+  const finalURL = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
+  expect(finalURL).toBeTruthy();
+  expect(finalURL).toContain("avatars%2F");
+
+  // The crux: the object the final photoURL points at must still EXIST (HTTP 200, not 404). Before the
+  // fix, the cleanup deleted this very object, so this fetch would 404.
+  const status = await page.evaluate(async (url) => {
+    const res = await fetch(url);
+    return res.status;
+  }, finalURL);
+  expect(status).toBe(200);
+
+  // And it renders in the UI (preview + nav) rather than showing the fallback glyph.
+  const previewImg = page.locator(".tm-profile-avatar .tm-avatar-img");
+  await expect(previewImg).toBeVisible();
+  await expect(previewImg).toHaveAttribute("src", finalURL);
+});
+
 test("a non-image file is rejected client-side before any upload", async ({ page }) => {
   await signIn(page);
   await page.click("#nav-profile");
