@@ -20,7 +20,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('the "Get the app" badges are hidden inside the WebView (TEAMMARHABA_WEBVIEW flag set)', async ({ page }) => {
+test('@webview the "Get the app" badges are hidden inside the WebView (TEAMMARHABA_WEBVIEW flag set)', async ({ page }) => {
   // Simulate the native Android shell signalling the WebView env BEFORE the app loads.
   await page.addInitScript(() => {
     window.TEAMMARHABA_WEBVIEW = true;
@@ -33,7 +33,7 @@ test('the "Get the app" badges are hidden inside the WebView (TEAMMARHABA_WEBVIE
   await expect(page.locator("#app-store-badges")).toBeHidden();
 });
 
-test('the "Get the app" badges are shown in a normal browser (no WebView flag)', async ({ page }) => {
+test('@webview the "Get the app" badges are shown in a normal browser (no WebView flag)', async ({ page }) => {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
 

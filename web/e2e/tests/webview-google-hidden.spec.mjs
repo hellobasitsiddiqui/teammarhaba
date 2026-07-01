@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Google sign-in is hidden inside the WebView (TEAMMARHABA_WEBVIEW flag set)", async ({ page }) => {
+test("@webview Google sign-in is hidden inside the WebView (TEAMMARHABA_WEBVIEW flag set)", async ({ page }) => {
   // Simulate the native Android shell signalling the WebView env BEFORE the app loads.
   await page.addInitScript(() => {
     window.TEAMMARHABA_WEBVIEW = true;
@@ -37,7 +37,7 @@ test("Google sign-in is hidden inside the WebView (TEAMMARHABA_WEBVIEW flag set)
   await expect(page.locator("#google-btn")).toHaveCount(0);
 });
 
-test("Google sign-in is shown in a normal browser (no WebView flag)", async ({ page }) => {
+test("@webview Google sign-in is shown in a normal browser (no WebView flag)", async ({ page }) => {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
 

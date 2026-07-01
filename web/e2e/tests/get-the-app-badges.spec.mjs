@@ -22,7 +22,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe('"Get the app" badges (TM-276)', () => {
+test.describe('@badges "Get the app" badges (TM-276)', () => {
   test("the footer shows Android + iOS badges (signed out)", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();

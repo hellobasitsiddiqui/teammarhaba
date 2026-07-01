@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe("Help section (TM-255)", () => {
+test.describe("@help Help section (TM-255)", () => {
   test("the #/help route renders the guide directly", async ({ page }) => {
     await page.goto("/#/help");
     const help = page.locator("#help-view");
@@ -73,7 +73,7 @@ test.describe("Help section (TM-255)", () => {
   });
 });
 
-test.describe("Attribution byline (TM-254)", () => {
+test.describe("@help Attribution byline (TM-254)", () => {
   test("the footer carries the 10xAI byline linking out in a new tab", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();

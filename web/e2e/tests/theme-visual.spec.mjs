@@ -70,7 +70,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe("the app boots in the configured theme", () => {
+test.describe("@theme the app boots in the configured theme", () => {
   test("with no override, config resolves to the default sketch theme", async ({ page }) => {
     // serve.mjs injects a config WITHOUT `theme`, so resolveTheme() falls back to DEFAULT_THEME.
     await page.goto("/#/login");
@@ -96,7 +96,7 @@ test.describe("the app boots in the configured theme", () => {
 });
 
 // The login page is reachable anonymously — exercise it directly under both themes.
-test.describe("login page renders under both themes", () => {
+test.describe("@theme login page renders under both themes", () => {
   for (const theme of THEMES) {
     test(`login is usable under ${theme}`, async ({ page }) => {
       await page.goto(routeWithTheme(theme, "/login"));
@@ -113,7 +113,7 @@ test.describe("login page renders under both themes", () => {
 // override doesn't exist, there was NO way to change the theme). It's now also mounted on the login
 // card. This proves a SIGNED-OUT user can change the theme there, it applies live (no reload), and it
 // persists across a reload — using the real UI control, not the ?theme= override.
-test.describe("signed-out user can change the theme from the login page", () => {
+test.describe("@theme signed-out user can change the theme from the login page", () => {
   test("changing the login-card theme applies live and persists across reload", async ({ page }) => {
     // Boot with NO override → config default (sketch). The login card is anonymous-reachable.
     await page.goto("/#/login");
@@ -153,7 +153,7 @@ test.describe("signed-out user can change the theme from the login page", () => 
 // (a full reload restores the Firebase session async, so the guard can flash #/login first). The
 // `?theme=` value lives in location.search, which survives hash navigation, and theme.js sets
 // data-theme once at boot — so the theme stays applied across the whole walk.
-test.describe("authenticated pages render under both themes", () => {
+test.describe("@theme authenticated pages render under both themes", () => {
   for (const theme of THEMES) {
     test(`home, profile and admin are usable under ${theme}`, async ({ page }) => {
       // Sign in on the login route already carrying the override. As an ADMIN the guard lands us on

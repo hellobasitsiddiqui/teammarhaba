@@ -10,7 +10,7 @@ import { ADMIN, TARGET, dbConfig } from "../fixtures.mjs";
 // endpoint — see the finding on the ticket. We assert persisted state (users.enabled = false)
 // instead, which is the real end-to-end effect; the same DB seam will assert the audit row later.
 
-test("admin signs in, disables a user via the console, and the change persists", async ({ page }) => {
+test("@admin admin signs in, disables a user via the console, and the change persists", async ({ page }) => {
   // 1. Anonymous lands on the login view.
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();

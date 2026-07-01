@@ -1,0 +1,366 @@
+name: Test suite (on-demand)
+
+# TM-340 — the FOUNDATION of the on-demand test-suite library (epic TM-339). This is the single
+# dispatch + tagging + evidence entrypoint that the golden-path (TM-341), soak (TM-342) and load
+# (TM-343) suites plug into. It runs a chosen journey suite across a chosen SURFACE and (optionally)
+# attaches screenshots + a pass/fail summary to a Jira ticket.
+#
+# CROSS-SURFACE MODEL
+# Every journey is meant to run across four surfaces. Android & iOS are Capacitor WebViews loading
+# the SAME hosted web app, so the journeys are shared — only the *runner* differs:
+#   web         → Playwright chromium project           (web/e2e, mirrors e2e.yml's stack)
+#   mobile-web  → Playwright mobile-chromium project    (Pixel-5 viewport; same stack as web)
+#   android     → Maestro on the WebView app            (mirrors mobile-e2e.yml → android/maestro/ci-run.sh)
+#   ios         → parked — echoes a clear "not yet" notice and succeeds as a no-op
+#
+# SUITE SELECTION
+#   <feature>   → Playwright `--grep @<feature>` over web/e2e/tests (per-feature tags added in TM-340)
+#   all         → the whole tagged suite (no grep)
+#   golden|soak|load → dispatched to web/e2e/suites/<suite>.sh, which TM-341/342/343 drop in. Until
+#                      the script exists the branch exits with a clear "not implemented yet" message.
+#
+# Manual dispatch only — this is a library you INVOKE, never a PR/merge gate (the fast gate is ci.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which suite to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          # journey feature suites (Playwright @tags)
+          - auth
+          - onboarding
+          - terms
+          - profile
+          - avatar
+          - admin
+          - theme
+          - help
+          - badges
+          - webview
+          - responsive
+          # aggregates / special suites
+          - all
+          - golden
+          - soak
+          - load
+      surface:
+        description: "Which surface to run the suite on"
+        required: true
+        default: "web"
+        type: choice
+        options:
+          - web
+          - mobile-web
+          - android
+          - ios
+      jira_ticket:
+        description: "Jira ticket key to attach evidence to (e.g. TM-190). Blank = skip."
+        required: false
+        default: ""
+      duration_minutes:
+        description: "Soak duration in minutes (soak suite only; passthrough)"
+        required: false
+        default: ""
+      vus:
+        description: "Virtual users / concurrency (load suite only; passthrough)"
+        required: false
+        default: ""
+
+concurrency:
+  # Serialize per (suite, surface) so two dispatches of the same combo don't fight over the emulator.
+  group: test-suite-${{ github.event.inputs.suite }}-${{ github.event.inputs.surface }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # WEB + MOBILE-WEB — both are Playwright, same backend/emulator stack (mirrors e2e.yml), differing
+  # only by --project (chromium vs mobile-chromium). One job with an `if` guard keeps them together.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  playwright:
+    name: "Playwright — ${{ github.event.inputs.suite }} @ ${{ github.event.inputs.surface }}"
+    if: ${{ github.event.inputs.surface == 'web' || github.event.inputs.surface == 'mobile-web' }}
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: teammarhaba
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: devpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d teammarhaba"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # DB (matches the postgres service above).
+      DB_NAME: teammarhaba
+      DB_USER: app
+      DB_PASSWORD: devpassword
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      # Firebase Auth + Storage emulators — the backend (Admin SDK) and the browser both talk to them.
+      FIREBASE_PROJECT_ID: teammarhaba
+      FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      FIREBASE_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
+      E2E_API_BASE_URL: http://127.0.0.1:8080
+      E2E_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+      E2E_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
+      # Which Playwright project the surface maps to.
+      PW_PROJECT: ${{ github.event.inputs.surface == 'mobile-web' && 'mobile-chromium' || 'chromium' }}
+      SUITE: ${{ github.event.inputs.suite }}
+      DURATION_MINUTES: ${{ github.event.inputs.duration_minutes }}
+      VUS: ${{ github.event.inputs.vus }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 21 (Temurin) + Maven cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Set up Node 20
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Build backend jar
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+
+      - name: Install e2e dependencies
+        working-directory: web/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright browser (Chromium)
+        working-directory: web/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Firebase Auth + Storage emulators
+        working-directory: web/e2e
+        run: |
+          npx firebase emulators:start --only auth,storage --project teammarhaba --config ../../firebase.json > /tmp/firebase-emulator.log 2>&1 &
+          echo "Waiting for the Auth emulator on :9099…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:9099/" > /dev/null && { echo "auth emulator up"; break; }
+            sleep 2
+          done
+          echo "Waiting for the Storage emulator on :9199…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:9199/" > /dev/null && { echo "storage emulator up"; break; }
+            sleep 2
+          done
+
+      - name: Start backend (pointed at the emulator + Postgres)
+        env:
+          SPRING_PROFILES_ACTIVE: dev
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/teammarhaba
+          SPRING_DATASOURCE_USERNAME: app
+          SPRING_DATASOURCE_PASSWORD: devpassword
+        run: |
+          java -jar backend/target/*.jar > /tmp/backend.log 2>&1 &
+          echo "Waiting for the backend on :8080…"
+          for i in $(seq 1 60); do
+            curl -sf "http://127.0.0.1:8080/health" > /dev/null && { echo "backend up"; break; }
+            sleep 2
+          done
+          curl -sf "http://127.0.0.1:8080/health" > /dev/null || { echo "backend failed to start"; tail -n 100 /tmp/backend.log; exit 1; }
+
+      # Resolve the suite → Playwright invocation.
+      #   feature tag → --grep @<suite>
+      #   all         → whole project, no grep
+      #   golden/soak/load → hand off to web/e2e/suites/<suite>.sh (TM-341/342/343). If the script is
+      #                      absent, exit non-zero with a clear "not implemented yet" so those tickets
+      #                      just drop their script in with no workflow change.
+      # Screenshots are forced ON (--screenshot=on) so there's always evidence to attach, regardless
+      # of the config (config already sets it, but a suite script may run its own invocation).
+      - name: Run suite (${{ github.event.inputs.suite }}) on ${{ github.event.inputs.surface }}
+        working-directory: web/e2e
+        run: |
+          set -euo pipefail
+          mkdir -p suite-evidence
+          case "$SUITE" in
+            golden|soak|load)
+              SCRIPT="suites/${SUITE}.sh"
+              if [ ! -f "$SCRIPT" ]; then
+                echo "::error::suite '${SUITE}' is not implemented yet — expected ${SCRIPT} (owned by TM-341/342/343). Drop the script in and re-dispatch."
+                exit 1
+              fi
+              echo "Handing off to ${SCRIPT} (project=${PW_PROJECT}, duration=${DURATION_MINUTES:-n/a}, vus=${VUS:-n/a})"
+              PW_PROJECT="$PW_PROJECT" DURATION_MINUTES="${DURATION_MINUTES:-}" VUS="${VUS:-}" bash "$SCRIPT"
+              ;;
+            all)
+              echo "Running the full tagged suite on project ${PW_PROJECT}"
+              npx playwright test --project="$PW_PROJECT" --screenshot=on
+              ;;
+            auth|onboarding|terms|profile|avatar|admin|theme|help|badges|webview|responsive)
+              echo "Running @${SUITE} on project ${PW_PROJECT}"
+              npx playwright test --project="$PW_PROJECT" --grep "@${SUITE}" --screenshot=on
+              ;;
+            *)
+              echo "::error::unknown suite '${SUITE}'"; exit 1
+              ;;
+          esac
+
+      - name: Upload Playwright report + screenshots (always — evidence)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-suite-${{ github.event.inputs.suite }}-${{ github.event.inputs.surface }}
+          path: |
+            web/e2e/playwright-report
+            web/e2e/test-results
+          if-no-files-found: warn
+
+      # Best-effort Jira evidence: attach the run's screenshots + a pass/fail summary.txt to the given
+      # ticket. Never fails the job — skips silently if no ticket or the JIRA_* secrets are unset.
+      - name: Post evidence to the Jira ticket (best-effort)
+        if: ${{ always() && github.event.inputs.jira_ticket != '' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET: ${{ github.event.inputs.jira_ticket }}
+          SUITE: ${{ github.event.inputs.suite }}
+          SURFACE: ${{ github.event.inputs.surface }}
+          RESULT: ${{ job.status }}
+        run: bash .github/scripts/test-suite-evidence.sh web/e2e/playwright-report web/e2e/test-results
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # ANDROID — Maestro on the WebView app. Reuses the mobile-e2e.yml toolchain + the SAME runner script
+  # (android/maestro/ci-run.sh). The Maestro flows are shared journeys; per-feature grep isn't wired
+  # for Maestro yet, so a feature suite runs the whole flow set with a notice (the WebView loads the
+  # same hosted web, so a feature run is still meaningful as a smoke over that surface).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  android:
+    name: "Android (Maestro) — ${{ github.event.inputs.suite }}"
+    if: ${{ github.event.inputs.surface == 'android' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Suite/surface note
+        env:
+          SUITE: ${{ github.event.inputs.suite }}
+        run: |
+          case "$SUITE" in
+            golden|soak|load)
+              echo "::notice::suite '${SUITE}' has no Maestro variant yet — running the shared android flow set as a smoke over this surface. TM-341/342/343 may add a surface-specific script later." ;;
+            *)
+              echo "::notice::running the shared android Maestro flow set for suite '${SUITE}' (per-tag Maestro selection not wired yet)." ;;
+          esac
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Set up JDK 21 (Temurin) + Gradle cache
+        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Node (for Capacitor CLI)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Install Capacitor deps + sync Android
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Build debug APK (assembleDebug)
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Locate debug APK
+        id: apk
+        run: |
+          set -euo pipefail
+          APK="$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n1)"
+          if [ -z "${APK}" ] || [ ! -f "${APK}" ]; then
+            echo "::error::No debug APK produced by assembleDebug."
+            exit 1
+          fi
+          echo "Built debug APK: ${APK}"
+          echo "apk=${APK}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "${HOME}/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run Maestro flows on emulator (API 34)
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash android/maestro/ci-run.sh "${{ steps.apk.outputs.apk }}"
+
+      - name: Upload Maestro evidence (screenshots/video/report)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-suite-${{ github.event.inputs.suite }}-android
+          path: |
+            maestro-artifacts
+            ~/.maestro/tests
+          if-no-files-found: warn
+
+      - name: Post evidence to the Jira ticket (best-effort)
+        if: ${{ always() && github.event.inputs.jira_ticket != '' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET: ${{ github.event.inputs.jira_ticket }}
+          SUITE: ${{ github.event.inputs.suite }}
+          SURFACE: android
+          RESULT: ${{ job.status }}
+        run: bash .github/scripts/test-suite-evidence.sh maestro-artifacts
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # iOS — parked. Capacitor iOS WebView journeys will share the same hosted web, but the runner isn't
+  # stood up yet. Echo a clear "not yet" and succeed as a no-op so `surface=ios` never red-flags.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  ios:
+    name: "iOS — ${{ github.event.inputs.suite }} (parked)"
+    if: ${{ github.event.inputs.surface == 'ios' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: iOS not available yet
+        run: |
+          echo "::notice::iOS surface is parked — no runner yet. The iOS Capacitor WebView will load the"
+          echo "::notice::same hosted web, so the '${{ github.event.inputs.suite }}' journeys will be shared once the runner lands."
+          echo "iOS not available yet (parked)."

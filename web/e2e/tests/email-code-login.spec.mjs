@@ -28,7 +28,7 @@ async function peekCode(email) {
   return (await res.text()).trim();
 }
 
-test("email-code is the default and a user signs in with the emailed code", async ({ page }) => {
+test("@auth email-code is the default and a user signs in with the emailed code", async ({ page }) => {
   // A unique address per run so a stale code / cooldown from a prior run can't bleed in.
   const email = `e2e-emailcode-${Date.now()}@teammarhaba.test`;
 
@@ -62,7 +62,7 @@ test("email-code is the default and a user signs in with the emailed code", asyn
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
-test("a wrong code shows an error and does not sign the user in", async ({ page }) => {
+test("@auth a wrong code shows an error and does not sign the user in", async ({ page }) => {
   const email = `e2e-emailcode-bad-${Date.now()}@teammarhaba.test`;
   await page.goto("/#/login");
   await page.fill("#email", email);
@@ -80,7 +80,7 @@ test("a wrong code shows an error and does not sign the user in", async ({ page 
   await expect(page.locator("#signout-btn")).toBeHidden();
 });
 
-test('"Try another way" reveals SMS and email+password, and SMS reaches the code step', async ({ page }) => {
+test('@auth "Try another way" reveals SMS and email+password, and SMS reaches the code step', async ({ page }) => {
   await page.goto("/#/login");
 
   // Alternatives are hidden until the user asks for them.

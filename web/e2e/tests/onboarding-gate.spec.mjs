@@ -45,7 +45,7 @@ async function signInFreshUser(page, email) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
-test("a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
+test("@onboarding a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
   const email = `e2e-onboard-${Date.now()}@teammarhaba.test`;
   const location = `Gateville-${Date.now()}`;
 
@@ -107,7 +107,7 @@ test("a brand-new user is gated, completes the profile, and then enters the app"
   }
 });
 
-test("a returning, already-onboarded user is NOT gated and lands straight in the app", async ({ page }) => {
+test("@onboarding a returning, already-onboarded user is NOT gated and lands straight in the app", async ({ page }) => {
   // The seeded ADMIN is marked onboarding-complete in global-setup, so signing in must skip the gate.
   await page.goto("/#/login");
   await page.fill("#email", ADMIN.email);

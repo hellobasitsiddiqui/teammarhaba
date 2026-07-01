@@ -34,7 +34,7 @@ async function openProfile(page) {
   await meLoaded; // populate has run — the form won't clobber what we type next
 }
 
-test("a user edits their profile via #/profile and the change persists", async ({ page }) => {
+test("@profile a user edits their profile via #/profile and the change persists", async ({ page }) => {
   // A value unique to this run so the assertion can't pass on stale data.
   const city = `Testville-${Date.now()}`;
 
@@ -64,7 +64,7 @@ test("a user edits their profile via #/profile and the change persists", async (
   }
 });
 
-test("a user with a blank phone can save their profile (TM-188)", async ({ page }) => {
+test("@profile a user with a blank phone can save their profile (TM-188)", async ({ page }) => {
   // Regression for TM-188: a blank phone field used to be sent as "" and rejected (400). Saving
   // with the phone left empty must now succeed.
   await openProfile(page);
@@ -75,7 +75,7 @@ test("a user with a blank phone can save their profile (TM-188)", async ({ page 
   await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Profile saved");
 });
 
-test("client-side validation blocks an out-of-range age before any save", async ({ page }) => {
+test("@profile client-side validation blocks an out-of-range age before any save", async ({ page }) => {
   await openProfile(page);
 
   // 200 is outside the allowed 13–120 range — the inline error shows and the save is rejected.
