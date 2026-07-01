@@ -13,4 +13,4 @@ set -euo pipefail
 PROJECT="${PW_PROJECT:-chromium}"
 
 echo "Running the @golden journey on project ${PROJECT}"
-exec npx playwright test --project="${PROJECT}" --grep "@golden" --screenshot=on
+exec npx playwright test --project="${PROJECT}" --grep "@golden"
