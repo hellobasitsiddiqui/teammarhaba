@@ -137,4 +137,34 @@ CI re-runs; report it back to ready. (The PR updates in place.)
 - **The `ios` job in `test-suite.yml` is a `ubuntu-latest` no-op — a Linux runner can't drive a Simulator.** It just echoes "iOS not available yet (parked)". Booting an iOS Simulator (and thus running iOS-surface journeys) needs a **macOS runner** — the follow-on smoke lane (TM-353) has to add one; the compile gate already correctly uses `macos-latest`. macOS minutes bill at ~10×, so keep the iOS jobs **path-gated** to `ios/**` + `capacitor.config.json` + `package.json`.
 - **iOS/Android satisfy the *same* WebView env-signal contract by *different* mechanisms.** Android exposes `TeamMarhabaWebView` as a **native** object via `addJavascriptInterface`; iOS `WKWebView` native handlers live at `window.webkit.messageHandlers.<name>`, **not** `window.<name>`, so the iOS shell defines `window.TeamMarhabaWebView` as an **inert JS object inside an `.atDocumentStart` `WKUserScript`** (`getPlatform()` → `"ios"`) alongside the `window.TEAMMARHABA_WEBVIEW = true` flag. When porting a "signal I'm a WebView" bridge to a new WebView engine, re-check *how* the engine surfaces native objects — a straight copy of the Android `addJavascriptInterface` shape would put it at the wrong global on iOS.
 
+### 2026-07-02 — Admin broadcast / push fan-out (epic TM-358)
+
+Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-feature.md).
+
+- **The first send path to honour a preference must state what "respect opt-out" actually costs.** The
+  broadcast is the **first** path in the app to honour `notificationPref`, and the default is `EMAIL`
+  for *every* account — with **no separate `OFF` value**, so email-only *is* the push opt-out. The
+  honest, correct behaviour is therefore "a broadcast reaches essentially **nobody** until users opt
+  into push". That reads like a bug at a glance, so **document it loudly as intended** (opt-in-respecting,
+  self-correcting as users opt in) or the next person "fixes" it by ignoring the pref. When you add the
+  first consumer of a default-off preference, spell out the reachable-audience consequence in the ticket
+  + feature doc.
+- **A compose/draft panel must live OUTSIDE the re-rendered region.** The admin table re-renders on
+  every keystroke/filter/sort (`clear(shell.table)`), so the broadcast compose panel is built **once**
+  and mounted *outside* `shell.table`, with its live inputs as the single source of truth and the
+  selection held **by id** (not by row) — so an in-progress draft + picked audience survive table churn.
+  General rule: any long-lived form/draft that sits next to a frequently-rebuilt list must be a stable
+  node the list re-render can't wipe; never rebuild the draft on a list event.
+- **Resolve recipients through the entity, never through the token store.** Soft-deleted users keep
+  their `device_tokens` rows (those cascade only on *hard* delete), so resolving a broadcast audience by
+  token would push to tombstoned accounts — a leak. Always resolve through `UserRepository` (its
+  `@SQLRestriction("deleted_at is null")` drops tombstoned rows), *then* read that user's tokens. When
+  fanning out to "a set of users", start from `User`, not from whatever child table holds the delivery
+  address.
+- **A per-instance cooldown is a real guard, but say it's process-local.** The accidental-double-send
+  guard is a `ConcurrentHashMap` + `Clock` per-admin-uid cooldown (copied from `EmailVerificationService`)
+  — fine on a single Cloud Run instance, but it does **not** hold cluster-wide; a shared store (Redis)
+  is the noted future improvement (consistent with TM-247). Any in-memory rate/dedup guard must be
+  documented as process-local so nobody assumes a cluster-wide guarantee it doesn't give.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
