@@ -11,7 +11,7 @@ name: Test suite (on-demand)
 #   web         → Playwright chromium project           (web/e2e, mirrors e2e.yml's stack)
 #   mobile-web  → Playwright mobile-chromium project    (Pixel-5 viewport; same stack as web)
 #   android     → Maestro on the WebView app            (mirrors mobile-e2e.yml → android/maestro/ci-run.sh)
-#   ios         → parked — echoes a clear "not yet" notice and succeeds as a no-op
+#   ios         → Maestro on the iOS-Simulator WebView  (macos-latest; xcodebuild + xcrun simctl → ios/maestro/ci-run.sh)
 #
 # SUITE SELECTION
 #   <feature>   → Playwright `--grep @<feature>` over web/e2e/tests (per-feature tags added in TM-340)
@@ -19,7 +19,13 @@ name: Test suite (on-demand)
 #   golden|soak|load → dispatched to web/e2e/suites/<suite>.sh, which TM-341/342/343 drop in. Until
 #                      the script exists the branch exits with a clear "not implemented yet" message.
 #
-# Manual dispatch only — this is a library you INVOKE, never a PR/merge gate (the fast gate is ci.yml).
+# Manual dispatch — this is a library you INVOKE, never a PR/merge gate (the fast gate is ci.yml).
+# One exception: a single offset NIGHTLY cron keeps the (slow, macOS-billed) iOS Simulator lane warm
+# so it doesn't rot between dispatches (TM-353). The cron path runs ONLY the ios job — the web/
+# mobile-web/android jobs gate on `inputs.surface`, which is empty on a `schedule` event, so they stay
+# dispatch-only. Cost discipline: iOS runs on `macos-latest` (billed ~10x), so it is dispatch + this
+# one nightly only — NEVER added to ci.yml's required gate, and no per-PR trigger (the path-filtered
+# `ios-simulator.yml` compile gate already covers ios/** changes on PRs).
 on:
   workflow_dispatch:
     inputs:
@@ -69,9 +75,16 @@ on:
         required: false
         default: ""
 
+  # Nightly keep-warm for the iOS Simulator lane ONLY (see the on: note above). Offset to 05:00 UTC so
+  # it trails e2e.yml (03:00) and mobile-e2e.yml (04:00) and the three slow nightlies don't contend for
+  # runners. On this event `inputs.*` are empty, so only the ios job (which also fires on schedule) runs.
+  schedule:
+    - cron: '0 5 * * *'   # ~05:00 UTC nightly — iOS Simulator smoke only
+
 concurrency:
   # Serialize per (suite, surface) so two dispatches of the same combo don't fight over the emulator.
-  group: test-suite-${{ github.event.inputs.suite }}-${{ github.event.inputs.surface }}
+  # On the nightly `schedule` event the inputs are empty, so this collapses to a stable scheduled group.
+  group: test-suite-${{ github.event.inputs.suite || 'nightly' }}-${{ github.event.inputs.surface || 'ios' }}
   cancel-in-progress: false
 
 permissions:
@@ -351,16 +364,182 @@ jobs:
         run: bash .github/scripts/test-suite-evidence.sh maestro-artifacts
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
-  # iOS — parked. Capacitor iOS WebView journeys will share the same hosted web, but the runner isn't
-  # stood up yet. Echo a clear "not yet" and succeed as a no-op so `surface=ios` never red-flags.
+  # iOS — Maestro on the iOS Simulator. The iOS Capacitor WebView loads the SAME hosted web app as
+  # Android, so the journeys are shared; only the runner differs — this is the macOS/Simulator sibling
+  # of the android job above, structurally the ios-simulator.yml COMPILE-CHECK shape (not a release
+  # job): Simulator destination → CODE_SIGNING_ALLOWED=NO → NO signing secrets.
+  #
+  # CEILING: Simulator only (no signing/provisioning/device/real-push). Runs on macos-latest (billed
+  # ~10x), so it's dispatch + the one offset nightly cron above — never on ci.yml's required gate.
+  #
+  # Capacitor 8 uses Swift Package Manager, NOT CocoaPods — the project is ios/App/App.xcodeproj with
+  # ios/App/CapApp-SPM/Package.swift; there is NO App.xcworkspace and NO Podfile, so this builds the
+  # .xcodeproj directly and resolves plugin deps via SPM (there is no `pod install`). This matches the
+  # working compile gate (ios-simulator.yml, TM-349); the TM-353 ticket text predates the Cap-8 SPM
+  # reality and assumed the Cap-7 CocoaPods/workspace flow.
+  #
+  # The SMS-login flow (+ its dependents) can't run unattended on iOS yet: the Android reCAPTCHA-bypass
+  # flag injector (adb + Chrome DevTools Protocol) does NOT port to WKWebView (no adb; Safari
+  # webinspectord ≠ CDP). That iOS flag-injection path is a follow-up (the automated-smoke ticket). So
+  # this lane proves the rung below the flows — Simulator boot + app install + launch + WebView load —
+  # and stays GREEN via ios/maestro/ci-run.sh's tolerant "no iOS flows yet" path (exactly how
+  # mobile-e2e.yml merged before the Android flows existed).
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   ios:
-    name: "iOS — ${{ github.event.inputs.suite }} (parked)"
-    if: ${{ github.event.inputs.surface == 'ios' }}
-    runs-on: ubuntu-latest
+    name: "iOS (Maestro, Simulator) — ${{ github.event.inputs.suite || 'nightly' }}"
+    # Fires on an explicit surface=ios dispatch, OR on the nightly schedule (empty inputs → ios lane).
+    if: ${{ github.event.inputs.surface == 'ios' || github.event_name == 'schedule' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    env:
+      APP_ID: app.teammarhaba.webview
+      # 'nightly' when the scheduled event fired with no suite input.
+      SUITE: ${{ github.event.inputs.suite || 'nightly' }}
+      # The .app xcodebuild drops for the Simulator SDK (derivedDataPath = ios/App/build).
+      APP_PATH: ios/App/build/Build/Products/Debug-iphonesimulator/App.app
+
     steps:
-      - name: iOS not available yet
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Suite/surface note
         run: |
-          echo "::notice::iOS surface is parked — no runner yet. The iOS Capacitor WebView will load the"
-          echo "::notice::same hosted web, so the '${{ github.event.inputs.suite }}' journeys will be shared once the runner lands."
-          echo "iOS not available yet (parked)."
+          case "$SUITE" in
+            golden|soak|load)
+              echo "::notice::suite '${SUITE}' has no native Maestro variant — running the shared iOS Simulator flow set as a smoke over this surface (web/e2e/suites/*.sh are Playwright-only). Mirrors the android job." ;;
+            nightly)
+              echo "::notice::nightly keep-warm run — booting the iOS Simulator + proving app launch/WebView load via the shared iOS flow set." ;;
+            *)
+              echo "::notice::running the shared iOS Simulator Maestro flow set for suite '${SUITE}' (per-tag Maestro selection not wired yet — same as android)." ;;
+          esac
+
+      # Pin a concrete, present Xcode. setup-xcode selects from the images actually installed on the
+      # runner (surviving macos-latest image bumps better than a hardcoded /Applications path), and
+      # `latest-stable` avoids a beta toolchain. Print the toolchain + available Simulator runtimes for
+      # diagnosability (same spirit as the compile gate).
+      - name: Select Xcode (latest stable)
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: latest-stable
+
+      - name: Print toolchain + Simulator runtimes
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      # Node 22: the Capacitor 8 CLI (cap sync) needs >=22 — NOT node 20. (The Playwright job above
+      # pins 20 for the web toolchain; the native lanes need 22, same as the android job.)
+      - name: Set up Node (for Capacitor CLI)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      # cap sync copies the web assets + generates the gitignored capacitor.config.json that the app
+      # loads, and points CapApp-SPM/Package.swift's plugin packages at ../../../node_modules/@capacitor/*
+      # — so deps + sync MUST run before xcodebuild (mirrors the compile gate / the android job).
+      - name: Install Capacitor deps + sync iOS
+        run: |
+          npm ci
+          npx cap sync ios
+
+      # Build the app for the Simulator SDK, signing fully disabled (a Simulator destination needs no
+      # team/provisioning profile). `generic/platform=iOS Simulator` builds the .app without pinning a
+      # booted device, so it's stable across runner Xcode/OS bumps; -derivedDataPath fixes where the
+      # .app lands (APP_PATH above). Building the .xcodeproj directly (SPM) — no workspace, no pods.
+      - name: Build App for iOS Simulator (Debug, signing disabled)
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=
+
+      - name: Verify the built .app
+        run: |
+          set -euo pipefail
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::xcodebuild did not produce an .app at $APP_PATH"
+            find ios/App/build/Build/Products -maxdepth 2 -name '*.app' 2>/dev/null || true
+            exit 1
+          fi
+          echo "Built app bundle: $APP_PATH"
+
+      # Create + boot a Simulator. Pin the iPhone by NAME (simctl create accepts the device-type name),
+      # preferring 'iPhone 15' per the ticket but falling back through nearby models so a future
+      # macos-latest image that drops that exact model still resolves. The iOS RUNTIME is derived as the
+      # NEWEST available iOS runtime identifier (single-line jq over `simctl list -j`) so it tracks the
+      # runner's Xcode without a hardcoded 'iOS-17-x'. `bootstatus -b` blocks until fully booted.
+      - name: Create + boot iOS Simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # Newest available iOS runtime identifier (e.g. com.apple.CoreSimulator.SimRuntime.iOS-17-5).
+          RUNTIME="$(xcrun simctl list runtimes --json \
+            | jq -r '[.runtimes[] | select(.isAvailable == true and (.identifier | contains("iOS")))]
+                     | sort_by(.version | split(".") | map(tonumber))
+                     | last.identifier')"
+          if [ -z "$RUNTIME" ] || [ "$RUNTIME" = "null" ]; then
+            echo "::error::no available iOS Simulator runtime found"; xcrun simctl list runtimes; exit 1
+          fi
+          echo "Using iOS runtime: $RUNTIME"
+          # Pick the first device-type name the runner actually knows, preferring iPhone 15.
+          DEVICE=""
+          for cand in "iPhone 15" "iPhone 15 Pro" "iPhone 16" "iPhone 14" "iPhone SE (3rd generation)"; do
+            if xcrun simctl list devicetypes | grep -qF "$cand ("; then DEVICE="$cand"; break; fi
+          done
+          if [ -z "$DEVICE" ]; then
+            echo "::error::no expected iPhone device type available"; xcrun simctl list devicetypes | grep -i iphone; exit 1
+          fi
+          echo "Using device: $DEVICE"
+          UDID="$(xcrun simctl create tm-sim "$DEVICE" "$RUNTIME")"
+          echo "Created Simulator UDID: $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      # Install Maestro (same official installer + PATH wiring as the android job / mobile-e2e.yml).
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "${HOME}/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Install + launch the app on the booted Simulator, pre-grant camera/photos/location, prove the
+      # WebView loads, then run any iOS Maestro flows. Tolerant of "no iOS flows yet" → green once boot
+      # + install + launch + WebView load are proven (the load-bearing evidence this lane produces).
+      # simctl auto-drives the single booted Simulator; ci-run.sh takes (udid, app-path).
+      - name: Install + launch on Simulator, run iOS Maestro flows
+        run: bash ios/maestro/ci-run.sh "${{ steps.sim.outputs.udid }}" "$APP_PATH"
+
+      # Upload whatever the run produced — launch/step screenshots, Maestro reports/debug output, and
+      # the NO_FLOWS_YET marker — as the SAME test-suite-<suite>-ios artifact the android job uploads.
+      - name: Upload Maestro evidence (screenshots/report)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-suite-${{ github.event.inputs.suite || 'nightly' }}-ios
+          path: |
+            maestro-artifacts
+            ~/.maestro/tests
+          if-no-files-found: warn
+
+      # Best-effort Jira evidence — byte-for-byte the android pattern (SURFACE: ios, same JIRA_* secrets,
+      # RESULT from job.status). Skips silently on the nightly (no jira_ticket input) or unset secrets.
+      - name: Post evidence to the Jira ticket (best-effort)
+        if: ${{ always() && github.event.inputs.jira_ticket != '' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET: ${{ github.event.inputs.jira_ticket }}
+          SUITE: ${{ github.event.inputs.suite }}
+          SURFACE: ios
+          RESULT: ${{ job.status }}
+        run: bash .github/scripts/test-suite-evidence.sh maestro-artifacts
