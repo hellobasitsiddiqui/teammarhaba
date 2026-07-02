@@ -80,6 +80,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.device.DeviceTokenService deviceTokenService;
 
+    // PushAdminController (TM-363) needs a BroadcastService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.notify.BroadcastService broadcastService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")
