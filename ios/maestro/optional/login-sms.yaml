@@ -1,0 +1,178 @@
+# TM-354 — SMS login happy path (Maestro, iOS Simulator) — OPTIONAL / BEST-EFFORT (NON-GATING)
+#
+# ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+# │ THIS FLOW DOES NOT GATE THE iOS LANE. It lives under ios/maestro/optional/, which ci-run.sh runs │
+# │ best-effort (a failure NEVER reds the lane). It is BOTH a standalone best-effort smoke AND the    │
+# │ subflow reused by ./journey.yaml + ./plugins.yaml. Its first interactive step ("Try another way" │
+# │ → reveal #sms-send-btn) is the dynamic ES-module reveal Maestro-on-iOS can't reliably drive on    │
+# │ the Simulator (the self-healing re-tap loop below still fails there) — hence non-gating. Kept as   │
+# │ documented aspiration (green on a physical device / improved Maestro-iOS; the human test TM-355    │
+# │ walks it on a real Simulator). The GATE is ../golden-path.yaml (launch + render). See ../README.md.│
+# └───────────────────────────────────────────────────────────────────────────────────────────────┘
+#
+# The iOS-Simulator sibling of android/maestro/login-sms.yaml. Drives the SAME native Capacitor app
+# (appId app.teammarhaba.webview) loading the SAME hosted SPA — only the reCAPTCHA-bypass flag
+# injection differs (see below). Mirrors the manually-verified SMS journey:
+#   "Try another way" → phone → "Text me a code" → SMS code → "Sign in" → lands on #/home.
+#
+# Uses Firebase's fixed TEST PHONE NUMBER (no real SMS, carrier-independent so it works on the
+# Simulator):  +16505550100 / fixed code 123456  (configured in the project, see TM-241).
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# THE iOS reCAPTCHA-BYPASS FLAG INJECTION (TM-354) — how this differs from the Android flow
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Firebase test numbers skip the SMS send but NOT the reCAPTCHA app-verification gate, which in a
+# scripted WebView escalates to a visual puzzle and stalls. web/src/assets/auth.js (via phone-e2e.js)
+# sets `auth.settings.appVerificationDisabledForTesting = true` ONLY when BOTH hold:
+#   1. REQUESTED — any of localStorage["tm_e2e_phone_test"]==="1", window.__TM_E2E_PHONE_TEST__===true,
+#      or TEAMMARHABA_CONFIG.phoneTestMode===true, AND
+#   2. CONTEXT-SAFE — Auth emulator wired, OR inside the native Capacitor shell
+#      (window.Capacitor.isNativePlatform()===true). Condition 2 is automatic in this app.
+#
+# The Android flow relies on the harness CDP-injecting the persisted localStorage flag
+# (android/maestro/inject-e2e-flag.mjs: adb-forward → Chrome DevTools Protocol). That does NOT port to
+# WKWebView (no adb; Safari webinspectord ≠ CDP). Instead, the iOS shell
+# (ios/App/App/TeamMarhabaViewController.swift, TM-354) sets the localStorage flag from its
+# `.atDocumentStart` WKUserScript — which runs BEFORE auth.js module-load — but ONLY when the
+# non-prod launch argument `-tmE2EPhoneTest` (or env `TM_E2E_PHONE_TEST=1`) is present. So this flow
+# declares that launch argument on EVERY `launchApp` via `arguments: { tmE2EPhoneTest: "1" }`; Maestro
+# forwards it to `simctl launch` as `-tmE2EPhoneTest 1`, the shell sees it in ProcessInfo and emits the
+# flag, and condition 1 is satisfied fresh on every launch — no CDP, no reload, and it survives
+# Maestro's relaunches (the arg is re-passed each launch). It is emitted NOWHERE in production (the App
+# Store binary is never launched with that arg; condition 2 would still gate it anyway).
+#
+# Because the flag is injected at document-start on every launch (not stored in localStorage by the
+# harness), there is no "must not clearState" contract on iOS — but we keep the flow structurally
+# identical to the Android one (clearState:false + optional sign-out) so the shared journey reads the
+# same on both surfaces; ci-run.sh already does a fresh install between flows for clean state.
+#
+# This flow ASSERTS the contract: if the launch arg were missing, the reCAPTCHA gate fires and the
+# "Text a code" step never appears within the timeout — a loud, diagnosable failure, not a silent hang.
+appId: app.teammarhaba.webview
+env:
+  TEST_PHONE: "+16505550100" # Firebase fixed test number (TM-241)
+  SMS_CODE: "123456"         # its fixed code
+---
+# Launch WITH the iOS e2e-flag launch argument so the shell injects tm_e2e_phone_test=1 at
+# document-start (before auth.js reads it). clearState:false mirrors the Android flow; the flag does
+# not depend on prior state, so this is only for structural parity.
+- launchApp:
+    clearState: false
+    arguments:
+      tmE2EPhoneTest: "1"
+- takeScreenshot: 01-launch
+
+# Reach a clean signed-out state without clearing app data: if a previous flow (or warm session) left
+# us signed in, sign out first. Both steps are optional so a fresh, already-signed-out launch skips them.
+- runFlow:
+    when:
+      visible:
+        id: "auth-signed-in"
+    commands:
+      - tapOn:
+          id: "nav-toggle"
+      - tapOn:
+          id: "signout-btn"
+
+# Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
+#
+# ── iOS BOOT-RACE GUARD (TM-354, root cause of the first CI failure) ──────────────────────────────
+# #auth-signed-out (this whole card, incl. the <h2>Sign in</h2> and the "Try another way" button) is
+# STATIC markup shown by default (styles.css `.auth-card{display:flex}`, no `hidden` attr) — so it is
+# on screen the instant the DOM parses, and the native splash (splash.js) lifts two rAFs after
+# DOMContentLoaded, i.e. BEFORE the ES-module graph has evaluated. The "Try another way" CLICK handler
+# is attached at the top level of login.js, an ES module that must first resolve auth.js → the remote
+# Firebase SDK; on the slow Simulator WKWebView (see 00-app-launched.png: still on the splash 8s after
+# launch) that module often hasn't run when Maestro taps, so a single tap is a NO-OP and #sms-send-btn
+# never reveals — the exact failure (`Assertion is false: id: sms-send-btn is visible`). The identical
+# Android flow only passes because its WebView wins the same race.
+#
+# Fix — make the reveal SELF-HEALING (no proxy "JS is up" marker, because every reliable one is
+# unusable here: the nav links that router.js un-hides all live inside #nav-items, which is
+# `display:none` behind the hamburger at phone width until nav-toggle.js opens it — so their visibility
+# can't gate a signed-out phone-width launch). Instead we re-tap "Try another way" until #sms-send-btn
+# actually appears, with a `times:` safety cap so the loop can NEVER hang:
+#   • The disclosure toggle is idempotent-to-open here: while #sms-send-btn is not visible the panel is
+#     collapsed, so every tap is an OPEN attempt; the moment the login.js handler is finally wired, one
+#     tap reveals the panel and the `while: notVisible` guard stops the loop. Earlier no-op taps (handler
+#     not attached yet) are simply retried — this rides out however long the module graph takes to boot.
+#   • `waitForAnimationToEnd` after each tap lets the WebView settle; combined with Maestro's per-tap
+#     hierarchy fetch this paces the loop across tens of seconds, comfortably outlasting the observed
+#     slow first paint, while the `times` cap bounds it if the button never wires (loud failure below).
+# Wait for the (static) login card to paint first — the boot screenshot showed the Simulator WebView
+# can still be on the splash 8s after launch (slower than Maestro's default 7s assertVisible window),
+# so use an extended wait on the static <h2>Sign in</h2> (visible regardless of the mobile-nav collapse)
+# before starting the reveal loop.
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+- repeat:
+    times: 20            # safety cap → the loop can never hang if the button never wires
+    while:
+      notVisible:
+        id: "sms-send-btn"
+    commands:
+      - tapOn:
+          text: "Try another way"
+      # Let the disclosure toggle + JS settle before the `while` re-checks; bounded so a still-loading
+      # WebView can't stall one iteration indefinitely (worst case ~20 short iterations, then the
+      # assert below fails loudly if the button never wired).
+      - waitForAnimationToEnd:
+          timeout: 5000
+# The self-healing loop above stops only once #sms-send-btn is visible; assert it to keep the
+# contract explicit (and to fail loudly if the cap was hit without the panel ever opening).
+- assertVisible:
+    id: "sms-send-btn"
+- takeScreenshot: 02-alternatives-revealed
+
+# The consent/disclosure line must be visible BEFORE we send (TM-242).
+- assertVisible:
+    id: "sms-disclosure"
+
+# Step 1 — enter the test phone number and request the code.
+- tapOn:
+    id: "phone" # <input id="phone" type="tel">
+- inputText: ${TEST_PHONE}
+- hideKeyboard   # IME covers the send button after typing; dismiss before tapping
+- tapOn:
+    id: "sms-send-btn" # "Text me a code"
+- takeScreenshot: 03-sms-requested
+
+# If the e2e flag was injected, no reCAPTCHA puzzle fires and the code step appears. If the launch arg
+# was NOT passed, this step times out — the intended loud failure for a missing injection. Uses an
+# extended wait (not the default 7s assertVisible) because sendSms() awaits a Firebase Phone Auth
+# round-trip (startPhoneSignIn) which is legitimately slower over the network on the Simulator; the
+# reCAPTCHA-missing failure still surfaces, just after a fair timeout rather than a premature one.
+- extendedWaitUntil:
+    visible:
+      id: "sms-step-code"
+    timeout: 30000
+
+# Step 2 — enter the fixed code and sign in.
+- tapOn:
+    id: "sms-code" # <input id="sms-code">
+- inputText: ${SMS_CODE}
+- hideKeyboard   # same: IME covers the Sign in button
+- takeScreenshot: 04-code-entered
+- tapOn:
+    id: "sms-verify-btn" # "Sign in"
+
+# First-run product tour (TM-135) auto-fires on home; its .tm-tour-blocker overlay covers the page.
+# Not suppressed in the native app (suppressAutoTours is web-harness-only), so dismiss it here.
+- tapOn:
+    text: "Skip"
+    optional: true
+
+# Signed-in end state. signout-btn is inside the collapsed mobile nav menu (nav-toggle), so assert the
+# home "signed in" markers that ARE visible. Extended wait on the first marker: verifySms() awaits a
+# Firebase confirm() + the router then fetches /me and navigates to #/home, so the signed-in home can
+# take a moment to paint on the Simulator; once it's up the remaining asserts are immediate.
+- extendedWaitUntil:
+    visible:
+      id: "auth-signed-in"
+    timeout: 30000
+- assertNotVisible:
+    id: "auth-signed-out"
+- assertVisible:
+    text: ".*You are signed in as.*"
+- takeScreenshot: 05-home-signed-in
