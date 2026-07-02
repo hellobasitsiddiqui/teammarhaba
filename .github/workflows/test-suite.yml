@@ -42,6 +42,7 @@ on:
           - profile
           - avatar
           - admin
+          - broadcast
           - theme
           - help
           - badges
