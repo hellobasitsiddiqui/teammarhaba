@@ -5,7 +5,14 @@
 //
 // Idempotent: re-running recreates the accounts and re-applies the ADMIN claim.
 import admin from "firebase-admin";
-import { ADMIN, TARGET, PROJECT_ID, API_BASE_URL, AUTH_EMULATOR_HOST } from "./fixtures.mjs";
+import {
+  ADMIN,
+  TARGET,
+  BROADCAST_RECIPIENTS,
+  PROJECT_ID,
+  API_BASE_URL,
+  AUTH_EMULATOR_HOST,
+} from "./fixtures.mjs";
 
 /** Create the user if missing, else reset its password — returns the user record. */
 async function ensureUser(auth, { email, password }) {
@@ -29,7 +36,11 @@ async function ensureUser(auth, { email, password }) {
  *  the gate. They're JIT-provisioned at RUN time — AFTER migrations — so the V8 backfill can't reach
  *  them; we flip the flag here via POST /me/onboarding-complete (the existing idempotent transition).
  *  We ALSO accept the current terms version (TM-170) via POST /me/accept-terms, reading the version the
- *  backend reports on GET /me (`currentTermsVersion`), so the same seeded accounts clear BOTH gates. */
+ *  backend reports on GET /me (`currentTermsVersion`), so the same seeded accounts clear BOTH gates.
+ *
+ *  Returns the account's authed request headers (Bearer + Accept) so a caller can make further
+ *  first-party API calls as this account without minting a second token — used by the broadcast
+ *  recipient seeding (TM-366) to PATCH the notification pref and register a device token. */
 async function provisionInBackend({ email, password }) {
   const signInUrl =
     `http://${AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`;
@@ -77,6 +88,54 @@ async function provisionInBackend({ email, password }) {
       );
     }
   }
+
+  return authed;
+}
+
+/**
+ * Seed one broadcast recipient (TM-366): create + provision + un-gate it (via {@link provisionInBackend}),
+ * then PATCH its {@code notificationPref} and register a device token, so the running backend resolves a
+ * real, opt-in-classified device for the admin broadcast e2e.
+ *
+ *   • pref = PUSH / BOTH  ⇒ push-eligible, so the broadcast targets its token (Outcome SENT).
+ *   • pref = EMAIL        ⇒ the push opt-out (TM-364), so the broadcast SKIPs it even though it has a
+ *                           token — proving the skip is by preference, not "no device".
+ *
+ * The pref is set with PATCH /api/v1/me (the same partial-update the profile page uses) and the token with
+ * POST /api/v1/me/devices (the idempotent register that JIT-provisions + persists against the user id, as
+ * DeviceTokenServiceIntegrationTest exercises). Both run as the recipient itself, using the authed headers
+ * provisionInBackend hands back — identity is the Bearer token, never the body.
+ */
+async function seedBroadcastRecipient(auth, recipient) {
+  await ensureUser(auth, recipient);
+  const authed = await provisionInBackend(recipient);
+
+  // Opt the account into (or out of) push by setting its notification preference (TM-162). EMAIL is the
+  // default + the push opt-out; PUSH/BOTH opt in. This is the first send path to honour the pref (TM-364).
+  const prefRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
+    method: "PATCH",
+    headers: { ...authed, "Content-Type": "application/json" },
+    body: JSON.stringify({ notificationPref: recipient.notificationPref }),
+  });
+  if (!prefRes.ok) {
+    throw new Error(
+      `set notificationPref failed for ${recipient.email}: ${prefRes.status} ${await prefRes.text()}`,
+    );
+  }
+
+  // Register a device token so the backend has a device to (attempt to) target — or, for the opt-out
+  // account, a device it must deliberately NOT target. Idempotent upsert keyed on the token value, so a
+  // re-run just re-points the same disposable token at the same account (no duplicate row).
+  const deviceRes = await fetch(`${API_BASE_URL}/api/v1/me/devices`, {
+    method: "POST",
+    headers: { ...authed, "Content-Type": "application/json" },
+    body: JSON.stringify({ token: recipient.token, platform: "ANDROID" }),
+  });
+  if (!deviceRes.ok) {
+    throw new Error(
+      `register device token failed for ${recipient.email}: ${deviceRes.status} ${await deviceRes.text()}`,
+    );
+  }
 }
 
 export default async function globalSetup() {
@@ -95,5 +154,14 @@ export default async function globalSetup() {
   await provisionInBackend(ADMIN);
   await provisionInBackend(TARGET);
 
-  console.log("[e2e] seeded admin + target accounts and provisioned them in the backend");
+  // Broadcast-compose recipients (TM-366): ≥2 push-eligible accounts + one EMAIL-only opt-out, each
+  // with a device token, so the admin broadcast e2e can multi-select them and assert fan-out + opt-out
+  // skip. Seeded sequentially (small N) after the base accounts so the admin list has them to pick.
+  for (const recipient of BROADCAST_RECIPIENTS) {
+    await seedBroadcastRecipient(auth, recipient);
+  }
+
+  console.log(
+    `[e2e] seeded admin + target + ${BROADCAST_RECIPIENTS.length} broadcast recipients and provisioned them in the backend`,
+  );
 }

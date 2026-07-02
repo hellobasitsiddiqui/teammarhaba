@@ -35,13 +35,13 @@ export default defineConfig({
     // Mobile viewport project (TM-229) — a phone profile (Pixel 5 ≈ 393px wide) so the responsive
     // specs exercise the real narrow-screen layout: hamburger nav, no horizontal page scroll, the
     // scrollable admin table. Scoped by testMatch so the desktop specs don't double-run under mobile.
-    // The golden-path journey (TM-341) is deliberately project-agnostic — it opts INTO this project
-    // too (handling the hamburger nav at a phone width) so the whole happy path is proven on mobile
-    // web as well as desktop.
+    // The golden-path journey (TM-341) and the admin broadcast compose→send e2e (TM-366) are
+    // deliberately project-agnostic — they opt INTO this project too (handling the hamburger nav at a
+    // phone width) so those flows are proven on mobile web as well as desktop.
     {
       name: "mobile-chromium",
       use: { ...devices["Pixel 5"] },
-      testMatch: /(responsive-mobile|golden-path)\.spec\.mjs/,
+      testMatch: /(responsive-mobile|golden-path|broadcast-admin)\.spec\.mjs/,
     },
   ],
   // Serve the static web app (with e2e config injected). The backend + emulator are external.

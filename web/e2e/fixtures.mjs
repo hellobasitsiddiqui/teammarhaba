@@ -22,6 +22,42 @@ export const WEB_BASE_URL = process.env.E2E_WEB_BASE_URL || "http://127.0.0.1:80
 export const ADMIN = { email: "e2e-admin@teammarhaba.test", password: "e2e-admin-pw-123456" };
 export const TARGET = { email: "e2e-target@teammarhaba.test", password: "e2e-target-pw-123456" };
 
+/**
+ * Broadcast-compose recipients (TM-366). The admin broadcast e2e needs MORE than the ADMIN+TARGET
+ * pair: it multi-selects ≥2 push-eligible accounts AND at least one EMAIL-only opt-out, so it can
+ * assert the send fans out to the opted-in users while the opt-out is skipped (TM-364).
+ *
+ * Each carries the `notificationPref` global-setup PATCHes onto the account and a `token` it registers
+ * via POST /me/devices, so the running backend resolves a real device per push-eligible recipient:
+ *   • PUSH_RECIPIENT / BOTH_RECIPIENT — opted into push (PUSH / BOTH) + a token ⇒ SENT (targeted ≥ 1).
+ *   • OPTOUT_RECIPIENT — pref EMAIL (the push opt-out) + a token that must NEVER be targeted ⇒
+ *     SKIPPED_OPTED_OUT. Seeding it WITH a token is deliberate: it proves the skip is by preference,
+ *     not merely "no device".
+ * The tokens are disposable, emulator-only fakes (never real FCM tokens) — headless CI has no FCM, so
+ * the send's `delivered` is legitimately 0; this spec asserts TARGETING/skip, not device receipt.
+ */
+export const PUSH_RECIPIENT = {
+  email: "e2e-push@teammarhaba.test",
+  password: "e2e-push-pw-123456",
+  notificationPref: "PUSH",
+  token: "e2e-broadcast-token-push",
+};
+export const BOTH_RECIPIENT = {
+  email: "e2e-both@teammarhaba.test",
+  password: "e2e-both-pw-123456",
+  notificationPref: "BOTH",
+  token: "e2e-broadcast-token-both",
+};
+export const OPTOUT_RECIPIENT = {
+  email: "e2e-optout@teammarhaba.test",
+  password: "e2e-optout-pw-123456",
+  notificationPref: "EMAIL",
+  token: "e2e-broadcast-token-optout",
+};
+
+/** The push-recipient fixtures as one list, in a stable order (used by global-setup + the spec). */
+export const BROADCAST_RECIPIENTS = [PUSH_RECIPIENT, BOTH_RECIPIENT, OPTOUT_RECIPIENT];
+
 /** Connection for the persisted-state assertion (same Postgres the stack uses). */
 export const dbConfig = {
   host: process.env.DB_HOST || "127.0.0.1",

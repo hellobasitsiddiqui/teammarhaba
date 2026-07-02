@@ -42,6 +42,7 @@ on:
           - profile
           - avatar
           - admin
+          - broadcast
           - theme
           - help
           - badges
@@ -218,11 +219,11 @@ jobs:
               ;;
             all)
               echo "Running the full tagged suite on project ${PW_PROJECT}"
-              npx playwright test --project="$PW_PROJECT" --screenshot=on
+              npx playwright test --project="$PW_PROJECT"
               ;;
-            auth|onboarding|terms|profile|avatar|admin|theme|help|badges|webview|responsive)
+            auth|onboarding|terms|profile|avatar|admin|theme|help|badges|webview|responsive|broadcast)
               echo "Running @${SUITE} on project ${PW_PROJECT}"
-              npx playwright test --project="$PW_PROJECT" --grep "@${SUITE}" --screenshot=on
+              npx playwright test --project="$PW_PROJECT" --grep "@${SUITE}"
               ;;
             *)
               echo "::error::unknown suite '${SUITE}'"; exit 1
