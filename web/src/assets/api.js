@@ -330,6 +330,56 @@ export async function deregisterDevice(token) {
   }
 }
 
+/**
+ * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
+ * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
+ * (TM-365) populates its dropdown from, so an admin only ever picks a route the send path will accept
+ * (no free text, no client copy that can drift). ADMIN-gated on the backend; a non-admin gets a 403.
+ * Returns the raw `{ routes: string[] }` body so the caller can normalise it (routeOptionsFrom); a
+ * 401 will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @returns {Promise<{routes: string[]}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function getPushRoutes() {
+  const response = await apiFetch("/api/v1/admin/users/push-routes", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Could not load deep-link routes (${response.status}).`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/admin/push/broadcast — send a custom notification (title + body + optional deep-link
+ * route) to a chosen set of accounts (TM-363 endpoint → TM-365 compose UI). Modelled on
+ * {@link updateMe}: JSON in/out, and a non-2xx is parsed as RFC-7807 and thrown as an {@link ApiError}
+ * (a 400 carries per-field `errors`; an off-list route is a clean 400 from the service). A missing user
+ * or a user with no devices is NOT an error — it's reported in the per-recipient result — so a
+ * well-formed request resolves with the aggregate + per-recipient outcomes. Pass `route: null` (or omit
+ * it) for no deep-link. A 401 will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @param {{title: string, body: string, route?: ?string, userIds: number[]}} payload
+ * @returns {Promise<{requested: number, sent: number, skipped: number, targeted: number, delivered: number, pruned: number, failed: number, recipients: Object[]}>}
+ * @throws {ApiError}
+ */
+export async function adminBroadcastPush({ title, body, route, userIds }) {
+  const response = await apiFetch("/api/v1/admin/push/broadcast", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    // Omit `route` entirely when there's no deep-link (null is also accepted server-side).
+    body: JSON.stringify(route ? { title, body, route, userIds } : { title, body, userIds }),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Broadcast failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
   window.tmApi = {
@@ -344,6 +394,8 @@ if (typeof window !== "undefined") {
     verifyEmailCode,
     registerDevice,
     deregisterDevice,
+    getPushRoutes,
+    adminBroadcastPush,
     redirectToLogin,
     LOGIN_PATH,
     ApiError,
