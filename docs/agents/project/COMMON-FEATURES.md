@@ -33,6 +33,7 @@ identified. This file is part of the agent OS (kept on replay).
 | **Bootstrap the first ADMIN** (env-driven seed) | ✅ | TM-110 — *was a gap; without it the admin surface is unreachable* |
 | Admin user-management endpoints (list/enable/disable/set-role) | ✅ | TM-111 |
 | Admin users console (web UI) | ✅ | TM-133 |
+| Admin broadcast (compose→select→preview→confirm→send custom push) | ✅ | epic TM-358 (TM-363/364/365/359/360) — [`admin-broadcast-feature.md`](../admin-broadcast-feature.md); Android via FCM now, real iOS push parked (TM-362) |
 | 404-not-403 on cross-user access; admin self-protection | ✅ | TM-111 |
 | Fine-grained perms; multi-tenancy / teams | ⬜ | Epic 3 candidate |
 
@@ -189,7 +190,7 @@ Cover the not-yet-wired behaviours once they ship.
 Alerting / SLOs + dashboards (metrics exist; alerts don't) · correlation / request IDs through logs · distributed tracing · error monitoring (Sentry-style) · log-retention policy.
 
 ### Platform / UX / compliance leftovers (a later platform epic or Epic 3 — *not* hardening)
-Account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive · onboarding / first-login tutorial · white-label / theming (re-skin) · email / notifications service · file / object storage · full-text search · background jobs / async queue · scheduled tasks · webhooks / outbound events · machine-to-machine auth · push notifications (FCM) · cookie-consent banner · admin impersonation · audit-log viewer/export UI · GDPR export/deletion + consent/retention · feature flags.
+Account self-service UI (password reset / email verification) · public status page · i18n · full a11y / responsive · onboarding / first-login tutorial · white-label / theming (re-skin) · email / notifications service · file / object storage · full-text search · background jobs / async queue · scheduled tasks · webhooks / outbound events · machine-to-machine auth · ~~push notifications (FCM)~~ *(shipped: transport TM-283/284/290, admin broadcast epic TM-358 — see the admin row above; real iOS push still parked, TM-362)* · cookie-consent banner · admin impersonation · audit-log viewer/export UI · GDPR export/deletion + consent/retention · feature flags.
 
 ### Growth
 Generic growth/virality features — deferred, captured so they're not lost.
