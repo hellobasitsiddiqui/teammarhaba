@@ -179,6 +179,17 @@ run_flow() {
   maestro test "$flow" --format junit \
     --output "maestro-artifacts/report-${name%.*}.xml" \
     --debug-output "maestro-artifacts/debug-${name%.*}"
+  local rc=$?
+  # TM-371: harvest EVERY screenshot this flow produced into the uploaded artifact dir, so the Jira
+  # ticket gets the full render/journey sequence — not just the one simctl launch shot. Maestro writes
+  # `takeScreenshot` outputs to its per-run dir (~/.maestro/tests/<ts>/) and/or the CWD depending on
+  # version, so grab from both. Never let harvesting change the flow's pass/fail.
+  local shots="maestro-artifacts/screenshots-${name%.*}"; mkdir -p "$shots"
+  local latest; latest="$(ls -1dt "$HOME"/.maestro/tests/*/ 2>/dev/null | head -1)"
+  [ -n "$latest" ] && find "$latest" -name '*.png' -exec cp -f {} "$shots/" \; 2>/dev/null || true
+  find . -maxdepth 1 -name '[0-9]*-*.png' -exec mv -f {} "$shots/" \; 2>/dev/null || true
+  echo "  harvested $(ls -1 "$shots"/*.png 2>/dev/null | wc -l | tr -d ' ') screenshot(s) for $name"
+  return $rc
 }
 
 overall=0
