@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.auth.EmailCodeException;
 import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
+import com.teammarhaba.backend.notify.BroadcastCooldownException;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -116,6 +117,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             case SEND_RATE_LIMITED, IP_RATE_LIMITED, VERIFY_RATE_LIMITED -> Problems.of(
                     HttpStatus.TOO_MANY_REQUESTS, "Too many requests", ex.getMessage());
         };
+    }
+
+    /**
+     * An admin re-sent a broadcast inside the per-admin cooldown (TM-364) -> 429 so the client backs
+     * off. Mirrors the email-verification / email-code cooldowns; the guard is the accidental-double-
+     * send protection, not a rejection of the request's content.
+     */
+    @ExceptionHandler(BroadcastCooldownException.class)
+    public ProblemDetail handleBroadcastCooldown(BroadcastCooldownException ex) {
+        return Problems.of(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", ex.getMessage());
     }
 
     /**

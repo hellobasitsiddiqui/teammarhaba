@@ -92,6 +92,10 @@
       },
       "BroadcastPushResponse" : {
         "properties" : {
+          "dedupedTokens" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "delivered" : {
             "format" : "int32",
             "type" : "integer"
@@ -119,6 +123,18 @@
             "type" : "integer"
           },
           "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedDisabled" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedNotFound" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedOptedOut" : {
             "format" : "int32",
             "type" : "integer"
           },

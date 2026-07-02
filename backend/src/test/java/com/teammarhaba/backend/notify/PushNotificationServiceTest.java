@@ -28,6 +28,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * right tokens are targeted (all of the user's devices), an {@code UNREGISTERED} response prunes that
  * token via TM-283's store, and a per-device {@code FAILED} (or an unexpected throw) does not abort the
  * rest of the fan-out.
+ *
+ * <p>Also pins the token-level {@link PushNotificationService#sendToTokens} seam that the admin
+ * broadcast path (TM-364) delivers a de-duplicated token set through: it attempts each supplied token
+ * once (same prune/fail semantics as {@code sendToUser}, which now delegates to it) and an empty
+ * collection is a no-op.
  */
 @ExtendWith(MockitoExtension.class)
 class PushNotificationServiceTest {
@@ -128,6 +133,36 @@ class PushNotificationServiceTest {
         RecordingPushSender sender = new RecordingPushSender();
 
         PushFanout result = service(sender).sendToUser(USER_ID, MSG);
+
+        assertThat(result).isEqualTo(new PushFanout(0, 0, 0, 0));
+        assertThat(sender.sentTokens()).isEmpty();
+        verifyNoInteractions(deviceTokens);
+    }
+
+    // --- sendToTokens (the token-level seam the broadcast dedupe path uses, TM-364) --------------
+
+    @Test
+    void sendToTokensDeliversEachSuppliedTokenOnceWithPruneAndFailSemantics() {
+        // No user lookup here — the caller (broadcast) has already resolved + deduped the tokens.
+        when(deviceTokens.prune("dead")).thenReturn(true);
+        RecordingPushSender sender = new RecordingPushSender()
+                .outcome("ok", PushDelivery.DELIVERED)
+                .outcome("dead", PushDelivery.UNREGISTERED)
+                .outcome("boom", PushDelivery.FAILED);
+
+        PushFanout result = service(sender).sendToTokens(List.of("ok", "dead", "boom"), MSG);
+
+        assertThat(sender.sentTokens()).containsExactly("ok", "dead", "boom"); // each once, in order
+        assertThat(result).isEqualTo(new PushFanout(3, 1, 1, 1));
+        verify(deviceTokens).prune("dead");
+        verify(tokens, never()).findByUserId(any()); // token-level path never resolves by user
+    }
+
+    @Test
+    void sendToTokensWithNoTokensIsANoOp() {
+        RecordingPushSender sender = new RecordingPushSender();
+
+        PushFanout result = service(sender).sendToTokens(List.of(), MSG);
 
         assertThat(result).isEqualTo(new PushFanout(0, 0, 0, 0));
         assertThat(sender.sentTokens()).isEmpty();

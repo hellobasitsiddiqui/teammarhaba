@@ -3,6 +3,7 @@ package com.teammarhaba.backend.notify;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
 import com.teammarhaba.backend.device.DeviceTokenService;
+import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,18 +59,43 @@ public class PushNotificationService {
             return PushFanout.EMPTY;
         }
 
+        PushFanout result = sendToTokens(devices.stream().map(DeviceToken::getToken).toList(), message);
+        log.info("Pushed to user {}: {}", userId, result);
+        return result;
+    }
+
+    /**
+     * Deliver {@code message} to an already-resolved set of device {@code tokens}, with the same
+     * per-token resilience as {@link #sendToUser}: prune on {@code UNREGISTERED}, log-and-keep on
+     * {@code FAILED}, never abort the loop. This is the token-level fan-out the admin broadcast path
+     * (TM-364) uses so it can <em>de-duplicate a token shared across multiple recipients</em> and send
+     * it exactly once — the caller resolves and dedupes the tokens (always through {@code User}, so a
+     * soft-deleted account's retained tokens are never targeted), this method just delivers them.
+     *
+     * <p>{@link #sendToUser} is now a thin wrapper over this (resolve-by-user, then delegate), so the
+     * two paths share one delivery/prune implementation and can never diverge. {@code tokens} is taken
+     * as-is: any de-duplication is the caller's responsibility (each value passed is attempted once).
+     *
+     * @param tokens  the FCM registration tokens to deliver to (attempted in order, once each as given)
+     * @param message the notification content
+     * @return per-outcome counts for the fan-out ({@code targeted == tokens.size()})
+     */
+    public PushFanout sendToTokens(Collection<String> tokens, PushMessage message) {
+        if (tokens.isEmpty()) {
+            return PushFanout.EMPTY;
+        }
+
         int delivered = 0;
         int pruned = 0;
         int failed = 0;
-        for (DeviceToken device : devices) {
-            String token = device.getToken();
+        for (String token : tokens) {
             PushDelivery outcome;
             try {
                 outcome = sender.send(token, message);
             } catch (RuntimeException unexpected) {
                 // A seam impl should classify rather than throw, but never let one bad device abort the
                 // rest of the fan-out — treat an unexpected throw as a non-pruning failure.
-                log.warn("Unexpected error sending push to a device for user {} (token kept).", userId, unexpected);
+                log.warn("Unexpected error sending push to a device (token kept).", unexpected);
                 failed++;
                 continue;
             }
@@ -84,9 +110,7 @@ public class PushNotificationService {
             }
         }
 
-        PushFanout result = new PushFanout(devices.size(), delivered, pruned, failed);
-        log.info("Pushed to user {}: {}", userId, result);
-        return result;
+        return new PushFanout(tokens.size(), delivered, pruned, failed);
     }
 
     /**
