@@ -62,6 +62,73 @@
         },
         "type" : "object"
       },
+      "BroadcastPushRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "route" : {
+            "type" : "string"
+          },
+          "title" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "userIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "maxItems" : 500,
+            "minItems" : 0,
+            "type" : "array"
+          }
+        },
+        "required" : [ "body", "title", "userIds" ],
+        "type" : "object"
+      },
+      "BroadcastPushResponse" : {
+        "properties" : {
+          "delivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pruned" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "recipients" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Recipient"
+            },
+            "type" : "array"
+          },
+          "requested" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "targeted" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "DeviceResponse" : {
         "properties" : {
           "platform" : {
@@ -277,6 +344,21 @@
         },
         "type" : "object"
       },
+      "Recipient" : {
+        "properties" : {
+          "fanout" : {
+            "$ref" : "#/components/schemas/PushFanoutResponse"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "RegisterDeviceRequest" : {
         "properties" : {
           "platform" : {
@@ -396,6 +478,34 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/api/v1/admin/push/broadcast" : {
+      "post" : {
+        "operationId" : "broadcast",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BroadcastPushRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BroadcastPushResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "push-admin-controller" ]
+      }
+    },
     "/api/v1/admin/users" : {
       "get" : {
         "operationId" : "list_1",
