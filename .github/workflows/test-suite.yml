@@ -221,7 +221,7 @@ jobs:
               echo "Running the full tagged suite on project ${PW_PROJECT}"
               npx playwright test --project="$PW_PROJECT" --screenshot=on
               ;;
-            auth|onboarding|terms|profile|avatar|admin|theme|help|badges|webview|responsive)
+            auth|onboarding|terms|profile|avatar|admin|theme|help|badges|webview|responsive|broadcast)
               echo "Running @${SUITE} on project ${PW_PROJECT}"
               npx playwright test --project="$PW_PROJECT" --grep "@${SUITE}" --screenshot=on
               ;;
