@@ -16,6 +16,7 @@ import com.teammarhaba.backend.notify.NotificationBroadcastRepository;
 import com.teammarhaba.backend.notify.PushDelivery;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushSender;
+import com.teammarhaba.backend.user.NotificationPref;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Instant;
@@ -83,12 +84,57 @@ class PushAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 new VerifiedUser(uid, uid + "@example.com"), null, List.of(new SimpleGrantedAuthority(authority))));
     }
 
+    /**
+     * Seed a push-eligible ({@code notificationPref = PUSH}) active account. Seeding as PUSH is
+     * deliberate: {@code notificationPref} defaults to {@code EMAIL} (the push opt-out) for every
+     * account, so a would-be recipient must opt in for the TM-364 opt-out rail to let the send through.
+     */
     private long seedUser(String uid) {
-        return users.saveAndFlush(new User(uid, uid + "@example.com", null)).getId();
+        return seedUser(uid, NotificationPref.PUSH);
+    }
+
+    private long seedUser(String uid, NotificationPref pref) {
+        User u = new User(uid, uid + "@example.com", null);
+        u.setNotificationPref(pref);
+        return users.saveAndFlush(u).getId();
     }
 
     private void seedToken(long userId, String token) {
         tokens.saveAndFlush(new DeviceToken(userId, token, DevicePlatform.ANDROID, Instant.now()));
+    }
+
+    /**
+     * Hand an existing (globally-unique) token to a new owner — the same idempotent-upsert re-point a
+     * real re-registration does ({@link DeviceToken#refresh}), so no duplicate row is created.
+     */
+    private void handToken(String token, long newUserId) {
+        DeviceToken existing = tokens.findByToken(token).orElseThrow();
+        existing.refresh(newUserId, DevicePlatform.ANDROID, Instant.now());
+        tokens.saveAndFlush(existing);
+    }
+
+    /** Suspend an account ({@code enabled = false}) — {@code setEnabled} is package-private, so reflect. */
+    private void disable(long userId) {
+        User u = users.findById(userId).orElseThrow();
+        setUserField(u, "enabled", false);
+        users.saveAndFlush(u);
+    }
+
+    /** Soft-delete (tombstone) an account so the entity's {@code @SQLRestriction} hides it. */
+    private void softDelete(long userId) {
+        User u = users.findById(userId).orElseThrow();
+        setUserField(u, "deletedAt", Instant.now());
+        users.saveAndFlush(u);
+    }
+
+    private static void setUserField(User user, String name, Object value) {
+        try {
+            var field = User.class.getDeclaredField(name);
+            field.setAccessible(true);
+            field.set(user, value);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static String body(List<Long> ids, String title, String body, String route) {
@@ -193,7 +239,7 @@ class PushAdminControllerIntegrationTest extends AbstractIntegrationTest {
         seedToken(id, "tok-c");
 
         mockMvc.perform(post("/api/v1/admin/push/broadcast")
-                        .with(admin("admin-b"))
+                        .with(admin("admin-multi"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(List.of(id), "Broadcast", "To all your devices", "#/home")))
                 .andExpect(status().isOk())
@@ -203,6 +249,8 @@ class PushAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.skipped").value(0))
                 .andExpect(jsonPath("$.targeted").value(3))
                 .andExpect(jsonPath("$.delivered").value(3))
+                .andExpect(jsonPath("$.dedupedTokens").value(0))
+                .andExpect(jsonPath("$.skippedOptedOut").value(0))
                 .andExpect(jsonPath("$.recipients.length()").value(1))
                 .andExpect(jsonPath("$.recipients[0].userId").value(id))
                 .andExpect(jsonPath("$.recipients[0].outcome").value("SENT"))
@@ -223,21 +271,150 @@ class PushAdminControllerIntegrationTest extends AbstractIntegrationTest {
         long ghost = 999_999L; // no such account
 
         mockMvc.perform(post("/api/v1/admin/push/broadcast")
-                        .with(admin("admin-b"))
+                        .with(admin("admin-mixed"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(List.of(real, noDevices, ghost), "Hi", "There", null)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.requested").value(3))
                 .andExpect(jsonPath("$.sent").value(1))
                 .andExpect(jsonPath("$.skipped").value(2))
+                .andExpect(jsonPath("$.skippedNotFound").value(1))
                 .andExpect(jsonPath("$.delivered").value(1))
                 .andExpect(jsonPath("$.recipients.length()").value(3))
                 .andExpect(jsonPath("$.recipients[?(@.userId==" + real + ")].outcome").value("SENT"))
                 .andExpect(jsonPath("$.recipients[?(@.userId==" + noDevices + ")].outcome").value("NO_DEVICES"))
-                .andExpect(jsonPath("$.recipients[?(@.userId==" + ghost + ")].outcome").value("NOT_FOUND"));
+                .andExpect(jsonPath("$.recipients[?(@.userId==" + ghost + ")].outcome").value("SKIPPED_NOT_FOUND"));
 
         // Only the real user's token was ever attempted.
         assertThat(sender.sentTokens()).containsExactly("tok-real");
+    }
+
+    // --- Safety rails (TM-364) -------------------------------------------------------------------
+
+    @Test
+    void optedOutRecipientIsSkippedAndNeverPushed() throws Exception {
+        long optedOut = seedUser("opted-out", NotificationPref.EMAIL); // EMAIL == push opt-out
+        seedToken(optedOut, "tok-optout"); // has a device, but opted out of push
+        long optedIn = seedUser("opted-in", NotificationPref.BOTH);
+        seedToken(optedIn, "tok-optin");
+
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-optout"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(List.of(optedOut, optedIn), "Hi", "There", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sent").value(1))
+                .andExpect(jsonPath("$.skipped").value(1))
+                .andExpect(jsonPath("$.skippedOptedOut").value(1))
+                .andExpect(jsonPath("$.recipients[?(@.userId==" + optedOut + ")].outcome").value("SKIPPED_OPTED_OUT"))
+                .andExpect(jsonPath("$.recipients[?(@.userId==" + optedIn + ")].outcome").value("SENT"));
+
+        // The opted-out user's token was never handed to the sender; only the opted-in user's was.
+        assertThat(sender.sentTokens()).containsExactly("tok-optin");
+    }
+
+    @Test
+    void disabledRecipientIsSkippedAndNeverPushed() throws Exception {
+        long suspended = seedUser("suspended");
+        seedToken(suspended, "tok-suspended");
+        disable(suspended);
+
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-disabled"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(List.of(suspended), "Hi", "There", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sent").value(0))
+                .andExpect(jsonPath("$.skipped").value(1))
+                .andExpect(jsonPath("$.skippedDisabled").value(1))
+                .andExpect(jsonPath("$.recipients[?(@.userId==" + suspended + ")].outcome").value("SKIPPED_DISABLED"));
+
+        assertThat(sender.sentTokens()).isEmpty();
+    }
+
+    @Test
+    void softDeletedRecipientIsExcludedAndTokenNeverLeaked() throws Exception {
+        long gone = seedUser("soft-deleted");
+        seedToken(gone, "tok-ghost"); // token row survives the soft-delete (cascade is hard-delete only)
+        softDelete(gone);
+
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-softdel"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(List.of(gone), "Hi", "There", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sent").value(0))
+                .andExpect(jsonPath("$.skipped").value(1))
+                .andExpect(jsonPath("$.skippedNotFound").value(1))
+                .andExpect(jsonPath("$.recipients[?(@.userId==" + gone + ")].outcome").value("SKIPPED_NOT_FOUND"));
+
+        // The retained device-token row must NOT be pushed — resolution goes through User, not tokens.
+        assertThat(sender.sentTokens()).isEmpty();
+    }
+
+    @Test
+    void handedDownDeviceTokenIsPushedOnceAcrossASelectionOfBothUsers() throws Exception {
+        // A device token is globally UNIQUE (device_tokens_token_key), so a handed-down phone's token
+        // lives on exactly one row: re-registering it re-points that row to the new owner (upsert),
+        // rather than duplicating it. Here "tok-shared" starts on A, is handed to B, and both users are
+        // then selected — it must reach the sender exactly once (now as B's device), never twice.
+        long userA = seedUser("handed-a");
+        long userB = seedUser("handed-b");
+        seedToken(userA, "tok-own-a");
+        seedToken(userB, "tok-own-b");
+        seedToken(userA, "tok-shared");
+        handToken("tok-shared", userB); // upsert-style handoff: the unique row moves from A to B
+
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-handed"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(List.of(userA, userB), "Hi", "There", null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sent").value(2))
+                .andExpect(jsonPath("$.targeted").value(3)) // own-a + own-b + shared (once), not 4
+                .andExpect(jsonPath("$.delivered").value(3));
+
+        // The handed-down token was delivered exactly once across the whole broadcast (never double-sent).
+        assertThat(sender.sentTokens())
+                .containsExactlyInAnyOrder("tok-own-a", "tok-own-b", "tok-shared");
+        assertThat(sender.sentTokens().stream().filter("tok-shared"::equals).count()).isEqualTo(1);
+    }
+
+    @Test
+    void emptyRecipientsIsRejected() throws Exception {
+        // Belt-and-braces: the DTO @NotEmpty makes this a validation 400; the service also guards it.
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-empty"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userIds\":[],\"title\":\"Hi\",\"body\":\"There\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(sender.sentTokens()).isEmpty();
+    }
+
+    @Test
+    void secondBroadcastFromSameAdminInsideCooldownIsRejectedWith429() throws Exception {
+        long id = seedUser("cooldown-target");
+        seedToken(id, "tok-cd");
+        String content = body(List.of(id), "Hi", "There", null);
+
+        // First send from this admin succeeds and records the (process-local, real-clock) cooldown window.
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-cooldown"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(content))
+                .andExpect(status().isOk());
+
+        // A second send from the SAME admin immediately after is refused with 429 (well inside 30s).
+        mockMvc.perform(post("/api/v1/admin/push/broadcast")
+                        .with(admin("admin-cooldown"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(content))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.title").value("Too many requests"));
+
+        // The token was delivered once (the first send only) — the blocked resubmit didn't re-push.
+        assertThat(sender.sentTokens()).containsExactly("tok-cd");
     }
 
     /**
