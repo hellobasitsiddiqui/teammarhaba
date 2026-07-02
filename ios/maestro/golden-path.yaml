@@ -91,8 +91,12 @@ appId: app.teammarhaba.webview
 - hideKeyboard
 - tapOn:
     text: "Save changes"
-- assertVisible:
-    text: ".*Profile saved.*"
+# The success toast follows an async PUT /profile and auto-dismisses, so wait for it with an extended
+# timeout (backend round-trip is slower on the Simulator) rather than racing the default 7s window.
+- extendedWaitUntil:
+    visible:
+      text: ".*Profile saved.*"
+    timeout: 30000
 - takeScreenshot: 06-profile-saved
 
 # ── STEP 5: AVATAR via the GALLERY path (TM-166) — open the native picker and choose "from gallery".
@@ -143,8 +147,12 @@ appId: app.teammarhaba.webview
     optional: true
 - tapOn:
     id: "signout-btn"
-- assertVisible:
-    id: "nav-signin"
+# signOut() is async (Firebase) → router re-renders the nav; wait for the sign-in control to return
+# with an extended timeout rather than the default 7s so the core sign-out step passes reliably.
+- extendedWaitUntil:
+    visible:
+      id: "nav-signin"
+    timeout: 30000
 - assertNotVisible:
     id: "auth-signed-in"
 - takeScreenshot: 12-signed-out

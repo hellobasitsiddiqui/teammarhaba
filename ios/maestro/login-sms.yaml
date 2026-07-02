@@ -65,9 +65,52 @@ env:
           id: "signout-btn"
 
 # Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
-- assertVisible: "Sign in"
-- tapOn:
-    text: "Try another way"
+#
+# ── iOS BOOT-RACE GUARD (TM-354, root cause of the first CI failure) ──────────────────────────────
+# #auth-signed-out (this whole card, incl. the <h2>Sign in</h2> and the "Try another way" button) is
+# STATIC markup shown by default (styles.css `.auth-card{display:flex}`, no `hidden` attr) — so it is
+# on screen the instant the DOM parses, and the native splash (splash.js) lifts two rAFs after
+# DOMContentLoaded, i.e. BEFORE the ES-module graph has evaluated. The "Try another way" CLICK handler
+# is attached at the top level of login.js, an ES module that must first resolve auth.js → the remote
+# Firebase SDK; on the slow Simulator WKWebView (see 00-app-launched.png: still on the splash 8s after
+# launch) that module often hasn't run when Maestro taps, so a single tap is a NO-OP and #sms-send-btn
+# never reveals — the exact failure (`Assertion is false: id: sms-send-btn is visible`). The identical
+# Android flow only passes because its WebView wins the same race.
+#
+# Fix — make the reveal SELF-HEALING (no proxy "JS is up" marker, because every reliable one is
+# unusable here: the nav links that router.js un-hides all live inside #nav-items, which is
+# `display:none` behind the hamburger at phone width until nav-toggle.js opens it — so their visibility
+# can't gate a signed-out phone-width launch). Instead we re-tap "Try another way" until #sms-send-btn
+# actually appears, with a `times:` safety cap so the loop can NEVER hang:
+#   • The disclosure toggle is idempotent-to-open here: while #sms-send-btn is not visible the panel is
+#     collapsed, so every tap is an OPEN attempt; the moment the login.js handler is finally wired, one
+#     tap reveals the panel and the `while: notVisible` guard stops the loop. Earlier no-op taps (handler
+#     not attached yet) are simply retried — this rides out however long the module graph takes to boot.
+#   • `waitForAnimationToEnd` after each tap lets the WebView settle; combined with Maestro's per-tap
+#     hierarchy fetch this paces the loop across tens of seconds, comfortably outlasting the observed
+#     slow first paint, while the `times` cap bounds it if the button never wires (loud failure below).
+# Wait for the (static) login card to paint first — the boot screenshot showed the Simulator WebView
+# can still be on the splash 8s after launch (slower than Maestro's default 7s assertVisible window),
+# so use an extended wait on the static <h2>Sign in</h2> (visible regardless of the mobile-nav collapse)
+# before starting the reveal loop.
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+- repeat:
+    times: 20            # safety cap → the loop can never hang if the button never wires
+    while:
+      notVisible:
+        id: "sms-send-btn"
+    commands:
+      - tapOn:
+          text: "Try another way"
+      # Let the disclosure toggle + JS settle before the `while` re-checks; bounded so a still-loading
+      # WebView can't stall one iteration indefinitely (worst case ~20 short iterations, then the
+      # assert below fails loudly if the button never wired).
+      - waitForAnimationToEnd:
+          timeout: 5000
+# The self-healing loop above stops only once #sms-send-btn is visible; assert it to keep the
+# contract explicit (and to fail loudly if the cap was hit without the panel ever opening).
 - assertVisible:
     id: "sms-send-btn"
 - takeScreenshot: 02-alternatives-revealed
@@ -86,9 +129,14 @@ env:
 - takeScreenshot: 03-sms-requested
 
 # If the e2e flag was injected, no reCAPTCHA puzzle fires and the code step appears. If the launch arg
-# was NOT passed, this assertion times out — the intended loud failure for a missing injection.
-- assertVisible:
-    id: "sms-step-code"
+# was NOT passed, this step times out — the intended loud failure for a missing injection. Uses an
+# extended wait (not the default 7s assertVisible) because sendSms() awaits a Firebase Phone Auth
+# round-trip (startPhoneSignIn) which is legitimately slower over the network on the Simulator; the
+# reCAPTCHA-missing failure still surfaces, just after a fair timeout rather than a premature one.
+- extendedWaitUntil:
+    visible:
+      id: "sms-step-code"
+    timeout: 30000
 
 # Step 2 — enter the fixed code and sign in.
 - tapOn:
@@ -106,9 +154,13 @@ env:
     optional: true
 
 # Signed-in end state. signout-btn is inside the collapsed mobile nav menu (nav-toggle), so assert the
-# home "signed in" markers that ARE visible.
-- assertVisible:
-    id: "auth-signed-in"
+# home "signed in" markers that ARE visible. Extended wait on the first marker: verifySms() awaits a
+# Firebase confirm() + the router then fetches /me and navigates to #/home, so the signed-in home can
+# take a moment to paint on the Simulator; once it's up the remaining asserts are immediate.
+- extendedWaitUntil:
+    visible:
+      id: "auth-signed-in"
+    timeout: 30000
 - assertNotVisible:
     id: "auth-signed-out"
 - assertVisible:
