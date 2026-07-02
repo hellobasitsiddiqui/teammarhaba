@@ -120,8 +120,9 @@ test("routeOptionsFrom with neither payload nor fallback is an empty list (never
 // --- summariseBroadcast: the honest result line ----------------------------------------------
 
 test("summariseBroadcast reads sent / delivered / skipped from the response", () => {
+  // No reason rails set → the whole skipped count is the residual "no device" (TM-365 M1).
   const s = summariseBroadcast({ requested: 15, sent: 12, skipped: 3, targeted: 20, delivered: 18, pruned: 1, failed: 1 });
-  assert.equal(s, "Sent to 12 users · 18 devices delivered · 3 skipped (no device)");
+  assert.equal(s, "Sent to 12 users · 18 devices delivered · 3 skipped (3 no device)");
 });
 
 test("summariseBroadcast omits the skipped clause when nothing was skipped", () => {
@@ -137,4 +138,44 @@ test("summariseBroadcast pluralises correctly for singular counts", () => {
 test("summariseBroadcast tolerates a missing/empty response (all zeros)", () => {
   assert.equal(summariseBroadcast(), "Sent to 0 users · 0 devices delivered");
   assert.equal(summariseBroadcast({}), "Sent to 0 users · 0 devices delivered");
+});
+
+// --- summariseBroadcast: the honest skip breakdown (TM-365 review M1) -------------------------
+
+test("summariseBroadcast reports an opted-out skip distinctly (not as 'no device')", () => {
+  // The e2e's scenario: 2 sent, 0 delivered (no FCM in CI), 1 skipped — and that 1 is an opt-out.
+  const s = summariseBroadcast({ sent: 2, skipped: 1, delivered: 0, skippedOptedOut: 1 });
+  assert.equal(s, "Sent to 2 users · 0 devices delivered · 1 skipped (1 opted out)");
+});
+
+test("summariseBroadcast reports a disabled-account skip distinctly", () => {
+  const s = summariseBroadcast({ sent: 4, skipped: 2, delivered: 6, skippedDisabled: 2 });
+  assert.equal(s, "Sent to 4 users · 6 devices delivered · 2 skipped (2 disabled)");
+});
+
+test("summariseBroadcast reports a not-found skip distinctly", () => {
+  const s = summariseBroadcast({ sent: 3, skipped: 1, delivered: 5, skippedNotFound: 1 });
+  assert.equal(s, "Sent to 3 users · 5 devices delivered · 1 skipped (1 not found)");
+});
+
+test("summariseBroadcast derives 'no device' as the residual after the named rails", () => {
+  // 5 skipped: 2 opted out + 1 disabled + 1 not found accounted for → 1 left over = no device.
+  const s = summariseBroadcast({
+    sent: 10, skipped: 5, delivered: 12,
+    skippedOptedOut: 2, skippedDisabled: 1, skippedNotFound: 1,
+  });
+  assert.equal(s, "Sent to 10 users · 12 devices delivered · 5 skipped (2 opted out, 1 no device, 1 disabled, 1 not found)");
+});
+
+test("summariseBroadcast lists only the non-zero skip reasons", () => {
+  // opted-out + no-device present, disabled/not-found zero → only the two non-zero reasons show.
+  const s = summariseBroadcast({ sent: 8, skipped: 5, delivered: 9, skippedOptedOut: 3, skippedDisabled: 0, skippedNotFound: 0 });
+  assert.equal(s, "Sent to 8 users · 9 devices delivered · 5 skipped (3 opted out, 2 no device)");
+});
+
+test("summariseBroadcast never shows a negative 'no device' if the rails over-count", () => {
+  // Defensive: if the rails somehow sum to more than `skipped`, the residual clamps to 0 (no negative,
+  // no phantom "no device") — the named reasons still show.
+  const s = summariseBroadcast({ sent: 1, skipped: 1, delivered: 0, skippedOptedOut: 1, skippedDisabled: 1 });
+  assert.equal(s, "Sent to 1 user · 0 devices delivered · 1 skipped (1 opted out, 1 disabled)");
 });

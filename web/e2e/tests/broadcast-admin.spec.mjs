@@ -188,11 +188,15 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   for (const r of sentUsers) expect(r.fanout.targeted).toBe(1);
 
   // ── STEP 7: the UI reflects it — the honest success toast summary. ──────────────────────────────
-  // summariseBroadcast (broadcast.js): "Sent to 2 users · 0 devices delivered · 1 skipped (no device)".
-  // We assert the true parts (sent-count + a skipped note); `delivered` is 0 here by design (no FCM).
+  // summariseBroadcast (broadcast.js) now reports the REAL skip breakdown from the response rails
+  // (TM-365 review M1): here the one skip is the EMAIL-only opt-out, so it reads
+  // "Sent to 2 users · 0 devices delivered · 1 skipped (1 opted out)" — NOT the old "(no device)".
+  // We assert the true parts (sent-count + that the skip is attributed to opt-out, not device);
+  // `delivered` is 0 here by design (no FCM).
   const successToast = page.locator("#tm-toasts .tm-toast-success");
   await expect(successToast).toContainText("Sent to 2 users");
-  await expect(successToast).toContainText("skipped");
+  await expect(successToast).toContainText("1 skipped (1 opted out)");
+  await expect(successToast).not.toContainText("no device");
   // The panel reset after a successful send: the selection cleared + the title field emptied (TM-365).
   await expect(page.locator("#admin-selected-count")).toHaveText("0 selected");
   await expect(page.locator("#admin-broadcast-title")).toHaveValue("");
