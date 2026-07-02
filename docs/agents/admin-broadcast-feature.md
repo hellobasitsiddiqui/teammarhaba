@@ -31,8 +31,12 @@ The flow is **multi-select → compose → preview → confirm → send-now** (`
 
 1. **Select recipients** — tick users in the table. The selection is held **by user id**, so it
    survives paging, filtering and sorting (a draft audience isn't lost when the table re-renders).
-   The header **select-all** checkbox selects **everyone matching the current filter** (not just the
-   visible page), so an admin can filter then select-all to target a cohort.
+   The header **select-all** checkbox selects **everyone matching the filter, on this page (up to the
+   first 100 fetched)** — not just the visible table page, but *also* not beyond the first 100 accounts
+   the console loads (it filters client-side and doesn't paginate the fetch yet; real pagination is
+   TM-370). When the fetched set is at that 100 ceiling the compose panel shows a caveat that more
+   accounts may exist and can't be selected yet. So an admin can filter then select-all to target a
+   cohort **within the first 100**.
 2. **Compose** — a **Title** and **Message**, plus an optional **Deep-link** picker. The deep-link
    options come from the backend allow-list (`GET …/push-routes`, TM-360) — never free text — so the
    admin can only pick a route the send path will accept. The picker falls back to the client
@@ -45,8 +49,10 @@ The flow is **multi-select → compose → preview → confirm → send-now** (`
    users? … This can't be undone.") — a delivered push is irreversible, so there is deliberately **no
    undo toast** (unlike the enable/role admin actions).
 5. **Send now** — on confirm, the UI POSTs the broadcast and shows an honest one-line summary toast
-   read from the response ("Sent to 12 users · 18 devices delivered · 3 skipped (no device)"), then
-   clears the draft + selection.
+   read from the response ("Sent to 12 users · 18 devices delivered · 5 skipped (2 opted out, 3 no
+   device)"). The skip breakdown reads the response's `skippedOptedOut` / `skippedDisabled` /
+   `skippedNotFound` rails (post-TM-364) and derives "no device" as the residual, showing only the
+   non-zero reasons. Then it clears the draft + selection.
 
 Client-side validation (`web/src/assets/broadcast.js`) mirrors the backend caps 1:1, so the browser
 fails fast with the *same* limits the server enforces and only ever POSTs something the server will
@@ -186,8 +192,8 @@ Known and intentional for v1 — captured so future work builds on accurate assu
 | **Real iOS push parked** | Android only today; iOS needs APNs `.p8` + Firebase iOS app + physical device | TM-362 (human-gated) |
 | **`>100`-user select ceiling** | the console fetches the **first 100 users** (`FETCH_SIZE = 100`, matches the admin list's max page size) and filters/selects client-side; you can't select someone off that first page | server-side selection / search once the user base outgrows 100 (flagged on TM-133/TM-115) |
 | **Per-admin send cooldown** | a **30s** per-admin-uid cooldown rejects a second broadcast inside the window with `429` — the accidental-double-send guard | it is **process-local** (fine for one Cloud Run instance); a shared store (Redis) for a cluster-wide guard is the noted future improvement, consistent with TM-247 |
-| **`notificationPref` not in the admin projection** | the admin `UserResponse` doesn't expose `notificationPref`, so the UI **can't show who is opt-out** before sending, and its summary toast folds "no device" + "opted out" into one `skipped (no device)` count — it does **not** invent a separate "opted-out" number client-side | add `notificationPref` to the admin projection so the console can show reachable/opt-out counts up front |
-| **No separate "opted-out" count on the wire** | the *response* does carry `skippedOptedOut`, but the v1 UI summary doesn't surface it distinctly | surface the rail breakdown in the UI once the projection lands |
+| **`notificationPref` not in the admin projection** | the admin `UserResponse` doesn't expose `notificationPref`, so the UI **can't show who is opt-out** *before* sending (only *after*, from the result). The pre-send reachable/opt-out counts still aren't shown up front | add `notificationPref` to the admin projection so the console can show reachable/opt-out counts before send |
+| **Skip-reason breakdown in the result toast** | the summary toast now reports the real skip breakdown from the response rails — `skipped (A opted out, B no device, C disabled, D not found)`, showing only the non-zero reasons, with "no device" derived as the residual (TM-365 review M1). Earlier it folded everything into one `(no device)` count | — (done) |
 | **No saved segments / scheduling / templates** | pick-and-send only; no reusable audiences, no send-later | segments + scheduling epic |
 | **No per-recipient receipt beyond FCM-accept** | `delivered` = tokens FCM *accepted*, not devices that displayed the push | delivery receipts if a use-case needs them |
 | **No `sendEachForMulticast` batching** | the fan-out sends per token rather than one batched multicast call | batch the send as a throughput optimisation (noted in TM-363) |

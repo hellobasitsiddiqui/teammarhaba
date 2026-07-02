@@ -384,6 +384,18 @@ function refreshSelectionUi() {
   updatePreview();
 }
 
+/**
+ * Show the "first N accounts" caveat only when the fetched set is exactly at the FETCH_SIZE ceiling —
+ * the tell that the backend page was full and more accounts probably exist beyond it (the console
+ * doesn't paginate yet, TM-370). Idempotent; safe to call on every render. `<` the ceiling means we
+ * definitely have everyone, so it stays hidden.
+ */
+function refreshCeilingWarning() {
+  const c = shell?.compose;
+  if (!c || !c.ceilingWarning) return;
+  c.ceilingWarning.hidden = state.users.length < FETCH_SIZE;
+}
+
 /** Repaint the faithful preview card from the current draft (title headline + body + tap caption). */
 function updatePreview() {
   const c = shell?.compose;
@@ -543,6 +555,18 @@ function buildCompose() {
     previewCaption,
   ]);
 
+  // At-ceiling warning (TM-365 review M2): the console fetches only the first FETCH_SIZE accounts, so
+  // when exactly that many come back there are probably more that "select all matching" can't reach.
+  // Built hidden; refreshCeilingWarning() reveals it after loadUsers(). role="status" (not "alert") —
+  // it's an informational caveat, not an error. Full pagination is the follow-up (TM-370).
+  const ceilingWarning = el("p", {
+    class: "tm-muted tm-broadcast-ceiling",
+    id: "admin-broadcast-ceiling",
+    role: "status",
+    hidden: true,
+    text: `Showing the first ${FETCH_SIZE} accounts — more may exist. “Select all matching” only covers these, so anyone beyond the first ${FETCH_SIZE} can't be selected yet.`,
+  });
+
   const send = el("button", {
     class: "tm-btn tm-btn-primary",
     id: "admin-broadcast-send",
@@ -556,7 +580,12 @@ function buildCompose() {
       el("h3", { class: "tm-broadcast-title", text: "Send a notification" }),
       count,
     ]),
-    el("p", { class: "tm-muted tm-broadcast-note", text: "Pick recipients in the table below (select-all covers everyone matching your current filter), compose your message, preview it, then send." }),
+    el("p", { class: "tm-muted tm-broadcast-note", text: `Pick recipients in the table below (select-all covers everyone matching your filter on this page, up to ${FETCH_SIZE}), compose your message, preview it, then send.` }),
+    // Shown only when the fetched account count is at the FETCH_SIZE ceiling: the console loads just the
+    // first page and filters client-side, so "select all matching" can't reach anyone off it. Warn the
+    // admin that more accounts may exist beyond what's selectable (real pagination is TM-370). Hidden by
+    // default; toggled in refreshCeilingWarning() once users load.
+    ceilingWarning,
     el("div", { class: "tm-broadcast-grid" }, [
       el("div", { class: "tm-broadcast-form" }, [
         el("div", { class: "tm-form-field" }, [
@@ -587,7 +616,7 @@ function buildCompose() {
 
   shell.compose = {
     panel, title, body, route, send,
-    count, recipientHint,
+    count, recipientHint, ceilingWarning,
     previewTitle, previewBody, previewCaption,
     errors: { title: titleError, body: bodyError },
     sendingBusy: false,
@@ -672,8 +701,11 @@ function renderTable() {
     type: "checkbox",
     class: "tm-check",
     id: "admin-select-all",
-    "aria-label": "Select all users matching the current filter",
-    title: "Select all matching the filter (not just this page)",
+    // The console only fetches the first FETCH_SIZE (100) accounts and filters client-side, so
+    // "matching the filter" is really "matching, among the fetched page" — don't overstate the reach
+    // (real >100 pagination is TM-370). The at-ceiling warning below surfaces when more may exist.
+    "aria-label": `Select everyone matching the filter on this page (up to ${FETCH_SIZE})`,
+    title: `Select everyone matching the filter on this page (up to ${FETCH_SIZE}, not just this table page)`,
     onChange: (e) => toggleSelectAllMatching(e.target.checked),
   });
   shell.selectAll = selectAll;
@@ -760,6 +792,7 @@ function render() {
   if (!shell) return;
   renderStats();
   renderTable();
+  refreshCeilingWarning();
 }
 
 // ---- mount --------------------------------------------------------------------------------

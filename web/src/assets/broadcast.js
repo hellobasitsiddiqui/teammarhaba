@@ -76,15 +76,18 @@ export function routeOptionsFrom(payload, fallback = []) {
 }
 
 /**
- * An honest one-line summary of a broadcast result for the success toast. Reads only the fields the
- * response actually carries (BroadcastPushResponse: sent / skipped / delivered over recipients) — it
- * does NOT invent an "opted-out" number, because v1's `skipped` folds together "no device now" and
- * (once TM-364 lands) opted-out, and the projection can't tell them apart client-side. So we report
- * what's true: recipients we sent to, devices delivered, and recipients skipped (reached no device).
+ * An honest one-line summary of a broadcast result for the success toast. Post-TM-364 the response
+ * carries the WHY behind every skip — `skippedOptedOut` / `skippedDisabled` / `skippedNotFound`
+ * (BroadcastPushResponse) — so we no longer have to fold everything into a bare "no device" count: we
+ * can, and do, report the real breakdown. The four sub-reasons sum to `skipped`; whatever `skipped`
+ * doesn't attribute to opted-out / disabled / not-found is genuinely "no device", derived as the
+ * residual (never trusted from a field that doesn't exist). Only the non-zero sub-parts are shown, so
+ * a clean send stays terse and a mixed one is transparent.
  *
- * e.g. "Sent to 12 users · 18 devices delivered · 3 skipped (no device)".
+ * e.g. "Sent to 12 users · 18 devices delivered · 5 skipped (2 opted out, 3 no device)".
  *
- * @param {{sent?: number, skipped?: number, delivered?: number, requested?: number}} [r]
+ * @param {{sent?: number, skipped?: number, delivered?: number, requested?: number,
+ *          skippedOptedOut?: number, skippedDisabled?: number, skippedNotFound?: number}} [r]
  * @returns {string}
  */
 export function summariseBroadcast(r = {}) {
@@ -95,8 +98,29 @@ export function summariseBroadcast(r = {}) {
     `Sent to ${sent} ${plural(sent, "user")}`,
     `${delivered} ${plural(delivered, "device")} delivered`,
   ];
-  if (skipped > 0) parts.push(`${skipped} skipped (no device)`);
+  if (skipped > 0) parts.push(`${skipped} skipped${skipReasons(r, skipped)}`);
   return parts.join(" · ");
+}
+
+/**
+ * Build the parenthetical reason breakdown for the skipped count, e.g. " (2 opted out, 3 no device)".
+ * "No device" isn't its own response field — it's the residual of `skipped` after the three named rails
+ * (opted-out / disabled / not-found), so a recipient reached with no registered device is still
+ * accounted for. Only non-zero reasons appear; if none can be attributed (all sub-counters zero /
+ * absent), the whole residual falls to "no device" so the clause is never empty. Returns "" only when
+ * there's nothing to say (caller already guards skipped > 0).
+ */
+function skipReasons(r, skipped) {
+  const optedOut = Number(r.skippedOptedOut) || 0;
+  const disabled = Number(r.skippedDisabled) || 0;
+  const notFound = Number(r.skippedNotFound) || 0;
+  const noDevice = Math.max(0, skipped - optedOut - disabled - notFound);
+  const reasons = [];
+  if (optedOut > 0) reasons.push(`${optedOut} opted out`);
+  if (noDevice > 0) reasons.push(`${noDevice} no device`);
+  if (disabled > 0) reasons.push(`${disabled} disabled`);
+  if (notFound > 0) reasons.push(`${notFound} not found`);
+  return reasons.length ? ` (${reasons.join(", ")})` : "";
 }
 
 /** Naive English pluraliser for the small set of nouns used above (user/device). */
