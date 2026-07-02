@@ -1,4 +1,9 @@
-# TM-354 — Per-plugin Simulator smokes (Maestro, iOS Simulator, best-effort/guarded)
+# TM-354 — Per-plugin Simulator smokes (Maestro, iOS Simulator, best-effort/guarded) — NON-GATING
+#
+# This flow lives under ios/maestro/optional/, which ci-run.sh runs BEST-EFFORT: its pass/fail never
+# affects the lane's green/red. The GATE is ../golden-path.yaml (launch + WKWebView render). It also
+# reuses ./login-sms.yaml, whose "Try another way" reveal Maestro-on-iOS can't reliably drive on the
+# Simulator — another reason this is non-gating. See ../README.md ("Scope & Simulator limitation").
 #
 # Exercises the native plugins against #/diagnostics + #/profile on the Simulator, mirroring the
 # best-effort posture of android/maestro/{permissions,camera,biometric}.yaml. Every Simulator-degraded

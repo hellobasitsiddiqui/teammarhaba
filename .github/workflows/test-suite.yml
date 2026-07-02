@@ -378,13 +378,21 @@ jobs:
   # working compile gate (ios-simulator.yml, TM-349); the TM-353 ticket text predates the Cap-8 SPM
   # reality and assumed the Cap-7 CocoaPods/workspace flow.
   #
-  # The SMS-login flow now runs unattended on iOS (TM-354): the Android reCAPTCHA-bypass flag injector
-  # (adb + Chrome DevTools Protocol) does NOT port to WKWebView (no adb; Safari webinspectord ≠ CDP), so
-  # instead the iOS shell (TeamMarhabaViewController.swift) sets localStorage["tm_e2e_phone_test"]="1"
-  # from its .atDocumentStart WKUserScript, gated on the non-prod launch argument `-tmE2EPhoneTest`
-  # which the iOS Maestro flows pass on every launchApp. So ios/maestro/ now carries real flows
-  # (golden-path + login-sms + plugins); ci-run.sh runs them (and still keeps the tolerant "no iOS flows
-  # yet → green after boot+install+launch+WebView load" fallback from TM-353). See ios/maestro/README.md.
+  # SCOPE (TM-354): the iOS Simulator GATE is a reliable LAUNCH + WKWebView RENDER smoke —
+  # ios/maestro/golden-path.yaml launches the shell and hard-asserts the hosted SPA rendered via the
+  # STATIC login text Maestro-on-iOS can see (TeamMarhaba / tagline / Sign in / Email me a code / Try
+  # another way), screenshotting each. The authenticated JOURNEY + per-plugin flows live under
+  # ios/maestro/optional/ (journey.yaml, login-sms.yaml, plugins.yaml) and ci-run.sh runs them
+  # BEST-EFFORT — non-gating — because they exercise dynamic WKWebView DOM interaction (e.g. the "Try
+  # another way" → #sms-send-btn reveal driven by login.js's ES-module handler) that Maestro does NOT
+  # reliably drive on the iOS Simulator (known Maestro-iOS/WKWebView limit; Android drives it fine). That
+  # journey logic IS covered on CI by the web Playwright golden-path (same web code, TM-341) + the human
+  # manual test on a real Simulator (TM-355). The reCAPTCHA-bypass flag injector (adb + Chrome DevTools
+  # Protocol) does NOT port to WKWebView (no adb; Safari webinspectord ≠ CDP), so the iOS shell
+  # (TeamMarhabaViewController.swift) sets localStorage["tm_e2e_phone_test"]="1" from its .atDocumentStart
+  # WKUserScript, gated on the non-prod launch arg `-tmE2EPhoneTest` the flows pass on every launchApp
+  # (retained even on the gate launch for parity). ci-run.sh keeps the tolerant "no gate flows yet →
+  # green after boot+install+launch+WebView load" fallback from TM-353. See ios/maestro/README.md.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   ios:
     name: "iOS (Maestro, Simulator) — ${{ github.event.inputs.suite || 'nightly' }}"
