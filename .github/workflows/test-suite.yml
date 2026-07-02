@@ -378,12 +378,13 @@ jobs:
   # working compile gate (ios-simulator.yml, TM-349); the TM-353 ticket text predates the Cap-8 SPM
   # reality and assumed the Cap-7 CocoaPods/workspace flow.
   #
-  # The SMS-login flow (+ its dependents) can't run unattended on iOS yet: the Android reCAPTCHA-bypass
-  # flag injector (adb + Chrome DevTools Protocol) does NOT port to WKWebView (no adb; Safari
-  # webinspectord ≠ CDP). That iOS flag-injection path is a follow-up (the automated-smoke ticket). So
-  # this lane proves the rung below the flows — Simulator boot + app install + launch + WebView load —
-  # and stays GREEN via ios/maestro/ci-run.sh's tolerant "no iOS flows yet" path (exactly how
-  # mobile-e2e.yml merged before the Android flows existed).
+  # The SMS-login flow now runs unattended on iOS (TM-354): the Android reCAPTCHA-bypass flag injector
+  # (adb + Chrome DevTools Protocol) does NOT port to WKWebView (no adb; Safari webinspectord ≠ CDP), so
+  # instead the iOS shell (TeamMarhabaViewController.swift) sets localStorage["tm_e2e_phone_test"]="1"
+  # from its .atDocumentStart WKUserScript, gated on the non-prod launch argument `-tmE2EPhoneTest`
+  # which the iOS Maestro flows pass on every launchApp. So ios/maestro/ now carries real flows
+  # (golden-path + login-sms + plugins); ci-run.sh runs them (and still keeps the tolerant "no iOS flows
+  # yet → green after boot+install+launch+WebView load" fallback from TM-353). See ios/maestro/README.md.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   ios:
     name: "iOS (Maestro, Simulator) — ${{ github.event.inputs.suite || 'nightly' }}"

@@ -1,0 +1,116 @@
+# TM-354 — SMS login happy path (Maestro, iOS Simulator)
+#
+# The iOS-Simulator sibling of android/maestro/login-sms.yaml. Drives the SAME native Capacitor app
+# (appId app.teammarhaba.webview) loading the SAME hosted SPA — only the reCAPTCHA-bypass flag
+# injection differs (see below). Mirrors the manually-verified SMS journey:
+#   "Try another way" → phone → "Text me a code" → SMS code → "Sign in" → lands on #/home.
+#
+# Uses Firebase's fixed TEST PHONE NUMBER (no real SMS, carrier-independent so it works on the
+# Simulator):  +16505550100 / fixed code 123456  (configured in the project, see TM-241).
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# THE iOS reCAPTCHA-BYPASS FLAG INJECTION (TM-354) — how this differs from the Android flow
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Firebase test numbers skip the SMS send but NOT the reCAPTCHA app-verification gate, which in a
+# scripted WebView escalates to a visual puzzle and stalls. web/src/assets/auth.js (via phone-e2e.js)
+# sets `auth.settings.appVerificationDisabledForTesting = true` ONLY when BOTH hold:
+#   1. REQUESTED — any of localStorage["tm_e2e_phone_test"]==="1", window.__TM_E2E_PHONE_TEST__===true,
+#      or TEAMMARHABA_CONFIG.phoneTestMode===true, AND
+#   2. CONTEXT-SAFE — Auth emulator wired, OR inside the native Capacitor shell
+#      (window.Capacitor.isNativePlatform()===true). Condition 2 is automatic in this app.
+#
+# The Android flow relies on the harness CDP-injecting the persisted localStorage flag
+# (android/maestro/inject-e2e-flag.mjs: adb-forward → Chrome DevTools Protocol). That does NOT port to
+# WKWebView (no adb; Safari webinspectord ≠ CDP). Instead, the iOS shell
+# (ios/App/App/TeamMarhabaViewController.swift, TM-354) sets the localStorage flag from its
+# `.atDocumentStart` WKUserScript — which runs BEFORE auth.js module-load — but ONLY when the
+# non-prod launch argument `-tmE2EPhoneTest` (or env `TM_E2E_PHONE_TEST=1`) is present. So this flow
+# declares that launch argument on EVERY `launchApp` via `arguments: { tmE2EPhoneTest: "1" }`; Maestro
+# forwards it to `simctl launch` as `-tmE2EPhoneTest 1`, the shell sees it in ProcessInfo and emits the
+# flag, and condition 1 is satisfied fresh on every launch — no CDP, no reload, and it survives
+# Maestro's relaunches (the arg is re-passed each launch). It is emitted NOWHERE in production (the App
+# Store binary is never launched with that arg; condition 2 would still gate it anyway).
+#
+# Because the flag is injected at document-start on every launch (not stored in localStorage by the
+# harness), there is no "must not clearState" contract on iOS — but we keep the flow structurally
+# identical to the Android one (clearState:false + optional sign-out) so the shared journey reads the
+# same on both surfaces; ci-run.sh already does a fresh install between flows for clean state.
+#
+# This flow ASSERTS the contract: if the launch arg were missing, the reCAPTCHA gate fires and the
+# "Text a code" step never appears within the timeout — a loud, diagnosable failure, not a silent hang.
+appId: app.teammarhaba.webview
+env:
+  TEST_PHONE: "+16505550100" # Firebase fixed test number (TM-241)
+  SMS_CODE: "123456"         # its fixed code
+---
+# Launch WITH the iOS e2e-flag launch argument so the shell injects tm_e2e_phone_test=1 at
+# document-start (before auth.js reads it). clearState:false mirrors the Android flow; the flag does
+# not depend on prior state, so this is only for structural parity.
+- launchApp:
+    clearState: false
+    arguments:
+      tmE2EPhoneTest: "1"
+- takeScreenshot: 01-launch
+
+# Reach a clean signed-out state without clearing app data: if a previous flow (or warm session) left
+# us signed in, sign out first. Both steps are optional so a fresh, already-signed-out launch skips them.
+- runFlow:
+    when:
+      visible:
+        id: "auth-signed-in"
+    commands:
+      - tapOn:
+          id: "nav-toggle"
+      - tapOn:
+          id: "signout-btn"
+
+# Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
+- assertVisible: "Sign in"
+- tapOn:
+    text: "Try another way"
+- assertVisible:
+    id: "sms-send-btn"
+- takeScreenshot: 02-alternatives-revealed
+
+# The consent/disclosure line must be visible BEFORE we send (TM-242).
+- assertVisible:
+    id: "sms-disclosure"
+
+# Step 1 — enter the test phone number and request the code.
+- tapOn:
+    id: "phone" # <input id="phone" type="tel">
+- inputText: ${TEST_PHONE}
+- hideKeyboard   # IME covers the send button after typing; dismiss before tapping
+- tapOn:
+    id: "sms-send-btn" # "Text me a code"
+- takeScreenshot: 03-sms-requested
+
+# If the e2e flag was injected, no reCAPTCHA puzzle fires and the code step appears. If the launch arg
+# was NOT passed, this assertion times out — the intended loud failure for a missing injection.
+- assertVisible:
+    id: "sms-step-code"
+
+# Step 2 — enter the fixed code and sign in.
+- tapOn:
+    id: "sms-code" # <input id="sms-code">
+- inputText: ${SMS_CODE}
+- hideKeyboard   # same: IME covers the Sign in button
+- takeScreenshot: 04-code-entered
+- tapOn:
+    id: "sms-verify-btn" # "Sign in"
+
+# First-run product tour (TM-135) auto-fires on home; its .tm-tour-blocker overlay covers the page.
+# Not suppressed in the native app (suppressAutoTours is web-harness-only), so dismiss it here.
+- tapOn:
+    text: "Skip"
+    optional: true
+
+# Signed-in end state. signout-btn is inside the collapsed mobile nav menu (nav-toggle), so assert the
+# home "signed in" markers that ARE visible.
+- assertVisible:
+    id: "auth-signed-in"
+- assertNotVisible:
+    id: "auth-signed-out"
+- assertVisible:
+    text: ".*You are signed in as.*"
+- takeScreenshot: 05-home-signed-in
