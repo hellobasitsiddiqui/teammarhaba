@@ -48,6 +48,7 @@ public class EventQueryService {
     private final LocationRevealPolicy reveal;
     private final EventPhasePolicy phase;
     private final AgeEligibilityPolicy ageGate;
+    private final BookingCutoffPolicy bookingCutoff;
 
     public EventQueryService(
             EventRepository events,
@@ -55,13 +56,15 @@ public class EventQueryService {
             UserRepository users,
             LocationRevealPolicy reveal,
             EventPhasePolicy phase,
-            AgeEligibilityPolicy ageGate) {
+            AgeEligibilityPolicy ageGate,
+            BookingCutoffPolicy bookingCutoff) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.reveal = reveal;
         this.phase = phase;
         this.ageGate = ageGate;
+        this.bookingCutoff = bookingCutoff;
     }
 
     /**
@@ -120,8 +123,10 @@ public class EventQueryService {
      * The detail view: full card fields, both counts, the first {@value #ATTENDEE_AVATAR_LIMIT}
      * attendee avatars in join order, and the caller's own state. {@code spotAvailableToClaim} is
      * {@code true} only when the caller is waitlisted with a <em>live offer</em>
-     * ({@code offer_notified_at} stamped by TM-397's cascade, not yet voided) <b>and</b> a free
-     * spot still exists — the affordance behind the "claim your spot" call-to-action.
+     * ({@code offer_notified_at} stamped by TM-397's cascade, not yet voided), a free spot still
+     * exists, <b>and</b> booking has not closed ({@link BookingCutoffPolicy#isPastCutoff} is false,
+     * TM-424) — the affordance behind the "claim your spot" call-to-action, kept in lock-step with
+     * what {@link EventRsvpService#claim} will actually accept.
      */
     @Transactional(readOnly = true)
     public EventDetail detail(String callerUid, Long eventId) {
@@ -140,9 +145,13 @@ public class EventQueryService {
         Optional<EventAttendance> mine =
                 caller.map(User::getId).flatMap(id -> attendance.findByEventIdAndUserId(eventId, id));
 
+        // A live offer is claimable only while a spot is free AND booking is still open (TM-424): once
+        // past the cutoff, claim 409s BOOKING_CLOSED, so the "claim your spot" affordance must go dark
+        // to match — mirroring the same gate the offer cascade now applies before it ever offers.
         boolean spotFree = !event.hasCapacityLimit() || going < event.getCapacity();
-        boolean spotAvailableToClaim =
-                spotFree && mine.map(EventAttendance::hasOpenOffer).orElse(false);
+        boolean spotAvailableToClaim = spotFree
+                && !bookingCutoff.isPastCutoff(event, now)
+                && mine.map(EventAttendance::hasOpenOffer).orElse(false);
 
         // Location-reveal guard (TM-408): the exact venue/map/online link are withheld until the
         // reveal boundary, uniformly for every caller (GOING/WAITLISTED included). Pre-reveal the

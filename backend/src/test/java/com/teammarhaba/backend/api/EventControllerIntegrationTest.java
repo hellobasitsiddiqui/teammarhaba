@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.event.AttendanceState;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventAttendance;
 import com.teammarhaba.backend.event.EventAttendanceRepository;
@@ -298,6 +299,36 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/events/" + event.getId()).with(queued))
                 .andExpect(jsonPath("$.myState").value("GOING"))
                 .andExpect(jsonPath("$.spotAvailableToClaim").value(false));
+    }
+
+    @Test
+    void pastTheBookingCutoffAFreedSpotIsNeitherClaimableNorClaimed() throws Exception {
+        // TM-424: a spot freed in the final hour before start must not read as claimable — past the
+        // cutoff claim 409s BOOKING_CLOSED, so spotAvailableToClaim has to go dark to match. The
+        // waitlist+offer state is seeded directly because the RSVP/claim API is itself cutoff-gated now.
+        Instant now = Instant.now();
+        Event event = saveEvent("Cutoff " + UUID.randomUUID(), creatorId(), e -> {
+            e.setCapacity(1);
+            e.setStartAt(now.plus(30, ChronoUnit.MINUTES)); // inside the default 1h booking cutoff
+        });
+        String queuedUid = "uid-cutoff-queued-" + UUID.randomUUID();
+        Long queuedId = users.save(new User(queuedUid, queuedUid + "@example.com", null)).getId();
+        // A free spot (no GOING attendee) held for the waitlist, with a live offer already stamped.
+        attendanceRepo.save(new EventAttendance(event.getId(), queuedId, AttendanceState.WAITLISTED));
+        stampOffer(event, queuedUid);
+        RequestPostProcessor queued = caller(queuedUid);
+
+        // The affordance is dark despite the free spot + live offer, because booking has closed.
+        mockMvc.perform(get("/api/v1/events/" + event.getId()).with(queued))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.myState").value("WAITLISTED"))
+                .andExpect(jsonPath("$.spotAvailableToClaim").value(false));
+        // And the claim it would have driven is refused with BOOKING_CLOSED — the two now agree.
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/claim").with(queued))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail")
+                        .value("Booking has closed for this event — you can no longer join this close to when it"
+                                + " starts."));
     }
 
     @Test
