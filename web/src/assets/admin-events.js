@@ -6,9 +6,11 @@
 // This file is the DOM/mount half; the pure, browser-free logic (validation mirroring the API DTOs,
 // UTC ⇄ local-wall-clock conversion, the payload builder, the display derivations) lives in
 // event-form.js so `node --test` can assert it without a browser or the Firebase SDK — the same split
-// admin.js ↔ broadcast.js uses. The create/edit form is a MODAL (built outside #admin-events-table,
-// which renderTable() clears on every keystroke/refresh), so an in-progress draft survives a table
-// re-render — the TM-358 lesson ("the compose panel must live outside the re-rendered table").
+// admin.js ↔ broadcast.js uses. The create/edit form is its OWN full-page admin route (TM-426):
+// #/admin/events/new and #/admin/events/{id}/edit render into #admin-event-form-view, so the form
+// scrolls with the page (no height cap) and the submit button is always reachable — the modal it
+// replaced overflowed short viewports and hid the submit button (TM-421). The list and the form are
+// separate views, so a background list refresh can't disturb an in-progress draft either.
 //
 // Backend contract consumed (TM-392, ADMIN-gated):
 //   GET    /api/v1/admin/events            — paged full inventory (PageResponse<EventResponse>)
@@ -20,7 +22,7 @@
 // `event-images/{id}` AFTER the id exists, then its path is persisted with a follow-up PATCH.
 
 import { apiFetch, ApiError } from "./api.js";
-import { clear, confirmDialog, el, modal, toast } from "./ui.js";
+import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES } from "./storage.js";
 import {
@@ -45,6 +47,7 @@ import {
   revealSummary,
   formatEventWhen,
 } from "./event-form.js";
+import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-inventory walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 events)
@@ -301,7 +304,13 @@ function renderTable() {
 function rowActions(event) {
   const edit = el(
     "button",
-    { class: "tm-btn tm-btn-sm", type: "button", "aria-label": `Edit ${event.heading}`, onClick: () => openEventForm("edit", event) },
+    {
+      class: "tm-btn tm-btn-sm",
+      type: "button",
+      "aria-label": `Edit ${event.heading}`,
+      // Navigate to the full-page edit route (TM-426) rather than opening a modal.
+      onClick: () => { window.location.hash = adminEventEditHash(event.id); },
+    },
     "Edit",
   );
   const cancelled = String(event.status).toUpperCase() === "CANCELLED";
@@ -389,7 +398,7 @@ async function cancelEvent(event) {
   }
 }
 
-// ---- create / edit form (modal) -----------------------------------------------------------
+// ---- create / edit form (full page — TM-426) ----------------------------------------------
 
 // The form field spec drives the grid, the read-back, and the error map from one declarative list —
 // the profile.js pattern. `key` matches BOTH the input id suffix and the API field name (so a server
@@ -603,13 +612,15 @@ function buildImageControl(event) {
 }
 
 /**
- * Open the create/edit modal. `mode` is "create" (event=null) or "edit" (event = the row's
- * EventResponse). The form lives on document.body (via modal()), OUTSIDE #admin-events-table, so a
- * background list refresh never disturbs the draft (TM-358). On save it validates against the API's
- * rules, converts the local wall-clock times to UTC, POSTs/PATCHes, uploads any picked image against
- * the (now-existing) id, then closes and reloads the list.
+ * Build the create/edit event form as a detached DOM subtree (no shell) — the SAME fields, validation,
+ * Coffee & X chips, image control and read-back the modal used; only the surrounding shell changed
+ * from a modal() to a full page (TM-426). `mode` is "create" (event=null) or "edit" (event = the
+ * EventResponse). On a valid submit it converts the local wall-clock times to UTC, POSTs/PATCHes,
+ * uploads any picked image against the (now-existing) id, then calls `onDone`; a "Cancel" button (and
+ * the page's back link) call `onCancel`. Returns { node } to mount + a `focusHeading` to call once the
+ * node is in the document.
  */
-export function openEventForm(mode, event = null) {
+function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const fields = new Map();
   const fieldNodes = FORM_FIELDS.map((f) => buildField(f, fields));
   const headingInput = fields.get("heading").input;
@@ -688,11 +699,14 @@ export function openEventForm(mode, event = null) {
   }
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
+  // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.
+  const cancel = el("button", { class: "tm-btn", id: "event-cancel", type: "button", onClick: () => onCancel?.() }, "Cancel");
   let busy = false;
 
   const setBusy = (on, labelWhileBusy) => {
     busy = on;
     save.disabled = on;
+    cancel.disabled = on;
     save.textContent = on ? labelWhileBusy : mode === "create" ? "Create event" : "Save changes";
   };
 
@@ -707,12 +721,13 @@ export function openEventForm(mode, event = null) {
     ]),
     ...layout.filter((node) => node !== byKey.get("heading")),
     image.node,
-    el("div", { class: "tm-form-actions" }, [save]),
+    el("div", { class: "tm-form-actions" }, [cancel, save]),
   ]);
 
   const revealSummaryText = event ? revealSummary(event) : "";
-
-  const { close } = modal(mode === "create" ? "New event" : `Edit · ${event.heading}`, [
+  // The full-page shell (TM-426): the form + the reveal-timing note, mounted into #admin-event-form-view
+  // by enterAdminEventForm(). No modal() — the page scrolls, so nothing is clipped on a short viewport.
+  const node = el("div", { class: "tm-event-form-page" }, [
     form,
     revealSummaryText ? el("p", { class: "tm-muted tm-event-reveal-note", text: revealSummaryText }) : null,
   ]);
@@ -736,15 +751,14 @@ export function openEventForm(mode, event = null) {
         const createdEvent = await eventApi("/api/v1/admin/events", { method: "POST", body });
         if (pending && createdEvent?.id != null) {
           // The id exists now — upload the image to event-images/{id}, then persist its path (TM-392).
-          // If ONLY the image step fails the event is already created, so close + reload rather than
-          // leave the modal open (a re-submit would create a DUPLICATE); the admin adds it via Edit.
+          // If ONLY the image step fails the event is already created, so navigate back to the list
+          // rather than stay on the form (a re-submit would create a DUPLICATE); the admin adds it via Edit.
           try {
             const { path } = await uploadEventImage(createdEvent.id, pending, image.setProgress);
             await eventApi(`/api/v1/admin/events/${createdEvent.id}`, { method: "PATCH", body: { imagePath: path } });
           } catch (imgErr) {
             toast(`Event created, but the image didn't upload (${imgErr?.message || "upload failed"}). Open it to add one.`, { type: "error" });
-            close();
-            await loadEvents();
+            onDone?.();
             return;
           }
         }
@@ -757,8 +771,9 @@ export function openEventForm(mode, event = null) {
       }
 
       toast(mode === "create" ? "Event created." : "Event saved.", { type: "success" });
-      close();
-      await loadEvents();
+      // Navigate back to the list, which reloads it (router → enterAdminEvents → loadEvents), so the
+      // just-created / edited event shows immediately (TM-426).
+      onDone?.();
     } catch (err) {
       image.resetProgress();
       if (err instanceof ApiError && err.fieldErrors?.length) {
@@ -777,8 +792,92 @@ export function openEventForm(mode, event = null) {
     }
   });
 
-  // Focus the heading for immediate typing (a fresh create) — a small, house-consistent nicety.
-  headingInput.focus();
+  // The heading is focused for immediate typing after the node is mounted (see mountEventForm) — a
+  // small, house-consistent nicety. focus() only takes effect once the node is in the document.
+  return { node, focusHeading: () => headingInput.focus() };
+}
+
+/** Module-level guard so a slow edit-by-id fetch that resolves AFTER the admin has navigated away (or
+ *  switched to a different form target) can't paint a stale form — the events.js renderToken trick. */
+let formToken = 0;
+
+/**
+ * Router entry (TM-426) for the full-page create/edit form. `mode` is "create" (id null) or "edit".
+ * For an edit we render from the row already in memory when we have it (the admin clicked "Edit" in the
+ * list — the common path); otherwise we fetch it by id, so the route also works on a direct deep-link /
+ * page refresh. On save or cancel the form navigates back to the list, which reloads it.
+ */
+export async function enterAdminEventForm(mode, id = null) {
+  const view = document.getElementById("admin-event-form-view");
+  if (!view) return;
+  const mine = ++formToken;
+
+  if (mode === "create") {
+    mountEventForm(view, "create", null);
+    return;
+  }
+
+  const cached = state.events.find((e) => String(e.id) === String(id));
+  if (cached) {
+    mountEventForm(view, "edit", cached);
+    return;
+  }
+
+  // Not in memory (deep-link / refresh straight onto an edit URL): fetch it by id.
+  renderFormLoading(view);
+  try {
+    const event = await eventApi(`/api/v1/admin/events/${encodeURIComponent(id)}`);
+    if (mine !== formToken) return; // navigated away / switched target while the fetch was in flight
+    if (!event) {
+      renderFormError(view, "That event isn't available anymore.", null);
+      return;
+    }
+    mountEventForm(view, "edit", event);
+  } catch (err) {
+    if (mine !== formToken) return;
+    const gone = err instanceof ApiError && err.status === 404;
+    renderFormError(
+      view,
+      gone ? "That event isn't available anymore." : "Couldn't load this event. Please try again.",
+      gone ? null : () => enterAdminEventForm("edit", id),
+    );
+  }
+}
+
+/** Mount the page chrome (a "← Events" back-link header) + the form into the view, then focus heading. */
+function mountEventForm(view, mode, event) {
+  const back = () => { window.location.hash = ADMIN_EVENTS_ROUTE; };
+  const { node, focusHeading } = buildEventForm({ mode, event, onDone: back, onCancel: back });
+  const title = mode === "create" ? "New event" : `Edit · ${event.heading || "event"}`;
+  clear(view).append(formHeader(title), node);
+  focusHeading();
+}
+
+/** The "← Events" back-link header, reusing the events-detail chrome (.tm-admin-head + an anchor). */
+function formHeader(title) {
+  return el("div", { class: "tm-admin-head tm-event-form-head" }, [
+    el("h2", {}, [doodle("calendar", { class: "tm-doodle-header" }), title]),
+    el("a", { class: "tm-btn tm-btn-sm", id: "admin-event-form-back", href: ADMIN_EVENTS_ROUTE }, "← Events"),
+  ]);
+}
+
+/** The transient "loading the event to edit" state while an edit-by-id fetch is in flight. */
+function renderFormLoading(view) {
+  clear(view).append(formHeader("Edit event"), el("p", { class: "tm-muted", text: "Loading event…" }));
+}
+
+/** The edit-by-id failure state: a message + either Retry (transient) or a back-to-list link (gone). */
+function renderFormError(view, message, onRetry) {
+  clear(view).append(
+    formHeader("Edit event"),
+    el("div", { class: "tm-error tm-empty" }, [
+      doodle("calendar", { class: "tm-doodle-empty" }),
+      el("p", { text: message }),
+      onRetry
+        ? el("button", { class: "tm-btn", type: "button", onClick: onRetry }, "Retry")
+        : el("a", { class: "tm-btn", href: ADMIN_EVENTS_ROUTE }, "Back to events"),
+    ]),
+  );
 }
 
 // ---- mount --------------------------------------------------------------------------------
@@ -813,7 +912,7 @@ function buildShell(view) {
     el("div", { class: "tm-admin-head" }, [
       el("h2", {}, [doodle("calendar", { class: "tm-doodle-header" }), "Events"]),
       el("div", { class: "tm-admin-head-actions" }, [
-        el("button", { class: "tm-btn tm-btn-primary tm-btn-sm", id: "admin-events-new", type: "button", onClick: () => openEventForm("create") }, "New event"),
+        el("button", { class: "tm-btn tm-btn-primary tm-btn-sm", id: "admin-events-new", type: "button", onClick: () => { window.location.hash = adminEventNewHash(); } }, "New event"),
         el("button", { class: "tm-btn tm-btn-sm", id: "admin-events-refresh", type: "button", onClick: loadEvents }, "Refresh"),
       ]),
     ]),
@@ -834,5 +933,5 @@ export function enterAdminEvents() {
 
 // Bridge for the router (which imports this) + ad-hoc use.
 if (typeof window !== "undefined") {
-  window.tmAdminEvents = { enterAdminEvents, loadEvents, openEventForm };
+  window.tmAdminEvents = { enterAdminEvents, enterAdminEventForm, loadEvents };
 }

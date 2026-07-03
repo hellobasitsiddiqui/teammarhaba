@@ -1932,11 +1932,21 @@ body {
     border-color: var(--accent);
 }
 
-/* The create/edit form inside the modal — a single comfortable column of fields. */
+/* The create/edit form — a single comfortable column of fields. Lives on its own full-page admin
+   route now (TM-426), not a modal. */
 .tm-event-form {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
+}
+
+/* Full-page event form wrapper (TM-426): the create/edit form is its own admin page now, not a modal —
+   it scrolls with the page (no height cap) so the submit button is always reachable on a short viewport
+   (the modal-overflow bug, TM-421). Constrain to a comfortable reading column rather than stretching to
+   the full console width; the "← Events" header reuses .tm-admin-head. */
+.tm-event-form-page {
+    margin-top: 1.25rem;
+    max-width: 44rem;
 }
 
 /* Two short fields side by side (start/end, visibility, capacity/reveal, age min/max); collapses to

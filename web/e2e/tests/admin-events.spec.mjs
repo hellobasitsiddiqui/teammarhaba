@@ -17,6 +17,11 @@ import { ADMIN, dbConfig } from "../fixtures.mjs";
 // + persistence + the screenshot trail. Dates are computed relative to now (UTC timezone on the event)
 // so the derived "Visible" status is stable regardless of when CI runs.
 //
+// The create/edit form is a full-page admin route now (TM-426): "New event" navigates to
+// #/admin/events/new and a row's "Edit" to #/admin/events/{id}/edit — it used to be a modal that
+// overflowed short viewports and hid the submit button (TM-421). So this spec also asserts the route
+// and that the console list view is replaced by the form page (not overlaid by a modal).
+//
 // `screenshot: "on"` is set globally (playwright.config.mjs); we ALSO take an explicit named shot at
 // each major step (console / form / created / edited / cancelled) so the run yields a step-by-step
 // visual trail to attach to the sprint evidence ticket.
@@ -101,6 +106,12 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
 
   // ── STEP 3: open the New event form + fill it (chip prefill, city, reveal hours, age band). ──────
   await page.click("#admin-events-new");
+  // The form is its own full page now (TM-426), not a modal: the URL is the create route, the console
+  // list view is replaced by the form view, and a "← Events" back link is present.
+  await expect(page).toHaveURL(/#\/admin\/events\/new$/);
+  await expect(page.locator("#admin-event-form-view")).toBeVisible();
+  await expect(page.locator("#admin-events-view")).toBeHidden();
+  await expect(page.locator("#admin-event-form-back")).toBeVisible();
   const form = page.locator("#event-form");
   await expect(form).toBeVisible();
   // Tap a Coffee & X suggestion chip — it prefills the heading, still editable (TM-382).
@@ -137,15 +148,18 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   expect(created.locationRevealHours).toBe(24);
   expect(typeof created.effectiveLocationRevealHours).toBe("number");
 
-  // ── STEP 5: it lands in the list with its derived status. ────────────────────────────────────────
+  // ── STEP 5: saving navigated back to the list (TM-426); it lands there with its derived status. ───
+  await expect(page).toHaveURL(/#\/admin\/events$/);
+  await expect(page.locator("#admin-events-view")).toBeVisible();
   const row = page.locator(`tr[data-event-id="${created.id}"]`);
   await expect(row).toBeVisible();
   await expect(row).toContainText(HEADING);
   await expect(row).toContainText("Visible"); // window open + start in the future (event-form lifecycle)
   await shot("created");
 
-  // ── STEP 6: edit the heading → assert the 200. ───────────────────────────────────────────────────
+  // ── STEP 6: edit the heading → assert the 200. The row's Edit navigates to the full-page edit route. ─
   await row.getByRole("button", { name: `Edit ${HEADING}` }).click();
+  await expect(page).toHaveURL(new RegExp(`#/admin/events/${created.id}/edit$`));
   await expect(page.locator("#event-form")).toBeVisible();
   await expect(page.locator("#event-heading")).toHaveValue(HEADING); // prefilled from the event
   await page.fill("#event-heading", EDITED_HEADING);

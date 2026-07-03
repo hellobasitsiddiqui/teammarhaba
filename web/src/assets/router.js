@@ -17,7 +17,8 @@
 
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
-import { enterAdminEvents } from "./admin-events.js";
+import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
+import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
 import { enterOnboarding } from "./onboarding.js";
@@ -34,6 +35,11 @@ const ADMIN = "#/admin";
 // Admin events console (TM-395) — protected + ADMIN-only, the same gate as #/admin. Its own hash so
 // it's a distinct exact-match route; admin-events.js mounts into #admin-events-view.
 const ADMIN_EVENTS = "#/admin/events";
+// Full-page create/edit event form (TM-426) — ADMIN-only, same gate as #/admin/events. The form used
+// to be a modal that overflowed short viewports (TM-421); it's now its own page at #/admin/events/new
+// (create) and #/admin/events/{id}/edit (edit). The edit route carries a dynamic id, so — like the
+// events detail — these are matched by pattern (admin-event-route.js) rather than the exact-match set,
+// and admin-events.js mounts them into #admin-event-form-view.
 // Self-service edit-profile view (TM-167) — protected, available to any signed-in user.
 const PROFILE = "#/profile";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
@@ -68,9 +74,10 @@ function eventDetailId(hash) {
   const rest = hash.slice(EVENTS.length + 1);
   return rest ? decodeURIComponent(rest) : null;
 }
-/** A route requires sign-in when it's in the exact protected set OR anywhere in the events area. */
+/** A route requires sign-in when it's in the exact protected set, the events area, or the admin event
+ *  form (ADMIN-only, so protected too). */
 function isProtected(route) {
-  return PROTECTED.has(route) || isEventsRoute(route);
+  return PROTECTED.has(route) || isEventsRoute(route) || isAdminEventFormRoute(route);
 }
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
@@ -91,6 +98,10 @@ let needsTerms = false;
 let adminActive = false;
 // Same lifecycle for the admin events console (TM-395): mount once, (re)load on entry.
 let adminEventsActive = false;
+// Admin event form (TM-426): the last form route we entered (#/admin/events/new or …/{id}/edit), so a
+// repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does.
+// Reset to null when leaving the form (mirrors eventsRouteEntered).
+let adminEventFormEntered = null;
 // Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
 let profileActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
@@ -118,6 +129,8 @@ function currentRoute() {
   if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
+  // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
+  if (isAdminEventFormRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -140,6 +153,7 @@ function render() {
   const homeView = $("auth-signed-in");
   const adminView = $("admin-view");
   const adminEventsView = $("admin-events-view");
+  const adminEventFormView = $("admin-event-form-view");
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
   const termsView = $("terms-view");
@@ -150,6 +164,8 @@ function render() {
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
+  // Admin event form (TM-426) — shown for the create route and any {id} edit route.
+  if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
   if (profileView) profileView.hidden = route !== PROFILE;
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
@@ -266,6 +282,13 @@ function guard() {
     go(HOME);
     return;
   }
+  // The full-page event create/edit form (TM-426) is ADMIN-only too — same rule as the events console.
+  if (isAdminEventFormRoute(route) && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminEventFormEntered = null;
+    go(HOME);
+    return;
+  }
   render();
   // Load the console on entry into the admin route (and reset on leaving so re-entry reloads).
   if (route === ADMIN && isAdmin) {
@@ -285,6 +308,20 @@ function guard() {
     }
   } else {
     adminEventsActive = false;
+  }
+  // Full-page event create/edit form (TM-426): (re)enter whenever the form route CHANGES (create vs a
+  // specific edit id) so switching targets re-renders, without refetching on the repeated guard() calls
+  // for the same route (mirrors the events list↔detail re-entry). Resolving the event for an edit lives
+  // in admin-events.js. Reset on leaving — and returning to #/admin/events re-runs enterAdminEvents(),
+  // which reloads the list so a just-saved create/edit shows immediately.
+  if (isAdminEventFormRoute(route) && isAdmin) {
+    if (route !== adminEventFormEntered) {
+      adminEventFormEntered = route;
+      const target = parseAdminEventFormRoute(route);
+      enterAdminEventForm(target.mode, target.id);
+    }
+  } else {
+    adminEventFormEntered = null;
   }
   // Same lifecycle for the edit-profile view (TM-167): mount + reload its values on entry.
   if (route === PROFILE) {
