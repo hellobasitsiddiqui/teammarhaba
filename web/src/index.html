@@ -187,6 +187,12 @@
              owns its visibility + the ADMIN gate. -->
         <section id="admin-events-view" class="admin-console" aria-label="Admin events console" hidden></section>
 
+        <!-- Admin event form (TM-426): the full-page #/admin/events/new + #/admin/events/{id}/edit
+             create/edit form. Moved out of the modal (which overflowed short viewports and hid the
+             submit button — TM-421) onto its own admin page so it scrolls naturally. admin-events.js
+             builds it here; router.js owns visibility + the ADMIN gate (same as the events console). -->
+        <section id="admin-event-form-view" class="admin-console" aria-label="Event form" hidden></section>
+
         <!-- Edit-profile view (TM-167): self-service #/profile view for any signed-in user. profile.js
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
         <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>
