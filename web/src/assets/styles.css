@@ -1286,6 +1286,12 @@ body {
 
 .tm-modal {
     width: min(34rem, 96vw);
+    /* Cap the modal to the backdrop's content box (viewport minus its safe-area padding) and lay it
+       out as a column so the head stays pinned and the body scrolls (TM-421). Without this a long
+       create/edit form overflows the viewport and its submit button sits below the fold, unreachable. */
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .tm-modal-head {
@@ -1317,6 +1323,10 @@ body {
 
 .tm-modal-body {
     margin-top: 0.75rem;
+    /* Scroll the (possibly long) modal content — e.g. the New event form — so its submit button is
+       always reachable; min-height:0 lets this flex child shrink below its content and actually scroll. */
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .tm-detail {
