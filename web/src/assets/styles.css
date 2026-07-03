@@ -2832,3 +2832,305 @@ button.tm-notif-item:hover {
     margin: 0;
     color: var(--muted);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * Events UI (TM-396) — the #/events browse list + #/events/{id} detail. Built entirely on the
+ * design tokens (--accent / --surface-card / --border / --radius* / --muted …) so it reskins across
+ * clean / doodle / sketch with no per-theme rules of its own (the sketch wobble/borders come from
+ * the theme blocks that already target .tm-btn, .auth-card, inputs, etc.).
+ * ───────────────────────────────────────────────────────────────────────────────────────────── */
+.events-view {
+    display: block;
+}
+
+.tm-event-head {
+    align-items: center;
+}
+
+/* Browse list */
+.tm-event-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.tm-event-section {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 1rem 0 0.25rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-event-live-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--danger, #d64545);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger, #d64545) 60%, transparent);
+    animation: tm-event-pulse 1.8s ease-out infinite;
+}
+
+@keyframes tm-event-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger, #d64545) 55%, transparent); }
+    70% { box-shadow: 0 0 0 0.5rem transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tm-event-live-dot { animation: none; }
+}
+
+/* A browse card is a link — the whole card is the tap target. */
+.tm-event-card {
+    display: flex;
+    gap: 0.9rem;
+    padding: 0.75rem;
+    background: var(--surface-card, #fff);
+    border: var(--border-width) solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.tm-event-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--accent-line);
+}
+
+.tm-event-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tm-event-card-live {
+    border-color: color-mix(in srgb, var(--danger, #d64545) 45%, var(--border, #ccc));
+}
+
+.tm-event-thumb {
+    flex: 0 0 auto;
+    width: 72px;
+    height: 72px;
+    border-radius: var(--radius-md);
+    object-fit: cover;
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    overflow: hidden;
+}
+
+.tm-event-thumb-placeholder svg {
+    width: 40px;
+    height: 40px;
+}
+
+.tm-event-hero {
+    width: 100%;
+    height: clamp(140px, 34vw, 220px);
+    border-radius: var(--radius-lg);
+    object-fit: cover;
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    margin: 0.5rem 0 0.75rem;
+    overflow: hidden;
+}
+
+.tm-event-hero svg { width: 72px; height: 72px; }
+
+.tm-event-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.tm-event-card-top {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.tm-event-card-title {
+    margin: 0.1rem 0;
+    font-size: 1.05rem;
+    line-height: 1.2;
+}
+
+.tm-event-when {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.tm-event-rel { font-size: 0.85rem; }
+
+.tm-event-where {
+    margin: 0.1rem 0 0;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tm-event-card-badges {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+}
+
+/* Chips + live/going badges (reuse .tm-badge shape via their own colours) */
+.tm-event-chip {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-pill);
+    border: var(--border-width) solid transparent;
+}
+
+.tm-event-chip-going {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.tm-event-chip-waitlisted {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.tm-event-badge-live {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--on-accent);
+    background: var(--danger, #d64545);
+    border-radius: var(--radius-pill);
+}
+
+.tm-event-going { color: var(--accent); border-color: var(--accent-line); }
+.tm-event-waitlist { color: var(--muted); }
+
+/* Detail */
+.tm-event-detail {
+    display: block;
+}
+
+.tm-event-title {
+    margin: 0.25rem 0 0.5rem;
+    font-size: 1.4rem;
+    line-height: 1.15;
+}
+
+.tm-event-when-block { margin: 0.25rem 0 0.75rem; }
+.tm-event-when-date { margin: 0; font-weight: 600; }
+.tm-event-when-time { margin: 0.1rem 0 0; font-size: 1.05rem; }
+.tm-event-when-local { margin: 0.1rem 0 0; font-size: 0.85rem; }
+
+.tm-event-subhead {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 0.95rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.tm-event-ageband {
+    display: inline-block;
+    margin: 0 0 0.5rem;
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+.tm-event-location { margin: 0.5rem 0; }
+
+.tm-event-location-primary {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.1rem 0;
+    font-weight: 500;
+}
+
+.tm-event-pin { width: 20px; height: 20px; flex: 0 0 auto; color: var(--accent); }
+
+.tm-event-reveal-note { margin: 0.15rem 0 0.5rem; font-size: 0.88rem; }
+
+.tm-event-location .tm-btn { margin: 0.35rem 0.4rem 0 0; }
+
+.tm-event-description {
+    margin: 0.75rem 0;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.tm-event-attendees { margin: 0.75rem 0; }
+
+.tm-event-counts {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.tm-event-avatars {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.tm-event-avatar {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: 2px solid var(--surface-card, #fff);
+}
+
+.tm-event-avatar-more {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+/* Action area */
+.tm-event-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: var(--border-width) solid var(--fg-line);
+}
+
+.tm-event-actions .tm-btn { align-self: flex-start; min-width: 12rem; }
+
+.tm-event-mystate { align-self: flex-start; margin: 0; }
+
+.tm-event-reason, .tm-event-remind { margin: 0; font-size: 0.9rem; }
+
+.tm-event-reason-link { color: var(--accent); font-weight: 600; }
+
+.tm-empty-title { font-weight: 700; font-size: 1.1rem; margin: 0.35rem 0 0.15rem; }
+
+/* Narrow screens: stack the card thumb above the body for a bigger tap target. */
+@media (max-width: 520px) {
+    .tm-event-card { flex-direction: column; }
+    .tm-event-thumb { width: 100%; height: 120px; }
+    .tm-event-actions .tm-btn { align-self: stretch; width: 100%; }
+}

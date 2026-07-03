@@ -380,6 +380,95 @@ export async function adminBroadcastPush({ title, body, route, userIds }) {
   return response.json();
 }
 
+/**
+ * GET /api/v1/events — the visible-now listing (TM-393), soonest-first, in the shared page envelope
+ * `{ items, page, size, totalElements, totalPages }`. Each item is an EventCard
+ * (`{ id, heading, locationText, timezone, startAt, endAt, capacity, imagePath, goingCount, myState }`).
+ * A 401 will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @param {{page?: number, size?: number}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {ApiError}
+ */
+export async function listEvents({ page, size } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  const query = params.toString();
+  const response = await apiFetch(`/api/v1/events${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not load events (${response.status}).`);
+  return response.json();
+}
+
+/**
+ * GET /api/v1/events/{id} — the full EventDetail (TM-393). A hidden/cancelled/finished event is a
+ * 404 (the view renders a friendly "no longer available" state off {@link ApiError}.status === 404).
+ * @param {number|string} id
+ * @returns {Promise<Object>} the EventDetail.
+ * @throws {ApiError}
+ */
+export async function getEvent(id) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not load this event (${response.status}).`);
+  return response.json();
+}
+
+/**
+ * POST /api/v1/events/{id}/rsvp — RSVP (idempotent). Returns the RsvpResult
+ * `{ state: "GOING"|"WAITLISTED", goingCount, waitlistedCount }` telling the caller where they
+ * landed. On a rejected command (e.g. a 409 booking-cutoff / one-active-event / age-band conflict,
+ * or after start) the backend's specific RFC-7807 `detail` is thrown as an {@link ApiError} so the
+ * UI can surface the exact reason rather than a generic error.
+ * @param {number|string} id
+ * @returns {Promise<{state: string, goingCount: number, waitlistedCount: number}>}
+ * @throws {ApiError}
+ */
+export async function rsvpToEvent(id) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}/rsvp`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, "Could not RSVP. Please try again.");
+  return response.json();
+}
+
+/**
+ * DELETE /api/v1/events/{id}/rsvp — leave the event / waitlist (idempotent, 204). A change after
+ * start is a 409 with honest copy, surfaced as an {@link ApiError}.
+ * @param {number|string} id
+ * @returns {Promise<void>}
+ * @throws {ApiError}
+ */
+export async function cancelEventRsvp(id) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}/rsvp`, {
+    method: "DELETE",
+    headers: { Accept: "application/problem+json" },
+  });
+  if (!response.ok) throw await toApiError(response, "Could not update your RSVP. Please try again.");
+}
+
+/**
+ * POST /api/v1/events/{id}/claim — claim an open spot from the waitlist (offer cascade, TM-393).
+ * Success flips the caller to GOING (returns the RsvpResult). Losing the race is a 409 whose honest
+ * copy ("That spot has already been taken — you are still on the waitlist.") is surfaced verbatim
+ * via {@link ApiError}.
+ * @param {number|string} id
+ * @returns {Promise<{state: string, goingCount: number, waitlistedCount: number}>}
+ * @throws {ApiError}
+ */
+export async function claimEventSpot(id) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}/claim`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, "Could not claim the spot. Please try again.");
+  return response.json();
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 if (typeof window !== "undefined") {
   window.tmApi = {
@@ -396,6 +485,11 @@ if (typeof window !== "undefined") {
     deregisterDevice,
     getPushRoutes,
     adminBroadcastPush,
+    listEvents,
+    getEvent,
+    rsvpToEvent,
+    cancelEventRsvp,
+    claimEventSpot,
     redirectToLogin,
     LOGIN_PATH,
     ApiError,
