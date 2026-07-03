@@ -73,9 +73,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * {@link EventAttendeeNotifier} rails.
  *
  * <p>Only claimable events are offered: the sweep applies the same gate as {@link
- * EventRsvpService#claim} — {@code PUBLISHED} and inside its visibility window and not yet started —
- * so every offer corresponds to a spot a member can actually take (an out-of-window or started event
- * is skipped, never offered).
+ * EventRsvpService#claim} — {@code PUBLISHED} and inside its visibility window, not yet started, and
+ * before the {@link BookingCutoffPolicy booking cutoff} (TM-424) — so every offer corresponds to a
+ * spot a member can actually take (an out-of-window, started or past-cutoff event is skipped, never
+ * offered; past the cutoff a claim would 409 {@code BOOKING_CLOSED}).
  */
 @Service
 public class WaitlistOfferCascadeService {
@@ -91,6 +92,7 @@ public class WaitlistOfferCascadeService {
     private final EventAttendanceRepository attendance;
     private final OfferCascadeScanRepository scan;
     private final EventAttendeeNotifier notifier;
+    private final BookingCutoffPolicy bookingCutoff;
     private final TransactionTemplate tx;
     private final Clock clock;
 
@@ -100,8 +102,9 @@ public class WaitlistOfferCascadeService {
             EventAttendanceRepository attendance,
             OfferCascadeScanRepository scan,
             EventAttendeeNotifier notifier,
+            BookingCutoffPolicy bookingCutoff,
             PlatformTransactionManager txManager) {
-        this(events, attendance, scan, notifier, new TransactionTemplate(txManager), Clock.systemUTC());
+        this(events, attendance, scan, notifier, bookingCutoff, new TransactionTemplate(txManager), Clock.systemUTC());
     }
 
     /** Test seam: inject an advanceable {@link Clock} and an explicit template (house pattern, TM-394). */
@@ -110,12 +113,14 @@ public class WaitlistOfferCascadeService {
             EventAttendanceRepository attendance,
             OfferCascadeScanRepository scan,
             EventAttendeeNotifier notifier,
+            BookingCutoffPolicy bookingCutoff,
             TransactionTemplate tx,
             Clock clock) {
         this.events = events;
         this.attendance = attendance;
         this.scan = scan;
         this.notifier = notifier;
+        this.bookingCutoff = bookingCutoff;
         this.tx = tx;
         this.clock = clock;
     }
@@ -180,8 +185,14 @@ public class WaitlistOfferCascadeService {
     private OfferBatch stampDueOffers(Long eventId) {
         Instant now = clock.instant();
         Event event = events.findByIdForUpdate(eventId).orElse(null);
-        if (event == null || !event.isVisibleAt(now) || !event.getStartAt().isAfter(now)) {
-            return null; // no claimable spot here — the same gate as claim (visible + not started)
+        if (event == null
+                || !event.isVisibleAt(now)
+                || !event.getStartAt().isAfter(now)
+                || bookingCutoff.isPastCutoff(event, now)) {
+            // No claimable spot here — the exact same gate as claim (visible + not started + before the
+            // booking cutoff, TM-424). Past the cutoff claim 409s BOOKING_CLOSED, so offering a spot in
+            // the final window would nudge waitlisters toward a spot they cannot take.
+            return null;
         }
         if (!event.hasCapacityLimit()) {
             return null; // unlimited capacity never waitlists — nothing to cascade
