@@ -5,8 +5,10 @@
 // self-protection in TM-111). Mounts into #admin-view; the router (TM-109) gates the route.
 //
 // Backend note: TM-111 supports page/size/sort but not yet search/role/status filters (TM-115),
-// so we fetch the full set (size cap 100) once and filter/sort/paginate in the browser. Fine for
-// the current small user base; >100 users needs server-side filtering (flagged on TM-133/TM-115).
+// so we fetch the FULL set — walking every page of the endpoint, 100 per request (TM-370) — and
+// filter/sort/paginate in the browser. Fine for the current scale (hundreds); when the base
+// outgrows fetch-all, a server-side "select all matching" replaces the walk at loadUsers' single
+// call into fetchAllUsers (the deliberate seam — see broadcast.js), per TM-133/TM-115.
 //
 // Identity note (TM-372): a phone-auth account may have NO email and NO display name, so every
 // render/search of a user goes through the broadcast.js display-identity chain (displayName →
@@ -23,6 +25,7 @@ import { KNOWN_ROUTES } from "./push-deeplink.js";
 import {
   MAX_TITLE,
   MAX_BODY,
+  MAX_RECIPIENTS,
   NO_ROUTE,
   validateBroadcast,
   routeOptionsFrom,
@@ -32,9 +35,14 @@ import {
   contactCell,
   displayIdentifier,
   searchHaystack,
+  // TM-370: the full-account-set page walk — loadUsers feeds it one-page fetches until the whole
+  // list is in memory, so select-all/search/stats cover every account, not just the first 100.
+  fetchAllUsers,
+  selectionCapMessage,
+  coverageNote,
 } from "./broadcast.js";
 
-const FETCH_SIZE = 100; // matches TM-111's max page size
+const FETCH_SIZE = 100; // page size PER REQUEST of the full-list walk — matches TM-111's max page size
 const PAGE_SIZES = [10, 25, 50];
 
 const COLUMNS = [
@@ -47,6 +55,11 @@ const COLUMNS = [
 
 const state = {
   users: [],
+  // TM-370: the server-reported account total and whether the page walk covered the whole list.
+  // On the normal, complete fetch totalAccounts === users.length; they diverge only when a later
+  // page failed mid-walk (partial coverage — the compose panel then warns with the exact numbers).
+  totalAccounts: 0,
+  fetchComplete: true,
   loading: false,
   error: null,
   search: "",
@@ -96,22 +109,36 @@ async function patchUser(id, body) {
   return res.json();
 }
 
+/** One page of the admin list for {@link fetchAllUsers}. Sorted by id so page boundaries stay stable
+ *  while the walk runs (new sign-ups get higher ids and land on the end, not mid-list). */
+async function fetchUsersPage(page, size) {
+  const res = await apiFetch(`/api/v1/admin/users?page=${page}&size=${size}&sort=id,asc`, {
+    headers: { Accept: "application/json" },
+  });
+  if (res.status === 403) throw new ApiError(403, "You need an admin role to view this page.");
+  if (!res.ok) throw new ApiError(res.status, `Could not load users (${res.status}).`);
+  return res.json();
+}
+
 export async function loadUsers() {
   state.loading = true;
   state.error = null;
   render();
   try {
-    const res = await apiFetch(`/api/v1/admin/users?page=0&size=${FETCH_SIZE}&sort=id,asc`, {
-      headers: { Accept: "application/json" },
-    });
-    if (res.status === 403) throw new ApiError(403, "You need an admin role to view this page.");
-    if (!res.ok) throw new ApiError(res.status, `Could not load users (${res.status}).`);
-    const body = await res.json();
-    state.users = Array.isArray(body.items) ? body.items : [];
+    // TM-370: walk EVERY page of the endpoint (100 per request) so the in-memory set — and with it
+    // search, the stats bar and select-all — covers the WHOLE account list, not just the first 100.
+    // A page failing mid-walk keeps what loaded and flags the fetch partial (coverage warning);
+    // only a failure with nothing loaded reaches the catch below and errors the table.
+    const { users, total, complete } = await fetchAllUsers(fetchUsersPage, { pageSize: FETCH_SIZE });
+    state.users = users;
+    state.totalAccounts = total;
+    state.fetchComplete = complete;
   } catch (err) {
     // 401 is already handled by api.js (token refresh + redirect); surface everything else.
     state.error = err instanceof ApiError ? err.message : "Could not load users.";
     state.users = [];
+    state.totalAccounts = 0;
+    state.fetchComplete = true; // nothing partial to warn about — the table shows the error instead
   } finally {
     state.loading = false;
     state.page = 0;
@@ -171,7 +198,8 @@ function toggleSelected(user, on) {
 /**
  * Select-all over the CURRENTLY-FILTERED set (not just the visible page): add every matching user's id
  * when not all are selected, otherwise clear them. Selections outside the current filter are left
- * untouched, so narrowing the filter, selecting, then widening it keeps the earlier picks.
+ * untouched, so narrowing the filter, selecting, then widening it keeps the earlier picks. Since
+ * TM-370 the fetched set is the WHOLE account list, so "matching" genuinely means everyone matching.
  */
 function toggleSelectAllMatching(on) {
   const matching = matchingUsers();
@@ -179,6 +207,12 @@ function toggleSelectAllMatching(on) {
     if (on) state.selection.add(u.id);
     else state.selection.delete(u.id);
   }
+  // With the full list selectable, select-all can now legitimately exceed the broadcast API's hard
+  // recipient cap (@Size max MAX_RECIPIENTS userIds). Selecting past it is allowed — the admin may be
+  // about to narrow down — but say so IMMEDIATELY (the compose panel may be scrolled out of view);
+  // the Send-gate stays closed with the same rule (validateBroadcast) until the count is back under.
+  const capMsg = on ? selectionCapMessage(state.selection.size) : "";
+  if (capMsg) toast(capMsg, { type: "info", timeout: 8000 });
   // The checkboxes on the visible page need repainting, so re-render the table body here.
   renderTable();
   refreshSelectionUi();
@@ -408,15 +442,18 @@ function refreshSelectionUi() {
 }
 
 /**
- * Show the "first N accounts" caveat only when the fetched set is exactly at the FETCH_SIZE ceiling —
- * the tell that the backend page was full and more accounts probably exist beyond it (the console
- * doesn't paginate yet, TM-370). Idempotent; safe to call on every render. `<` the ceiling means we
- * definitely have everyone, so it stays hidden.
+ * Coverage warning (TM-370). The console now walks the WHOLE account list, so the old "first 100"
+ * ceiling is gone — this fires only when a fetch came back PARTIAL (a later page failed mid-walk, or
+ * the runaway page guard tripped), stating exactly how many accounts are loaded vs the server total
+ * so select-all's real reach is never overstated. Hidden on a complete fetch (the normal case),
+ * while loading, and on a full load error (the table already shows that). Idempotent per render.
  */
 function refreshCeilingWarning() {
   const c = shell?.compose;
   if (!c || !c.ceilingWarning) return;
-  c.ceilingWarning.hidden = state.users.length < FETCH_SIZE;
+  const partial = !state.fetchComplete && !state.loading && !state.error;
+  if (partial) c.ceilingWarning.textContent = coverageNote(state.users.length, state.totalAccounts);
+  c.ceilingWarning.hidden = !partial;
 }
 
 /** Repaint the faithful preview card from the current draft (title headline + body + tap caption). */
@@ -578,16 +615,16 @@ function buildCompose() {
     previewCaption,
   ]);
 
-  // At-ceiling warning (TM-365 review M2): the console fetches only the first FETCH_SIZE accounts, so
-  // when exactly that many come back there are probably more that "select all matching" can't reach.
-  // Built hidden; refreshCeilingWarning() reveals it after loadUsers(). role="status" (not "alert") —
-  // it's an informational caveat, not an error. Full pagination is the follow-up (TM-370).
+  // Partial-coverage warning (TM-370, ex the TM-365 M2 "first 100" caveat): the console now fetches
+  // EVERY page, so this only appears when a load came back incomplete (a page failed mid-walk / the
+  // runaway guard tripped). Built hidden and textless; refreshCeilingWarning() fills the live
+  // "Loaded X of Y accounts" copy after loadUsers(). role="status" (not "alert") — an informational
+  // caveat, not an error.
   const ceilingWarning = el("p", {
     class: "tm-muted tm-broadcast-ceiling",
     id: "admin-broadcast-ceiling",
     role: "status",
     hidden: true,
-    text: `Showing the first ${FETCH_SIZE} accounts — more may exist. “Select all matching” only covers these, so anyone beyond the first ${FETCH_SIZE} can't be selected yet.`,
   });
 
   const send = el("button", {
@@ -603,11 +640,10 @@ function buildCompose() {
       el("h3", { class: "tm-broadcast-title", text: "Send a notification" }),
       count,
     ]),
-    el("p", { class: "tm-muted tm-broadcast-note", text: `Pick recipients in the table below (select-all covers everyone matching your filter on this page, up to ${FETCH_SIZE}), compose your message, preview it, then send.` }),
-    // Shown only when the fetched account count is at the FETCH_SIZE ceiling: the console loads just the
-    // first page and filters client-side, so "select all matching" can't reach anyone off it. Warn the
-    // admin that more accounts may exist beyond what's selectable (real pagination is TM-370). Hidden by
-    // default; toggled in refreshCeilingWarning() once users load.
+    el("p", { class: "tm-muted tm-broadcast-note", text: `Pick recipients in the table below (select-all covers everyone matching your filter, across the whole account list), compose your message, preview it, then send. A single broadcast can reach up to ${MAX_RECIPIENTS} recipients.` }),
+    // Shown only when a load came back PARTIAL (a page failed mid-walk): says exactly how many accounts
+    // are loaded vs the server total, so select-all's reach is never overstated (TM-370). Hidden by
+    // default; filled + toggled in refreshCeilingWarning() once users load.
     ceilingWarning,
     el("div", { class: "tm-broadcast-grid" }, [
       el("div", { class: "tm-broadcast-form" }, [
@@ -667,14 +703,17 @@ function accountStateRow(user) {
 }
 
 function renderStats() {
-  const total = state.users.length;
+  // "Total" is the SERVER's count (TM-370) — the real account total even if a partial fetch loaded
+  // fewer (the coverage warning explains any gap). The role/status splits are counted over the
+  // loaded rows (identical on the normal, complete fetch).
+  const total = Math.max(state.totalAccounts, state.users.length);
   const admins = state.users.filter((u) => u.role === "ADMIN").length;
   const enabled = state.users.filter((u) => u.enabled).length;
   const cards = [
     ["Total", total],
     ["Admins", admins],
     ["Enabled", enabled],
-    ["Disabled", total - enabled],
+    ["Disabled", state.users.length - enabled],
   ];
   clear(shell.stats).append(...cards.map(([label, value]) =>
     el("div", { class: "tm-stat" }, [
@@ -724,11 +763,11 @@ function renderTable() {
     type: "checkbox",
     class: "tm-check",
     id: "admin-select-all",
-    // The console only fetches the first FETCH_SIZE (100) accounts and filters client-side, so
-    // "matching the filter" is really "matching, among the fetched page" — don't overstate the reach
-    // (real >100 pagination is TM-370). The at-ceiling warning below surfaces when more may exist.
-    "aria-label": `Select everyone matching the filter on this page (up to ${FETCH_SIZE})`,
-    title: `Select everyone matching the filter on this page (up to ${FETCH_SIZE}, not just this table page)`,
+    // Since TM-370 the console holds the FULL account list (loadUsers walks every page), so this
+    // label finally means what it says: everyone matching the filter, full stop. If a load came back
+    // partial, the compose panel's coverage warning states the real reach — the label needn't hedge.
+    "aria-label": "Select all users matching the current filter",
+    title: "Select all users matching the current filter (across the whole list, not just this table page)",
     onChange: (e) => toggleSelectAllMatching(e.target.checked),
   });
   shell.selectAll = selectAll;

@@ -31,12 +31,13 @@ The flow is **multi-select → compose → preview → confirm → send-now** (`
 
 1. **Select recipients** — tick users in the table. The selection is held **by user id**, so it
    survives paging, filtering and sorting (a draft audience isn't lost when the table re-renders).
-   The header **select-all** checkbox selects **everyone matching the filter, on this page (up to the
-   first 100 fetched)** — not just the visible table page, but *also* not beyond the first 100 accounts
-   the console loads (it filters client-side and doesn't paginate the fetch yet; real pagination is
-   TM-370). When the fetched set is at that 100 ceiling the compose panel shows a caveat that more
-   accounts may exist and can't be selected yet. So an admin can filter then select-all to target a
-   cohort **within the first 100**.
+   The header **select-all** checkbox selects **everyone matching the filter across the whole account
+   list** — the console walks *every* page of the admin endpoint on load (100/request,
+   `fetchAllUsers` in `broadcast.js`, TM-370), so filtering client-side now runs over the full set,
+   not just the first 100. If a load ever comes back **partial** (a page failed mid-walk), the
+   compose panel shows a "Loaded X of Y accounts" caveat so select-all's real reach is never
+   overstated. A selection that grows past the **500-recipient send cap** (the server DTO's `@Size`)
+   raises an immediate toast and keeps the Send-gate closed until it's back under.
 2. **Compose** — a **Title** and **Message**, plus an optional **Deep-link** picker. The deep-link
    options come from the backend allow-list (`GET …/push-routes`, TM-360) — never free text — so the
    admin can only pick a route the send path will accept. The picker falls back to the client
@@ -190,7 +191,7 @@ Known and intentional for v1 — captured so future work builds on accurate assu
 | Limit | Detail | Future |
 |---|---|---|
 | **Real iOS push parked** | Android only today; iOS needs APNs `.p8` + Firebase iOS app + physical device | TM-362 (human-gated) |
-| **`>100`-user select ceiling** | the console fetches the **first 100 users** (`FETCH_SIZE = 100`, matches the admin list's max page size) and filters/selects client-side; you can't select someone off that first page | server-side selection / search once the user base outgrows 100 (flagged on TM-133/TM-115) |
+| **`>100`-user select ceiling** | **fixed (TM-370)**: the console now walks *every* page of the admin list on load (100/request, `fetchAllUsers`), so select-all covers the **full account set**; a partial load (mid-walk failure / runaway-guard trip) shows a "Loaded X of Y accounts" warning instead of overstating reach. A single send is still capped at **500 recipients** (server `@Size`) — exceeding it toasts immediately and blocks Send | server-side "select all matching the filter" once the base outgrows fetch-all (thousands) — the injected page-fetcher in `fetchAllUsers` is the seam (flagged on TM-133/TM-115) |
 | **Per-admin send cooldown** | a **30s** per-admin-uid cooldown rejects a second broadcast inside the window with `429` — the accidental-double-send guard | it is **process-local** (fine for one Cloud Run instance); a shared store (Redis) for a cluster-wide guard is the noted future improvement, consistent with TM-247 |
 | **`notificationPref` not in the admin projection** | the admin `UserResponse` doesn't expose `notificationPref`, so the UI **can't show who is opt-out** *before* sending (only *after*, from the result). The pre-send reachable/opt-out counts still aren't shown up front | add `notificationPref` to the admin projection so the console can show reachable/opt-out counts before send |
 | **Skip-reason breakdown in the result toast** | the summary toast now reports the real skip breakdown from the response rails — `skipped (A opted out, B no device, C disabled, D not found)`, showing only the non-zero reasons, with "no device" derived as the residual (TM-365 review M1). Earlier it folded everything into one `(no device)` count | — (done) |

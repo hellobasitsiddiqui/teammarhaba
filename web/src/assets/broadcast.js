@@ -15,7 +15,11 @@
 //   - summariseBroadcast(): the BroadcastPushResponse → an honest one-line result summary;
 //   - the user display-identity chain (TM-372): maskPhone / uidPrefix / displayIdentifier /
 //     contactCell / searchHaystack — how the admin table + broadcast picker name and find an account
-//     that has no email/display name (phone-auth sign-ins), so no row is ever blank or unsearchable.
+//     that has no email/display name (phone-auth sign-ins), so no row is ever blank or unsearchable;
+//   - the full-account-set page walk (TM-370): fetchAllUsers / selectionCapMessage / coverageNote —
+//     how the console loads EVERY page of the admin list (so select-all genuinely covers the whole
+//     account set, not just the first 100) and what it tells the admin when it can't. fetchAllUsers
+//     itself does no fetching — the page fetcher is injected — so it stays Node-testable.
 
 /** Max title length — mirrors BroadcastPushRequest.MAX_TITLE_LENGTH (fits the DB column + PushMessage). */
 export const MAX_TITLE = 200;
@@ -243,4 +247,124 @@ export function searchHaystack(user = {}) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+// --- full account-set fetch (TM-370) -----------------------------------------------------------
+//
+// The console used to load ONE page (page=0&size=100 — the server's max page size) and run all
+// filtering/selection client-side over that, so with >100 accounts "select all matching" silently
+// missed everyone beyond the first page. fetchAllUsers is the fix for the current scale (hundreds,
+// not millions): walk the paginated endpoint until exhausted so the in-memory set — and therefore
+// search, the stats bar and select-all — covers the WHOLE account list.
+//
+// The page fetcher is INJECTED (`(page, size) => Promise<envelope>`), which keeps this loop pure
+// enough to unit-test in Node and is deliberately the seam for the next scale step: when the base
+// outgrows fetch-all (thousands+), a server-side "select all matching the filter" replaces this
+// walk at its single call site (admin.js loadUsers) without touching the selection model.
+
+/** Per-request page size for the admin account walk — mirrors the server's MAX_PAGE_SIZE (TM-111). */
+export const USERS_PAGE_SIZE = 100;
+
+/**
+ * Runaway guard on the page walk: at most this many requests per load (× {@link USERS_PAGE_SIZE} =
+ * 5,000 accounts). Not a product limit — a circuit breaker against a pathological/looping server
+ * response. Hitting it flags the fetch as partial so the coverage warning shows.
+ */
+export const MAX_USER_FETCH_PAGES = 50;
+
+/**
+ * Fetch the ENTIRE account list by walking the paginated admin endpoint page by page.
+ *
+ * `fetchPage(page, pageSize)` must resolve to the server's paged envelope
+ * ({@code {items, totalElements, totalPages, …}}); this loop owns when to stop:
+ *   - after the last page — trusting the server's `totalPages` when present (avoids a wasted empty
+ *     request on an exact multiple of the page size), else when a short page comes back;
+ *   - at `maxPages` (the runaway guard) — the result is then flagged incomplete;
+ *   - on a failed page: a failure with NOTHING loaded yet is rethrown (a real load error for the
+ *     caller to surface); a failure after some pages loaded keeps the partial set and flags it
+ *     incomplete, so one blipped request degrades coverage (with a warning) instead of blanking
+ *     the whole console.
+ *
+ * Rows are de-duplicated by `id`: accounts created/removed mid-walk can shift page boundaries, so
+ * the same row may appear on two consecutive pages — selection is by id (TM-358), so a duplicate
+ * would double-render but a dropped dupe loses nothing.
+ *
+ * @param {(page: number, pageSize: number) => Promise<{items?: unknown[], totalElements?: number,
+ *          totalPages?: number}>} fetchPage resolves one page of the admin list.
+ * @param {{pageSize?: number, maxPages?: number}} [options]
+ * @returns {Promise<{users: object[], total: number, complete: boolean}>} every fetched row, the
+ *          true account total (the server's count when known, never less than what was fetched),
+ *          and whether the walk covered the whole list.
+ */
+export async function fetchAllUsers(fetchPage, { pageSize = USERS_PAGE_SIZE, maxPages = MAX_USER_FETCH_PAGES } = {}) {
+  const users = [];
+  const seen = new Set();
+  let reportedTotal = 0;
+  let complete = false;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    let body;
+    try {
+      body = await fetchPage(page, pageSize);
+    } catch (err) {
+      if (users.length === 0) throw err; // nothing usable loaded — surface the load error
+      break; // a later page blipped: keep the partial set; `complete` stays false → warning shows
+    }
+    const items = Array.isArray(body?.items) ? body.items : [];
+    for (const item of items) {
+      const id = item?.id;
+      if (id != null) {
+        if (seen.has(id)) continue; // page-boundary duplicate (row shifted mid-walk)
+        seen.add(id);
+      }
+      users.push(item);
+    }
+
+    const total = Number(body?.totalElements);
+    if (Number.isFinite(total) && total > reportedTotal) reportedTotal = total;
+
+    const totalPages = Number(body?.totalPages);
+    const lastByServer = Number.isFinite(totalPages) && page + 1 >= totalPages;
+    const lastByCount = items.length < pageSize; // a short (or empty) page ⇒ nothing beyond it
+    if (lastByServer || lastByCount) {
+      complete = true;
+      break;
+    }
+  }
+
+  return { users, total: Math.max(reportedTotal, users.length), complete };
+}
+
+/**
+ * The warning to show when a selection has grown past the broadcast API's hard recipient cap
+ * ({@link MAX_RECIPIENTS}, the server DTO's {@code @Size} on userIds). Selecting past the cap is
+ * allowed — the admin may be mid-way through narrowing a cohort — but the Send-gate stays closed
+ * (validateBroadcast) and this message says so the moment it happens. "" while within the cap.
+ *
+ * @param {number} selected how many recipients are selected.
+ * @returns {string} the over-cap message, or "" when the selection is sendable (cap-wise).
+ */
+export function selectionCapMessage(selected) {
+  const n = Number(selected) || 0;
+  if (n <= MAX_RECIPIENTS) return "";
+  return `${n} selected — a single broadcast can send to at most ${MAX_RECIPIENTS} recipients. `
+    + "Unselect some (or narrow the filter and reselect) before sending.";
+}
+
+/**
+ * The compose-panel coverage warning for a PARTIAL fetch (a page failed mid-walk, or the runaway
+ * guard tripped): tells the admin exactly how many accounts are loaded vs the server's total, and
+ * that select-all only reaches the loaded ones. On a complete fetch the caller shows nothing —
+ * coverage is whole, there is no ceiling left to warn about (TM-370).
+ *
+ * @param {number} loaded how many accounts the console actually holds.
+ * @param {number} total the server-reported account total (may equal `loaded` when unknown).
+ * @returns {string}
+ */
+export function coverageNote(loaded, total) {
+  const l = Math.max(0, Number(loaded) || 0);
+  const t = Math.max(l, Number(total) || 0);
+  const reach = "“Select all matching” only covers the loaded accounts — refresh to retry loading the rest.";
+  if (t > l) return `Loaded ${l} of ${t} accounts. ${reach}`;
+  return `Loaded the first ${l} accounts — more may exist. ${reach}`;
 }
