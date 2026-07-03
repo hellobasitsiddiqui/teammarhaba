@@ -3173,6 +3173,66 @@ button.tm-notif-item:hover {
     border-color: var(--accent-line);
 }
 
+/* Add to calendar (TM-398) — a native <details> disclosure styled as a subtle button. */
+.tm-event-calendar { margin: 0.35rem 0 0.75rem; }
+
+.tm-event-calendar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: max-content;
+    padding: 0.15rem 0;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--accent);
+    list-style: none;
+}
+
+.tm-event-calendar-toggle::-webkit-details-marker { display: none; }
+.tm-event-calendar-toggle::marker { content: ""; }
+
+.tm-event-calendar-toggle::after {
+    content: "\25B8"; /* ▸ */
+    font-size: 0.8em;
+    transition: transform 0.15s ease;
+}
+
+.tm-event-calendar[open] .tm-event-calendar-toggle::after { transform: rotate(90deg); }
+
+.tm-event-calendar-toggle:focus-visible {
+    outline: var(--border-width) solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius, 6px);
+}
+
+.tm-event-cal-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--accent); }
+
+.tm-event-calendar-menu {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0;
+}
+
+.tm-event-calendar-menu .tm-btn { margin: 0; }
+
+.tm-event-cal-opt-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 0.3rem;
+    vertical-align: text-bottom;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tm-event-calendar-toggle::after { transition: none; }
+}
+
+@media (max-width: 520px) {
+    .tm-event-calendar-menu { flex-direction: column; align-items: stretch; }
+    .tm-event-calendar-menu .tm-btn { width: 100%; }
+}
+
 .tm-event-location { margin: 0.5rem 0; }
 
 .tm-event-location-primary {
