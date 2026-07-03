@@ -61,6 +61,8 @@
                 <a id="nav-profile" href="#/profile" hidden>Profile</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
+                <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN. -->
+                <a id="nav-admin-events" href="#/admin/events" hidden>Events</a>
                 <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
                      to re-run the whole-site walkthrough or the current page's tour. -->
                 <button id="nav-help" type="button" hidden>Help</button>
@@ -179,6 +181,11 @@
         <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
              builds the table/filters/actions into this container; router.js owns its visibility. -->
         <section id="admin-view" class="admin-console" aria-label="Admin users console" hidden></section>
+
+        <!-- Admin events console (TM-395): ADMIN-only #/admin/events view. admin-events.js (imported by
+             router.js) builds the events list + create/edit/cancel form into this container; router.js
+             owns its visibility + the ADMIN gate. -->
+        <section id="admin-events-view" class="admin-console" aria-label="Admin events console" hidden></section>
 
         <!-- Edit-profile view (TM-167): self-service #/profile view for any signed-in user. profile.js
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->

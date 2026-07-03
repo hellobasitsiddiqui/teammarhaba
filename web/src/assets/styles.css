@@ -1869,6 +1869,126 @@ body {
     flex-wrap: wrap;
 }
 
+/* ===== Admin events console (TM-395) ===== reuses the users-console language (.tm-admin-head,
+   .tm-stats, .tm-toolbar, .tm-table, .tm-pager, .tm-badge); these are the events-only additions.
+   Token-only so they swap across clean / doodle / sketch (and dark) with everything else. */
+
+/* Button group beside the "Events" heading (New event / Refresh). */
+.tm-admin-head-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Info-tone status badge (e.g. "Hidden") — accent-tinted, the neutral sibling of .tm-badge-ok/off. */
+.tm-badge-info {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: transparent;
+}
+
+/* The event title in a list row + its inline "Online" tag. */
+.tm-event-heading {
+    font-weight: 600;
+}
+
+.tm-event-tag {
+    margin-left: 0.4rem;
+    font-size: 0.68rem;
+    vertical-align: middle;
+}
+
+/* Coffee & X heading suggestion chips (TM-382): tap-to-prefill pills above the heading input. */
+.tm-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.1rem;
+}
+
+.tm-chip {
+    padding: 0.2rem 0.6rem;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+
+.tm-chip:hover {
+    border-color: var(--accent);
+}
+
+/* The create/edit form inside the modal — a single comfortable column of fields. */
+.tm-event-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+/* Two short fields side by side (start/end, visibility, capacity/reveal, age min/max); collapses to
+   one column on a narrow screen so nothing is cramped in the WebView. */
+.tm-field-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+@media (max-width: 32rem) {
+    .tm-field-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Event image control (TM-395) — the avatar upload UX (TM-166) with a rectangular preview to suit a
+   landscape event image. Reuses .tm-avatar-progress / -progress-bar for the upload bar. */
+.tm-event-image {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.tm-event-image-frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 6rem;
+    height: 4rem;
+    flex: 0 0 auto;
+    font-size: 1.5rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.tm-event-image-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tm-event-image-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.tm-event-image-file {
+    font-size: 0.85rem;
+    max-width: 16rem;
+}
+
+/* The resolved reveal-window note under the edit form (TM-408). */
+.tm-event-reveal-note {
+    margin: 0.6rem 0 0;
+    font-size: 0.8rem;
+}
+
 /*
  * ===== Responsive mobile-web polish (TM-229) =====
  *

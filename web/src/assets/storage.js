@@ -170,3 +170,83 @@ function mapUploadError(err) {
   }
   return new Error("Could not upload your avatar. Please try again.");
 }
+
+// --- event images (TM-395, epic TM-390) -------------------------------------------------------
+//
+// Event images ride the SAME house Storage pattern as avatars (TM-166), reusing the init + emulator
+// seam above so there is one Storage app instance and one emulator wiring. The difference is the
+// object path and where the pointer lives: bytes go to `event-images/{eventId}` (admin-only per
+// storage.rules — the `role == ADMIN` custom-claim gate) and the OBJECT PATH is persisted on the
+// event row via the admin API (`PATCH /api/v1/admin/events/{id}` imagePath, TM-392), not a photoURL.
+// The path is stored (not a download URL) because the URL carries a rotating `?token=`; the path is
+// stable and the public/event views resolve it to a URL when they render. The admin form keeps the
+// returned download URL only for its own immediate preview.
+
+/** Event-image size cap — mirrors storage.rules (`< 5 MB`), same as avatars. */
+export const MAX_EVENT_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** A user-facing validation message for an event image the rules would reject, or "" if acceptable. */
+export function validateEventImageFile(file) {
+  if (!file) return "Choose an image to upload.";
+  if (!file.type || !file.type.startsWith("image/")) return "That file isn't an image.";
+  if (file.size > MAX_EVENT_IMAGE_BYTES) return "Image must be 5 MB or smaller.";
+  return "";
+}
+
+/**
+ * Upload an event image to Firebase Storage at `event-images/{eventId}` and return its object PATH
+ * (for the imagePath PATCH) plus the download URL (for the form's preview). Admin-only at the rules
+ * layer (`request.auth.token.role == 'ADMIN'`); this mirrors that with a fast client pre-check. A
+ * re-upload overwrites the same per-event path, so an event never accumulates orphan objects.
+ *
+ * @param {number|string} eventId the persisted event id (the path segment). MUST exist — for a NEW
+ *   event the caller creates the event first, then uploads to the returned id (the id can't exist
+ *   before creation, so the create body carries no image; the house avatar/imagePath pattern, TM-392).
+ * @param {File} file the image the admin picked.
+ * @param {(fraction: number) => void} [onProgress] called with 0..1 as bytes transfer.
+ * @returns {Promise<{path: string, url: string}>} the stored object path + its download URL.
+ * @throws {Error} with a user-friendly `.message` on validation/upload failure.
+ */
+export async function uploadEventImage(eventId, file, onProgress) {
+  const message = validateEventImageFile(file);
+  if (message) throw new Error(message);
+  if (eventId == null || String(eventId).trim() === "") {
+    throw new Error("Save the event before adding an image.");
+  }
+
+  const store = getStorageOrNull();
+  if (!store) throw new Error("Event image uploads aren't available right now.");
+
+  const path = `event-images/${eventId}`;
+  const objectRef = ref(store, path);
+  const task = uploadBytesResumable(objectRef, file, { contentType: file.type });
+
+  await new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snapshot) => {
+        if (typeof onProgress === "function" && snapshot.totalBytes > 0) {
+          onProgress(snapshot.bytesTransferred / snapshot.totalBytes);
+        }
+      },
+      (err) => reject(mapEventImageUploadError(err)),
+      resolve,
+    );
+  });
+
+  const url = await getDownloadURL(objectRef);
+  return { path, url };
+}
+
+/** Map a Firebase Storage upload error to a concise, user-friendly Error (event-image wording). */
+function mapEventImageUploadError(err) {
+  const code = err?.code || "";
+  if (code === "storage/unauthorized") {
+    return new Error("You're not allowed to upload that — admins only, and it must be an image under 5 MB.");
+  }
+  if (code === "storage/canceled") return new Error("Upload cancelled.");
+  if (code === "storage/retry-limit-exceeded" || code === "storage/quota-exceeded") {
+    return new Error("Upload failed — please try again.");
+  }
+  return new Error("Could not upload the event image. Please try again.");
+}
