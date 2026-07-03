@@ -7,6 +7,11 @@
 // Backend note: TM-111 supports page/size/sort but not yet search/role/status filters (TM-115),
 // so we fetch the full set (size cap 100) once and filter/sort/paginate in the browser. Fine for
 // the current small user base; >100 users needs server-side filtering (flagged on TM-133/TM-115).
+//
+// Identity note (TM-372): a phone-auth account may have NO email and NO display name, so every
+// render/search of a user goes through the broadcast.js display-identity chain (displayName →
+// email → masked auth phone → uid-prefix → "User #id"). The auth phone arrives on the admin list
+// payload as `phoneNumber` (read live from Firebase by the backend; null when unavailable).
 
 import { apiFetch, adminBroadcastPush, getPushRoutes, ApiError as ApiClientError } from "./api.js";
 import { currentUser } from "./auth.js";
@@ -22,6 +27,11 @@ import {
   validateBroadcast,
   routeOptionsFrom,
   summariseBroadcast,
+  // TM-372: the display-identity fallback chain (displayName → email → masked auth phone →
+  // uid-prefix → "User #id"), so phone-only accounts never render as blank, unfindable rows.
+  contactCell,
+  displayIdentifier,
+  searchHaystack,
 } from "./broadcast.js";
 
 const FETCH_SIZE = 100; // matches TM-111's max page size
@@ -118,8 +128,9 @@ function filteredUsers() {
     if (state.statusFilter === "ENABLED" && !u.enabled) return false;
     if (state.statusFilter === "DISABLED" && u.enabled) return false;
     if (q) {
-      const hay = `${u.email || ""} ${u.displayName || ""}`.toLowerCase();
-      if (!hay.includes(q)) return false;
+      // TM-372: match the whole identity chain (name, email, auth phone raw + masked, "User #id"),
+      // not just email/name — so a phone-only account is findable by its number (or its id).
+      if (!searchHaystack(u).includes(q)) return false;
     }
     return true;
   });
@@ -211,9 +222,11 @@ async function toggleEnabled(user) {
   const disabling = user.enabled;
   const ok = await confirmDialog({
     title: disabling ? "Disable account?" : "Enable account?",
+    // TM-372: displayIdentifier never comes back blank, so the dialog always names who's affected
+    // (masked phone / "User #id" for accounts with no email or name).
     message: disabling
-      ? `${user.email || "This user"} will be blocked on their next request until re-enabled.`
-      : `${user.email || "This user"} will be able to sign in again.`,
+      ? `${displayIdentifier(user)} will be blocked on their next request until re-enabled.`
+      : `${displayIdentifier(user)} will be able to sign in again.`,
     confirmLabel: disabling ? "Disable" : "Enable",
     danger: disabling,
   });
@@ -230,8 +243,8 @@ async function changeRole(user) {
   const ok = await confirmDialog({
     title: promoting ? "Make admin?" : "Remove admin?",
     message: promoting
-      ? `${user.email || "This user"} will get full admin access (effective on their next sign-in/token refresh).`
-      : `${user.email || "This user"} will lose admin access (effective on their next token refresh).`,
+      ? `${displayIdentifier(user)} will get full admin access (effective on their next sign-in/token refresh).`
+      : `${displayIdentifier(user)} will lose admin access (effective on their next token refresh).`,
     confirmLabel: promoting ? "Make admin" : "Remove admin",
     danger: !promoting,
   });
@@ -264,6 +277,16 @@ function openDetail(user) {
       ]),
       el("dt", { text: "Name" }),
       el("dd", { text: user.displayName || "—" }),
+      // TM-372: the verified auth phone (from Firebase, via the admin list payload) — the identity
+      // of a phone-auth account. Shown in FULL here (the deliberate single-account view, same as
+      // email above); the table shows it masked. "—" when the account has no phone identity.
+      el("dt", { text: "Phone (auth)" }),
+      el("dd", {}, [
+        el("span", { text: user.phoneNumber || "—" }),
+        user.phoneNumber
+          ? el("button", { class: "tm-copy", type: "button", title: "Copy phone number", onClick: () => copyToClipboard(user.phoneNumber) }, "Copy")
+          : null,
+      ]),
       el("dt", { text: "Role" }),
       el("dd", {}, [roleBadge(user.role)]),
       el("dt", { text: "Status" }),
@@ -279,7 +302,7 @@ function openDetail(user) {
     el("h3", { class: "tm-detail-h", text: "Recent activity" }),
     el("p", { class: "tm-muted", id: "tm-activity" }, "Loading…"),
   ];
-  const { close } = modal(`User · ${user.email || user.id}`, body);
+  const { close } = modal(`User · ${displayIdentifier(user)}`, body);
   loadActivity(user);
   return close;
 }
@@ -724,23 +747,31 @@ function renderTable() {
     el("th", { scope: "col", text: "Actions" }),
   ));
 
-  const body = el("tbody", {}, pageRows.map((u) => el("tr", { class: isSelf(u) ? "tm-row-self" : null }, [
-    el("td", { class: "tm-check-cell" }, [
-      el("input", {
-        type: "checkbox",
-        class: "tm-check",
-        checked: state.selection.has(u.id),
-        "aria-label": `Select ${u.email || `user ${u.id}`}`,
-        onChange: (e) => toggleSelected(u, e.target.checked),
-      }),
-    ]),
-    el("td", {}, [el("span", { text: u.email || "—" }), isSelf(u) ? el("span", { class: "tm-you", text: "you" }) : null]),
-    el("td", { text: u.displayName || "—" }),
-    el("td", {}, [roleBadge(u.role)]),
-    el("td", {}, [statusBadge(u.enabled)]),
-    el("td", { class: "tm-muted", text: String(u.id) }),
-    el("td", { class: "tm-actions" }, rowActions(u)),
-  ])));
+  const body = el("tbody", {}, pageRows.map((u) => {
+    // TM-372: no blank rows. The Email cell falls back to the masked auth phone (or, for a row with
+    // no name either, the uid/id tail) via contactCell; the checkbox label uses the full identity
+    // chain so a phone-only account is announced and selectable, not "Select " + nothing. The
+    // fallback renders on a muted SPAN — never a `tm-muted` td, which is how the e2e specs find the
+    // ID cell (`td.tm-muted`).
+    const contact = contactCell(u);
+    return el("tr", { class: isSelf(u) ? "tm-row-self" : null }, [
+      el("td", { class: "tm-check-cell" }, [
+        el("input", {
+          type: "checkbox",
+          class: "tm-check",
+          checked: state.selection.has(u.id),
+          "aria-label": `Select ${displayIdentifier(u)}`,
+          onChange: (e) => toggleSelected(u, e.target.checked),
+        }),
+      ]),
+      el("td", {}, [el("span", { class: contact.fallback ? "tm-muted" : null, text: contact.text }), isSelf(u) ? el("span", { class: "tm-you", text: "you" }) : null]),
+      el("td", { text: u.displayName || "—" }),
+      el("td", {}, [roleBadge(u.role)]),
+      el("td", {}, [statusBadge(u.enabled)]),
+      el("td", { class: "tm-muted", text: String(u.id) }),
+      el("td", { class: "tm-actions" }, rowActions(u)),
+    ]);
+  }));
 
   shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
   syncSelectAll();
@@ -800,7 +831,7 @@ function render() {
 function buildShell(view) {
   const search = el("input", {
     type: "search",
-    placeholder: "Search email or name…",
+    placeholder: "Search name, email, phone…",
     class: "tm-input",
     "aria-label": "Search users",
     onInput: (e) => { state.search = e.target.value; state.page = 0; renderTable(); },

@@ -479,6 +479,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "phoneNumber" : {
+            "type" : "string"
+          },
           "role" : {
             "type" : "string"
           }

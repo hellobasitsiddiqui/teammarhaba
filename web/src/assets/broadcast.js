@@ -12,7 +12,10 @@
 //   - routeOptionsFrom(): the { routes: [...] } push-routes response → a safe, de-duped, sorted list
 //     of dropdown values (defensive: tolerates a bad/absent body and falls back to a caller-supplied
 //     known list, so the picker is never empty);
-//   - summariseBroadcast(): the BroadcastPushResponse → an honest one-line result summary.
+//   - summariseBroadcast(): the BroadcastPushResponse → an honest one-line result summary;
+//   - the user display-identity chain (TM-372): maskPhone / uidPrefix / displayIdentifier /
+//     contactCell / searchHaystack — how the admin table + broadcast picker name and find an account
+//     that has no email/display name (phone-auth sign-ins), so no row is ever blank or unsearchable.
 
 /** Max title length — mirrors BroadcastPushRequest.MAX_TITLE_LENGTH (fits the DB column + PushMessage). */
 export const MAX_TITLE = 200;
@@ -126,4 +129,118 @@ function skipReasons(r, skipped) {
 /** Naive English pluraliser for the small set of nouns used above (user/device). */
 function plural(n, noun) {
   return n === 1 ? noun : `${noun}s`;
+}
+
+// --- user display identity (TM-372) -----------------------------------------------------------
+//
+// A phone-auth account can have NO email and NO display name, so any admin surface that identifies
+// users only by those renders it as a blank, unfindable row. These helpers are the single fallback
+// chain every admin render/search path goes through instead:
+//
+//     displayName → email → masked auth phone → uid-prefix → "User #<db id>"
+//
+// The admin list payload carries `phoneNumber` (the verified auth phone, read live from Firebase by
+// the backend — TM-372) but NOT the Firebase uid (deliberately withheld by UserResponse), so today
+// the uid link only fires for objects that carry a `uid`/`firebaseUid` field; the guaranteed last
+// resort for admin rows is the DB id, which the table already shows in its ID column.
+
+/** Leading characters the masked phone keeps (international prefix + area, e.g. "+1650"). */
+const PHONE_MASK_HEAD = 5;
+/** Trailing digits the masked phone keeps (the part people recognise, e.g. "0100"). */
+const PHONE_MASK_TAIL = 4;
+/** Characters of a uid the uid-prefix fallback shows — enough to correlate, short enough for a cell. */
+const UID_PREFIX_LENGTH = 8;
+
+/** A trimmed string, or "" for anything that isn't a non-blank string. */
+function cleanText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** The "User #<db id>" last-resort label, or "" when there's no id to point at. */
+function idLabel(user) {
+  return user.id == null || String(user.id).trim() === "" ? "" : `User #${user.id}`;
+}
+
+/**
+ * Mask a phone number for table display: keep the head ("+1650") and the last four ("0100"), elide
+ * the middle — "+16505550100" → "+1650…0100". Recognisable to an admin without printing a column of
+ * full numbers; the raw number stays available for search (see searchHaystack) and the detail view.
+ * A number too short to elide anything is returned as-is; non-string/blank input is "".
+ */
+export function maskPhone(phone) {
+  const p = cleanText(phone);
+  if (p.length <= PHONE_MASK_HEAD + PHONE_MASK_TAIL) return p;
+  return `${p.slice(0, PHONE_MASK_HEAD)}…${p.slice(-PHONE_MASK_TAIL)}`;
+}
+
+/** The first characters of a uid + "…" (e.g. "jLz3NDaB…"); short uids pass through; non-string → "". */
+export function uidPrefix(uid) {
+  const u = cleanText(uid);
+  if (u.length <= UID_PREFIX_LENGTH) return u;
+  return `${u.slice(0, UID_PREFIX_LENGTH)}…`;
+}
+
+/**
+ * THE display identifier for a user, anywhere one is rendered in the admin surfaces (checkbox
+ * labels, confirm dialogs, the detail-modal title): the first non-blank link of the fallback chain
+ * displayName → email → masked phone → uid-prefix → "User #id". Never returns "" — a totally bare
+ * object still gets "Unknown user" rather than rendering nothing.
+ *
+ * @param {{displayName?: string, email?: string, phoneNumber?: string, uid?: string,
+ *          firebaseUid?: string, id?: number|string}} [user]
+ * @returns {string}
+ */
+export function displayIdentifier(user = {}) {
+  return (
+    cleanText(user.displayName) ||
+    cleanText(user.email) ||
+    maskPhone(user.phoneNumber) ||
+    uidPrefix(user.uid ?? user.firebaseUid) ||
+    idLabel(user) ||
+    "Unknown user"
+  );
+}
+
+/**
+ * What the admin table's Email column shows for a user — email when there is one, otherwise the
+ * best NON-NAME contact fallback so no row is ever blank end-to-end:
+ *   - masked auth phone when present (useful contact info even for named accounts);
+ *   - the uid-prefix / "User #id" tail ONLY when the account also has no display name (a named
+ *     account is already identifiable by its Name cell — repeating "User #12" there is noise);
+ *   - "—" when there's genuinely nothing to add.
+ * `fallback: true` marks a non-email value so the cell can render it muted (visually "not an email").
+ *
+ * @returns {{text: string, fallback: boolean}}
+ */
+export function contactCell(user = {}) {
+  const email = cleanText(user.email);
+  if (email) return { text: email, fallback: false };
+  const contact =
+    maskPhone(user.phoneNumber) ||
+    (cleanText(user.displayName) ? "" : uidPrefix(user.uid ?? user.firebaseUid) || idLabel(user));
+  if (contact) return { text: contact, fallback: true };
+  return { text: "—", fallback: false };
+}
+
+/**
+ * Everything the admin search box should match for a user, lowercased: name, email, the auth phone
+ * BOTH raw (so typing "+1650555" or "0100" finds it) and masked (so pasting the displayed
+ * "+1650…0100" finds it), any uid, and the "User #id" label (so a degraded row is findable by its
+ * id). The caller lowercases the query; substring match against this string.
+ *
+ * @returns {string}
+ */
+export function searchHaystack(user = {}) {
+  return [
+    user.displayName,
+    user.email,
+    user.phoneNumber,
+    maskPhone(user.phoneNumber),
+    user.uid ?? user.firebaseUid,
+    idLabel(user),
+  ]
+    .map(cleanText)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }

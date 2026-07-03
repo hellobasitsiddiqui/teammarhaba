@@ -18,6 +18,11 @@ import {
   validateBroadcast,
   routeOptionsFrom,
   summariseBroadcast,
+  maskPhone,
+  uidPrefix,
+  displayIdentifier,
+  contactCell,
+  searchHaystack,
 } from "../src/assets/broadcast.js";
 
 // --- caps mirror the backend DTO (BroadcastPushRequest) --------------------------------------
@@ -178,4 +183,84 @@ test("summariseBroadcast never shows a negative 'no device' if the rails over-co
   // no phantom "no device") — the named reasons still show.
   const s = summariseBroadcast({ sent: 1, skipped: 1, delivered: 0, skippedOptedOut: 1, skippedDisabled: 1 });
   assert.equal(s, "Sent to 1 user · 0 devices delivered · 1 skipped (1 opted out, 1 disabled)");
+});
+
+// --- user display identity (TM-372): the no-blank-rows fallback chain -------------------------
+
+// The bug's repro account: phone-auth sign-in, so no email and no display name — previously a
+// completely blank, unfindable row in the admin table and the broadcast picker.
+const PHONE_ONLY = { id: 42, email: null, displayName: null, phoneNumber: "+16505550100" };
+
+test("maskPhone keeps the prefix and last four, elides the middle", () => {
+  assert.equal(maskPhone("+16505550100"), "+1650…0100"); // the ticket's example account
+  assert.equal(maskPhone("+447700900123"), "+4477…0123");
+});
+
+test("maskPhone leaves a number too short to elide as-is, and is '' for garbage", () => {
+  assert.equal(maskPhone("+1650"), "+1650"); // nothing sensible to hide
+  assert.equal(maskPhone("  +16505550100  "), "+1650…0100"); // trims first
+  assert.equal(maskPhone(""), "");
+  assert.equal(maskPhone(null), "");
+  assert.equal(maskPhone(16505550100), ""); // numbers are not phone strings on the wire
+});
+
+test("uidPrefix truncates a long uid to 8 chars + ellipsis, passes short ones through", () => {
+  assert.equal(uidPrefix("jLz3NDaBcDeFgH"), "jLz3NDaB…");
+  assert.equal(uidPrefix("shortId"), "shortId");
+  assert.equal(uidPrefix(undefined), "");
+});
+
+test("displayIdentifier walks the chain: displayName → email → masked phone → uid → User #id", () => {
+  const full = { displayName: "Ayesha", email: "a@x.test", phoneNumber: "+16505550100", id: 1 };
+  assert.equal(displayIdentifier(full), "Ayesha");
+  assert.equal(displayIdentifier({ ...full, displayName: null }), "a@x.test");
+  assert.equal(displayIdentifier(PHONE_ONLY), "+1650…0100"); // the TM-372 repro is now identifiable
+  assert.equal(displayIdentifier({ firebaseUid: "jLz3NDaBcDeF", id: 7 }), "jLz3NDaB…");
+  assert.equal(displayIdentifier({ uid: "jLz3NDaBcDeF", id: 7 }), "jLz3NDaB…"); // either uid key
+  assert.equal(displayIdentifier({ id: 7 }), "User #7");
+});
+
+test("displayIdentifier never returns blank, and skips whitespace-only links", () => {
+  assert.equal(displayIdentifier({}), "Unknown user");
+  assert.equal(displayIdentifier(), "Unknown user");
+  assert.equal(displayIdentifier({ displayName: "   ", email: "a@x.test" }), "a@x.test");
+});
+
+test("contactCell shows the email plainly when there is one", () => {
+  assert.deepEqual(contactCell({ email: "a@x.test", id: 1 }), { text: "a@x.test", fallback: false });
+});
+
+test("contactCell falls back to the masked phone for a phone-only account", () => {
+  assert.deepEqual(contactCell(PHONE_ONLY), { text: "+1650…0100", fallback: true });
+  // ...even when the account has a name — the phone is still useful contact info.
+  assert.deepEqual(
+    contactCell({ displayName: "Ayesha", phoneNumber: "+16505550100", id: 3 }),
+    { text: "+1650…0100", fallback: true },
+  );
+});
+
+test("contactCell uses the uid/id tail only when the row has no name to identify it", () => {
+  // Named, no email/phone: the Name cell already identifies the row — "—" beats "User #12" noise.
+  assert.deepEqual(contactCell({ displayName: "Ayesha", id: 12 }), { text: "—", fallback: false });
+  // Nameless with nothing else: the row MUST still say something.
+  assert.deepEqual(contactCell({ id: 12 }), { text: "User #12", fallback: true });
+  assert.deepEqual(contactCell({ firebaseUid: "jLz3NDaBcDeF", id: 12 }), { text: "jLz3NDaB…", fallback: true });
+});
+
+test("contactCell never yields a blank cell even for an empty object", () => {
+  assert.deepEqual(contactCell({}), { text: "—", fallback: false });
+});
+
+test("searchHaystack finds a phone-only account by raw digits, masked form, or id", () => {
+  const hay = searchHaystack(PHONE_ONLY);
+  assert.ok(hay.includes("+16505550100")); // raw: typing "+1650555" or "0100" matches
+  assert.ok(hay.includes("+1650…0100")); // masked: pasting the displayed identifier matches
+  assert.ok(hay.includes("user #42")); // id: "42" / "#42" find the degraded row
+});
+
+test("searchHaystack still matches name and email, lowercased for the search box", () => {
+  const hay = searchHaystack({ displayName: "Ayesha Khan", email: "Ayesha@X.Test", id: 2 });
+  assert.ok(hay.includes("ayesha khan"));
+  assert.ok(hay.includes("ayesha@x.test"));
+  assert.equal(searchHaystack({}), "");
 });

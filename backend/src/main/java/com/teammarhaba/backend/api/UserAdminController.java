@@ -2,6 +2,7 @@ package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.notify.PushRoutes;
+import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserAdminService;
 import com.teammarhaba.backend.web.BadRequestException;
 import jakarta.validation.Valid;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -68,12 +70,18 @@ public class UserAdminController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "id,asc") String sort) {
-        return PagedResponse.from(adminService.list(toPageable(page, size, sort)), UserResponse::from);
+        Page<User> accounts = adminService.list(toPageable(page, size, sort));
+        // TM-372: enrich the page with the verified auth phone numbers (one batched Firebase read,
+        // best-effort) so a phone-auth account with no email/name renders identifiably, not blank.
+        Map<String, String> authPhones = adminService.authPhonesByUid(
+                accounts.getContent().stream().map(User::getFirebaseUid).toList());
+        return PagedResponse.from(accounts, u -> UserResponse.from(u, authPhones.get(u.getFirebaseUid())));
     }
 
     @GetMapping("/{id}")
     public UserResponse get(@PathVariable long id) {
-        return UserResponse.from(adminService.get(id));
+        User user = adminService.get(id);
+        return UserResponse.from(user, adminService.authPhoneFor(user.getFirebaseUid()));
     }
 
     @PatchMapping("/{id}")
@@ -81,7 +89,10 @@ public class UserAdminController {
             @PathVariable long id,
             @RequestBody @Valid UpdateUserRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
-        return UserResponse.from(adminService.update(id, request.enabled(), request.role(), caller.uid()));
+        User user = adminService.update(id, request.enabled(), request.role(), caller.uid());
+        // Enriched like list/get: the console replaces its row with this body, so a PATCH must not
+        // silently wipe the phone identifier off a phone-only account's row (TM-372).
+        return UserResponse.from(user, adminService.authPhoneFor(user.getFirebaseUid()));
     }
 
     /**

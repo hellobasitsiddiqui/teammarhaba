@@ -1,6 +1,11 @@
 package com.teammarhaba.backend.user;
 
+import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseAuthException;
+import com.google.firebase.auth.GetUsersResult;
+import com.google.firebase.auth.UidIdentifier;
+import com.google.firebase.auth.UserIdentifier;
+import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
@@ -10,9 +15,14 @@ import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -33,6 +43,9 @@ import org.springframework.transaction.annotation.Transactional;
  *       a claim-write failure rolls the transaction back rather than leaving the two out of sync.</li>
  *   <li><b>Audited</b> — every effective enable/disable or role change appends one immutable audit
  *       event (TM-137) in the same transaction as the change, so it's never silently un-audited.</li>
+ *   <li><b>Auth-phone enrichment (TM-372)</b> — {@link #authPhonesByUid} reads the verified auth
+ *       phone numbers live from Firebase (batched, best-effort, never stored) so the console can
+ *       identify phone-auth accounts that have no email/display name instead of showing blank rows.</li>
  * </ul>
  */
 @Service
@@ -43,20 +56,28 @@ public class UserAdminService {
     /** Audit {@code target_type} for account actions — the kind of thing acted on. */
     private static final String TARGET_TYPE = "User";
 
+    /** The Admin SDK's cap on identifiers per {@code getUsers} batch lookup. */
+    private static final int FIREBASE_LOOKUP_BATCH = 100;
+
     private final UserRepository users;
     private final RoleService roleService;
     private final AuditService audit;
     private final PushNotificationService push;
+    private final ObjectProvider<FirebaseAuth> firebaseAuth;
 
     public UserAdminService(
             UserRepository users,
             RoleService roleService,
             AuditService audit,
-            PushNotificationService push) {
+            PushNotificationService push,
+            ObjectProvider<FirebaseAuth> firebaseAuth) {
         this.users = users;
         this.roleService = roleService;
         this.audit = audit;
         this.push = push;
+        // Lazily resolved, like FirebaseAccountStateService — no Admin SDK bean (dev/test/CI without
+        // credentials) must not stop this service from constructing or the console from listing.
+        this.firebaseAuth = firebaseAuth;
     }
 
     /** A page of active accounts. Soft-deleted rows are excluded by the entity's {@code @SQLRestriction}. */
@@ -69,6 +90,76 @@ public class UserAdminService {
     @Transactional(readOnly = true)
     public User get(long id) {
         return users.findById(id).orElseThrow(UserAdminService::notFound);
+    }
+
+    /**
+     * The verified auth phone numbers for {@code firebaseUids}, keyed by uid, read <strong>live</strong>
+     * from Firebase (TM-372). A phone-auth account often has no email and no display name, so without
+     * this the admin console renders it as a blank, unfindable row; the auth phone is the identifier
+     * that makes it manageable. We never store it — Firebase stays the source of truth for auth
+     * identity, the same rule {@link com.teammarhaba.backend.auth.FirebaseAccountStateService} follows.
+     * (The user-editable profile {@code phone} column is a different, unrelated field.)
+     *
+     * <p><strong>Cost:</strong> one batched Admin-SDK {@code getUsers} round trip per
+     * {@value #FIREBASE_LOOKUP_BATCH} accounts — a single call for a full admin page (the page size
+     * cap equals the SDK's batch cap).
+     *
+     * <p><strong>Best-effort by design:</strong> no Admin SDK bean (dev/test/CI without credentials),
+     * an SDK failure, an unknown uid, or an account with no phone identity all just leave entries out
+     * of the map — never an exception, so an identity-provider blip degrades the console's phone
+     * column instead of 500-ing the user list. Callers treat a missing key as "unknown".
+     */
+    public Map<String, String> authPhonesByUid(Collection<String> firebaseUids) {
+        if (firebaseUids == null || firebaseUids.isEmpty()) {
+            return Map.of();
+        }
+        FirebaseAuth auth;
+        try {
+            // getIfAvailable() returns null only when NO bean definition exists; when the lazy
+            // definition exists but creation fails (e.g. no ADC in CI), it THROWS — same trap
+            // FirebaseAccountStateService guards. Degrade to "no enrichment", never a 500.
+            auth = firebaseAuth.getIfAvailable();
+        } catch (Exception ex) {
+            log.warn("FirebaseAuth unavailable for auth-phone enrichment — rows fall back to their id.", ex);
+            return Map.of();
+        }
+        if (auth == null) {
+            return Map.of();
+        }
+        List<UserIdentifier> identifiers = firebaseUids.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .map(uid -> (UserIdentifier) new UidIdentifier(uid))
+                .toList();
+        Map<String, String> phones = new HashMap<>();
+        for (int i = 0; i < identifiers.size(); i += FIREBASE_LOOKUP_BATCH) {
+            List<UserIdentifier> chunk =
+                    identifiers.subList(i, Math.min(i + FIREBASE_LOOKUP_BATCH, identifiers.size()));
+            try {
+                GetUsersResult result = auth.getUsers(chunk);
+                if (result == null) {
+                    continue; // defensive: an unstubbed test double — treat as "nothing found"
+                }
+                for (UserRecord record : result.getUsers()) {
+                    if (record.getPhoneNumber() != null) {
+                        phones.put(record.getUid(), record.getPhoneNumber());
+                    }
+                }
+            } catch (Exception ex) {
+                // Degrade, don't fail the console: affected rows fall back to their DB id in the UI.
+                log.warn(
+                        "Could not read auth phone numbers from Firebase for {} account(s) — those rows "
+                                + "will fall back to their id.",
+                        chunk.size(),
+                        ex);
+            }
+        }
+        return phones;
+    }
+
+    /** Single-account variant of {@link #authPhonesByUid} (get/PATCH responses); null when unknown. */
+    public String authPhoneFor(String firebaseUid) {
+        return firebaseUid == null ? null : authPhonesByUid(List.of(firebaseUid)).get(firebaseUid);
     }
 
     /**

@@ -1,6 +1,9 @@
 package com.teammarhaba.backend.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -9,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.GetUsersResult;
+import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.notify.PushRoutes;
@@ -16,6 +21,7 @@ import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -184,5 +190,72 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
     void pushRouteAllowListRejectsAnonymous() throws Exception {
         mockMvc.perform(get("/api/v1/admin/users/push-routes"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // --- auth-phone enrichment (TM-372): phone-only accounts render identifiably, not blank ---
+
+    /** Stub the mocked Admin SDK so the batch lookup reports one account with a phone identity. */
+    private void firebaseHasPhone(String uid, String phone) throws Exception {
+        UserRecord record = mock(UserRecord.class);
+        when(record.getUid()).thenReturn(uid);
+        when(record.getPhoneNumber()).thenReturn(phone);
+        GetUsersResult result = mock(GetUsersResult.class);
+        when(result.getUsers()).thenReturn(Set.of(record));
+        when(firebaseAuth.getUsers(any())).thenReturn(result);
+    }
+
+    @Test
+    void listCarriesTheAuthPhoneForAPhoneOnlyAccount() throws Exception {
+        // The TM-372 repro: a phone-auth account with NO email and NO display name — previously an
+        // unidentifiable blank row. The admin list now carries its verified auth phone from Firebase.
+        long id = users.saveAndFlush(new User("phone-only-uid", null, null)).getId();
+        firebaseHasPhone("phone-only-uid", "+16505550100");
+
+        // Newest-first so the just-seeded row is on page 0 regardless of what other tests seeded.
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("size", "100")
+                        .param("sort", "id,desc")
+                        .with(admin("admin-phone")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].phoneNumber").value("+16505550100"));
+    }
+
+    @Test
+    void singleUserReadCarriesTheAuthPhone() throws Exception {
+        long id = users.saveAndFlush(new User("phone-only-get-uid", null, null)).getId();
+        firebaseHasPhone("phone-only-get-uid", "+16505550100");
+
+        mockMvc.perform(get("/api/v1/admin/users/{id}", id).with(admin("admin-phone-get")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phoneNumber").value("+16505550100"));
+    }
+
+    @Test
+    void phoneNumberIsNullWhenFirebaseHasNothingToSay() throws Exception {
+        // The unstubbed @MockBean returns null from getUsers — the enrichment's defensive path: the
+        // response still succeeds, phoneNumber is just null (the UI then falls back to the DB id).
+        long id = seed("no-phone");
+
+        mockMvc.perform(get("/api/v1/admin/users/{id}", id).with(admin("admin-no-phone")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phoneNumber").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void patchResponseKeepsTheAuthPhoneSoTheConsoleRowStaysIdentifiable() throws Exception {
+        // The console replaces its row with the PATCH body (admin.js), so disabling a phone-only
+        // account must return the phone identifier too — and proves such an account is manageable.
+        long id = users.saveAndFlush(new User("phone-only-patch-uid", null, null)).getId();
+        firebaseHasPhone("phone-only-patch-uid", "+16505550100");
+
+        mockMvc.perform(patch("/api/v1/admin/users/{id}", id)
+                        .with(admin("admin-phone-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.phoneNumber").value("+16505550100"));
+
+        assertThat(users.findById(id).orElseThrow().isEnabled()).isFalse();
     }
 }
