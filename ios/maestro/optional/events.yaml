@@ -1,0 +1,137 @@
+# TM-401 — Events surface RENDER smoke (Maestro, iOS Simulator) — OPTIONAL / BEST-EFFORT (NON-GATING)
+#
+# ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+# │ THIS FLOW IS NOT PART OF THE iOS SIMULATOR GATE. It lives under ios/maestro/optional/ so          │
+# │ ci-run.sh runs it BEST-EFFORT — its pass/fail NEVER changes the green/red of the run. The GATE    │
+# │ is ../golden-path.yaml (launch + static login render). See ../README.md "Scope & Simulator        │
+# │ limitation" → the Events note.                                                                     │
+# └───────────────────────────────────────────────────────────────────────────────────────────────┘
+#
+# WHAT IT COVERS — the Events surface on iOS (surface 4 of 4, TM-390 / TM-396):
+#   the native Capacitor shell's WKWebView renders the user Events UI — the #/events BROWSE list and a
+#   #/events/{id} DETAIL — asserted via the STATIC view text Maestro-on-iOS can reliably see, with a
+#   screenshot at each step as living evidence.
+#     • Browse: the "Events" header headerBar() always paints, then EITHER the empty-state copy
+#       ("No upcoming events", events.js renderList → data-testid "events-empty") OR a populated card
+#       whose going badge opens the detail.
+#     • Detail: the "← Events" back-link (detail-specific) that headerBar("Event", { back }) renders.
+#   RENDER ONLY. The RSVP / waitlist / offer-cascade CLAIM journey logic is deliberately NOT driven
+#   here — it stays covered by the web Playwright golden-path (same web code this WebView loads,
+#   TM-341 / TM-396) and is walked on a real Simulator by the human manual test (the TM-355 analogue),
+#   because Maestro-on-iOS can't reliably drive dynamic WKWebView DOM (the TM-354 lesson).
+#
+# ── WHY OPTIONAL / NON-GATING, and NOT a step in ../golden-path.yaml (read before "promoting" it) ───
+# The events routes are AUTH-PROTECTED: web/src/assets/router.js `isProtected()` returns true for
+# `isEventsRoute()` (#/events and #/events/{id}), so a signed-OUT user is bounced to #/login and the
+# events views never paint. Reaching them needs sign-in — and on the iOS Simulator that sign-in is the
+# very dynamic ES-module reveal Maestro can't reliably drive ("Try another way" → #sms-send-btn, see
+# ./login-sms.yaml + ../golden-path.yaml headers). So there is NO signed-out static events text the
+# GATE could hard-assert; forcing one there would be a faked pass, which this lane refuses to do.
+# Instead this flow reuses ./login-sms.yaml's best-effort sign-in and renders events behind it: on the
+# Simulator it fails at that sign-in (logged, non-gating) exactly like ./journey.yaml, and it goes
+# GREEN on a physical device / once Maestro-iOS WKWebView interaction improves. Documented aspiration,
+# no faked pass — the honest same posture as the rest of the optional/ tier.
+#
+# Auth: Firebase fixed TEST PHONE NUMBER via ./login-sms.yaml (carries the iOS reCAPTCHA-bypass
+# launch-arg injection). It is a REUSED account, so the first-login ONBOARDING (TM-250) and TERMS
+# (TM-170) gates are GUARDED — completed when they fire (fresh account), skipped otherwise — exactly
+# as in ./journey.yaml, landing on #/home either way. Onboarding must clear before the nav Events link
+# (#nav-events, un-hidden only for a signed-in ONBOARDED user) appears.
+appId: app.teammarhaba.webview
+---
+# ── STEP 1: sign in via the SMS test-number happy path (reuses ./login-sms.yaml — it carries the iOS
+#    e2e-flag launch arg so reCAPTCHA is bypassed). Lands signed-in on #/home. ───────────────────────
+- runFlow: login-sms.yaml
+- assertVisible:
+    id: "auth-signed-in"
+- takeScreenshot: 01-signed-in
+
+# ── STEP 2: first-login ONBOARDING gate (TM-250) — GUARDED. The reused test number is likely already
+#    onboarded, so complete it only if it fires (mirrors ./journey.yaml). It must clear before the nav
+#    Events link un-hides. ───────────────────────────────────────────────────────────────────────────
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-view"
+    commands:
+      - assertVisible:
+          id: "onboarding-form"
+      - tapOn:
+          id: "onboarding-name"
+      - inputText: "Golden Tester"
+      - tapOn:
+          id: "onboarding-location"
+      - inputText: "Goldenville"
+      - tapOn:
+          id: "onboarding-age"
+      - inputText: "29"
+      - hideKeyboard
+      - tapOn: "Continue"   # onboarding-form submit; label best-effort within the guarded block
+
+# ── STEP 3: TERMS gate (TM-170) — GUARDED, same rationale. ─────────────────────────────────────────
+- runFlow:
+    when:
+      visible:
+        id: "terms-view"
+    commands:
+      - assertVisible:
+          id: "terms-version"
+      - tapOn:
+          id: "terms-accept"
+
+# Past both gates → signed-in on #/home.
+- assertVisible:
+    id: "auth-signed-in"
+
+# ── STEP 4: open the EVENTS BROWSE list from the nav. The account nav is collapsed behind the
+#    hamburger at phone width, so open it (optional / no-op when already open) then tap Events. ───────
+- tapOn:
+    id: "nav-toggle"
+    optional: true
+- tapOn:
+    id: "nav-events"
+# The browse view builds after a GET /api/v1/events round-trip — slower on the Simulator than Maestro's
+# default 7s window. Wait on the (static) "Events" <h2> header headerBar() always renders (present in
+# BOTH the empty and populated states), then wait for the list to SETTLE (the "Loading…" line gone) so
+# the branch below sees the resolved state, then screenshot the browse view as living evidence.
+- extendedWaitUntil:
+    visible: "Events"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible: "Loading"
+    timeout: 30000
+- takeScreenshot: 02-events-browse
+
+# ── STEP 5a: EMPTY-STATE branch — GUARDED. When the public list is empty, assert the empty-state
+#    static copy renders (events.js renderList → "No upcoming events"). ─────────────────────────────
+- runFlow:
+    when:
+      visible: "No upcoming events"
+    commands:
+      - assertVisible: "No upcoming events"
+      - takeScreenshot: 03-events-empty-state
+
+# ── STEP 5b: DETAIL branch — GUARDED on a POPULATED list (a card's going badge is always present:
+#    "Be the first to go" at zero RSVPs, else "{N} going"). Tapping it navigates into the card's
+#    #/events/{id} detail. Assert the detail chrome — the "← Events" back-link headerBar("Event",{back})
+#    renders (detail-specific) — then screenshot. No RSVP interaction (journey logic → web Playwright /
+#    the TM-355 manual test). ─────────────────────────────────────────────────────────────────────────
+- runFlow:
+    when:
+      visible: "(Be the first to go|[0-9]+ going)"
+    commands:
+      - tapOn:
+          text: "(Be the first to go|[0-9]+ going)"
+      - extendedWaitUntil:
+          visible: "← Events"
+          timeout: 30000
+      - takeScreenshot: 04-events-detail
+      # Back to the browse list, leaving a known state for any following flow (ci-run.sh also
+      # reinstalls between flows, so this is only tidiness).
+      - tapOn:
+          text: "← Events"
+          optional: true
+
+# ── DONE: the iOS shell's WKWebView rendered the Events BROWSE list and (when populated) an event
+#    DETAIL on the Simulator, captured across 01–04. Non-gating by design (behind the best-effort
+#    sign-in); RSVP/waitlist/claim journey logic is covered by web Playwright + the TM-355 manual test.

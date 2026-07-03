@@ -38,6 +38,7 @@ So the lane is split into two tiers, **by directory**, and `ci-run.sh` treats th
 |---|---|---|---|---|
 | **GATE** | `ios/maestro/*.yaml` | **YES — must pass** | [`golden-path.yaml`](./golden-path.yaml) | **The iOS automated-test gate.** Launch the shell with `-tmE2EPhoneTest`, then **hard-assert the WKWebView rendered the hosted SPA** via the STATIC login text Maestro can see (`TeamMarhaba`, the tagline, `Sign in`, `Email me a code`, `Try another way`), screenshotting each. Proves the iOS-specific risk: the native shell loads + renders the shared web app. |
 | **OPTIONAL** | `ios/maestro/optional/*.yaml` | **NO — best-effort, never fatal** | [`optional/journey.yaml`](./optional/journey.yaml) | The full authenticated journey: sign in → *(onboarding)* → *(terms)* → profile edit → avatar (**gallery**) → home → help/visual-guide → sign out. Mirrors [`web/e2e/tests/golden-path.spec.mjs`](../../web/e2e/tests/golden-path.spec.mjs). Reuses `login-sms.yaml`. |
+| **OPTIONAL** | `ios/maestro/optional/*.yaml` | **NO — best-effort, never fatal** | [`optional/events.yaml`](./optional/events.yaml) | The Events surface (TM-401 / TM-396): sign in → browse `#/events` (assert the `Events` header + empty-state `No upcoming events`, or open a card) → event `#/events/{id}` detail (`← Events` back-link). **Render only** — RSVP/waitlist/claim logic stays on web Playwright. Reuses `login-sms.yaml`; events routes are auth-gated, so this can't live in the gate (see below). |
 | **OPTIONAL** | `ios/maestro/optional/*.yaml` | **NO — best-effort, never fatal** | [`optional/login-sms.yaml`](./optional/login-sms.yaml) | SMS happy-path via the Firebase test number `+16505550100` / `123456`. The subflow `journey.yaml`/`plugins.yaml` reuse; carries the **iOS e2e-flag launch-arg injection** (below). |
 | **OPTIONAL** | `ios/maestro/optional/*.yaml` | **NO — best-effort, never fatal** | [`optional/plugins.yaml`](./optional/plugins.yaml) | Per-plugin Simulator smokes vs `#/diagnostics` + `#/profile`: geolocation, Face-ID app-lock, app-lock resume, push deep-link. |
 
@@ -53,6 +54,19 @@ Simulator. **Where the journey logic is actually covered on CI:** the **web Play
 ([`web/e2e/tests/golden-path.spec.mjs`](../../web/e2e/tests/golden-path.spec.mjs), **TM-341**) exercises
 the SAME journey against the SAME web code this WebView loads. So scoping the iOS gate to launch+render
 loses **no** real coverage — it just stops asserting an interaction Maestro-iOS can't reliably perform.
+
+**Events surface (TM-401) — same posture, and why it's not in the GATE.** The user Events UI (`#/events`
+browse + `#/events/{id}` detail, TM-396) is **auth-protected**: `web/src/assets/router.js` `isProtected()`
+returns true for `isEventsRoute()`, so a signed-out user is bounced to `#/login` and the events views
+never paint. There is therefore **no signed-out static events text the GATE could hard-assert**, and
+reaching events needs the sign-in Maestro-iOS can't reliably drive. So [`optional/events.yaml`](./optional/events.yaml)
+renders events **behind the best-effort sign-in** — render only (the `Events` browse header, the
+empty-state, and a card → the `← Events` detail back-link), screenshotting each — and is **non-gating**,
+exactly like the journey. The RSVP / waitlist / claim **journey logic** is covered on CI by the web
+Playwright suite (same web code, TM-396) and walked on a real Simulator by the human manual test
+([TM-355]); the reliable iOS gate stays the launch+render smoke in [`golden-path.yaml`](./golden-path.yaml).
+Its screenshots (`01-signed-in` … `04-events-detail`) are digit-prefixed so `ci-run.sh`'s per-flow
+harvest (TM-371) picks them up into `screenshots-events/` with no `ci-run.sh` change.
 
 > **App bug vs Maestro limitation?** The evidence points to a **Maestro-iOS/WKWebView limitation**, not
 > an app defect: the same `login.js` ES-module handler drives the identical reveal reliably on Android's

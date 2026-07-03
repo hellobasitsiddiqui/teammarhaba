@@ -383,7 +383,7 @@ jobs:
   # ios/maestro/golden-path.yaml launches the shell and hard-asserts the hosted SPA rendered via the
   # STATIC login text Maestro-on-iOS can see (TeamMarhaba / tagline / Sign in / Email me a code / Try
   # another way), screenshotting each. The authenticated JOURNEY + per-plugin flows live under
-  # ios/maestro/optional/ (journey.yaml, login-sms.yaml, plugins.yaml) and ci-run.sh runs them
+  # ios/maestro/optional/ (journey.yaml, events.yaml, login-sms.yaml, plugins.yaml) and ci-run.sh runs them
   # BEST-EFFORT — non-gating — because they exercise dynamic WKWebView DOM interaction (e.g. the "Try
   # another way" → #sms-send-btn reveal driven by login.js's ES-module handler) that Maestro does NOT
   # reliably drive on the iOS Simulator (known Maestro-iOS/WKWebView limit; Android drives it fine). That
