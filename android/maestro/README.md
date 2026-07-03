@@ -20,6 +20,7 @@ shell, the WebView bridge, and the live web UI — in a way the web-only Playwri
 | `camera.yaml` | profile → tap avatar → native camera/photos picker prompt | Best-effort; asserts the picker/permission UI. |
 | `biometric.yaml` | profile → flip app-lock → BiometricPrompt | Best-effort; needs an enrolled fingerprint to fully complete. |
 | `permissions.yaml` | push (POST_NOTIFICATIONS on login) + location (GPS) prompts | Best-effort; asserts + grants the OS dialogs. |
+| `events.yaml` | Events → browse list → open detail → RSVP → confirm → land GOING → un-RSVP (TM-399) | **Suite-scoped** (`suite=events`, kept out of the default smoke set). Needs a **seeded public event** + drives a best-effort reminder push receipt — see below. |
 
 Every flow asserts its end state (signed-in home, or the prompt UI) and calls `takeScreenshot` at the
 key steps. `warm-restart`, `camera`, `biometric`, and `permissions` reuse `login-sms.yaml` as a
@@ -167,3 +168,72 @@ times out — rather than hanging silently.
 - **permissions** — the push (POST_NOTIFICATIONS) dialog only appears on **API 33+**; on older API
   levels it's auto-granted at install (no dialog). The flow guards these with `optional: true` so it
   never hard-fails on absent or locale-different OS chrome.
+
+## Events journey (TM-399) — selection, data precondition, reminder push receipt
+
+`events.yaml` walks the merged user Events UI (TM-396): **sign in → open Events → browse the list →
+open an event detail → RSVP → confirm ("I'm going") → land GOING (✓ Going + "we'll remind you the day
+before") → un-RSVP**. It reuses `login-sms.yaml` as the sign-in subflow (same e2e-flag contract).
+
+**Selector note.** The TM-396 UI tags interactive nodes with `data-testid` (`event-card`,
+`event-primary-action`, `event-mystate`, `event-remind-note`…), not DOM `id`s — and Maestro's `id:`
+matches a DOM `id`, not `data-testid`. So the flow targets those elements by their **stable tested
+copy** (from `web/src/assets/events-core.js`) and annotates each step with the matching `data-testid`.
+`text:` is an **anchored regex**, so strings with regex metacharacters (`?`, the 🎉 emoji) are matched
+with a tolerant `.*…*` pattern.
+
+**How to run it.** It's **suite-scoped** — the default/all/nightly android set (`login-sms`,
+`warm-restart`, `camera`, `biometric`, `permissions`) deliberately **excludes** it (it carries a data
+precondition), so `mobile-e2e.yml` is unchanged. Select it explicitly:
+
+```bash
+gh workflow run test-suite.yml -f suite=events -f surface=android -f jira_ticket=TM-399
+# locally: bash android/maestro/ci-run.sh <debug.apk> events
+#   or a single flow (seed first): maestro test android/maestro/events.yaml -e EVENT_HEADING="…"
+```
+
+### Events data precondition (the honest e2e contract)
+
+The flow RSVPs to a **real, public, upcoming event** identified by its heading (env `EVENT_HEADING`,
+default `TeamMarhaba e2e coffee morning`). Events are **admin-created** (no public seed path), so — the
+same way `login-sms.yaml` assumes the injected reCAPTCHA flag + the deployed SPA — this flow assumes
+that event exists; if it doesn't, the browse assertion fails **loud** (not a hang). The seeded event
+should have **no age band** (so the TM-415 age gate is a no-op) and start **> 60 min out** (outside the
+TM-413 booking cutoff, so a fresh RSVP lands GOING). Two ways to satisfy it:
+
+- **Seed hook (CI):** set `EVENTS_SEED_CMD` — `ci-run.sh` runs it before the flow (e.g. a `curl` to
+  `POST /api/v1/admin/events` with an admin token, or `gh workflow run` a seeding job). It stays out of
+  this repo because it needs an **admin** credential (the human-secret split); the harness only invokes
+  the hook you give it.
+- **Pre-seed once:** create one public demo event with that heading via the admin Events console — a
+  one-time action, like registering the Firebase test number.
+
+### Events reminder / lifecycle push receipt (best-effort, non-gating — the TM-368 method)
+
+Pure Maestro can't register an FCM token, trigger a send, or read the tray, so "a real
+reminder/lifecycle push was **received** on the emulator" is a best-effort **harness** step
+(`ci-run.sh` → `verify_reminder_push`), run right after `events.yaml` against its still-signed-in
+session. It applies the TM-368 method (a `google_apis` emulator receives real FCM):
+
+1. Grant `POST_NOTIFICATIONS` so `push.js` registers a real FCM token.
+2. Over CDP (`push-receipt.mjs`, same bridge as `inject-e2e-flag.mjs`) drive the app's own client:
+   opt into push (`api.js` `updateMe({notificationPref:"BOTH"})`) + read the device token
+   (`push.js` `getCurrentToken()`) — token presence proves the device is targetable.
+3. **Trigger** the push — a reminder needs the wall-clock scheduler; a lifecycle push is
+   `POST /api/v1/admin/events/{id}/cancel`; `POST /api/v1/admin/users/{id}/test-push` is the generic
+   real-FCM send. All need an **admin** send (or the 24h/1h scheduler), so the trigger is
+   environment-provided: set `EVENTS_PUSH_TRIGGER_CMD` to run one.
+4. Capture evidence: `dumpsys notification` + a tray screenshot into `maestro-artifacts/`
+   (`push-dumpsys.txt`, `push-tray.png`).
+
+It **never changes the run's pass/fail** — emulator FCM delivery + the admin/wall-clock trigger are
+outside the flow's control, so this is advisory evidence (the same posture as the iOS `optional/`
+tier). The deterministic in-app journey (browse → RSVP → un-RSVP) is the gating part.
+
+### Screenshot harvest (TM-371)
+
+`ci-run.sh` now **harvests** each flow's `takeScreenshot` PNGs from `~/.maestro/tests/<ts>/` into
+`maestro-artifacts/screenshots-<flow>/` after every flow (mirroring `ios/maestro/ci-run.sh`), so the
+Jira evidence zip — built from `maestro-artifacts/` only — carries the **full per-step set**, not just
+whatever the GH artifact's `~/.maestro/tests` path caught. This closes the android side of the
+recurring harvest gotcha.
