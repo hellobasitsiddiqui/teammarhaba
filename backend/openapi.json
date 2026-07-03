@@ -498,6 +498,10 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "heading" : {
             "type" : "string"
           },
@@ -546,6 +550,10 @@
           "visibilityStart" : {
             "format" : "date-time",
             "type" : "string"
+          },
+          "waitlistCount" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"

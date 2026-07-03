@@ -10,11 +10,13 @@ import com.teammarhaba.backend.web.ResourceNotFoundException;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -49,6 +51,7 @@ public class EventAdminService {
     static final String TARGET_EVENT = "Event";
 
     private final EventRepository events;
+    private final EventAttendanceRepository attendance;
     private final UserService users;
     private final AuditService audit;
     private final ApplicationEventPublisher lifecycle;
@@ -56,15 +59,25 @@ public class EventAdminService {
 
     public EventAdminService(
             EventRepository events,
+            EventAttendanceRepository attendance,
             UserService users,
             AuditService audit,
             ApplicationEventPublisher lifecycle,
             EntityManager entityManager) {
         this.events = events;
+        this.attendance = attendance;
         this.users = users;
         this.audit = audit;
         this.lifecycle = lifecycle;
         this.entityManager = entityManager;
+    }
+
+    /**
+     * Going / waitlist tallies for one event — the counts the admin console renders per row (TM-430).
+     * A record so both the single-GET and the batch listing return the same shape.
+     */
+    public record EventCounts(long going, long waitlist) {
+        public static final EventCounts ZERO = new EventCounts(0, 0);
     }
 
     /**
@@ -82,6 +95,46 @@ public class EventAdminService {
     @Transactional(readOnly = true)
     public Event get(long id) {
         return events.findById(id).orElseThrow(EventAdminService::notFound);
+    }
+
+    /**
+     * Going / waitlist counts for many events in ONE query (TM-430) — the listing's per-row badges
+     * without an N+1, mirroring how {@link EventQueryService} counts the public side. States with no
+     * rows simply don't appear in the tally, so an event with no attendance maps to
+     * {@link EventCounts#ZERO}. An empty id set short-circuits (no query, empty map).
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, EventCounts> attendanceCounts(Collection<Long> eventIds) {
+        if (eventIds.isEmpty()) {
+            return Map.of();
+        }
+        // One grouped tally (event, state) for the whole page, then partition by state.
+        List<EventAttendanceRepository.AttendanceTally> tallies = attendance.tallyByEventIds(eventIds);
+        Map<Long, Long> going = tallyState(tallies, AttendanceState.GOING);
+        Map<Long, Long> waitlisted = tallyState(tallies, AttendanceState.WAITLISTED);
+        return eventIds.stream()
+                .distinct()
+                .collect(Collectors.toMap(
+                        id -> id,
+                        id -> new EventCounts(going.getOrDefault(id, 0L), waitlisted.getOrDefault(id, 0L))));
+    }
+
+    /** Going / waitlist counts for a single event (TM-430) — the single-GET edit-load path. */
+    @Transactional(readOnly = true)
+    public EventCounts attendanceCounts(long eventId) {
+        return new EventCounts(
+                attendance.countByEventIdAndState(eventId, AttendanceState.GOING),
+                attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED));
+    }
+
+    /** One state's per-event totals from an already-fetched grouped tally (mirrors {@code EventQueryService}). */
+    private static Map<Long, Long> tallyState(
+            List<EventAttendanceRepository.AttendanceTally> tallies, AttendanceState state) {
+        return tallies.stream()
+                .filter(t -> t.getState() == state)
+                .collect(Collectors.toMap(
+                        EventAttendanceRepository.AttendanceTally::getEventId,
+                        EventAttendanceRepository.AttendanceTally::getTotal));
     }
 
     /**

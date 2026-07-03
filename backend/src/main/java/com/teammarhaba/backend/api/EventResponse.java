@@ -43,6 +43,9 @@ import java.time.Instant;
  * @param createdBy                    {@code users.id} of the creating admin
  * @param createdAt                    DB-authoritative creation instant
  * @param updatedAt                    last mutation instant
+ * @param goingCount                   number of {@code GOING} attendees ({@code null} = not computed
+ *     on this path — the create/cancel responses, which aren't a count display) — TM-430
+ * @param waitlistCount                number of {@code WAITLISTED} attendees ({@code null} as above) — TM-430
  */
 public record EventResponse(
         Long id,
@@ -67,9 +70,26 @@ public record EventResponse(
         String status,
         Long createdBy,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        Long goingCount,
+        Long waitlistCount) {
 
+    /**
+     * Projection WITHOUT attendance counts — the create/cancel responses, which the console doesn't
+     * render as a count display (it navigates back to the list, which reloads with real counts). The
+     * counts come back {@code null} here, distinguishing "not computed" from a real {@code 0}.
+     */
     public static EventResponse from(Event event, LocationRevealPolicy reveal) {
+        return from(event, reveal, null, null);
+    }
+
+    /**
+     * Projection WITH attendance counts (TM-430) — the list and single-GET display paths. The caller
+     * supplies the counts (batch-tallied for the list, per-state for the single event) so the admin
+     * console can show "N going / M waitlist" instead of "— / —".
+     */
+    public static EventResponse from(
+            Event event, LocationRevealPolicy reveal, Long goingCount, Long waitlistCount) {
         return new EventResponse(
                 event.getId(),
                 event.getHeading(),
@@ -93,6 +113,8 @@ public record EventResponse(
                 event.getStatus().name(),
                 event.getCreatedBy(),
                 event.getCreatedAt(),
-                event.getUpdatedAt());
+                event.getUpdatedAt(),
+                goingCount,
+                waitlistCount);
     }
 }

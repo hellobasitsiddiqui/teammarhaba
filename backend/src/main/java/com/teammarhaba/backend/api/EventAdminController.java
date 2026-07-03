@@ -3,10 +3,15 @@ package com.teammarhaba.backend.api;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventAdminService;
+import com.teammarhaba.backend.event.EventAdminService.EventCounts;
 import com.teammarhaba.backend.event.LocationRevealPolicy;
 import jakarta.validation.Valid;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -72,14 +77,23 @@ public class EventAdminController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String sort) {
-        return PageResponse.from(
-                adminService.list(PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT)),
-                event -> EventResponse.from(event, reveal));
+        Page<Event> events = adminService.list(PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT));
+        // Per-row going/waitlist counts for the whole page in ONE query (TM-430) — no N+1. A countless
+        // event maps to EventCounts.ZERO. The counting lives in the service (JPA access), like the
+        // public side's EventQueryService; the controller only maps entity -> DTO.
+        List<Long> ids = events.getContent().stream().map(Event::getId).toList();
+        Map<Long, EventCounts> counts = adminService.attendanceCounts(ids);
+        return PageResponse.from(events, event -> {
+            EventCounts c = counts.getOrDefault(event.getId(), EventCounts.ZERO);
+            return EventResponse.from(event, reveal, c.going(), c.waitlist());
+        });
     }
 
     @GetMapping("/{id}")
     public EventResponse get(@PathVariable long id) {
-        return EventResponse.from(adminService.get(id), reveal);
+        Event event = adminService.get(id);
+        EventCounts counts = adminService.attendanceCounts(id);
+        return EventResponse.from(event, reveal, counts.going(), counts.waitlist());
     }
 
     @PostMapping
