@@ -3,6 +3,7 @@ package com.teammarhaba.backend.api;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.teammarhaba.backend.event.EventDraft;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -28,6 +29,8 @@ import java.time.ZoneId;
  * @param locationText    free-text venue line, always present — "Online" for online events (≤ 500)
  * @param mapUrl          optional map-pin link (≤ 2048)
  * @param onlineUrl       optional join link for online/hybrid events (≤ 2048)
+ * @param city            optional coarse locality (≤ 120); the pre-reveal public hint + per-city
+ *     reveal-default key (TM-408)
  * @param timezone        IANA timezone id of the event's locale (e.g. {@code Europe/London})
  * @param startAt         when the event starts (UTC instant)
  * @param endAt           optional end instant; omitted = open-ended
@@ -35,6 +38,8 @@ import java.time.ZoneId;
  * @param visibilityEnd   until when it appears
  * @param capacity        max GOING attendees, ≥ 1; omitted = unlimited
  * @param imagePath       optional storage path of the event image ({@code event-images/…})
+ * @param locationRevealHours optional per-event reveal window in hours before start (1..8760);
+ *     omitted = inherit the per-city / app default (TM-408)
  */
 public record CreateEventRequest(
         @NotBlank @Size(max = 120) String heading,
@@ -42,6 +47,7 @@ public record CreateEventRequest(
         @NotBlank @Size(max = 500) String locationText,
         @Size(max = 2048) String mapUrl,
         @Size(max = 2048) String onlineUrl,
+        @Size(max = 120) String city,
         @NotBlank @Size(max = 64) String timezone,
         @NotNull Instant startAt,
         Instant endAt,
@@ -52,7 +58,8 @@ public record CreateEventRequest(
                 @Pattern(
                         regexp = "event-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like event-images/{eventId}")
-                String imagePath) {
+                String imagePath,
+        @Min(1) @Max(8760) Integer locationRevealHours) {
 
     /** The timezone must be a real IANA zone id — bad ids would break every client's rendering. */
     @JsonIgnore
@@ -83,12 +90,14 @@ public record CreateEventRequest(
                 locationText,
                 mapUrl,
                 onlineUrl,
+                city,
                 timezone,
                 startAt,
                 endAt,
                 visibilityStart,
                 visibilityEnd,
                 capacity,
-                imagePath);
+                imagePath,
+                locationRevealHours);
     }
 }

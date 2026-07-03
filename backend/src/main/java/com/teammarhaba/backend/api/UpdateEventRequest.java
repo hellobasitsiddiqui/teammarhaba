@@ -3,6 +3,7 @@ package com.teammarhaba.backend.api;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.teammarhaba.backend.event.EventPatch;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -27,6 +28,7 @@ public record UpdateEventRequest(
         @Size(max = 500) String locationText,
         @Size(max = 2048) String mapUrl,
         @Size(max = 2048) String onlineUrl,
+        @Size(max = 120) String city,
         @Size(max = 64) String timezone,
         Instant startAt,
         Instant endAt,
@@ -37,7 +39,8 @@ public record UpdateEventRequest(
                 @Pattern(
                         regexp = "event-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like event-images/{eventId}")
-                String imagePath) {
+                String imagePath,
+        @Min(1) @Max(8760) Integer locationRevealHours) {
 
     @JsonIgnore
     @AssertTrue(message = "heading must not be blank")
@@ -85,12 +88,14 @@ public record UpdateEventRequest(
                 locationText,
                 mapUrl,
                 onlineUrl,
+                city,
                 timezone,
                 startAt,
                 endAt,
                 visibilityStart,
                 visibilityEnd,
                 capacity,
-                imagePath);
+                imagePath,
+                locationRevealHours);
     }
 }

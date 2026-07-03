@@ -164,6 +164,11 @@
             "minimum" : 1,
             "type" : "integer"
           },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "description" : {
             "maxLength" : 5000,
             "minLength" : 0,
@@ -183,6 +188,12 @@
             "minLength" : 0,
             "pattern" : "event-images/[A-Za-z0-9._-]+",
             "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 1,
+            "type" : "integer"
           },
           "locationText" : {
             "maxLength" : 500,
@@ -278,6 +289,9 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "city" : {
+            "type" : "string"
+          },
           "endAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -294,6 +308,13 @@
             "type" : "integer"
           },
           "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealed" : {
+            "type" : "boolean"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "locationText" : {
@@ -325,6 +346,9 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "city" : {
+            "type" : "string"
+          },
           "description" : {
             "type" : "string"
           },
@@ -344,6 +368,13 @@
             "type" : "integer"
           },
           "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealed" : {
+            "type" : "boolean"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "locationText" : {
@@ -382,6 +413,9 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "city" : {
+            "type" : "string"
+          },
           "createdAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -392,6 +426,10 @@
           },
           "description" : {
             "type" : "string"
+          },
+          "effectiveLocationRevealHours" : {
+            "format" : "int32",
+            "type" : "integer"
           },
           "endAt" : {
             "format" : "date-time",
@@ -405,6 +443,14 @@
             "type" : "integer"
           },
           "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "locationText" : {
@@ -720,6 +766,11 @@
             "minimum" : 1,
             "type" : "integer"
           },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "description" : {
             "maxLength" : 5000,
             "minLength" : 0,
@@ -739,6 +790,12 @@
             "minLength" : 0,
             "pattern" : "event-images/[A-Za-z0-9._-]+",
             "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 1,
+            "type" : "integer"
           },
           "locationText" : {
             "maxLength" : 500,

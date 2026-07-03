@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.event;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.List;
 
@@ -13,12 +14,20 @@ import java.util.List;
  * TM-397's cascade and not yet voided) <em>and</em> a free spot still exists. It is the signal the
  * client turns into the "claim your spot" call-to-action for {@code POST /events/{id}/claim}.
  *
+ * <p><b>Location reveal (TM-408)</b> — the three exact-location fields ({@code locationText},
+ * {@code mapUrl}, {@code onlineUrl}) are a server-side privacy guard: they are populated only once
+ * {@code locationRevealed} is {@code true} ({@code now >= startAt − revealHours}) and are otherwise
+ * <b>absent</b> from the JSON ({@link JsonInclude.Include#NON_NULL}), never merely blanked. Before
+ * reveal the client shows the coarse {@code city} hint plus {@code locationRevealsAt}. The guard is
+ * uniform for every caller — GOING and WAITLISTED attendees see exactly the same withholding.
+ *
  * @param id                   the event id
  * @param heading              short display title
  * @param description          full body text
- * @param locationText         free-text venue line
- * @param mapUrl               optional map-pin link
- * @param onlineUrl            optional join link for online/hybrid events
+ * @param locationText         exact venue line — present only once revealed, else absent
+ * @param mapUrl               exact map-pin link — present only once revealed, else absent
+ * @param onlineUrl            exact join link — present only once revealed, else absent
+ * @param city                 coarse locality hint (may be {@code null}); safe to show pre-reveal
  * @param timezone             IANA timezone id pairing with the instants
  * @param startAt              when the event starts (UTC)
  * @param endAt                optional end instant; {@code null} = open-ended
@@ -29,14 +38,17 @@ import java.util.List;
  * @param attendees            the first N GOING attendees in join order (the avatar strip)
  * @param myState              the caller's own state on this event
  * @param spotAvailableToClaim {@code true} when an open spot and a live offer exist for the caller
+ * @param locationRevealed     whether the exact location is public yet
+ * @param locationRevealsAt    the instant the exact location becomes public ({@code startAt − revealHours})
  */
 public record EventDetail(
         Long id,
         String heading,
         String description,
-        String locationText,
-        String mapUrl,
-        String onlineUrl,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String locationText,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String mapUrl,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String onlineUrl,
+        String city,
         String timezone,
         Instant startAt,
         Instant endAt,
@@ -46,4 +58,6 @@ public record EventDetail(
         long waitlistedCount,
         List<AttendeeAvatar> attendees,
         MyState myState,
-        boolean spotAvailableToClaim) {}
+        boolean spotAvailableToClaim,
+        boolean locationRevealed,
+        Instant locationRevealsAt) {}

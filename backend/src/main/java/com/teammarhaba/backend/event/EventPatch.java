@@ -15,13 +15,15 @@ public record EventPatch(
         String locationText,
         String mapUrl,
         String onlineUrl,
+        String city,
         String timezone,
         Instant startAt,
         Instant endAt,
         Instant visibilityStart,
         Instant visibilityEnd,
         Integer capacity,
-        String imagePath) {
+        String imagePath,
+        Integer locationRevealHours) {
 
     /** {@code true} if the patch carries no fields at all (a guaranteed no-op). */
     public boolean isEmpty() {
@@ -30,12 +32,14 @@ public record EventPatch(
                 && locationText == null
                 && mapUrl == null
                 && onlineUrl == null
+                && city == null
                 && timezone == null
                 && startAt == null
                 && endAt == null
                 && visibilityStart == null
                 && visibilityEnd == null
                 && capacity == null
-                && imagePath == null;
+                && imagePath == null
+                && locationRevealHours == null;
     }
 }
