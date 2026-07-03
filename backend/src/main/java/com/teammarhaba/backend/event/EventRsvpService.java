@@ -6,6 +6,7 @@ import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,11 +49,17 @@ public class EventRsvpService {
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
     private final UserService users;
+    private final ApplicationEventPublisher publisher;
 
-    public EventRsvpService(EventRepository events, EventAttendanceRepository attendance, UserService users) {
+    public EventRsvpService(
+            EventRepository events,
+            EventAttendanceRepository attendance,
+            UserService users,
+            ApplicationEventPublisher publisher) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
+        this.publisher = publisher;
     }
 
     /**
@@ -144,6 +151,10 @@ public class EventRsvpService {
         if (lastSpotFilled) {
             attendance.clearOpenOffers(eventId); // cascade-stop signal: void the remaining live offers
         }
+        // The offer cascade's terminal signal (TM-397): a genuine WAITLISTED -> GOING promotion (not
+        // the double-tap-already-GOING path above) publishes in-transaction, so the "You're in ✓"
+        // confirmation push fires from EventLifecycleNotifier only after this claim actually commits.
+        publisher.publishEvent(new EventClaimedEvent(eventId, user.getId(), event.getHeading()));
         return new RsvpResult(AttendanceState.GOING, going + 1, waitlisted - 1);
     }
 
