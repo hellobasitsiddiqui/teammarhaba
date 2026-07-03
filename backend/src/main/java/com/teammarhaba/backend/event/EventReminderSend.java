@@ -14,7 +14,7 @@ import java.time.Instant;
 /**
  * The persisted claim that one reminder — one ({@link Event}, {@link ReminderMilestone}) pair —
  * has been taken for sending (TM-394). Schema is owned by Flyway
- * ({@code V12__create_event_reminder_sends}); Hibernate runs validate-only, so this mapping must
+ * ({@code V14__create_event_reminder_sends}); Hibernate runs validate-only, so this mapping must
  * match the table exactly.
  *
  * <p><b>This row is the idempotency guard, not just a log.</b> The DB-unique

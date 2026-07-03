@@ -33,6 +33,18 @@
         },
         "type" : "object"
       },
+      "AttendeeAvatar" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "AuditEventResponse" : {
         "properties" : {
           "action" : {
@@ -260,6 +272,110 @@
         },
         "type" : "object"
       },
+      "EventCard" : {
+        "properties" : {
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "imagePath" : {
+            "type" : "string"
+          },
+          "locationText" : {
+            "type" : "string"
+          },
+          "myState" : {
+            "enum" : [ "NONE", "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "EventDetail" : {
+        "properties" : {
+          "attendees" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AttendeeAvatar"
+            },
+            "type" : "array"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "imagePath" : {
+            "type" : "string"
+          },
+          "locationText" : {
+            "type" : "string"
+          },
+          "mapUrl" : {
+            "type" : "string"
+          },
+          "myState" : {
+            "enum" : [ "NONE", "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "onlineUrl" : {
+            "type" : "string"
+          },
+          "spotAvailableToClaim" : {
+            "type" : "boolean"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "waitlistedCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "EventResponse" : {
         "properties" : {
           "capacity" : {
@@ -440,6 +556,33 @@
         },
         "type" : "object"
       },
+      "PageResponseEventCard" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventCard"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PageResponseEventResponse" : {
         "properties" : {
           "items" : {
@@ -543,6 +686,23 @@
           }
         },
         "required" : [ "platform", "token" ],
+        "type" : "object"
+      },
+      "RsvpResult" : {
+        "properties" : {
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "state" : {
+            "enum" : [ "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "waitlistedCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
         "type" : "object"
       },
       "TestPushRequest" : {
@@ -901,7 +1061,7 @@
     },
     "/api/v1/admin/users" : {
       "get" : {
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -1068,7 +1228,7 @@
     },
     "/api/v1/audit" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "list_2",
         "parameters" : [ {
           "in" : "query",
           "name" : "actorUid",
@@ -1176,6 +1336,140 @@
           }
         },
         "tags" : [ "email-code-controller" ]
+      }
+    },
+    "/api/v1/events" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseEventCard"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}" : {
+      "get" : {
+        "operationId" : "detail",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/claim" : {
+      "post" : {
+        "operationId" : "claim",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RsvpResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/rsvp" : {
+      "delete" : {
+        "operationId" : "cancelRsvp",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      },
+      "post" : {
+        "operationId" : "rsvp",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RsvpResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
       }
     },
     "/api/v1/me" : {

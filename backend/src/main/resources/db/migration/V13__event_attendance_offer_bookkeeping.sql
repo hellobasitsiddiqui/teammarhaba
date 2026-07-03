@@ -1,0 +1,32 @@
+-- V12__event_attendance_offer_bookkeeping — offer-cascade bookkeeping (TM-393 / events epic)
+--
+-- OWNER POLICY (2026-07-03, supersedes auto-promotion): when a GOING spot frees, nobody is
+-- promoted automatically. Waitlisted members are notified in FIFO order, five minutes apart
+-- (TM-397 runs that cascade), and the spot goes to the first authenticated claimer via
+-- POST /api/v1/events/{id}/claim — first-come, capacity-safe.
+--
+-- One additive column carries the whole model:
+--
+--   offer_notified_at   Stamped by TM-397 as the cascade walks the FIFO waitlist — the instant
+--                       this member was told "a spot is open". NULL = not (yet) notified in the
+--                       current cascade. The invariant is: a WAITLISTED row with a non-null
+--                       offer_notified_at holds a LIVE offer. The claim endpoint clears the stamp
+--                       on the claimant (their entry leaves the waitlist), and when a claim fills
+--                       the last free spot it clears the stamps of every remaining WAITLISTED row
+--                       — that wipe IS the recorded cascade-stop signal, and it leaves the next
+--                       cascade (for a future freed spot) starting from a clean slate.
+--
+-- Deliberately NOT added (the free-spot count is DERIVED, per the ticket's preference):
+--
+--   * No free_spots / going_count counter column on events. Free spots are always
+--     capacity - COUNT(event_attendance WHERE state = 'GOING') (NULL capacity = unlimited, the
+--     cascade never applies). Every capacity-affecting write (RSVP, un-RSVP, claim) runs holding
+--     a SELECT ... FOR UPDATE lock on the events row, so the derived count is race-free where it
+--     matters and can never drift the way a maintained counter could. Un-RSVP of a GOING member
+--     therefore "records" the freed spot simply by making the derived count positive; TM-397
+--     detects a cascade to run as: free spots > 0 AND a WAITLISTED row exists.
+--
+-- No new index: the cascade's scan (waitlist FIFO with stamps, per event) is served by the
+-- existing idx_event_attendance_event_state (event_id, state, created_at) from V11.
+ALTER TABLE event_attendance
+    ADD COLUMN offer_notified_at TIMESTAMPTZ;

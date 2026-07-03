@@ -97,7 +97,7 @@ app:
   # nudges to an event's GOING attendees. `enabled: false` skips creating the scheduler bean
   # entirely (the test profile does this so integration tests stay deterministic and drive the
   # service directly). Cadence knobs are tunables, not secrets; per-(event, milestone) idempotency
-  # is a DB unique claim (V12), so any number of instances may tick concurrently.
+  # is a DB unique claim (V14), so any number of instances may tick concurrently.
   event-reminders:
     enabled: ${EVENT_REMINDERS_ENABLED:true}
     scan-interval-ms: ${EVENT_REMINDERS_SCAN_INTERVAL_MS:60000}   # gap between scan passes
