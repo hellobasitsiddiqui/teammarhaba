@@ -78,6 +78,15 @@ public class Event {
     @Column(name = "location_reveal_hours")
     private Integer locationRevealHours;
 
+    /**
+     * Per-event override of the booking cutoff, in whole hours before {@code startAt} (TM-413).
+     * {@code null} = inherit — {@link BookingCutoffPolicy} then falls back to the per-city default
+     * and finally the app default (1h). Once {@code now >= startAt − cutoffHours} the RSVP,
+     * waitlist-join and claim endpoints refuse a new join with a {@code 409}.
+     */
+    @Column(name = "booking_cutoff_hours")
+    private Integer bookingCutoffHours;
+
     /** IANA timezone id of the event's locale; pairs with the UTC instants for client rendering. */
     @Column(name = "timezone", nullable = false)
     private String timezone;
@@ -215,6 +224,14 @@ public class Event {
 
     public void setLocationRevealHours(Integer locationRevealHours) {
         this.locationRevealHours = locationRevealHours;
+    }
+
+    public Integer getBookingCutoffHours() {
+        return bookingCutoffHours;
+    }
+
+    public void setBookingCutoffHours(Integer bookingCutoffHours) {
+        this.bookingCutoffHours = bookingCutoffHours;
     }
 
     public String getTimezone() {

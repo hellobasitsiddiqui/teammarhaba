@@ -67,4 +67,35 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from Event e where e.id = :id")
     Optional<Event> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * The caller's live GOING commitments that would block a new join under the "one active event at
+     * a time" rule (TM-413): events the user holds a {@code GOING} attendance to that are still
+     * {@link EventStatus#PUBLISHED} and have <em>not finished</em> — {@code now < end_at}, or
+     * {@code now < start_at} for an open-ended event with no end (via {@code coalesce}). The event
+     * being joined is excluded through {@code excludeEventId}, so RSVPing or claiming an event never
+     * counts as its own blocker. Cancelled events (status not {@code PUBLISHED}) and soft-deleted
+     * events (the {@code @SQLRestriction}) never block — both are ways an active commitment is
+     * released, alongside leaving. Ordered soonest-first so the guard can name a single deterministic
+     * blocker; pass a one-row {@code Pageable} — it only needs the first.
+     *
+     * <p>{@link EventAttendance} has no JPA association to {@link Event} (both carry plain FK ids, by
+     * design), so this is an explicit id join — the same bridge the rest of the event package uses.
+     */
+    @Query(
+            """
+            select e from Event e, EventAttendance a
+            where a.eventId = e.id
+              and a.userId = :userId
+              and a.state = com.teammarhaba.backend.event.AttendanceState.GOING
+              and e.id <> :excludeEventId
+              and e.status = com.teammarhaba.backend.event.EventStatus.PUBLISHED
+              and coalesce(e.endAt, e.startAt) > :now
+            order by e.startAt asc, e.id asc
+            """)
+    List<Event> findActiveGoingForUser(
+            @Param("userId") Long userId,
+            @Param("excludeEventId") Long excludeEventId,
+            @Param("now") Instant now,
+            Pageable pageable);
 }

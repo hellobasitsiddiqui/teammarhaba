@@ -1,0 +1,13 @@
+-- V16__event_booking_cutoff — per-event override for the RSVP booking-cutoff policy (TM-413)
+--
+-- An event stops accepting new joins once now >= start_at − cutoffHours: RSVP, waitlist-join and
+-- claim all 409 from that instant (server-side guard in EventRsvpService via BookingCutoffPolicy).
+-- The cutoff resolves per event, exactly like location-reveal: this override → a per-city default →
+-- the app default of 1h (see app.booking-cutoff.* and BookingCutoffProperties). This migration adds
+-- the single additive, nullable input the policy resolves over; it changes no existing rows. Flyway
+-- owns the DDL; Hibernate validate-only, so the Event entity must match.
+--
+--   booking_cutoff_hours  Per-event override of the booking cutoff, in whole hours before start_at.
+--                         NULL = inherit (fall back to the per-city default, then the 1h app
+--                         default).
+ALTER TABLE events ADD COLUMN booking_cutoff_hours INTEGER;
