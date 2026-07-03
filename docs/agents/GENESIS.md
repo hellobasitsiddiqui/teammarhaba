@@ -70,6 +70,7 @@
 - **Blackboard:** read after each claim (loop step) + auto-loaded via `@import`; append cross-cutting findings.
 - **Build tool = Gradle (Kotlin DSL)** — unify with the Gradle-native Android; **don't default to Maven**.
 - **One PR implements its one ticket.** A PR's branch/key must match the work it contains — never build an out-of-scope or deferred feature under a convenient ticket. The orchestrator *flags* a mis-scoped PR (doesn't merge it). *(An onboarding tour shipped under TM-135's OpenAPI-drift ticket — caught only by manual review.)*
+- **Surface delivery order (owner rule, 2026-07-03): Android → web → mobile-web → iOS.** When a feature/fix spans surfaces, **create the tickets for ALL affected surfaces in parallel at scoping** (one per surface where the work differs, linked to each other) — but **execute in that order**: Android leads, iOS trails (Simulator-scoped until the Apple-account epic). A surface with no work for a given change is skipped with a note on the ticket — never silently. *(Origin: the splash fix shipped on Android (TM-347) with no iOS leg until the owner asked — TM-387 is the retrofit; this rule makes the per-surface tickets exist from day 1.)*
 
 ## D. Jira project setup
 - **Epic → Task** model (Tasks are pickable, not Sub-tasks); `group-1.x` + `wave-N` labels.
