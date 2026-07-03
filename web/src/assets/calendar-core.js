@@ -261,14 +261,26 @@ export function shouldShowAddToCalendar(detail) {
 }
 
 /**
- * Everything the detail view needs to render the three options in one call — the descriptor plus the
+ * Everything the detail view needs to render the options in one call — the descriptor plus the
  * ready-to-use .ics text, Google URL and Outlook URL. Reveal- and cancellation-aware; returns
- * `{ show: false }` when the control must be hidden.
+ * `{ show: false }` when the control must be hidden entirely.
  *
+ * `icsDownloadable` says whether the client-side .ics *download* affordance is viable in this
+ * environment. The download is a blob + download-anchor click (events.js `downloadIcs`); the Android
+ * System WebView / iOS WKWebView shells ignore anchor-`download`/`blob:` (no DownloadListener /
+ * WKDownloadDelegate is wired) and `a.click()` doesn't throw, so offering the button there is a SILENT
+ * no-op with zero feedback (TM-422). Pass `{ webView: true }` — the caller reads auth-env
+ * `isWebViewEnv()` — to withhold the button and rely on the real-https Google/Outlook links instead.
+ * The .ics text and both URLs are unchanged either way: identical output on web, mobile-web and both
+ * native shells (TM-398); only the download affordance is gated.
+ *
+ * @param {object} detail  event detail
+ * @param {number} [nowMs] clock for the reveal / visibility checks
+ * @param {{url?:string, webView?:boolean}} [opts] public event URL; `webView` withholds the .ics download
  * @returns {{show:boolean, event?:object, ics?:string, icsFilename?:string, googleUrl?:string,
- *            outlookUrl?:string}}
+ *            outlookUrl?:string, icsDownloadable?:boolean}}
  */
-export function addToCalendarModel(detail, nowMs = Date.now(), { url } = {}) {
+export function addToCalendarModel(detail, nowMs = Date.now(), { url, webView = false } = {}) {
   if (!shouldShowAddToCalendar(detail)) return { show: false };
   const event = calendarEventFromDetail(detail, nowMs, { url });
   return {
@@ -278,5 +290,6 @@ export function addToCalendarModel(detail, nowMs = Date.now(), { url } = {}) {
     icsFilename: icsFilename(event),
     googleUrl: googleCalendarUrl(event),
     outlookUrl: outlookCalendarUrl(event),
+    icsDownloadable: !webView,
   };
 }
