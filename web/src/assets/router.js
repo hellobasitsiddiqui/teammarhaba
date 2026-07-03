@@ -18,6 +18,7 @@
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterProfile } from "./profile.js";
+import { enterEvents } from "./events.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
@@ -46,7 +47,27 @@ const HELP = "#/help";
 // it's a QA enabler reached from the profile/settings area, not a public page, and the push/token
 // readout only makes sense for a signed-in session. It is NOT promoted in the main nav (unobtrusive).
 const DIAGNOSTICS = "#/diagnostics";
+// User events UI (TM-396) — protected, available to any signed-in user. The list is `#/events`; a
+// detail is `#/events/{id}` (also the push deep-link target). Because the detail carries a dynamic id
+// it can't live in the exact-match PROTECTED set, so events routes are matched by prefix instead
+// (see isEventsRoute / isProtected below).
+const EVENTS = "#/events";
 const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING, TERMS, DIAGNOSTICS]);
+
+/** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
+function isEventsRoute(hash) {
+  return hash === EVENTS || hash.startsWith(`${EVENTS}/`);
+}
+/** The detail id from `#/events/{id}`, or null for the list route / a non-events hash. */
+function eventDetailId(hash) {
+  if (!hash.startsWith(`${EVENTS}/`)) return null;
+  const rest = hash.slice(EVENTS.length + 1);
+  return rest ? decodeURIComponent(rest) : null;
+}
+/** A route requires sign-in when it's in the exact protected set OR anywhere in the events area. */
+function isProtected(route) {
+  return PROTECTED.has(route) || isEventsRoute(route);
+}
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
@@ -75,6 +96,10 @@ let helpActive = false;
 // Same lifecycle for the QA diagnostics view (TM-297): mount once on entry, refresh its live readouts
 // each entry (handled inside enterDiagnostics), reset on leaving so a future entry re-enters.
 let diagnosticsActive = false;
+// Events UI (TM-396): the last events route we entered (`#/events` or `#/events/{id}`), so repeated
+// guard() calls for the SAME route (e.g. the 2–3 fired on load / auth-resolve) don't refetch, while a
+// list↔detail↔another-detail change still re-enters. Reset to null when leaving the events area.
+let eventsRouteEntered = null;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
@@ -85,6 +110,8 @@ const $ = (id) => document.getElementById(id);
 function currentRoute() {
   const hash = window.location.hash;
   if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
+  if (isEventsRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -111,6 +138,7 @@ function render() {
   const termsView = $("terms-view");
   const helpView = $("help-view");
   const diagnosticsView = $("diagnostics-view");
+  const eventsView = $("events-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
@@ -119,6 +147,8 @@ function render() {
   if (termsView) termsView.hidden = route !== TERMS;
   if (helpView) helpView.hidden = route !== HELP;
   if (diagnosticsView) diagnosticsView.hidden = route !== DIAGNOSTICS;
+  // Events UI (TM-396) — shown for the list and any event detail.
+  if (eventsView) eventsView.hidden = !isEventsRoute(route);
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
   // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
@@ -137,6 +167,9 @@ function render() {
   // bounces them back to the gate, but hiding the link keeps the gated nav clean).
   const navHelpLink = $("nav-help-link");
   if (navHelpLink) navHelpLink.hidden = gated;
+  // The Events link (TM-396) shows for any signed-in, onboarded user (hidden while gated).
+  const navEvents = $("nav-events");
+  if (navEvents) navEvents.hidden = !signedIn || gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
@@ -154,7 +187,7 @@ function guard() {
   const signedIn = Boolean(currentUser());
   const route = currentRoute();
 
-  if (!signedIn && PROTECTED.has(route)) {
+  if (!signedIn && isProtected(route)) {
     sessionStorage.setItem(INTENDED_KEY, route);
     go(LOGIN);
     return;
@@ -274,6 +307,17 @@ function guard() {
     }
   } else {
     diagnosticsActive = false;
+  }
+  // Events UI (TM-396): (re)enter when the events route CHANGES so list↔detail↔another-detail
+  // navigation always shows fresh counts/state, without refetching on the repeated guard() calls for
+  // the same route. enterEvents(null) is the list; enterEvents(id) is a detail. Reset on leaving.
+  if (isEventsRoute(route)) {
+    if (route !== eventsRouteEntered) {
+      eventsRouteEntered = route;
+      enterEvents(eventDetailId(route));
+    }
+  } else {
+    eventsRouteEntered = null;
   }
 }
 

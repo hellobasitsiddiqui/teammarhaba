@@ -54,6 +54,9 @@
                      is the TM-135 tour-REPLAY menu (signed-in only); this is the standalone Help page.
                      A plain hash-link, so nav-toggle.js closes the mobile menu on click like the others. -->
                 <a id="nav-help-link" href="#/help">Help</a>
+                <!-- Events entry point (TM-396): shown by router.js for any signed-in, onboarded user.
+                     Sits alongside Profile (the bottom-nav idea TM-386 stays parked). -->
+                <a id="nav-events" href="#/events" hidden>Events</a>
                 <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
                 <a id="nav-profile" href="#/profile" hidden>Profile</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
@@ -204,6 +207,12 @@
              promoted in the main nav (reached from the profile/settings area); safe in a plain browser
              (native-only checks show "not on device"). -->
         <section id="diagnostics-view" class="diagnostics-view" aria-label="Diagnostics" hidden></section>
+
+        <!-- Events UI (TM-396): the #/events browse list + #/events/{id} detail (RSVP, waitlist-join
+             and offer-cascade claim states). events.js (imported by router.js) builds the list/detail
+             into this container; router.js owns its visibility + the #/events and #/events/{id}
+             routing (the detail is the push deep-link landing target). -->
+        <section id="events-view" class="events-view" aria-label="Events" hidden></section>
 
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
