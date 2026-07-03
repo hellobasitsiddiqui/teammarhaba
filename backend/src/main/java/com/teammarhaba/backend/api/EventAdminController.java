@@ -1,0 +1,105 @@
+package com.teammarhaba.backend.api;
+
+import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.common.PageRequests;
+import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.EventAdminService;
+import jakarta.validation.Valid;
+import java.util.Set;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Admin event-management API under {@code /api/v1/admin/events} (TM-392, events epic) — the
+ * backend for the admin events console. The whole controller is gated by
+ * {@code @PreAuthorize("hasRole('ADMIN')")}: a non-admin gets a uniform {@code 403}, an anonymous
+ * caller a {@code 401} from the security chain, and a missing id is always a plain {@code 404}
+ * (no existence leak) — the TM-111 pattern.
+ *
+ * <ul>
+ *   <li>{@code GET /admin/events} — paged listing of the <b>full inventory</b>: cancelled events
+ *       and events whose visibility window hasn't opened yet included (the console manages
+ *       everything; only soft-deleted rows are hidden).</li>
+ *   <li>{@code GET /admin/events/{id}} — one event (edit-form load).</li>
+ *   <li>{@code POST /admin/events} — create; {@code 201} with the persisted event.</li>
+ *   <li>{@code PATCH /admin/events/{id}} — partial edit ({@code null} = leave unchanged).</li>
+ *   <li>{@code POST /admin/events/{id}/cancel} — call it off; the record is kept with status
+ *       {@code CANCELLED}. Idempotent.</li>
+ * </ul>
+ *
+ * <p>Every mutation is audited (TM-113) and emits an {@code EventLifecycleEvent} — the seam
+ * lifecycle pushes (TM-397) will consume; no push logic lives here. Event images ride the house
+ * avatar pattern (TM-166): the console uploads {@code event-images/{eventId}} straight to Firebase
+ * Storage (admin-only per {@code storage.rules}) and persists only the path via PATCH. Errors are
+ * RFC-7807 ({@code GlobalExceptionHandler}); lists use the shared TM-115 conventions
+ * ({@link PageRequests}/{@link PageResponse}). Lives in the {@code api} package so it inherits the
+ * package-driven {@code /api/v1} prefix ({@link ApiV1Config}).
+ */
+@RestController
+@RequestMapping("/admin/events")
+@PreAuthorize("hasRole('ADMIN')")
+public class EventAdminController {
+
+    /** Sortable columns, allow-listed per TM-115 so internals (e.g. {@code deletedAt}) never leak. */
+    static final Set<String> SORTABLE =
+            Set.of("id", "heading", "startAt", "visibilityStart", "visibilityEnd", "status", "createdAt", "updatedAt");
+
+    /** Default order: latest-scheduled first — newly planned events surface at the top of the console. */
+    private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.DESC, "startAt");
+
+    private final EventAdminService adminService;
+
+    public EventAdminController(EventAdminService adminService) {
+        this.adminService = adminService;
+    }
+
+    @GetMapping
+    public PageResponse<EventResponse> list(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort) {
+        return PageResponse.from(
+                adminService.list(PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT)), EventResponse::from);
+    }
+
+    @GetMapping("/{id}")
+    public EventResponse get(@PathVariable long id) {
+        return EventResponse.from(adminService.get(id));
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public EventResponse create(
+            @RequestBody @Valid CreateEventRequest request, @AuthenticationPrincipal VerifiedUser caller) {
+        return EventResponse.from(adminService.create(caller, request.toDraft()));
+    }
+
+    @PatchMapping("/{id}")
+    public EventResponse update(
+            @PathVariable long id,
+            @RequestBody @Valid UpdateEventRequest request,
+            @AuthenticationPrincipal VerifiedUser caller) {
+        return EventResponse.from(adminService.update(caller, id, request.toPatch()));
+    }
+
+    /**
+     * Cancel — deliberately a POST sub-action rather than a DELETE: the event is called off but
+     * the record (and its attendance history) survives, visible in this console with status
+     * {@code CANCELLED}.
+     */
+    @PostMapping("/{id}/cancel")
+    public EventResponse cancel(@PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
+        return EventResponse.from(adminService.cancel(caller, id));
+    }
+}

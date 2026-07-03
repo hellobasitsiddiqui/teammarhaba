@@ -1,10 +1,15 @@
 rules_version = '2';
 
-// Firebase Storage security rules (TM-166) — avatar uploads.
+// Firebase Storage security rules (TM-166 avatars, TM-392 event images).
 //
 // The web app uploads a user's avatar image to `avatars/{uid}` and then sets the Firebase user's
 // `photoURL` to the resulting download URL (the single source of truth). These rules are the real
 // authority for who may write what; the client mirrors them only for a fast, friendly pre-check.
+//
+// Event images (TM-392) ride the same pattern: the admin console uploads `event-images/{eventId}`
+// directly to Storage, then persists the object path on the event row via the admin API
+// (`PATCH /api/v1/admin/events/{id}`). Writes are gated on the `role` custom claim the backend
+// maintains on the Firebase token (RoleService, TM-110) — admins only.
 //
 // Enforced on write:
 //   - OWNER ONLY  — request.auth.uid must equal the {uid} path segment, so a user can only write
@@ -37,6 +42,23 @@ service firebase.storage {
       // The owner may also delete their own avatar (used by the re-upload cleanup path). A delete has
       // no `request.resource`, so it carries only the owner check — not the size/content-type checks.
       allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /event-images/{eventId} {
+      // Anyone may read an event image — the event listing renders it for signed-out visitors too,
+      // and download URLs already carry an unguessable token (same reasoning as avatars).
+      allow read: if true;
+
+      // Only an ADMIN (the `role` custom claim written by RoleService, TM-110) may upload/replace
+      // an event image, and only an image content-type no larger than 5 MB — the avatar caps.
+      allow create, update: if request.auth != null
+                            && request.auth.token.role == 'ADMIN'
+                            && request.resource.size < 5 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+
+      // Admins may also delete an event image (re-upload cleanup / event retired). No
+      // `request.resource` on delete, so only the role check applies.
+      allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
     }
   }
 }
