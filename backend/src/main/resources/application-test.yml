@@ -13,3 +13,8 @@ app:
   # nondeterminism (a mid-test tick could claim a marker the test expects to claim itself).
   event-reminders:
     enabled: false
+  # Likewise no background offer-cascade sweeps during tests (TM-397): integration tests drive
+  # WaitlistOfferCascadeService directly with a controlled clock, so a live sweep would race the
+  # stamps/pushes a test sets up itself.
+  offer-cascade:
+    enabled: false

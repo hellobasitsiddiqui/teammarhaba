@@ -114,6 +114,16 @@ app:
     #     london: 12
     #     dubai: 6
     city-hours: {}
+  # Waitlist offer cascade (TM-397): a fixed-delay @Scheduled sweep that offers a freed GOING spot to
+  # the FIFO waitlist, widening one member every 5 minutes until the spot is claimed or the list is
+  # exhausted. `enabled: false` skips creating the scheduler bean entirely (the test profile does this
+  # so integration tests drive the service with a controlled clock). Cadence knobs are tunables, not
+  # secrets; per-member idempotency is the persisted offer_notified_at stamp (V13) plus a per-event
+  # FOR UPDATE lock, so any number of instances may sweep concurrently.
+  offer-cascade:
+    enabled: ${OFFER_CASCADE_ENABLED:true}
+    scan-interval-ms: ${OFFER_CASCADE_SCAN_INTERVAL_MS:60000}     # gap between sweep passes
+    initial-delay-ms: ${OFFER_CASCADE_INITIAL_DELAY_MS:20000}     # startup grace before the first sweep
   # Current published terms/privacy version (TM-170). The client gates the app until the user's
   # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
   # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as

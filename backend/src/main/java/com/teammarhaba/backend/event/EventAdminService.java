@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
@@ -181,8 +182,8 @@ public class EventAdminService {
                 TARGET_EVENT,
                 String.valueOf(event.getId()),
                 Map.of("fields", List.copyOf(changed)));
-        lifecycle.publishEvent(
-                new EventLifecycleEvent(event.getId(), event.getHeading(), EventLifecycleEvent.Kind.UPDATED));
+        lifecycle.publishEvent(new EventLifecycleEvent(
+                event.getId(), event.getHeading(), EventLifecycleEvent.Kind.UPDATED, Set.copyOf(changed)));
         return event;
     }
 
