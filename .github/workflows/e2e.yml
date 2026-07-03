@@ -112,6 +112,12 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/teammarhaba
           SPRING_DATASOURCE_USERNAME: app
           SPRING_DATASOURCE_PASSWORD: devpassword
+          # Events e2e (TM-400): run the waitlist offer-cascade sweep (TM-397) on a FAST cadence so the
+          # "un-RSVP → a freed spot is offered → claim" path lands within seconds instead of the ~60s
+          # prod default. The events spec still polls (bounded) for the claim affordance, so this only
+          # tightens the timing; it never makes the run depend on an exact interval.
+          OFFER_CASCADE_SCAN_INTERVAL_MS: "3000"
+          OFFER_CASCADE_INITIAL_DELAY_MS: "2000"
         run: |
           java -jar backend/target/*.jar > /tmp/backend.log 2>&1 &
           echo "Waiting for the backend on :8080…"
