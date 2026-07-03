@@ -28,6 +28,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -57,6 +58,7 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
     @Autowired private EventAttendeeNotifier notifier;
     @Autowired private UserRepository users;
     @Autowired private DeviceTokenRepository deviceTokens;
+    @Autowired private JdbcTemplate jdbc;
     @Autowired private EventRsvpService rsvps;
     @Autowired private PlatformTransactionManager txManager;
     @Autowired private RecordingPushSender sender;
@@ -80,10 +82,19 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
         wipe(); // good-citizen cleanup: the suite shares one DB, and the scan is DB-wide
     }
 
-    /** Wiping attendance is enough to give this class a clean, stray-free cascade scan. */
+    /**
+     * A full FK-safe truncation of the tables this DB-wide cascade scan can see (TM-419). Wiping only
+     * attendance left {@code events} and {@code users} behind, and {@link #seedUser} is find-or-create
+     * by firebase_uid — so leaked users/events from other tests (or this class's own earlier methods)
+     * polluted the shared Postgres and made the sweep collide on {@code uq_event_attendance_event_user}
+     * depending on surefire ordering (a different method failed on each run). Raw SQL so the {@code users}
+     * soft-delete {@code @SQLRestriction} can't hide a stale row; child-first delete order.
+     */
     private void wipe() {
-        attendance.deleteAll();
+        jdbc.update("DELETE FROM event_attendance");
         deviceTokens.deleteAll();
+        jdbc.update("DELETE FROM events");
+        jdbc.update("DELETE FROM users");
     }
 
     // ------------------------------------------------------------------ tests
