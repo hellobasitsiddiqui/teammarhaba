@@ -271,6 +271,29 @@ test("addToCalendarModel: hidden for cancelled; otherwise carries ics + both URL
   assert.ok(m.outlookUrl.startsWith("https://outlook.live.com/"));
 });
 
+test("addToCalendarModel: on web / mobile-web the .ics download is offered (icsDownloadable defaults true)", () => {
+  // No `webView` option = a normal browser: the blob + download-anchor .ics works, so the button stays.
+  assert.equal(addToCalendarModel(revealedEvent()).icsDownloadable, true);
+  assert.equal(addToCalendarModel(revealedEvent(), Date.now(), { webView: false }).icsDownloadable, true);
+});
+
+test("addToCalendarModel (TM-422): inside the native WebView the .ics download is withheld, links survive", () => {
+  // On the Android System WebView / iOS WKWebView shell the blob + download-anchor .ics is a SILENT
+  // no-op (no DownloadListener / WKDownloadDelegate; a.click() doesn't throw → zero feedback). The
+  // shell reads isWebViewEnv() and passes webView:true so the button is dropped rather than dead.
+  const m = addToCalendarModel(revealedEvent(), Date.now(), { webView: true });
+  assert.equal(m.show, true, "the control still shows — only the .ics option is gated");
+  assert.equal(m.icsDownloadable, false, "the silently-failing .ics option must not be offered in a WebView");
+  // The working paths remain fully present, so the user is never left with nothing: Google/Outlook are
+  // real https navigations opened externally.
+  assert.ok(m.googleUrl.startsWith("https://calendar.google.com/"));
+  assert.ok(m.outlookUrl.startsWith("https://outlook.live.com/"));
+  // The calendar payload itself is identical everywhere (TM-398) — only the download affordance is
+  // gated, never the generated .ics text / filename.
+  assert.ok(m.ics.includes("BEGIN:VCALENDAR"));
+  assert.equal(m.icsFilename, "teammarhaba-sunday-picnic.ics");
+});
+
 test("addToCalendarModel (TM-408): pre-reveal exact venue never appears in ANY output", () => {
   const detail = revealedEvent({
     locationRevealed: false,

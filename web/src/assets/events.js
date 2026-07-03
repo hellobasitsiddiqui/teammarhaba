@@ -15,6 +15,7 @@
 import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, ApiError } from "./api.js";
 import { el, clear, toast, confirmDialog, relativeTime } from "./ui.js";
 import { doodle } from "./doodles.js";
+import { isWebViewEnv } from "./auth-env.js";
 import * as core from "./events-core.js";
 import * as cal from "./calendar-core.js";
 
@@ -303,20 +304,34 @@ function calendarSection(detail, now) {
   const origin =
     typeof window !== "undefined" && /^https?:/.test(window.location?.origin || "") ? window.location.origin : "";
   const url = origin ? `${origin}/#/events/${encodeURIComponent(detail.id)}` : "";
-  const model = cal.addToCalendarModel(detail, now, { url });
+  // `webView` gates the .ics option. Inside the Android/iOS native shell the blob + download-anchor
+  // .ics is a SILENT no-op: the shell honours neither anchor-`download` nor `blob:` and `a.click()`
+  // doesn't throw, so downloadIcs's catch→toast never fires and the tap does nothing (TM-422).
+  // isWebViewEnv() reads the shell's signal (window.TEAMMARHABA_WEBVIEW / the JS bridge); it's false on
+  // any normal page load, so web/mobile-web are unaffected. Mirrors the WebView hides in login.js
+  // (TM-275) and app-badges.js (TM-330).
+  const model = cal.addToCalendarModel(detail, now, { url, webView: isWebViewEnv() });
   if (!model.show) return null;
 
-  const menu = el("div", { class: "tm-event-calendar-menu", role: "group", "aria-label": "Add to calendar" }, [
-    el(
-      "button",
-      {
-        class: "tm-btn tm-btn-sm",
-        type: "button",
-        "data-testid": "calendar-ics",
-        onClick: () => downloadIcs(model.icsFilename, model.ics),
-      },
-      [doodle("calendar", { class: "tm-event-cal-opt-icon", title: "" }), "Apple / iCal (.ics)"],
-    ),
+  // Google / Outlook are real https links opened externally, so they work everywhere — including the
+  // WebView, where the .ics download can't. When the .ics button is withheld the user still has both of
+  // these (never left with nothing); on web / mobile-web all three show.
+  const options = [];
+  if (model.icsDownloadable) {
+    options.push(
+      el(
+        "button",
+        {
+          class: "tm-btn tm-btn-sm",
+          type: "button",
+          "data-testid": "calendar-ics",
+          onClick: () => downloadIcs(model.icsFilename, model.ics),
+        },
+        [doodle("calendar", { class: "tm-event-cal-opt-icon", title: "" }), "Apple / iCal (.ics)"],
+      ),
+    );
+  }
+  options.push(
     el(
       "a",
       { class: "tm-btn tm-btn-sm", href: model.googleUrl, target: "_blank", rel: "noopener", "data-testid": "calendar-google" },
@@ -327,7 +342,9 @@ function calendarSection(detail, now) {
       { class: "tm-btn tm-btn-sm", href: model.outlookUrl, target: "_blank", rel: "noopener", "data-testid": "calendar-outlook" },
       "Outlook",
     ),
-  ]);
+  );
+
+  const menu = el("div", { class: "tm-event-calendar-menu", role: "group", "aria-label": "Add to calendar" }, options);
 
   return el("details", { class: "tm-event-calendar", "data-testid": "event-add-to-calendar" }, [
     el("summary", { class: "tm-event-calendar-toggle" }, [
@@ -339,9 +356,11 @@ function calendarSection(detail, now) {
 }
 
 /**
- * Trigger a client-side .ics download — a generated file, no server round-trip. The standard blob +
- * download-anchor path (works on web / mobile-web, and iOS/Chromium WebViews that honour a download
- * gesture). Best-effort: any failure degrades to a toast rather than a broken control.
+ * Trigger a client-side .ics download — a generated file, no server round-trip, via the standard blob +
+ * download-anchor path. Only ever wired on web / mobile-web: the native Android/iOS WebView shell
+ * honours neither anchor-`download` nor `blob:` and fails SILENTLY there (TM-422), so calendarSection
+ * withholds this button in that env (`model.icsDownloadable`) and offers the Google/Outlook links
+ * instead. Best-effort regardless: any failure degrades to a toast rather than a broken control.
  */
 function downloadIcs(filename, icsText) {
   try {
