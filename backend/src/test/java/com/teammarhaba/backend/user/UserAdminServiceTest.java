@@ -4,10 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.GetUsersResult;
+import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
@@ -20,20 +24,31 @@ import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
-/** Rules of admin user-management (TM-111): 404 semantics, self-protection, claim-first role change, audit (TM-137). */
+/**
+ * Rules of admin user-management (TM-111): 404 semantics, self-protection, claim-first role change,
+ * audit (TM-137) — plus the best-effort auth-phone enrichment (TM-372): batched, degrades to empty
+ * on any Firebase problem, never fails the console.
+ */
 class UserAdminServiceTest {
 
     private final UserRepository users = mock(UserRepository.class);
     private final RoleService roleService = mock(RoleService.class);
     private final AuditService audit = mock(AuditService.class);
     private final PushNotificationService push = mock(PushNotificationService.class);
-    private final UserAdminService service = new UserAdminService(users, roleService, audit, push);
+
+    @SuppressWarnings("unchecked")
+    private final ObjectProvider<FirebaseAuth> firebaseAuthProvider = mock(ObjectProvider.class);
+
+    private final UserAdminService service =
+            new UserAdminService(users, roleService, audit, push, firebaseAuthProvider);
 
     private static User account(String uid) {
         return new User(uid, uid + "@example.com", null);
@@ -227,5 +242,82 @@ class UserAdminServiceTest {
         when(users.findAll(pageable)).thenReturn(page);
 
         assertThat(service.list(pageable)).isSameAs(page);
+    }
+
+    // --- auth-phone enrichment (TM-372): identify phone-auth accounts with no email/name ---
+
+    /** A mocked Firebase account record with the given uid and (possibly null) phone number. */
+    private static UserRecord firebaseRecord(String uid, String phone) {
+        UserRecord record = mock(UserRecord.class);
+        when(record.getUid()).thenReturn(uid);
+        when(record.getPhoneNumber()).thenReturn(phone);
+        return record;
+    }
+
+    @Test
+    void authPhonesComeFromOneBatchedFirebaseLookup() throws Exception {
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+        // One account with a phone identity, one (email sign-in) without — only the former maps.
+        // Built BEFORE the result stubbing: nesting when() inside thenReturn() trips Mockito.
+        Set<UserRecord> records =
+                Set.of(firebaseRecord("phone-uid", "+16505550100"), firebaseRecord("email-uid", null));
+        GetUsersResult result = mock(GetUsersResult.class);
+        when(result.getUsers()).thenReturn(records);
+        when(auth.getUsers(any())).thenReturn(result);
+
+        Map<String, String> phones = service.authPhonesByUid(List.of("phone-uid", "email-uid"));
+
+        assertThat(phones).containsExactlyEntriesOf(Map.of("phone-uid", "+16505550100"));
+        verify(auth, times(1)).getUsers(any()); // one batched round trip, not one call per account
+    }
+
+    @Test
+    void authPhonesAreEmptyWithoutTheAdminSdk() {
+        // No FirebaseAuth bean (dev/test/CI without credentials): degrade to empty, never throw.
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(null);
+
+        assertThat(service.authPhonesByUid(List.of("some-uid"))).isEmpty();
+    }
+
+    @Test
+    void authPhonesDegradeToEmptyOnAnSdkFailure() throws Exception {
+        // An identity-provider blip must degrade the phone column, not 500 the admin user list.
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+        when(auth.getUsers(any())).thenThrow(new IllegalStateException("firebase down"));
+
+        assertThat(service.authPhonesByUid(List.of("some-uid"))).isEmpty();
+    }
+
+    @Test
+    void authPhonesTolerateANullSdkResult() throws Exception {
+        // Defensive: an unstubbed FirebaseAuth test double returns null — treat as "nothing found".
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+        when(auth.getUsers(any())).thenReturn(null);
+
+        assertThat(service.authPhonesByUid(List.of("some-uid"))).isEmpty();
+    }
+
+    @Test
+    void noUidsMeansNoFirebaseCall() {
+        assertThat(service.authPhonesByUid(List.of())).isEmpty();
+        assertThat(service.authPhonesByUid(null)).isEmpty();
+
+        verifyNoInteractions(firebaseAuthProvider);
+    }
+
+    @Test
+    void authPhoneForASingleUidReadsTheBatchAndNullMeansUnknown() throws Exception {
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+        Set<UserRecord> records = Set.of(firebaseRecord("phone-uid", "+16505550100"));
+        GetUsersResult result = mock(GetUsersResult.class);
+        when(result.getUsers()).thenReturn(records);
+        when(auth.getUsers(any())).thenReturn(result);
+
+        assertThat(service.authPhoneFor("phone-uid")).isEqualTo("+16505550100");
+        assertThat(service.authPhoneFor(null)).isNull();
     }
 }
