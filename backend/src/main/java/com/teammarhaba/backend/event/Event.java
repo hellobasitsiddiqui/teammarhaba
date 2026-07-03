@@ -121,6 +121,20 @@ public class Event {
     @Column(name = "image_path")
     private String imagePath;
 
+    /**
+     * Inclusive lower edge of the event's target age band (TM-415, migration V16); {@code null} = no
+     * lower bound. Paired with {@link #ageMax}: both {@code null} = open to all ages (no restriction,
+     * the common case). The self-reported {@link com.teammarhaba.backend.user.User#getAge() User.age}
+     * must fall within the band widened by the app-level ±tolerance grace — the hard eligibility guard
+     * lives in {@code AgeEligibilityPolicy}, not here; this field only carries the band.
+     */
+    @Column(name = "age_min")
+    private Integer ageMin;
+
+    /** Inclusive upper edge of the target age band (TM-415); {@code null} = no upper bound. */
+    @Column(name = "age_max")
+    private Integer ageMax;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private EventStatus status = EventStatus.PUBLISHED;
@@ -310,6 +324,40 @@ public class Event {
 
     public void setImagePath(String imagePath) {
         this.imagePath = imagePath;
+    }
+
+    public Integer getAgeMin() {
+        return ageMin;
+    }
+
+    public void setAgeMin(Integer ageMin) {
+        this.ageMin = ageMin;
+    }
+
+    public Integer getAgeMax() {
+        return ageMax;
+    }
+
+    public void setAgeMax(Integer ageMax) {
+        this.ageMax = ageMax;
+    }
+
+    /** {@code true} when this event targets an age group (at least one band edge is set). */
+    public boolean hasAgeRestriction() {
+        return ageMin != null || ageMax != null;
+    }
+
+    /**
+     * Human-readable band for the eligibility 409 copy (TM-415): a full band {@code "25–30"}, a
+     * single cohort {@code "28"} (min == max), or a half-open band {@code "18 and up"} /
+     * {@code "up to 12"}. Only meaningful when {@link #hasAgeRestriction()} — an open band has no
+     * label. The grace is not advertised: the label names the configured band, not the widened one.
+     */
+    public String ageBandLabel() {
+        if (ageMin != null && ageMax != null) {
+            return ageMin.equals(ageMax) ? ageMin.toString() : ageMin + "–" + ageMax;
+        }
+        return ageMin != null ? ageMin + " and up" : "up to " + ageMax;
     }
 
     public EventStatus getStatus() {

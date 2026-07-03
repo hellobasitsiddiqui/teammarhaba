@@ -23,7 +23,9 @@ public record EventPatch(
         Instant visibilityEnd,
         Integer capacity,
         String imagePath,
-        Integer locationRevealHours) {
+        Integer locationRevealHours,
+        Integer ageMin,
+        Integer ageMax) {
 
     /** {@code true} if the patch carries no fields at all (a guaranteed no-op). */
     public boolean isEmpty() {
@@ -40,6 +42,8 @@ public record EventPatch(
                 && visibilityEnd == null
                 && capacity == null
                 && imagePath == null
-                && locationRevealHours == null;
+                && locationRevealHours == null
+                && ageMin == null
+                && ageMax == null;
     }
 }

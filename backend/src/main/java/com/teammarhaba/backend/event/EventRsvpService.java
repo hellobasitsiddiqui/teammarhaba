@@ -52,6 +52,11 @@ import org.springframework.transaction.annotation.Transactional;
  *       event is allowed — only a {@code GOING} commitment blocks. Leaving the blocker, or the
  *       blocker finishing/being cancelled, frees the caller.</li>
  * </ol>
+ * <p><b>Age-group guard (TM-415)</b> — RSVP/waitlist-join and claim additionally enforce
+ * {@link AgeEligibilityPolicy}: the caller's self-reported age must fall in the event's band (widened
+ * by the app-level ±tolerance grace), else a {@code 409} that names the band — or, for an unset age,
+ * prompts profile completion. Leaving ({@link #cancelRsvp}) is never age-gated: a user can always
+ * drop out.
  */
 @Service
 public class EventRsvpService {
@@ -76,6 +81,7 @@ public class EventRsvpService {
     private final EventAttendanceRepository attendance;
     private final UserService users;
     private final CancellationPolicy cancellationPolicy;
+    private final AgeEligibilityPolicy ageGate;
     private final ApplicationEventPublisher publisher;
     private final BookingCutoffPolicy bookingCutoff;
 
@@ -84,12 +90,14 @@ public class EventRsvpService {
             EventAttendanceRepository attendance,
             UserService users,
             CancellationPolicy cancellationPolicy,
+            AgeEligibilityPolicy ageGate,
             ApplicationEventPublisher publisher,
             BookingCutoffPolicy bookingCutoff) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.cancellationPolicy = cancellationPolicy;
+        this.ageGate = ageGate;
         this.publisher = publisher;
         this.bookingCutoff = bookingCutoff;
     }
@@ -113,6 +121,9 @@ public class EventRsvpService {
         if (bookingCutoff.isPastCutoff(event, now)) {
             throw new ConflictException(BOOKING_CLOSED);
         }
+        // Hard age-group guard (TM-415): applied to both a fresh RSVP and a waitlist-join (the same
+        // command), before the idempotent branch — an ineligible caller gets a uniform 409.
+        ageGate.ensureEligible(event, user);
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
         long waitlisted = attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED);
@@ -216,6 +227,9 @@ public class EventRsvpService {
         if (bookingCutoff.isPastCutoff(event, now)) {
             throw new ConflictException(BOOKING_CLOSED);
         }
+        // Hard age-group guard (TM-415): a claim is a route into a GOING spot, so it is guarded too —
+        // e.g. a member who became ineligible after the admin narrowed the band cannot promote.
+        ageGate.ensureEligible(event, user);
 
         EventAttendance mine = attendance
                 .findByEventIdAndUserId(eventId, user.getId())

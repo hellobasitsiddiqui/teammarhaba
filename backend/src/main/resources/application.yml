@@ -136,6 +136,15 @@ app:
   # open-ended event is never hidden the instant it starts. Tunable, not a secret.
   event-listing:
     default-duration-hours: ${EVENT_DEFAULT_DURATION_HOURS:3}   # assumed run-length when end_at is null
+  # Event age-group eligibility (TM-415). An event may target an age band (age_min/age_max); a user
+  # is eligible iff their self-reported age (users.age) falls within it, widened by this ±tolerance
+  # grace on each edge (band 25–30 with tolerance 2 → allowed 23–32). An APP-LEVEL constant,
+  # deliberately NOT per-event or per-city, so no admin can weaken the hard rule for one event; the
+  # server-side guard is AgeEligibilityPolicy. Open band (both null) = no restriction. A tunable, not
+  # a secret; a non-negative whole number — blank/unset or negative falls back to the shipped default
+  # of 2 (AgeGateProperties).
+  age-gate:
+    tolerance-years: ${EVENT_AGE_GATE_TOLERANCE_YEARS:2}
   # Waitlist offer cascade (TM-397): a fixed-delay @Scheduled sweep that offers a freed GOING spot to
   # the FIFO waitlist, widening one member every 5 minutes until the spot is claimed or the list is
   # exhausted. `enabled: false` skips creating the scheduler bean entirely (the test profile does this

@@ -36,6 +36,9 @@ import java.time.Instant;
  * @param locationRevealHours          per-event reveal override in hours ({@code null} = inherit)
  * @param effectiveLocationRevealHours the reveal window actually applied (override → city → app default)
  * @param locationRevealsAt            when the exact location goes public ({@code startAt − effective hours})
+ * @param ageMin                       lower edge of the target age band ({@code null} = no lower bound)
+ * @param ageMax                       upper edge of the target age band ({@code null} = no upper bound;
+ *     both {@code null} = open to all ages) — TM-415
  * @param status                       {@code PUBLISHED} or {@code CANCELLED}
  * @param createdBy                    {@code users.id} of the creating admin
  * @param createdAt                    DB-authoritative creation instant
@@ -59,6 +62,8 @@ public record EventResponse(
         Integer locationRevealHours,
         int effectiveLocationRevealHours,
         Instant locationRevealsAt,
+        Integer ageMin,
+        Integer ageMax,
         String status,
         Long createdBy,
         Instant createdAt,
@@ -83,6 +88,8 @@ public record EventResponse(
                 event.getLocationRevealHours(),
                 reveal.revealHoursFor(event),
                 reveal.revealsAt(event),
+                event.getAgeMin(),
+                event.getAgeMax(),
                 event.getStatus().name(),
                 event.getCreatedBy(),
                 event.getCreatedAt(),

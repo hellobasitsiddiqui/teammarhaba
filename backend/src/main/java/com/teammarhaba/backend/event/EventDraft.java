@@ -10,7 +10,8 @@ import java.time.Instant;
  * {@code endAt}, {@code capacity}, {@code imagePath}, {@code city}, {@code locationRevealHours})
  * are {@code null} when absent. {@code city} is the coarse locality (pre-reveal hint + per-city
  * default key); {@code locationRevealHours} is the per-event reveal-window override ({@code null}
- * = inherit the city/app default) — both TM-408.
+ * = inherit the city/app default) — both TM-408. {@code ageMin}/{@code ageMax} are the optional
+ * age-group band (TM-415); both {@code null} = open to all ages.
  */
 public record EventDraft(
         String heading,
@@ -26,4 +27,6 @@ public record EventDraft(
         Instant visibilityEnd,
         Integer capacity,
         String imagePath,
-        Integer locationRevealHours) {}
+        Integer locationRevealHours,
+        Integer ageMin,
+        Integer ageMax) {}
