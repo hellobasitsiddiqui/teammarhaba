@@ -9,6 +9,7 @@ import {
   ADMIN,
   TARGET,
   BROADCAST_RECIPIENTS,
+  EVENT_ACCOUNTS,
   PROJECT_ID,
   API_BASE_URL,
   AUTH_EMULATOR_HOST,
@@ -161,7 +162,16 @@ export default async function globalSetup() {
     await seedBroadcastRecipient(auth, recipient);
   }
 
+  // Events-journey accounts (TM-400): a browser goer, a browser waiter and an API-only filler — all
+  // provisioned + un-gated (onboarding + terms accepted) so they land straight in the app. The events
+  // themselves are created PER RUN by the spec via the admin API (it needs the ids back), not here.
+  for (const account of EVENT_ACCOUNTS) {
+    await ensureUser(auth, account);
+    await provisionInBackend(account);
+  }
+
   console.log(
-    `[e2e] seeded admin + target + ${BROADCAST_RECIPIENTS.length} broadcast recipients and provisioned them in the backend`,
+    `[e2e] seeded admin + target + ${BROADCAST_RECIPIENTS.length} broadcast recipients + ` +
+      `${EVENT_ACCOUNTS.length} events-journey accounts and provisioned them in the backend`,
   );
 }

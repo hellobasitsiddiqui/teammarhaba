@@ -8,7 +8,7 @@ import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
 //   sign in (email-code) → first-login ONBOARDING gate (TM-250) → TERMS gate (TM-170) →
 //   edit PROFILE (save + DB persist, TM-167) → AVATAR upload (TM-166) → RE-UPLOAD a second avatar
 //   and assert it still loads (TM-335 regression) → browse HOME (+ ADMIN console if the account is
-//   admin) → open HELP + the annotated VISUAL guide (TM-255/TM-178) → SIGN OUT.
+//   admin) → browse EVENTS (TM-400) → open HELP + the annotated VISUAL guide (TM-255/TM-178) → SIGN OUT.
 //
 // Deterministic against the seeded Firebase emulator: we sign in a BRAND-NEW email-code address
 // (never seen ⇒ always un-onboarded ⇒ always hits both first-run gates), so the journey exercises
@@ -254,7 +254,23 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
     await shot("admin-console");
   }
 
-  // ── STEP 8: open HELP + the annotated VISUAL guide (TM-255 / TM-178). ─────────────────────────
+  // ── STEP 8: browse EVENTS (TM-400) — the events list renders (or its empty state), and IF an event
+  // is present its detail opens with the action area. Defensive so the journey stays deterministic
+  // regardless of seeded data — the shared @events spec (events.spec.mjs) owns the full RSVP / waitlist
+  // / claim coverage; here we just prove the events surface is reachable and renders for a fresh user.
+  await clickNav(page, "#nav-events");
+  await expect(page.locator("#events-view")).toBeVisible();
+  await expect(page.locator('[data-testid="events-list"], [data-testid="events-empty"]').first()).toBeVisible();
+  await shot("events");
+  const firstEvent = page.locator('[data-testid="event-card"]').first();
+  if (await firstEvent.count()) {
+    await firstEvent.click();
+    await expect(page.locator('[data-testid="event-detail"]')).toBeVisible();
+    await expect(page.locator('[data-testid="event-actions"]')).toBeVisible();
+    await shot("event-detail");
+  }
+
+  // ── STEP 9: open HELP + the annotated VISUAL guide (TM-255 / TM-178). ─────────────────────────
   await clickNav(page, "#nav-help-link");
   const help = page.locator("#help-view");
   await expect(help).toBeVisible();
@@ -277,7 +293,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   }
   await shot("help-visual-guide");
 
-  // ── STEP 9: SIGN OUT. ────────────────────────────────────────────────────────────────────────
+  // ── STEP 10: SIGN OUT. ───────────────────────────────────────────────────────────────────────
   // We're on the PUBLIC #/help route here, so — unlike the admin-walkthrough spec, which signs out
   // from the protected #/admin and is therefore bounced to #/login — signing out does NOT force a
   // route change: #/help stays shown, just signed-out. So assert the sign-out took effect via the
