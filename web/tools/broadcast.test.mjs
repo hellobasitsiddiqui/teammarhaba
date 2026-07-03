@@ -23,6 +23,11 @@ import {
   displayIdentifier,
   contactCell,
   searchHaystack,
+  USERS_PAGE_SIZE,
+  MAX_USER_FETCH_PAGES,
+  fetchAllUsers,
+  selectionCapMessage,
+  coverageNote,
 } from "../src/assets/broadcast.js";
 
 // --- caps mirror the backend DTO (BroadcastPushRequest) --------------------------------------
@@ -263,4 +268,164 @@ test("searchHaystack still matches name and email, lowercased for the search box
   assert.ok(hay.includes("ayesha khan"));
   assert.ok(hay.includes("ayesha@x.test"));
   assert.equal(searchHaystack({}), "");
+});
+
+// --- fetchAllUsers: the full-account-set page walk (TM-370) ------------------------------------
+//
+// The bug: the console fetched ONE page (100 accounts) and select-all silently operated over only
+// those. These tests drive the walk with a fake page fetcher and assert it exhausts the endpoint,
+// reports the true total, survives mid-walk failures as PARTIAL (never silent), and never loops.
+
+/** Rows `from..to` inclusive, as minimal admin-list items keyed by id (selection is by id, TM-358). */
+function rows(from, to) {
+  const out = [];
+  for (let id = from; id <= to; id += 1) out.push({ id });
+  return out;
+}
+
+/** A fake pager over `all` rows serving the server's envelope shape, recording each call. */
+function fakePager(all, { envelope = (x) => x } = {}) {
+  const calls = [];
+  const fetchPage = async (page, size) => {
+    calls.push([page, size]);
+    const items = all.slice(page * size, page * size + size);
+    return envelope({ items, page, size, totalElements: all.length, totalPages: Math.ceil(all.length / size) });
+  };
+  return { calls, fetchPage };
+}
+
+test("the page-walk defaults mirror the server: 100/page (MAX_PAGE_SIZE), bounded pages", () => {
+  assert.equal(USERS_PAGE_SIZE, 100);
+  assert.ok(MAX_USER_FETCH_PAGES >= 10); // ceiling stays comfortably above the current scale
+});
+
+test("fetchAllUsers walks every page and returns the WHOLE set, in order, complete", async () => {
+  // 250 accounts at 100/page — the exact >100 shape the bug silently truncated to page one.
+  const { calls, fetchPage } = fakePager(rows(1, 250));
+  const r = await fetchAllUsers(fetchPage, { pageSize: 100 });
+  assert.equal(r.users.length, 250);
+  assert.equal(r.users[0].id, 1);
+  assert.equal(r.users[249].id, 250);
+  assert.equal(r.total, 250);
+  assert.equal(r.complete, true);
+  assert.deepEqual(calls, [[0, 100], [1, 100], [2, 100]]);
+});
+
+test("fetchAllUsers stops after one request when the first page is short (≤100 accounts)", async () => {
+  const { calls, fetchPage } = fakePager(rows(1, 40));
+  const r = await fetchAllUsers(fetchPage, { pageSize: 100 });
+  assert.equal(r.users.length, 40);
+  assert.equal(r.complete, true);
+  assert.deepEqual(calls, [[0, 100]]); // the pre-TM-370 cost for a small base: unchanged, one call
+});
+
+test("fetchAllUsers trusts the server's totalPages — no wasted empty request on an exact multiple", async () => {
+  const { calls, fetchPage } = fakePager(rows(1, 200)); // 200 = exactly 2 full pages
+  const r = await fetchAllUsers(fetchPage, { pageSize: 100 });
+  assert.equal(r.users.length, 200);
+  assert.equal(r.complete, true);
+  assert.deepEqual(calls, [[0, 100], [1, 100]]); // not a third fetch for an empty page 2
+});
+
+test("fetchAllUsers falls back to short-page detection when the envelope has no metadata", async () => {
+  const { calls, fetchPage } = fakePager(rows(1, 5), {
+    envelope: ({ items }) => ({ items }), // no totalElements / totalPages at all
+  });
+  const r = await fetchAllUsers(fetchPage, { pageSize: 2 });
+  assert.equal(r.users.length, 5);
+  assert.equal(r.total, 5); // derived from what was fetched
+  assert.equal(r.complete, true);
+  assert.deepEqual(calls, [[0, 2], [1, 2], [2, 2]]); // last page short (1 row) ends the walk
+});
+
+test("fetchAllUsers on an empty account list is complete with zero users", async () => {
+  // Spring reports totalPages 0 for an empty result — must not be treated as 'more to fetch'.
+  const { calls, fetchPage } = fakePager([]);
+  const r = await fetchAllUsers(fetchPage, { pageSize: 100 });
+  assert.deepEqual(r, { users: [], total: 0, complete: true });
+  assert.equal(calls.length, 1);
+});
+
+test("fetchAllUsers de-dupes a row that slides across a page boundary mid-walk", async () => {
+  // A deletion between requests shifts rows down: page 1 re-serves id 3. Selection is by id, so a
+  // duplicate row would double-render; the walk must keep the first sighting only.
+  const pages = [
+    { items: rows(1, 3), totalElements: 5, totalPages: 2 },
+    { items: [{ id: 3 }, { id: 4 }, { id: 5 }], totalElements: 5, totalPages: 2 },
+  ];
+  const r = await fetchAllUsers(async (page) => pages[page], { pageSize: 3 });
+  assert.deepEqual(r.users.map((u) => u.id), [1, 2, 3, 4, 5]);
+  assert.equal(r.complete, true);
+});
+
+test("fetchAllUsers rethrows a FIRST-page failure — nothing loaded is a real load error", async () => {
+  const boom = new Error("403");
+  await assert.rejects(
+    () => fetchAllUsers(async () => { throw boom; }),
+    (err) => err === boom, // the caller's typed ApiError must arrive intact for its 403 copy
+  );
+});
+
+test("fetchAllUsers keeps the loaded pages and flags PARTIAL when a later page fails", async () => {
+  const fetchPage = async (page, size) => {
+    if (page >= 1) throw new Error("blip");
+    return { items: rows(1, size), totalElements: 9, totalPages: 3 };
+  };
+  const r = await fetchAllUsers(fetchPage, { pageSize: 3 });
+  assert.deepEqual(r.users.map((u) => u.id), [1, 2, 3]); // what loaded survives
+  assert.equal(r.total, 9); // the server total still reported — the warning can say "3 of 9"
+  assert.equal(r.complete, false); // never silently pretend coverage is whole
+});
+
+test("fetchAllUsers never loops: the runaway page guard trips and reports partial", async () => {
+  // A pathological server that always claims more pages must not hang the console.
+  const { calls, fetchPage } = fakePager(rows(1, 1000));
+  const r = await fetchAllUsers(fetchPage, { pageSize: 10, maxPages: 3 });
+  assert.equal(calls.length, 3);
+  assert.equal(r.users.length, 30);
+  assert.equal(r.total, 1000); // the true total still surfaces for the coverage warning
+  assert.equal(r.complete, false);
+});
+
+test("fetchAllUsers tolerates a garbage envelope without throwing (treated as an empty last page)", async () => {
+  const r = await fetchAllUsers(async () => ({ nonsense: true }), { pageSize: 100 });
+  assert.deepEqual(r, { users: [], total: 0, complete: true });
+});
+
+// --- selectionCapMessage: the honest MAX_RECIPIENTS warning (TM-370) ---------------------------
+
+test("selectionCapMessage is silent at and below the recipient cap", () => {
+  assert.equal(selectionCapMessage(0), "");
+  assert.equal(selectionCapMessage(3), "");
+  assert.equal(selectionCapMessage(MAX_RECIPIENTS), ""); // exactly at the cap is sendable
+});
+
+test("selectionCapMessage names the count and the cap once the selection exceeds it", () => {
+  const msg = selectionCapMessage(MAX_RECIPIENTS + 112);
+  assert.ok(msg.includes(`${MAX_RECIPIENTS + 112} selected`));
+  assert.ok(msg.includes(`at most ${MAX_RECIPIENTS} recipients`));
+});
+
+test("selectionCapMessage tolerates garbage input as zero", () => {
+  assert.equal(selectionCapMessage(undefined), "");
+  assert.equal(selectionCapMessage("not a number"), "");
+});
+
+// --- coverageNote: the partial-fetch warning copy (TM-370) -------------------------------------
+
+test("coverageNote states loaded vs the true total, and that select-all covers only the loaded", () => {
+  const note = coverageNote(300, 612);
+  assert.ok(note.includes("300 of 612"));
+  assert.match(note, /select all matching/i);
+  assert.match(note, /refresh/i);
+});
+
+test("coverageNote degrades honestly when the true total is unknown", () => {
+  const note = coverageNote(500, 500); // partial fetch but no bigger server total learned
+  assert.match(note, /first 500/);
+  assert.match(note, /more may exist/i);
+});
+
+test("coverageNote never reports a total smaller than what is loaded", () => {
+  assert.ok(coverageNote(50, 10).includes("first 50")); // clamped, not "50 of 10"
 });
