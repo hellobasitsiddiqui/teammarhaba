@@ -276,10 +276,12 @@ jobs:
           SUITE: ${{ github.event.inputs.suite }}
         run: |
           case "$SUITE" in
+            events)
+              echo "::notice::suite 'events' → the Events Maestro journey (android/maestro/events.yaml, TM-399): browse → detail → RSVP → confirm → un-RSVP, plus the best-effort reminder/lifecycle push receipt (TM-368 method). Needs a seeded public event — see android/maestro/README.md → 'Events data precondition'." ;;
             golden|soak|load)
               echo "::notice::suite '${SUITE}' has no Maestro variant yet — running the shared android flow set as a smoke over this surface. TM-341/342/343 may add a surface-specific script later." ;;
             *)
-              echo "::notice::running the shared android Maestro flow set for suite '${SUITE}' (per-tag Maestro selection not wired yet)." ;;
+              echo "::notice::running the shared android Maestro flow set for suite '${SUITE}' (per-tag Maestro selection wired for 'events' only so far)." ;;
           esac
 
       - name: Enable KVM
@@ -341,7 +343,7 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash android/maestro/ci-run.sh "${{ steps.apk.outputs.apk }}"
+          script: bash android/maestro/ci-run.sh "${{ steps.apk.outputs.apk }}" "${{ github.event.inputs.suite }}"
 
       - name: Upload Maestro evidence (screenshots/video/report)
         if: ${{ always() }}

@@ -1,0 +1,154 @@
+# TM-399 — Events journey happy path (Maestro, Android surface 1 of 4)
+#
+# Drives the native Capacitor Android app (appId app.teammarhaba.webview) loading the hosted SPA, and
+# walks the TM-377 journey-3 storyboard made real by the merged user Events UI (TM-396):
+#
+#   sign in → open Events → BROWSE the list → open an event DETAIL → RSVP → CONFIRM ("I'm going") →
+#   land GOING (✓ Going chip + "we'll remind you the day before") → UN-RSVP (Cancel RSVP → confirm) →
+#   back to a joinable state.
+#
+# This is the pure-Maestro, deterministic core of TM-399. The separate "reminder/lifecycle push
+# RECEIVED on the emulator" half (the TM-368 real-FCM method) is a best-effort HARNESS step in
+# ci-run.sh (verify_reminder_push) — pure Maestro cannot register an FCM token or trigger a send, so
+# it lives outside this flow. See android/maestro/README.md → "Events reminder push receipt".
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# SELECTOR STRATEGY (read before editing)
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Maestro drives the Android WebView via the accessibility tree. As the login-sms / ios journey flows
+# established, it reliably matches:
+#   • `id:`   → a real DOM `id` attribute  (e.g. #nav-events, #events-view — the router/index.html ids)
+#   • `text:` → the element's visible text, as an ANCHORED REGULAR EXPRESSION (the WHOLE text must match)
+# The TM-396 Events UI tags its interactive nodes with `data-testid` (event-card, event-primary-action,
+# event-mystate, event-remind-note …), NOT DOM ids — and Maestro's `id:` does not match `data-testid`.
+# So this flow targets those elements by their stable, tested COPY (from web/src/assets/events-core.js)
+# and annotates each step with the corresponding `data-testid` for traceability. Because `text:` is an
+# anchored regex, strings containing regex metacharacters — `?` (RSVP to this event?) and the 🎉 emoji
+# (the success toast) — are matched with a tolerant `.*…*` pattern rather than the literal.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# DATA PRECONDITION (the honest e2e contract — mirrors login-sms's injected-flag contract)
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# This flow RSVPs to a real, public, upcoming event identified by its heading (env EVENT_HEADING). The
+# ci-run.sh harness SEEDS exactly that event via the admin Events API before this flow runs, and
+# cancels it after (see seed_event / cleanup_event, and events-e2e-harness.mjs). If the event is
+# absent, the "browse" assertion fails LOUD and diagnosably (the seed step logs why) rather than
+# hanging — the same posture login-sms takes when the e2e flag wasn't injected. The seeded event has
+# NO age band (so the TM-415 age gate is a no-op) and starts well outside the 60-min booking cutoff
+# (TM-413), so a fresh RSVP lands GOING.
+appId: app.teammarhaba.webview
+env:
+  # The heading of the public event the harness seeds and this flow browses/RSVPs. Override per run
+  # with `-e EVENT_HEADING="…"`; the harness seeds this EXACT string so the card is tappable by text.
+  EVENT_HEADING: "TeamMarhaba e2e coffee morning"
+---
+# ── STEP 1: sign in via the SMS test-number happy path (reuses ./login-sms.yaml, which assumes the
+#    harness pre-injected the persisted reCAPTCHA-bypass flag — see login-sms.yaml / README). Lands
+#    signed-in on #/home. (warm-restart / permissions reuse it the same way.) ──────────────────────
+- runFlow: login-sms.yaml
+- assertVisible:
+    id: "auth-signed-in"
+- takeScreenshot: 01-signed-in
+
+# The first-login product tour (TM-135) can re-arm because ci-run.sh `pm clear`s between flows; login-sms
+# already dismisses it once, but tap Skip again defensively so its overlay can't cover the nav.
+- tapOn:
+    text: "Skip"
+    optional: true
+
+# ── STEP 2: open the EVENTS list. The Events nav link (#nav-events, TM-396) shows for any signed-in,
+#    onboarded user and sits behind the collapsed mobile nav (the hamburger #nav-toggle at phone width,
+#    like #nav-profile in the ios journey). Open the menu, then follow the link. ────────────────────
+- tapOn:
+    id: "nav-toggle"
+    optional: true   # no-op / already open on a wide layout
+- tapOn:
+    id: "nav-events"          # <a id="nav-events" href="#/events">Events</a>
+- assertVisible:
+    id: "events-view"         # <section id="events-view"> — the events route container
+# The list rendered and carries our seeded event. (`data-testid="events-list"` / "event-card" /
+# "event-going-count"; asserted here by the seeded heading + the "N going" badge copy.)
+- assertVisible:
+    text: "${EVENT_HEADING}"
+- assertVisible:
+    text: ".*going.*"         # the tm-event-going badge — goingBadge() copy, data-testid event-going-count
+- takeScreenshot: 02-events-browse
+
+# ── STEP 3: open the event DETAIL by tapping its browse card (the card is an <a> whose title is the
+#    heading — data-testid "event-card"). The detail renders into the same #events-view. ────────────
+- tapOn:
+    text: "${EVENT_HEADING}"
+- assertVisible:
+    text: "${EVENT_HEADING}"  # the tm-event-title h3 on the detail (data-testid event-detail)
+- assertVisible:
+    text: "Where"             # the location subhead — always present, reveal-aware (TM-408, data-testid event-location)
+- takeScreenshot: 03-event-detail
+
+# ── STEP 4: RSVP. For a not-yet-attending caller with a free spot, the primary action button
+#    (data-testid "event-primary-action") reads "RSVP — I'm going" (events-core.js rsvpControlModel).
+- assertVisible:
+    text: "RSVP — I'm going"
+# The reminder promise is surfaced BEFORE committing: the NONE-state standing note "We'll remind you
+# the day before." (data-testid event-remind-note). Post-RSVP the GOING model does NOT re-render this
+# standing note (events-core.js rsvpControlModel returns early for GOING), so the reminder evidence
+# after committing is the success toast (step 6) — assert the standing promise HERE while it shows.
+- assertVisible:
+    text: ".*remind you the day before.*"
+- takeScreenshot: 04-rsvp-cta
+- tapOn:
+    text: "RSVP — I'm going"
+
+# ── STEP 5: CONFIRM. An RSVP that lands GOING raises the confirm dialog (ui.js confirmDialog):
+#    title "RSVP to this event?", body "We'll remind you the day before.", confirm button "I'm going".
+#    (The "?" in the title is a regex metachar → matched tolerantly.) ────────────────────────────────
+- assertVisible:
+    text: ".*RSVP to this event.*"
+- assertVisible:
+    text: ".*remind you the day before.*"   # the reminder promise, shown BEFORE committing
+- takeScreenshot: 05-rsvp-confirm
+# "I'm going" is the dialog's confirm button. As an anchored regex it matches ONLY that button — the
+# originating "RSVP — I'm going" button has extra text and cannot full-match "I'm going".
+- tapOn:
+    text: "I'm going"
+
+# ── STEP 6: GOING state. runCommand() re-renders the detail: the my-state chip becomes "✓ Going"
+#    (data-testid event-mystate) and the primary button flips to "Cancel RSVP" (event-primary-action).
+#    A success toast "You're going 🎉 — we'll remind you the day before." fires first (transient) and
+#    repeats the reminder promise — assert it FIRST (tolerating the 🎉 emoji + its auto-dismiss), then
+#    the durable button-label + chip anchors that prove the RSVP committed.
+- assertVisible:
+    text: ".*You're going.*"                  # success toast — carries the reminder promise (best-effort)
+    optional: true
+- assertVisible:
+    text: "Cancel RSVP"                        # primary flipped rsvp→leave (event-primary-action)
+- assertNotVisible:
+    text: "RSVP — I'm going"                   # the RSVP CTA is gone → we are GOING
+- assertVisible:
+    text: ".*Going"                            # the "✓ Going" chip (event-mystate); tolerant of the ✓ glyph
+- takeScreenshot: 06-rsvp-going
+
+# ── STEP 7: UN-RSVP. Tapping "Cancel RSVP" opens a second confirm dialog: title "Cancel your RSVP?",
+#    body "You'll give up your spot for this event.", danger confirm button ALSO labelled "Cancel RSVP".
+#    At this first tap there is only ONE "Cancel RSVP" (the detail button); the dialog isn't open yet.
+- tapOn:
+    text: "Cancel RSVP"
+- assertVisible:
+    text: ".*Cancel your RSVP.*"               # the dialog title (the "?" → tolerant)
+- takeScreenshot: 07-un-rsvp-confirm
+# Now there are TWO "Cancel RSVP" (the backgrounded detail button + the dialog's danger button). Target
+# the dialog's using a RELATIVE selector — the confirm button sits BELOW the dialog title — so we never
+# accidentally re-tap the detail button (which is first in DOM order).
+- tapOn:
+    text: "Cancel RSVP"
+    below:
+      text: ".*Cancel your RSVP.*"
+
+# ── STEP 8: back to a JOINABLE state — the RSVP was removed, so the primary button returns to
+#    "RSVP — I'm going" and the ✓ Going chip is gone. An info toast "Your RSVP has been removed." fires.
+- assertVisible:
+    text: "RSVP — I'm going"
+- assertNotVisible:
+    text: "Cancel RSVP"        # the leave CTA is gone → RSVP successfully removed
+- assertNotVisible:
+    text: ".*Going"            # the ✓ Going chip cleared (the lowercase "N going" badge won't match capital-G)
+- takeScreenshot: 08-rsvp-removed
