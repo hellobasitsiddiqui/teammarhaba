@@ -16,6 +16,7 @@ import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, get
 import { el, clear, toast, confirmDialog, relativeTime } from "./ui.js";
 import { doodle } from "./doodles.js";
 import * as core from "./events-core.js";
+import * as cal from "./calendar-core.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -246,6 +247,10 @@ function paintDetail(view, detail, me) {
       // Age band (TM-415) — shown whenever the event has one, independent of eligibility.
       bandLabel ? el("p", { class: "tm-badge tm-event-ageband", "data-testid": "event-age-band", text: bandLabel }) : null,
 
+      // Add to calendar (TM-398) — reveal-aware (never leaks the exact venue pre-reveal); hidden for
+      // cancelled events. Returns null when there's nothing to add.
+      calendarSection(detail, now),
+
       // Location — reveal-aware (TM-408).
       locationSection(detail, now),
 
@@ -279,6 +284,79 @@ function locationSection(detail, now) {
     children.push(el("a", { class: "tm-btn tm-btn-sm", href: loc.onlineUrl, target: "_blank", rel: "noopener", "data-testid": "event-online-link" }, "Join online"));
   }
   return el("section", { class: "tm-event-location", "data-testid": "event-location" }, children);
+}
+
+// ------------------------------------------------------------------ add to calendar (TM-398)
+
+/**
+ * The "Add to calendar" disclosure. All of the decision logic (reveal-safe location, .ics text, the
+ * Google / Outlook URLs, and the cancelled-hides-control gate) lives in the pure, unit-tested
+ * calendar-core.js; this is the thin DOM shell. Returns null (renders nothing) when the model says
+ * the control must be hidden — cancelled events, or anything without a start (the AC).
+ *
+ * A native <details> disclosure keeps it accessible and framework-free. The .ics is a JS blob
+ * download (a generated file, not a navigation), so it's a <button>; Google and Outlook are real
+ * outbound links.
+ */
+function calendarSection(detail, now) {
+  // A deep-link back to this event, only for a real http(s) origin (never a capacitor:// scheme).
+  const origin =
+    typeof window !== "undefined" && /^https?:/.test(window.location?.origin || "") ? window.location.origin : "";
+  const url = origin ? `${origin}/#/events/${encodeURIComponent(detail.id)}` : "";
+  const model = cal.addToCalendarModel(detail, now, { url });
+  if (!model.show) return null;
+
+  const menu = el("div", { class: "tm-event-calendar-menu", role: "group", "aria-label": "Add to calendar" }, [
+    el(
+      "button",
+      {
+        class: "tm-btn tm-btn-sm",
+        type: "button",
+        "data-testid": "calendar-ics",
+        onClick: () => downloadIcs(model.icsFilename, model.ics),
+      },
+      [doodle("calendar", { class: "tm-event-cal-opt-icon", title: "" }), "Apple / iCal (.ics)"],
+    ),
+    el(
+      "a",
+      { class: "tm-btn tm-btn-sm", href: model.googleUrl, target: "_blank", rel: "noopener", "data-testid": "calendar-google" },
+      "Google Calendar",
+    ),
+    el(
+      "a",
+      { class: "tm-btn tm-btn-sm", href: model.outlookUrl, target: "_blank", rel: "noopener", "data-testid": "calendar-outlook" },
+      "Outlook",
+    ),
+  ]);
+
+  return el("details", { class: "tm-event-calendar", "data-testid": "event-add-to-calendar" }, [
+    el("summary", { class: "tm-event-calendar-toggle" }, [
+      doodle("calendar", { class: "tm-event-cal-icon", title: "" }),
+      el("span", { text: "Add to calendar" }),
+    ]),
+    menu,
+  ]);
+}
+
+/**
+ * Trigger a client-side .ics download — a generated file, no server round-trip. The standard blob +
+ * download-anchor path (works on web / mobile-web, and iOS/Chromium WebViews that honour a download
+ * gesture). Best-effort: any failure degrades to a toast rather than a broken control.
+ */
+function downloadIcs(filename, icsText) {
+  try {
+    const blob = new Blob([icsText], { type: "text/calendar;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = el("a", { href: objectUrl, download: filename, rel: "noopener" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    // Revoke once the download has been handed off (a short delay is enough across browsers).
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
+  } catch (err) {
+    console.warn("[events] .ics download failed:", err?.message ?? err);
+    toast("Couldn't prepare the calendar file. Please try again.", { type: "error" });
+  }
 }
 
 function attendeesSection(detail) {
