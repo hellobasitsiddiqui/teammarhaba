@@ -154,6 +154,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return Problems.forbidden("You do not have permission to access this resource.");
     }
 
+    /**
+     * A state conflict raised by feature code with honest, user-facing copy (e.g. an RSVP change
+     * after the event started, or a claim on an already-taken spot, TM-393) -> 409.
+     */
+    @ExceptionHandler(ConflictException.class)
+    public ProblemDetail handleStateConflict(ConflictException ex) {
+        return Problems.of(HttpStatus.CONFLICT, "Conflict", ex.getMessage());
+    }
+
     /** DB / state conflict (e.g. unique-constraint violation) -> 409. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleConflict(DataIntegrityViolationException ex) {

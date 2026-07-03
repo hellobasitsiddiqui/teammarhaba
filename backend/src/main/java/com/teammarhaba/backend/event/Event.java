@@ -256,6 +256,24 @@ public class Event {
     }
 
     /**
+     * The public-API visibility rule (TM-393): {@code PUBLISHED} and {@code when} inside the
+     * [{@code visibilityStart}, {@code visibilityEnd}] window. Cancelled or out-of-window events
+     * are <em>hidden</em> — the public endpoints 404 them (soft-deleted rows never even load,
+     * thanks to the {@code @SQLRestriction}).
+     */
+    public boolean isVisibleAt(Instant when) {
+        return isPublished() && !when.isBefore(visibilityStart) && !when.isAfter(visibilityEnd);
+    }
+
+    /**
+     * {@code true} once the event has started — the cut-off after which attendance changes
+     * (RSVP, un-RSVP, claim) are refused with a {@code 409} (TM-393).
+     */
+    public boolean hasStartedBy(Instant when) {
+        return !when.isBefore(startAt);
+    }
+
+    /**
      * Call the event off (idempotent): keeps the row readable for attendees/history but drops it
      * from the visible-now listing. Distinct from soft-delete, which hides it everywhere.
      */

@@ -1,10 +1,13 @@
 package com.teammarhaba.backend.event;
 
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -51,4 +54,17 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             """)
     List<Event> findStartingBetween(
             @Param("status") EventStatus status, @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Load the event holding a {@code SELECT ... FOR UPDATE} row lock — <b>the</b> locking
+     * discipline for every capacity-affecting write (TM-393). RSVP, un-RSVP and claim all start by
+     * taking this lock inside their transaction, so concurrent joins/claims on the same event
+     * serialise: capacity checks read committed truth, oversell is impossible and first-claim-wins
+     * falls out for free. Locking one {@code events} row per event keeps contention scoped — writes
+     * to different events never queue behind each other. The {@code @SQLRestriction} still applies:
+     * soft-deleted events don't load (or lock).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from Event e where e.id = :id")
+    Optional<Event> findByIdForUpdate(@Param("id") Long id);
 }

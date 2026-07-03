@@ -88,6 +88,14 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.EventAdminService eventAdminService;
 
+    // EventController (TM-393) needs the event query + RSVP services — supply them so the web
+    // slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.event.EventQueryService eventQueryService;
+
+    @MockitoBean
+    private com.teammarhaba.backend.event.EventRsvpService eventRsvpService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

@@ -3,6 +3,7 @@ package com.teammarhaba.backend.event;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -24,6 +25,16 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
 
     /** Capacity check ({@code GOING} vs {@code events.capacity}) and per-state badge counts. */
     long countByEventIdAndState(Long eventId, AttendanceState state);
+
+    /** The caller's rows across many events in one query — the listing's "my-state" without an N+1. */
+    List<EventAttendance> findByUserIdAndEventIdIn(Long userId, Collection<Long> eventIds);
+
+    /**
+     * A slice of one event's attendance in a given state — the detail view passes {@code GOING}
+     * with a page of the first N by ({@code createdAt}, {@code id}) to build the attendee-avatar
+     * strip in join order.
+     */
+    List<EventAttendance> findByEventIdAndState(Long eventId, AttendanceState state, Pageable pageable);
 
     /**
      * All attendance rows of one state on one event — the reminder fan-out's recipient source
@@ -69,6 +80,24 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
     @Modifying
     @Query("delete from EventAttendance a where a.eventId = :eventId and a.userId = :userId")
     int deleteByEventIdAndUserId(@Param("eventId") Long eventId, @Param("userId") Long userId);
+
+    /**
+     * The cascade-stop wipe (TM-393): void every live offer left on the event's waitlist. The
+     * claim service calls this when a claim fills the <em>last</em> free spot — remaining
+     * waitlisted members no longer have a spot available, and the next freed spot starts a fresh
+     * cascade from a clean slate. Runs under the event's {@code FOR UPDATE} lock (the claim
+     * transaction), so it can never race another claim's bookkeeping. Returns the number of
+     * offers voided.
+     */
+    @Modifying
+    @Query(
+            """
+            update EventAttendance a set a.offerNotifiedAt = null
+            where a.eventId = :eventId
+              and a.state = com.teammarhaba.backend.event.AttendanceState.WAITLISTED
+              and a.offerNotifiedAt is not null
+            """)
+    int clearOpenOffers(@Param("eventId") Long eventId);
 
     /** Projection for {@link #tallyByEventIds}: one row per (event, state) with its count. */
     interface AttendanceTally {
