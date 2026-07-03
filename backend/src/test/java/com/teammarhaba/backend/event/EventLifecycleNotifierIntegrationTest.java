@@ -95,7 +95,9 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
 
         List<Delivery> pushes = pushesTitled("Event updated:");
         assertThat(pushes).extracting(Delivery::token).containsExactly("tok-loc-going");
-        assertThat(pushes.get(0).message().body()).contains("location");
+        // The event starts in 2h — past its default 24h reveal boundary — so the update push names the
+        // new venue (TM-416: post-reveal pushes include location).
+        assertThat(pushes.get(0).message().body()).contains("location").contains("New Venue, 99 Side St");
     }
 
     @Test

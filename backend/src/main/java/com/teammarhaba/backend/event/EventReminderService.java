@@ -75,11 +75,14 @@ import org.springframework.stereotype.Service;
  * claim row afterwards, best effort.
  *
  * <p><strong>Content.</strong> Title is the milestone prefix + the event heading; body is the
- * event's start rendered in the <em>event's own timezone</em> plus the venue line. This is the one
+ * event's start rendered in the <em>event's own timezone</em> plus the location line. This is the one
  * deliberate exception to "the backend never renders local times" (TM-391's client-side rule):
  * push text is displayed verbatim by the OS with no client logic, so the server must localise
- * here, using the stored IANA zone. The deep link is the {@code #/events/{id}} detail route via
- * the {@link PushRoutes#eventDetail allow-listed route pattern} (TM-360 mechanism).
+ * here, using the stored IANA zone. The location line is reveal-gated through {@link
+ * EventPushLocation} (TM-416) — the exact venue only once the event's reveal window has opened,
+ * honest placeholder copy before then, so a shorter-than-default reveal window can't leak the address
+ * early. The deep link is the {@code #/events/{id}} detail route via the {@link PushRoutes#eventDetail
+ * allow-listed route pattern} (TM-360 mechanism).
  *
  * <p><strong>Known limits</strong> (documented trade-offs, not bugs): a rescheduled event does not
  * re-arm milestones already claimed for it (the marker pins the pair, not the start time), and a
@@ -101,6 +104,7 @@ public class EventReminderService {
     private final UserRepository users;
     private final DeviceTokenRepository deviceTokens;
     private final PushNotificationService push;
+    private final EventPushLocation pushLocation;
     private final Clock clock;
 
     @Autowired
@@ -110,8 +114,9 @@ public class EventReminderService {
             EventReminderSendRepository markers,
             UserRepository users,
             DeviceTokenRepository deviceTokens,
-            PushNotificationService push) {
-        this(events, attendance, markers, users, deviceTokens, push, Clock.systemUTC());
+            PushNotificationService push,
+            EventPushLocation pushLocation) {
+        this(events, attendance, markers, users, deviceTokens, push, pushLocation, Clock.systemUTC());
     }
 
     /** Test seam: inject a fixed/advanceable {@link Clock} (house pattern, as {@code BroadcastService}). */
@@ -122,6 +127,7 @@ public class EventReminderService {
             UserRepository users,
             DeviceTokenRepository deviceTokens,
             PushNotificationService push,
+            EventPushLocation pushLocation,
             Clock clock) {
         this.events = events;
         this.attendance = attendance;
@@ -129,6 +135,7 @@ public class EventReminderService {
         this.users = users;
         this.deviceTokens = deviceTokens;
         this.push = push;
+        this.pushLocation = pushLocation;
         this.clock = clock;
     }
 
@@ -166,7 +173,7 @@ public class EventReminderService {
                         .contains(milestone)) {
                     continue; // already sent (this run of the pre-filter's knowledge)
                 }
-                if (remind(event, milestone)) {
+                if (remind(event, milestone, now)) {
                     sent++;
                 }
             }
@@ -191,7 +198,7 @@ public class EventReminderService {
      * performed the fan-out (even if it then reached zero devices — the reminder is spent either way;
      * capacity to receive is the attendee's own opt-in/device state, exactly like broadcast).
      */
-    private boolean remind(Event event, ReminderMilestone milestone) {
+    private boolean remind(Event event, ReminderMilestone milestone, Instant now) {
         EventReminderSend marker = claim(event.getId(), milestone);
         if (marker == null) {
             return false; // a concurrent instance (or an earlier crashed run) holds the claim
@@ -208,7 +215,7 @@ public class EventReminderService {
             return false;
         }
 
-        PushFanout fanout = fanOut(current, milestone);
+        PushFanout fanout = fanOut(current, milestone, now);
         marker.recordFanout(fanout);
         markers.save(marker); // best-effort back-fill; the claim itself is already durable
         log.info("Event {} reminder {} sent: {}", current.getId(), milestone, fanout);
@@ -234,7 +241,7 @@ public class EventReminderService {
      * and suspended skipped, {@code notificationPref} honoured), de-duplicate their device tokens, and
      * deliver through the shared {@link PushNotificationService#sendToTokens} fan-out.
      */
-    private PushFanout fanOut(Event event, ReminderMilestone milestone) {
+    private PushFanout fanOut(Event event, ReminderMilestone milestone, Instant now) {
         List<EventAttendance> going =
                 attendance.findByEventIdAndState(event.getId(), AttendanceState.GOING);
         if (going.isEmpty()) {
@@ -262,7 +269,7 @@ public class EventReminderService {
         if (tokens.isEmpty()) {
             return new PushFanout(0, 0, 0, 0);
         }
-        return push.sendToTokens(tokens, message(event, milestone));
+        return push.sendToTokens(tokens, message(event, milestone, now));
     }
 
     /** Push-eligible == the pref opted into push; EMAIL (the default) is the opt-out — as broadcast. */
@@ -271,14 +278,18 @@ public class EventReminderService {
     }
 
     /**
-     * The reminder content: milestone prefix + heading as the title; local start time + venue line as
-     * the body; the event-detail deep link (allow-listed pattern, TM-360 mechanism) as the route.
+     * The reminder content: milestone prefix + heading as the title; local start time + location line
+     * as the body; the event-detail deep link (allow-listed pattern, TM-360 mechanism) as the route.
+     *
+     * <p>The location line is routed through {@link EventPushLocation} (TM-416): it is the exact venue
+     * only once {@code now} has reached the event's reveal boundary, and honest placeholder copy
+     * before then — so a short-reveal event never leaks its address via the T-24h reminder.
      */
-    private PushMessage message(Event event, ReminderMilestone milestone) {
+    private PushMessage message(Event event, ReminderMilestone milestone, Instant now) {
         String localStart = LOCAL_START.withZone(zoneOf(event)).format(event.getStartAt());
         return new PushMessage(
                 milestone.titlePrefix() + event.getHeading(),
-                localStart + " · " + event.getLocationText(),
+                localStart + " · " + pushLocation.line(event, now),
                 PushRoutes.eventDetail(event.getId()));
     }
 

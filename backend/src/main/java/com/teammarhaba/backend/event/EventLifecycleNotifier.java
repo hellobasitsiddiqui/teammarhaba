@@ -2,10 +2,12 @@ package com.teammarhaba.backend.event;
 
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushRoutes;
+import java.time.Clock;
 import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -30,6 +32,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * exact changed-field set the admin service already computed, off the event, and applies the policy
  * here (the domain seam stays policy-free). {@code endAt} and the map/online URLs are a deliberate
  * non-material trade-off for now (a follow-up can widen the set).
+ *
+ * <p><b>Reveal-aware venue (TM-416).</b> When the <em>where</em> moved, the push names the new venue
+ * only once the event's location-reveal window has opened, routed through the shared
+ * {@link EventPushLocation} helper — the same gate the reminders use. Before reveal the address is
+ * withheld and the push just points at the app, so a location change on a not-yet-revealed event can
+ * never leak the new address early; after reveal the attendee sees where it moved to.
  *
  * <h2>Cancel — notify and stop everything</h2>
  *
@@ -61,16 +69,36 @@ public class EventLifecycleNotifier {
     private static final Logger log = LoggerFactory.getLogger(EventLifecycleNotifier.class);
 
     private final EventAttendanceRepository attendance;
+    private final EventRepository events;
     private final EventAttendeeNotifier notifier;
     private final WaitlistOfferCascadeService cascade;
+    private final EventPushLocation pushLocation;
+    private final Clock clock;
 
+    @Autowired
     public EventLifecycleNotifier(
             EventAttendanceRepository attendance,
+            EventRepository events,
             EventAttendeeNotifier notifier,
-            WaitlistOfferCascadeService cascade) {
+            WaitlistOfferCascadeService cascade,
+            EventPushLocation pushLocation) {
+        this(attendance, events, notifier, cascade, pushLocation, Clock.systemUTC());
+    }
+
+    /** Test seam: inject a fixed {@link Clock} so the location-reveal boundary is deterministic. */
+    EventLifecycleNotifier(
+            EventAttendanceRepository attendance,
+            EventRepository events,
+            EventAttendeeNotifier notifier,
+            WaitlistOfferCascadeService cascade,
+            EventPushLocation pushLocation,
+            Clock clock) {
         this.attendance = attendance;
+        this.events = events;
         this.notifier = notifier;
         this.cascade = cascade;
+        this.pushLocation = pushLocation;
+        this.clock = clock;
     }
 
     /** Edit/cancel pushes, post-commit. Create has no attendees, so it is a no-op. */
@@ -82,7 +110,7 @@ public class EventLifecycleNotifier {
             }
             case UPDATED -> {
                 if (isMaterial(event.changedFields())) {
-                    pushToGoing(event.eventId(), updatedMessage(event.eventId(), event.heading(), event.changedFields()));
+                    pushToGoing(event.eventId(), updatedMessage(event));
                 } else {
                     log.debug("Event {} updated with no material change; not notifying.", event.eventId());
                 }
@@ -116,7 +144,8 @@ public class EventLifecycleNotifier {
         notifier.pushToUsers(going, message);
     }
 
-    private static PushMessage updatedMessage(long eventId, String heading, Set<String> changedFields) {
+    private PushMessage updatedMessage(EventLifecycleEvent lifecycle) {
+        Set<String> changedFields = lifecycle.changedFields();
         boolean timeChanged = changedFields.contains("startAt") || changedFields.contains("timezone");
         boolean placeChanged = changedFields.contains("locationText");
         String what;
@@ -127,7 +156,20 @@ public class EventLifecycleNotifier {
         } else {
             what = "The location changed";
         }
-        return new PushMessage("Event updated: " + heading, what + " — tap for details.", PushRoutes.eventDetail(eventId));
+
+        // When the venue moved, name the new place only once its reveal window has opened — the same
+        // gate the reminders use, via the one shared EventPushLocation helper (TM-416). Before reveal
+        // (or if the event has since been removed) we withhold the address and just point at the app,
+        // exactly as the public events API withholds it; the client applies the policy when rendering.
+        String tail = " — tap for details.";
+        if (placeChanged) {
+            Event current = events.findById(lifecycle.eventId()).orElse(null);
+            if (current != null && pushLocation.isRevealed(current, clock.instant())) {
+                tail = " — now at " + current.getLocationText() + ". Tap for details.";
+            }
+        }
+        return new PushMessage(
+                "Event updated: " + lifecycle.heading(), what + tail, PushRoutes.eventDetail(lifecycle.eventId()));
     }
 
     private static PushMessage cancelledMessage(long eventId, String heading) {
