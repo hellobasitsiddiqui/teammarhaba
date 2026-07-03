@@ -26,9 +26,10 @@ import { authHeadersFor, createEvent, apiRsvp, apiCancelRsvp, resetAttendanceFor
 // env in e2e.yml / test-suite.yml) so the offer lands within a few seconds; STEP 4 of test 2 re-reads
 // the detail on a BOUNDED poll until the claim affordance appears (never an unbounded wait).
 //
-// CALENDAR (soft): "add-to-calendar links present" is TM-398, which has NOT merged — so that assertion
-// is kept CONDITIONAL (assert the link's target only IF the affordance exists; else annotate + skip),
-// exactly as the ticket instructs.
+// CALENDAR: "add-to-calendar links present" is TM-398, now MERGED. The detail renders a
+// <details data-testid="event-add-to-calendar"> disclosure whose Google/Outlook options are real
+// outbound <a> links (the .ics option is a JS blob-download <button>, so it has no href). We assert the
+// wrapper is present and that those two links carry a Google Calendar / Outlook deep-link.
 //
 // Project-agnostic (like golden-path TM-341 / broadcast-admin TM-366): runs under BOTH the desktop
 // `chromium` and the phone `mobile-chromium` Playwright projects (see playwright.config.mjs testMatch),
@@ -129,27 +130,27 @@ async function assertAttendanceState(eventId, email, expectedState) {
   }
 }
 
-/** Soft, conditional add-to-calendar assertion (TM-398). Assert the link's target only if the
- *  affordance already exists; otherwise annotate + skip so the suite stays green until TM-398 lands. */
-async function assertCalendarLinksSoft(page, testInfo) {
-  const cal = page.locator(
-    '[data-testid="event-add-to-calendar"], [data-testid="event-calendar-link"], ' +
-      '[data-testid="event-ics-link"], a[href*="calendar.google"], a[download$=".ics"]',
-  );
-  if (await cal.count()) {
-    const first = cal.first();
-    await expect(first).toBeVisible();
-    const href = (await first.getAttribute("href")) || "";
-    expect(href, "an add-to-calendar link should target a calendar (Google Calendar / .ics / webcal)").toMatch(
-      /calendar\.google|\.ics|webcal:|outlook\.(live|office)/i,
-    );
-    testInfo.annotations.push({ type: "calendar", description: `add-to-calendar link present: ${href}` });
-  } else {
-    testInfo.annotations.push({
-      type: "calendar-soft-skip",
-      description: "no add-to-calendar affordance yet (TM-398 not merged) — soft-skipped per TM-400.",
-    });
-  }
+/** Add-to-calendar assertion (TM-398, merged). The detail renders a <details
+ *  data-testid="event-add-to-calendar"> disclosure holding three options; the Google and Outlook
+ *  options are real outbound <a> links, while the .ics option is a JS blob-download <button> (no href).
+ *  Assert the wrapper is present, then read the calendar deep-links off the Google/Outlook anchors.
+ *  Those anchors live inside the collapsed <details>, so they're attached but not visible — `toHaveAttribute`
+ *  polls the DOM without requiring visibility, so we read the href off them rather than asserting visibility. */
+async function assertCalendarLinks(page, testInfo) {
+  const cal = page.locator('[data-testid="event-add-to-calendar"]');
+  await expect(cal).toBeVisible();
+
+  const google = cal.locator('[data-testid="calendar-google"]');
+  const outlook = cal.locator('[data-testid="calendar-outlook"]');
+  await expect(google).toHaveAttribute("href", /calendar\.google\.com/i);
+  await expect(outlook).toHaveAttribute("href", /outlook\.(live|office)\.com/i);
+
+  testInfo.annotations.push({
+    type: "calendar",
+    description:
+      `add-to-calendar links present — google: ${await google.getAttribute("href")} · ` +
+      `outlook: ${await outlook.getAttribute("href")}`,
+  });
 }
 
 /** Re-read the detail (hop list → detail so the router re-enters + re-GETs, the no-reload hash nav the
@@ -229,8 +230,9 @@ test("@events browse an event, RSVP to it (going), then un-RSVP", async ({ page 
   // It persisted: a GOING event_attendance row for this user + event.
   await assertAttendanceState(event.id, EVENT_GOER.email, "GOING");
 
-  // Add-to-calendar links (soft — TM-398 not merged): assert only if present, else annotate + skip.
-  await assertCalendarLinksSoft(page, testInfo);
+  // Add-to-calendar links (TM-398, merged): the disclosure is present and its Google/Outlook options
+  // carry real calendar deep-links.
+  await assertCalendarLinks(page, testInfo);
 
   // ── STEP 3: un-RSVP (leave) → confirm → back to NONE. ─────────────────────────────────────────
   const leave = page.locator('[data-testid="event-primary-action"]');
