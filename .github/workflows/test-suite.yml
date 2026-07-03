@@ -49,6 +49,8 @@ on:
           - badges
           - webview
           - responsive
+          # events journey (TM-399): android Maestro is wired (events.yaml); web/mobile-web/ios specs land via TM-400/401
+          - events
           # aggregates / special suites
           - all
           - golden
