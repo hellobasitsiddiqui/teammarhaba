@@ -21,6 +21,12 @@ import java.util.List;
  * reveal the client shows the coarse {@code city} hint plus {@code locationRevealsAt}. The guard is
  * uniform for every caller — GOING and WAITLISTED attendees see exactly the same withholding.
  *
+ * <p><b>Age band (TM-415)</b> — {@code ageMin}/{@code ageMax} carry the event's target age group for
+ * display ({@code null}/{@code null} = open to all ages); {@code ageEligible} is the caller's own
+ * verdict — {@code null} when the event is unrestricted, else {@code true}/{@code false} from
+ * {@code AgeEligibilityPolicy} (an unset age on a banded event is {@code false}). The client uses it
+ * to disable RSVP with honest copy without needing to know the server-side ±tolerance grace.
+ *
  * @param id                   the event id
  * @param heading              short display title
  * @param description          full body text
@@ -43,6 +49,11 @@ import java.util.List;
  * @param status               the temporal phase (TM-412); {@code UPCOMING} or {@code HAPPENING_NOW}
  *     — a finished event's detail 404s, so {@code FINISHED} is never returned here
  * @param happeningNow         convenience flag ({@code status == HAPPENING_NOW}) for the live badge
+ * @param ageMin               lower edge of the target age band ({@code null} = no lower bound)
+ * @param ageMax               upper edge of the target age band ({@code null} = no upper bound;
+ *     both {@code null} = open to all ages)
+ * @param ageEligible          the caller's eligibility verdict: {@code null} = unrestricted event,
+ *     else {@code true}/{@code false} (age unset ⇒ {@code false})
  */
 public record EventDetail(
         Long id,
@@ -65,4 +76,7 @@ public record EventDetail(
         boolean locationRevealed,
         Instant locationRevealsAt,
         EventPhase status,
-        boolean happeningNow) {}
+        boolean happeningNow,
+        Integer ageMin,
+        Integer ageMax,
+        Boolean ageEligible) {}

@@ -111,7 +111,10 @@ public class EventAdminService {
         event.setCapacity(draft.capacity());
         event.setImagePath(draft.imagePath());
         event.setLocationRevealHours(draft.locationRevealHours());
+        event.setAgeMin(draft.ageMin());
+        event.setAgeMax(draft.ageMax());
         requireConsistentTimes(event);
+        requireConsistentAgeBand(event);
 
         Event saved = events.saveAndFlush(event);
         // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the
@@ -168,8 +171,11 @@ public class EventAdminService {
                 event::setLocationRevealHours,
                 "locationRevealHours",
                 changed);
+        applyIfChanged(patch.ageMin(), event.getAgeMin(), event::setAgeMin, "ageMin", changed);
+        applyIfChanged(patch.ageMax(), event.getAgeMax(), event::setAgeMax, "ageMax", changed);
 
         requireConsistentTimes(event);
+        requireConsistentAgeBand(event);
 
         if (changed.isEmpty()) {
             return event; // nothing actually changed: no touch, no audit, no lifecycle signal
@@ -232,6 +238,21 @@ public class EventAdminService {
         }
         if (event.getEndAt() != null && !event.getEndAt().isAfter(event.getStartAt())) {
             throw new BadRequestException("endAt must be after startAt.");
+        }
+    }
+
+    /**
+     * The age-band invariant, checked on the <em>merged</em> entity state (like
+     * {@link #requireConsistentTimes}) so a partial PATCH that carries only one edge is validated
+     * against the other side's persisted value: when both edges are set, the lower must not exceed
+     * the upper (TM-415). The 13..120 range and non-negativity are enforced at the request edge; the
+     * DB CHECK constraint is the final backstop.
+     */
+    private static void requireConsistentAgeBand(Event event) {
+        Integer min = event.getAgeMin();
+        Integer max = event.getAgeMax();
+        if (min != null && max != null && min > max) {
+            throw new BadRequestException("ageMin must be less than or equal to ageMax.");
         }
     }
 

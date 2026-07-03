@@ -40,7 +40,9 @@ public record UpdateEventRequest(
                         regexp = "event-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like event-images/{eventId}")
                 String imagePath,
-        @Min(1) @Max(8760) Integer locationRevealHours) {
+        @Min(1) @Max(8760) Integer locationRevealHours,
+        @Min(13) @Max(120) Integer ageMin,
+        @Min(13) @Max(120) Integer ageMax) {
 
     @JsonIgnore
     @AssertTrue(message = "heading must not be blank")
@@ -80,6 +82,17 @@ public record UpdateEventRequest(
         return endAt == null || startAt == null || endAt.isAfter(startAt);
     }
 
+    /**
+     * When the patch carries both age-band edges, the lower must not exceed the upper. The
+     * merged-state check (patch carries only one edge, inverted against the persisted other side)
+     * is {@code EventAdminService}'s, exactly like the visibility-window rule (TM-415).
+     */
+    @JsonIgnore
+    @AssertTrue(message = "ageMin must be less than or equal to ageMax")
+    public boolean isAgeBandOrdered() {
+        return ageMin == null || ageMax == null || ageMin <= ageMax;
+    }
+
     /** Map onto the domain-side command object ({@code event} package stays free of api DTOs). */
     EventPatch toPatch() {
         return new EventPatch(
@@ -96,6 +109,8 @@ public record UpdateEventRequest(
                 visibilityEnd,
                 capacity,
                 imagePath,
-                locationRevealHours);
+                locationRevealHours,
+                ageMin,
+                ageMax);
     }
 }

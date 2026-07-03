@@ -40,6 +40,10 @@ import java.time.ZoneId;
  * @param imagePath       optional storage path of the event image ({@code event-images/…})
  * @param locationRevealHours optional per-event reveal window in hours before start (1..8760);
  *     omitted = inherit the per-city / app default (TM-408)
+ * @param ageMin          optional lower edge of the target age band, 13..120; omitted = no lower
+ *     bound (TM-415)
+ * @param ageMax          optional upper edge of the target age band, 13..120; omitted = no upper
+ *     bound. Both omitted = open to all ages
  */
 public record CreateEventRequest(
         @NotBlank @Size(max = 120) String heading,
@@ -59,7 +63,9 @@ public record CreateEventRequest(
                         regexp = "event-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like event-images/{eventId}")
                 String imagePath,
-        @Min(1) @Max(8760) Integer locationRevealHours) {
+        @Min(1) @Max(8760) Integer locationRevealHours,
+        @Min(13) @Max(120) Integer ageMin,
+        @Min(13) @Max(120) Integer ageMax) {
 
     /** The timezone must be a real IANA zone id — bad ids would break every client's rendering. */
     @JsonIgnore
@@ -82,6 +88,13 @@ public record CreateEventRequest(
         return endAt == null || startAt == null || endAt.isAfter(startAt);
     }
 
+    /** When both age-band edges are given, the lower must not exceed the upper (TM-415). */
+    @JsonIgnore
+    @AssertTrue(message = "ageMin must be less than or equal to ageMax")
+    public boolean isAgeBandOrdered() {
+        return ageMin == null || ageMax == null || ageMin <= ageMax;
+    }
+
     /** Map onto the domain-side command object ({@code event} package stays free of api DTOs). */
     EventDraft toDraft() {
         return new EventDraft(
@@ -98,6 +111,8 @@ public record CreateEventRequest(
                 visibilityEnd,
                 capacity,
                 imagePath,
-                locationRevealHours);
+                locationRevealHours,
+                ageMin,
+                ageMax);
     }
 }

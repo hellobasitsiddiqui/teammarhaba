@@ -46,12 +46,15 @@ class EventRsvpServiceCancellationTest {
     /** TM-413's RSVP booking cutoff — a collaborator of the service but never exercised on the cancel path. */
     @Mock private BookingCutoffPolicy bookingCutoff;
 
+    /** TM-415's age-group guard — a collaborator of the service but never exercised on the cancel path. */
+    @Mock private AgeEligibilityPolicy ageGate;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
 
     private EventRsvpService service() {
-        return new EventRsvpService(events, attendance, users, policy, publisher, bookingCutoff);
+        return new EventRsvpService(events, attendance, users, policy, ageGate, publisher, bookingCutoff);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)

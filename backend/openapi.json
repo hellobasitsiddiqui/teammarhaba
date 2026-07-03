@@ -177,6 +177,18 @@
       },
       "CreateEventRequest" : {
         "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
           "capacity" : {
             "format" : "int32",
             "minimum" : 1,
@@ -361,6 +373,17 @@
       },
       "EventDetail" : {
         "properties" : {
+          "ageEligible" : {
+            "type" : "boolean"
+          },
+          "ageMax" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "attendees" : {
             "items" : {
               "$ref" : "#/components/schemas/AttendeeAvatar"
@@ -441,6 +464,14 @@
       },
       "EventResponse" : {
         "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "capacity" : {
             "format" : "int32",
             "type" : "integer"
@@ -797,6 +828,18 @@
       },
       "UpdateEventRequest" : {
         "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
           "capacity" : {
             "format" : "int32",
             "minimum" : 1,

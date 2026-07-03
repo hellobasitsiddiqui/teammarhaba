@@ -47,18 +47,21 @@ public class EventQueryService {
     private final UserRepository users;
     private final LocationRevealPolicy reveal;
     private final EventPhasePolicy phase;
+    private final AgeEligibilityPolicy ageGate;
 
     public EventQueryService(
             EventRepository events,
             EventAttendanceRepository attendance,
             UserRepository users,
             LocationRevealPolicy reveal,
-            EventPhasePolicy phase) {
+            EventPhasePolicy phase,
+            AgeEligibilityPolicy ageGate) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.reveal = reveal;
         this.phase = phase;
+        this.ageGate = ageGate;
     }
 
     /**
@@ -131,8 +134,11 @@ public class EventQueryService {
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
         long waitlisted = attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED);
+        // Resolve the caller once (reads never provision): their id drives my-state, their age the
+        // age-eligibility verdict (TM-415). An unprovisioned caller is simply absent from both.
+        Optional<User> caller = users.findByFirebaseUid(callerUid);
         Optional<EventAttendance> mine =
-                callerId(callerUid).flatMap(id -> attendance.findByEventIdAndUserId(eventId, id));
+                caller.map(User::getId).flatMap(id -> attendance.findByEventIdAndUserId(eventId, id));
 
         boolean spotFree = !event.hasCapacityLimit() || going < event.getCapacity();
         boolean spotAvailableToClaim =
@@ -165,7 +171,10 @@ public class EventQueryService {
                 revealed,
                 reveal.revealsAt(event),
                 phaseNow,
-                phaseNow == EventPhase.HAPPENING_NOW);
+                phaseNow == EventPhase.HAPPENING_NOW,
+                event.getAgeMin(),
+                event.getAgeMax(),
+                ageGate.eligibility(event, caller.map(User::getAge).orElse(null)));
     }
 
     /**
