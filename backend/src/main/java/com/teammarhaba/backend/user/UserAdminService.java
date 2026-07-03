@@ -113,7 +113,16 @@ public class UserAdminService {
         if (firebaseUids == null || firebaseUids.isEmpty()) {
             return Map.of();
         }
-        FirebaseAuth auth = firebaseAuth.getIfAvailable();
+        FirebaseAuth auth;
+        try {
+            // getIfAvailable() returns null only when NO bean definition exists; when the lazy
+            // definition exists but creation fails (e.g. no ADC in CI), it THROWS — same trap
+            // FirebaseAccountStateService guards. Degrade to "no enrichment", never a 500.
+            auth = firebaseAuth.getIfAvailable();
+        } catch (Exception ex) {
+            log.warn("FirebaseAuth unavailable for auth-phone enrichment — rows fall back to their id.", ex);
+            return Map.of();
+        }
         if (auth == null) {
             return Map.of();
         }
