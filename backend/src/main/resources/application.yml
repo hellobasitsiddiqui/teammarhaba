@@ -124,6 +124,18 @@ app:
     enabled: ${OFFER_CASCADE_ENABLED:true}
     scan-interval-ms: ${OFFER_CASCADE_SCAN_INTERVAL_MS:60000}     # gap between sweep passes
     initial-delay-ms: ${OFFER_CASCADE_INITIAL_DELAY_MS:20000}     # startup grace before the first sweep
+  # Event booking-cutoff policy (TM-413). RSVP, waitlist-join and claim are refused once
+  # now >= start − cutoffHours (server-side guard in EventRsvpService via BookingCutoffPolicy), so an
+  # event stops taking new joins shortly before it begins. cutoffHours resolves per event exactly like
+  # location-reveal: event.bookingCutoffHours override → this per-city map → default-hours. Tunables,
+  # not secrets; prod may override via the env. (Leaving an event is never gated by the cutoff.)
+  booking-cutoff:
+    default-hours: ${BOOKING_CUTOFF_DEFAULT_HOURS:1}   # app default when neither event nor city supplies one
+    # Optional per-city defaults (city name → whole hours), matched case-insensitively. Example:
+    #   city-hours:
+    #     london: 2
+    #     dubai: 3
+    city-hours: {}
   # Current published terms/privacy version (TM-170). The client gates the app until the user's
   # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
   # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as

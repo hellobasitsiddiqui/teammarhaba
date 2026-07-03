@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.event;
 
+import com.teammarhaba.backend.config.LayeredHours;
 import com.teammarhaba.backend.config.LocationRevealProperties;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -30,11 +31,8 @@ public class LocationRevealPolicy {
      * The reveal window for this event in whole hours, resolved override → city → app default.
      */
     public int revealHoursFor(Event event) {
-        if (event.getLocationRevealHours() != null) {
-            return event.getLocationRevealHours();
-        }
-        Integer cityDefault = properties.hoursForCity(event.getCity());
-        return cityDefault != null ? cityDefault : properties.defaultHours();
+        return LayeredHours.resolve(
+                event.getLocationRevealHours(), properties.hoursForCity(event.getCity()), properties.defaultHours());
     }
 
     /** The instant the exact location becomes public: {@code startAt − revealHours}. */

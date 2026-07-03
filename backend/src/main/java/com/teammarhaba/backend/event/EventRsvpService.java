@@ -7,6 +7,7 @@ import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,20 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>Change window</b> — all three commands are refused with a {@code 409} once the event has
  * started; hidden events (cancelled, outside the visibility window, soft-deleted) are a public
  * {@code 404} exactly as on the read side.
+ *
+ * <p><b>Eligibility guards (TM-413)</b> — two further server-side rules gate a <em>new</em> join
+ * (RSVP, waitlist-join and claim); leaving is never gated:
+ *
+ * <ol>
+ *   <li><b>Booking cutoff</b> — a join is refused once {@code now >= start − cutoffHours}, where the
+ *       cutoff resolves per-event → per-city → app-default (1h) through {@link BookingCutoffPolicy}.
+ *       It applies whether the RSVP would land {@code GOING} or {@code WAITLISTED}.</li>
+ *   <li><b>One active event at a time</b> — a new {@code GOING} landing (a GOING RSVP or a claim) is
+ *       refused with a {@code 409} <em>naming the blocking event</em> while the caller already holds
+ *       a {@code GOING} attendance to another still-published, unfinished event. Waitlisting a second
+ *       event is allowed — only a {@code GOING} commitment blocks. Leaving the blocker, or the
+ *       blocker finishing/being cancelled, frees the caller.</li>
+ * </ol>
  */
 @Service
 public class EventRsvpService {
@@ -45,21 +60,35 @@ public class EventRsvpService {
     static final String EVENT_STARTED = "This event has already started, so attendance can no longer be changed.";
     static final String NOT_ON_WAITLIST = "You are not on the waitlist for this event.";
     static final String SPOT_ALREADY_TAKEN = "That spot has already been taken — you are still on the waitlist.";
+    static final String BOOKING_CLOSED =
+            "Booking has closed for this event — you can no longer join this close to when it starts.";
+
+    /**
+     * The 409 copy for the "one active event at a time" rule, naming the event the caller is still
+     * committed to. Exposed (package-private) so tests can assert the exact message.
+     */
+    static String activeEventBlock(String blockingHeading) {
+        return "You're already going to \"" + blockingHeading
+                + "\" until it ends — you can only be going to one event at a time. Leave it first to join another.";
+    }
 
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
     private final UserService users;
     private final ApplicationEventPublisher publisher;
+    private final BookingCutoffPolicy bookingCutoff;
 
     public EventRsvpService(
             EventRepository events,
             EventAttendanceRepository attendance,
             UserService users,
-            ApplicationEventPublisher publisher) {
+            ApplicationEventPublisher publisher,
+            BookingCutoffPolicy bookingCutoff) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.publisher = publisher;
+        this.bookingCutoff = bookingCutoff;
     }
 
     /**
@@ -78,6 +107,9 @@ public class EventRsvpService {
         if (event.hasStartedBy(now)) {
             throw new ConflictException(EVENT_STARTED);
         }
+        if (bookingCutoff.isPastCutoff(event, now)) {
+            throw new ConflictException(BOOKING_CLOSED);
+        }
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
         long waitlisted = attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED);
@@ -88,6 +120,9 @@ public class EventRsvpService {
                     boolean spotFree = !event.hasCapacityLimit() || going < event.getCapacity();
                     AttendanceState state =
                             (spotFree && waitlisted == 0) ? AttendanceState.GOING : AttendanceState.WAITLISTED;
+                    if (state == AttendanceState.GOING) {
+                        guardOneActiveEvent(user.getId(), eventId, now);
+                    }
                     attendance.save(new EventAttendance(eventId, user.getId(), state));
                     return state == AttendanceState.GOING
                             ? new RsvpResult(state, going + 1, waitlisted)
@@ -133,6 +168,9 @@ public class EventRsvpService {
         if (event.hasStartedBy(now)) {
             throw new ConflictException(EVENT_STARTED);
         }
+        if (bookingCutoff.isPastCutoff(event, now)) {
+            throw new ConflictException(BOOKING_CLOSED);
+        }
 
         EventAttendance mine = attendance
                 .findByEventIdAndUserId(eventId, user.getId())
@@ -145,6 +183,7 @@ public class EventRsvpService {
         if (event.hasCapacityLimit() && going >= event.getCapacity()) {
             throw new ConflictException(SPOT_ALREADY_TAKEN);
         }
+        guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
         boolean lastSpotFilled = event.hasCapacityLimit() && going + 1 >= event.getCapacity();
@@ -156,6 +195,23 @@ public class EventRsvpService {
         // confirmation push fires from EventLifecycleNotifier only after this claim actually commits.
         publisher.publishEvent(new EventClaimedEvent(eventId, user.getId(), event.getHeading()));
         return new RsvpResult(AttendanceState.GOING, going + 1, waitlisted - 1);
+    }
+
+    /**
+     * Enforce "one active event at a time" (TM-413): refuse a new {@code GOING} landing while the
+     * caller already holds a {@code GOING} attendance to another still-published, unfinished event.
+     * The {@code 409} names that blocking event so the client can be honest about why. Called only on
+     * the {@code GOING} paths (a GOING RSVP, a claim) — waitlisting is never blocked. Leaving the
+     * blocker, or the blocker finishing/being cancelled, clears it (see
+     * {@link EventRepository#findActiveGoingForUser}). Runs inside the command's transaction; it is a
+     * plain read (no extra lock), scanning only this caller's own attendance.
+     */
+    private void guardOneActiveEvent(Long userId, Long currentEventId, Instant now) {
+        events.findActiveGoingForUser(userId, currentEventId, now, PageRequest.of(0, 1)).stream()
+                .findFirst()
+                .ifPresent(blocking -> {
+                    throw new ConflictException(activeEventBlock(blocking.getHeading()));
+                });
     }
 
     /**
