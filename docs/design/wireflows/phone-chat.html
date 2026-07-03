@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<!--
+  TM-377 wireflow — Journey 4: phone sign-in & first chat, recreated frame-for-frame from the
+  owner's canonical reference image (image-20260703-071910.jpg on TM-377): Enter Phone → OTP →
+  Chats list → Chat screen → Search user → New chat → Sending (ticks) → lock-screen notification.
+  Styled ONLY by the storyboard skin (blunt.css + wireflow.css) — the app's themes are not used.
+  Re-render: see index.md.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>TeamMarhaba wireflow — phone sign-in &amp; first chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="blunt.css" />
+    <link rel="stylesheet" href="wireflow.css" />
+</head>
+<body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <filter id="wobble-soft">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+        </filter>
+    </svg>
+
+    <header class="wf-title">
+        <h2>Journey 4 — Phone sign-in &amp; first chat</h2>
+        <p class="tagline">TM-377 wireflow · frame-for-frame from the owner reference · storyboard skin only (no app theme)</p>
+    </header>
+
+    <main class="wf-strip">
+
+        <!-- 1 · Enter phone number -->
+        <section class="wf-step">
+            <h3><span class="wf-num">1</span>Enter phone number</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body wf-center">
+                    <div class="wf-doodle">💬</div>
+                    <h2 class="wf-center-h">Welcome!</h2>
+                    <p class="tagline">Enter your phone number to continue</p>
+                    <label class="field"><input value="+44 7911 123456" readonly /></label>
+                    <button type="button" class="tm-btn tm-btn-primary">Next</button>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36"><path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="tagline">tap "Next"</p>
+        </div>
+
+        <!-- 2 · Enter OTP -->
+        <section class="wf-step">
+            <h3><span class="wf-num">2</span>Enter OTP</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body wf-center">
+                    <p class="wf-back">←</p>
+                    <h2 class="wf-center-h">Verify your number</h2>
+                    <p class="tagline">We have sent a 6-digit code<br/>to +44 7911 123456</p>
+                    <div class="wf-otp"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span></div>
+                    <p class="tagline">Resend code in 00:45</p>
+                    <button type="button" class="tm-btn tm-btn-primary">Verify</button>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36"><path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="tagline">tap "Verify"</p>
+        </div>
+
+        <!-- 3 · Chats / users list -->
+        <section class="wf-step">
+            <h3><span class="wf-num">3</span>Chats / users list</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar"><h2>Chats</h2><span class="wf-glyph">🔍</span></div>
+                    <div class="wf-row"><span class="wf-avatar">O</span><span class="wf-row-main"><span class="wf-row-title"><span>Omar</span><span class="wf-time">12:10 PM</span></span><span class="wf-row-sub">Hey, how are you? <span class="wf-unread">2</span></span></span></div>
+                    <div class="wf-row"><span class="wf-avatar">L</span><span class="wf-row-main"><span class="wf-row-title"><span>Layla</span><span class="wf-time">11:05 AM</span></span><span class="wf-row-sub">Let's meet tomorrow.</span></span></div>
+                    <div class="wf-row"><span class="wf-avatar">H</span><span class="wf-row-main"><span class="wf-row-title"><span>Hamza</span><span class="wf-time">Yesterday</span></span><span class="wf-row-sub">Ok, sounds good.</span></span></div>
+                    <div class="wf-row"><span class="wf-avatar">S</span><span class="wf-row-main"><span class="wf-row-title"><span>Sara</span><span class="wf-time">Yesterday</span></span><span class="wf-row-sub">Thanks!</span></span></div>
+                    <div class="wf-fab">+</div>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36"><path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="tagline">tap "Omar"</p>
+        </div>
+
+        <!-- 4 · Chat screen -->
+        <section class="wf-step">
+            <h3><span class="wf-num">4</span>Chat screen</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar"><span class="wf-back">←</span><span class="wf-avatar wf-avatar-sm">O</span><span class="wf-row-main"><span class="wf-row-title"><span>Omar</span></span><span class="wf-row-sub">Online</span></span><span class="wf-glyph">⋮</span></div>
+                    <div class="wf-thread">
+                        <div class="wf-bubble wf-bubble-sent">Hey Omar! <span class="wf-time">12:01 PM ✓✓</span></div>
+                        <div class="wf-bubble wf-bubble-recv">Hi! <span class="wf-time">12:02 PM</span></div>
+                        <div class="wf-bubble wf-bubble-sent">How are you? <span class="wf-time">12:02 PM ✓✓</span></div>
+                        <div class="wf-bubble wf-bubble-recv">I'm good, thanks! <span class="wf-time">12:03 PM</span></div>
+                    </div>
+                    <div class="wf-composer"><label class="field"><input placeholder="Type a message" readonly /></label><span class="wf-glyph">🙂</span><span class="wf-glyph">➤</span></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5 · Search user -->
+        <section class="wf-step">
+            <h3><span class="wf-num">5</span>Search user</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar"><span class="wf-back">←</span><h2>Search user</h2></div>
+                    <label class="field"><input value="🔍 7911 123456" readonly /></label>
+                    <div class="wf-row"><span class="wf-avatar">O</span><span class="wf-row-main"><span class="wf-row-title"><span>Omar</span></span><span class="wf-row-sub">+44 7911 123456</span></span></div>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36"><path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="tagline">tap result</p>
+        </div>
+
+        <!-- 6 · New chat -->
+        <section class="wf-step">
+            <h3><span class="wf-num">6</span>New chat (start conversation)</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar"><span class="wf-back">←</span><span class="wf-avatar wf-avatar-sm">O</span><span class="wf-row-main"><span class="wf-row-title"><span>Omar</span></span><span class="wf-row-sub">+44 7911 123456</span></span></div>
+                    <div class="wf-thread wf-thread-empty"></div>
+                    <div class="wf-composer"><label class="field"><input placeholder="Type a message" readonly /></label><span class="wf-glyph">🙂</span><span class="wf-glyph">➤</span></div>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36"><path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="tagline">type + send</p>
+        </div>
+
+        <!-- 7 · Sending message -->
+        <section class="wf-step">
+            <h3><span class="wf-num">7</span>Sending message</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar"><span class="wf-back">←</span><span class="wf-avatar wf-avatar-sm">O</span><span class="wf-row-main"><span class="wf-row-title"><span>Omar</span></span><span class="wf-row-sub">Online</span></span><span class="wf-glyph">⋮</span></div>
+                    <div class="wf-thread">
+                        <div class="wf-bubble wf-bubble-sent">Hi Omar <span class="wf-time">12:10 PM ✓✓</span></div>
+                        <div class="wf-bubble wf-bubble-sent">How are you? <span class="wf-time">12:11 PM ✓✓</span></div>
+                        <div class="wf-bubble wf-bubble-recv">I'm good! <span class="wf-time">12:12 PM</span></div>
+                    </div>
+                    <div class="wf-composer"><label class="field"><input placeholder="Type a message" readonly /></label><span class="wf-glyph">🙂</span><span class="wf-glyph">➤</span></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 8 · New message notification -->
+        <section class="wf-step">
+            <h3><span class="wf-num">8</span>New message notification</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body wf-center">
+                    <div class="wf-lockicon">🔒</div>
+                    <div class="wf-clock">12:30</div>
+                    <p class="tagline">Monday, 20 May</p>
+                    <div class="wf-notif">
+                        <span class="wf-row-title"><span>💬 TeamMarhaba · now</span></span>
+                        <strong>Omar</strong>
+                        <span>Hey! Are we still meeting today?</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+</body>
+</html>
