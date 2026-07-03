@@ -40,6 +40,12 @@ import {
   fetchAllUsers,
   selectionCapMessage,
   coverageNote,
+  // TM-427: push-eligibility guard — surface each user's push status and stop an admin selecting or
+  // sending push to someone who can't receive it (push not enabled, or no registered device).
+  isPushEligible,
+  pushStatusLabel,
+  eligibleRecipients,
+  PUSH_INELIGIBLE_HINT,
 } from "./broadcast.js";
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-list walk — matches TM-111's max page size
@@ -50,6 +56,9 @@ const COLUMNS = [
   { key: "displayName", label: "Name", sortable: true },
   { key: "role", label: "Role", sortable: true },
   { key: "enabled", label: "Status", sortable: true },
+  // TM-427: per-user push-eligibility, so an admin sees at a glance who a broadcast can actually reach.
+  // Not sortable — it's a derived reachability flag, not an account attribute to order the table by.
+  { key: "pushEligible", label: "Push", sortable: false },
   { key: "id", label: "ID", sortable: true },
 ];
 
@@ -133,6 +142,9 @@ export async function loadUsers() {
     state.users = users;
     state.totalAccounts = total;
     state.fetchComplete = complete;
+    // TM-427: a user selected before this refresh may no longer be push-eligible — drop them so the
+    // broadcast can't carry an unreachable recipient.
+    pruneIneligibleSelection();
   } catch (err) {
     // 401 is already handled by api.js (token refresh + redirect); surface everything else.
     state.error = err instanceof ApiError ? err.message : "Could not load users.";
@@ -186,8 +198,29 @@ function matchingUsers() {
   return sortUsers(filteredUsers());
 }
 
+/** The push-eligible subset of the currently-filtered set — the real target of select-all (TM-427),
+ *  so a push-ineligible user can never be swept into the selection. */
+function eligibleMatchingUsers() {
+  return eligibleRecipients(matchingUsers());
+}
+
+/** After a (re)load, drop any selected user who is now push-ineligible in the fresh set (TM-427), so a
+ *  stale selection can't carry an unreachable recipient across a Refresh. Ids not present in the loaded
+ *  set are left alone — there's nothing to re-evaluate them against. */
+function pruneIneligibleSelection() {
+  if (state.selection.size === 0) return;
+  const byId = new Map(state.users.map((u) => [u.id, u]));
+  for (const id of [...state.selection]) {
+    const u = byId.get(id);
+    if (u && !isPushEligible(u)) state.selection.delete(id);
+  }
+}
+
 /** Toggle one user's membership in the broadcast selection (persisted by id across paging/filtering). */
 function toggleSelected(user, on) {
+  // Guard (TM-427): never let a push-ineligible user into the selection. The row checkbox is disabled,
+  // so this is belt-and-braces — no code path can add a recipient a push can't reach.
+  if (on && !isPushEligible(user)) return;
   if (on) state.selection.add(user.id);
   else state.selection.delete(user.id);
   // Only the compose panel + the header select-all state change — no need to rebuild the whole table.
@@ -202,10 +235,12 @@ function toggleSelected(user, on) {
  * TM-370 the fetched set is the WHOLE account list, so "matching" genuinely means everyone matching.
  */
 function toggleSelectAllMatching(on) {
-  const matching = matchingUsers();
-  for (const u of matching) {
-    if (on) state.selection.add(u.id);
-    else state.selection.delete(u.id);
+  if (on) {
+    // Only ever select users a push can actually reach (TM-427) — ineligible rows are left untouched.
+    for (const u of eligibleMatchingUsers()) state.selection.add(u.id);
+  } else {
+    // Deselect clears the whole matching set (eligible or not), so no stray id survives a toggle-off.
+    for (const u of matchingUsers()) state.selection.delete(u.id);
   }
   // With the full list selectable, select-all can now legitimately exceed the broadcast API's hard
   // recipient cap (@Size max MAX_RECIPIENTS userIds). Selecting past it is allowed — the admin may be
@@ -218,23 +253,25 @@ function toggleSelectAllMatching(on) {
   refreshSelectionUi();
 }
 
-/** How many of the currently-filtered users are selected — drives the select-all checked/indeterminate. */
+/** How many of the currently-filtered ELIGIBLE users are selected (TM-427) — drives the header
+ *  select-all checked/indeterminate against the reachable set, since only those can be selected. */
 function matchingSelectedCount() {
-  const matching = matchingUsers();
   let n = 0;
-  for (const u of matching) if (state.selection.has(u.id)) n += 1;
+  for (const u of eligibleMatchingUsers()) if (state.selection.has(u.id)) n += 1;
   return n;
 }
 
-/** Reflect the current selection onto the header select-all checkbox (checked / indeterminate / off). */
+/** Reflect the current selection onto the header select-all checkbox (checked / indeterminate / off).
+ *  "All" means all push-eligible matching users (TM-427); a filter that matches only ineligible users
+ *  leaves nothing to select, so the box is disabled. */
 function syncSelectAll() {
   const box = shell?.selectAll;
   if (!box) return;
-  const matching = matchingUsers();
+  const eligible = eligibleMatchingUsers();
   const selected = matchingSelectedCount();
-  box.checked = matching.length > 0 && selected === matching.length;
-  box.indeterminate = selected > 0 && selected < matching.length;
-  box.disabled = matching.length === 0;
+  box.checked = eligible.length > 0 && selected === eligible.length;
+  box.indeterminate = selected > 0 && selected < eligible.length;
+  box.disabled = eligible.length === 0;
 }
 
 // ---- actions ------------------------------------------------------------------------------
@@ -640,7 +677,7 @@ function buildCompose() {
       el("h3", { class: "tm-broadcast-title", text: "Send a notification" }),
       count,
     ]),
-    el("p", { class: "tm-muted tm-broadcast-note", text: `Pick recipients in the table below (select-all covers everyone matching your filter, across the whole account list), compose your message, preview it, then send. A single broadcast can reach up to ${MAX_RECIPIENTS} recipients.` }),
+    el("p", { class: "tm-muted tm-broadcast-note", text: `Pick recipients in the table below — only users who can receive push (push enabled and a registered device) are selectable; select-all covers everyone eligible matching your filter, across the whole account list. Compose your message, preview it, then send. A single broadcast can reach up to ${MAX_RECIPIENTS} recipients.` }),
     // Shown only when a load came back PARTIAL (a page failed mid-walk): says exactly how many accounts
     // are loaded vs the server total, so select-all's reach is never overstated (TM-370). Hidden by
     // default; filled + toggled in refreshCeilingWarning() once users load.
@@ -691,6 +728,17 @@ function roleBadge(role) {
 
 function statusBadge(enabled) {
   return el("span", { class: `tm-badge ${enabled ? "tm-badge-ok" : "tm-badge-off"}`, text: enabled ? "Enabled" : "Disabled" });
+}
+
+/** The push-eligibility badge for a user row (TM-427): a green "Push" when a broadcast can reach them,
+ *  a grey "No push" (with an explaining tooltip) when it can't. Mirrors the disabled row checkbox. */
+function pushBadge(user) {
+  const eligible = isPushEligible(user);
+  return el("span", {
+    class: `tm-badge ${eligible ? "tm-badge-ok" : "tm-badge-off"}`,
+    title: eligible ? null : PUSH_INELIGIBLE_HINT,
+    text: pushStatusLabel(user),
+  });
 }
 
 // A `<dt>/<dd>` pair carrying the account-state badges (TM-168) for the detail dialog — but only
@@ -793,13 +841,20 @@ function renderTable() {
     // fallback renders on a muted SPAN — never a `tm-muted` td, which is how the e2e specs find the
     // ID cell (`td.tm-muted`).
     const contact = contactCell(u);
+    // TM-427: a push-ineligible user (push not enabled, or no registered device) can't be a broadcast
+    // recipient — disable the row's checkbox (with an explaining tooltip) and show a "No push" badge, so
+    // the admin can't pick someone a push would be silently lost on. The Push cell must NOT be a
+    // `tm-muted` td — that selector is how the e2e specs find the ID cell (see the TM-372 note above).
+    const eligible = isPushEligible(u);
     return el("tr", { class: isSelf(u) ? "tm-row-self" : null }, [
       el("td", { class: "tm-check-cell" }, [
         el("input", {
           type: "checkbox",
           class: "tm-check",
           checked: state.selection.has(u.id),
-          "aria-label": `Select ${displayIdentifier(u)}`,
+          disabled: !eligible,
+          title: eligible ? null : PUSH_INELIGIBLE_HINT,
+          "aria-label": eligible ? `Select ${displayIdentifier(u)}` : `${displayIdentifier(u)} can't receive push`,
           onChange: (e) => toggleSelected(u, e.target.checked),
         }),
       ]),
@@ -807,6 +862,7 @@ function renderTable() {
       el("td", { text: u.displayName || "—" }),
       el("td", {}, [roleBadge(u.role)]),
       el("td", {}, [statusBadge(u.enabled)]),
+      el("td", {}, [pushBadge(u)]),
       el("td", { class: "tm-muted", text: String(u.id) }),
       el("td", { class: "tm-actions" }, rowActions(u)),
     ]);

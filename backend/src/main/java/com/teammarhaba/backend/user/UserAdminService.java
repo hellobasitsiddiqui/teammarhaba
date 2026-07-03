@@ -9,6 +9,7 @@ import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
+import com.teammarhaba.backend.device.DeviceTokenRepository;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.notify.PushRoutes;
@@ -17,9 +18,11 @@ import com.teammarhaba.backend.web.ResourceNotFoundException;
 import com.teammarhaba.backend.web.SelfActionNotAllowedException;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -63,6 +66,7 @@ public class UserAdminService {
     private final RoleService roleService;
     private final AuditService audit;
     private final PushNotificationService push;
+    private final DeviceTokenRepository deviceTokens;
     private final ObjectProvider<FirebaseAuth> firebaseAuth;
 
     public UserAdminService(
@@ -70,11 +74,13 @@ public class UserAdminService {
             RoleService roleService,
             AuditService audit,
             PushNotificationService push,
+            DeviceTokenRepository deviceTokens,
             ObjectProvider<FirebaseAuth> firebaseAuth) {
         this.users = users;
         this.roleService = roleService;
         this.audit = audit;
         this.push = push;
+        this.deviceTokens = deviceTokens;
         // Lazily resolved, like FirebaseAccountStateService — no Admin SDK bean (dev/test/CI without
         // credentials) must not stop this service from constructing or the console from listing.
         this.firebaseAuth = firebaseAuth;
@@ -160,6 +166,41 @@ public class UserAdminService {
     /** Single-account variant of {@link #authPhonesByUid} (get/PATCH responses); null when unknown. */
     public String authPhoneFor(String firebaseUid) {
         return firebaseUid == null ? null : authPhonesByUid(List.of(firebaseUid)).get(firebaseUid);
+    }
+
+    /**
+     * Push-eligibility for a page of accounts (TM-427), keyed by {@code users.id}: {@code true} when the
+     * account's preference {@linkplain NotificationPref#permitsPush() permits push}
+     * <strong>and</strong> it has at least one registered device token. This is the exact signal the
+     * admin send-notification page surfaces (and blocks selection on), so it mirrors the broadcast
+     * opt-out / no-device skip in {@code BroadcastService} — the UI's "can receive push" and the send
+     * path can't disagree. Device presence is resolved in a single batched query for the whole page (no
+     * N+1); a user id absent from the returned map is treated as ineligible by the caller.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, Boolean> pushEligibilityByUserId(Collection<User> pageUsers) {
+        if (pageUsers == null || pageUsers.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = pageUsers.stream().map(User::getId).toList();
+        Set<Long> withDevice = new HashSet<>(deviceTokens.findUserIdsWithTokens(ids));
+        Map<Long, Boolean> eligibility = new HashMap<>();
+        for (User user : pageUsers) {
+            eligibility.put(
+                    user.getId(),
+                    user.getNotificationPref().permitsPush() && withDevice.contains(user.getId()));
+        }
+        return eligibility;
+    }
+
+    /**
+     * Single-account push-eligibility (TM-427): the pref {@linkplain NotificationPref#permitsPush()
+     * permits push} AND a device token is registered. Backs the get/PATCH admin responses; the list uses
+     * the batched {@link #pushEligibilityByUserId(Collection)} instead.
+     */
+    @Transactional(readOnly = true)
+    public boolean isPushEligible(User user) {
+        return user.getNotificationPref().permitsPush() && deviceTokens.existsByUserId(user.getId());
     }
 
     /**

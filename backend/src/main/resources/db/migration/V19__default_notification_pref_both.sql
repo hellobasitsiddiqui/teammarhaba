@@ -1,0 +1,19 @@
+-- V19__default_notification_pref_both — new accounts default to email AND push (TM-427)
+--
+-- The bug: an admin could send a push to a user who could never receive it, silently lost. Part of
+-- the fix is sensible defaults — a new account should be set up to receive push the moment a device
+-- token registers, instead of defaulting to email-only (the push opt-out) and quietly missing pushes.
+--
+-- notification_pref was introduced (V5__users_profile_fields) with a DB default of 'EMAIL'. This flips
+-- the default to 'BOTH' (email + push) to match the new Java-side default on the User entity.
+--
+-- SCOPE — new rows only. Hibernate always writes notification_pref on insert (from the entity field),
+-- so the Java default is what every app-provisioned account actually gets; this column default only
+-- governs raw SQL inserts that omit the column. It is set here so the DB and the app agree.
+--
+-- EXISTING ROWS ARE DELIBERATELY NOT REWRITTEN. A backfill (EMAIL -> BOTH) is intentionally omitted:
+-- we cannot tell an account that merely inherited the old 'EMAIL' default from one that deliberately
+-- chose email-only via PATCH /api/v1/me, and silently opting existing users into push would override a
+-- real choice. New accounts get BOTH; existing accounts keep whatever preference they already hold and
+-- can still opt into push themselves. (Flagged for owner review on TM-427.)
+ALTER TABLE users ALTER COLUMN notification_pref SET DEFAULT 'BOTH';

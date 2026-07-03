@@ -16,10 +16,15 @@ import com.google.firebase.auth.GetUsersResult;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.device.DevicePlatform;
+import com.teammarhaba.backend.device.DeviceToken;
+import com.teammarhaba.backend.device.DeviceTokenRepository;
 import com.teammarhaba.backend.notify.PushRoutes;
+import com.teammarhaba.backend.user.NotificationPref;
 import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -47,6 +52,9 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private UserRepository users;
 
+    @Autowired
+    private DeviceTokenRepository tokens;
+
     // Role changes call the Admin SDK; mock it so no Firebase credentials are needed.
     @MockBean
     private FirebaseAuth firebaseAuth;
@@ -66,6 +74,18 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
 
     private long seed(String uid) {
         return users.saveAndFlush(new User(uid, uid + "@example.com", null)).getId();
+    }
+
+    /** Seed an account with an explicit notification preference (TM-427 push-eligibility tests). */
+    private long seedWithPref(String uid, NotificationPref pref) {
+        User u = new User(uid, uid + "@example.com", null);
+        u.setNotificationPref(pref);
+        return users.saveAndFlush(u).getId();
+    }
+
+    /** Register a device token for an account, so it has "a device a push could reach" (TM-427). */
+    private void seedToken(long userId, String token) {
+        tokens.saveAndFlush(new DeviceToken(userId, token, DevicePlatform.ANDROID, Instant.now()));
     }
 
     @Test
@@ -257,5 +277,62 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.phoneNumber").value("+16505550100"));
 
         assertThat(users.findById(id).orElseThrow().isEnabled()).isFalse();
+    }
+
+    // --- push-eligibility signal for the send-notification page (TM-427) ---
+    //
+    // pushEligible == the account's pref permits push AND it has a registered device token. The admin
+    // send-notification page surfaces this and blocks selecting/sending push to an ineligible account,
+    // so an admin can't fire a push into the void. The just-seeded row is fetched by id from a
+    // newest-first page (like the auth-phone tests) so accumulated rows from other tests don't matter.
+
+    @Test
+    void listMarksAPushUserWithADeviceEligible() throws Exception {
+        long id = seedWithPref("elig-push-dev", NotificationPref.BOTH);
+        seedToken(id, "tok-elig-" + id);
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("size", "100")
+                        .param("sort", "id,desc")
+                        .with(admin("admin-elig-1")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].pushEligible").value(true));
+    }
+
+    @Test
+    void listMarksAnOptedOutUserIneligibleEvenWithADevice() throws Exception {
+        // Has a device, but chose EMAIL (the push opt-out) — a push would be skipped, so it's ineligible.
+        long id = seedWithPref("elig-email-dev", NotificationPref.EMAIL);
+        seedToken(id, "tok-email-" + id);
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("size", "100")
+                        .param("sort", "id,desc")
+                        .with(admin("admin-elig-2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].pushEligible").value(false));
+    }
+
+    @Test
+    void listMarksAPushUserWithoutADeviceIneligible() throws Exception {
+        // Permits push (default BOTH), but no device token is registered — a push has nowhere to land.
+        long id = seedWithPref("elig-push-nodev", NotificationPref.BOTH);
+
+        mockMvc.perform(get("/api/v1/admin/users")
+                        .param("size", "100")
+                        .param("sort", "id,desc")
+                        .with(admin("admin-elig-3")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].pushEligible").value(false));
+    }
+
+    @Test
+    void singleUserReadExposesPushEligibility() throws Exception {
+        long id = seedWithPref("elig-single", NotificationPref.PUSH);
+        seedToken(id, "tok-single-" + id);
+
+        mockMvc.perform(get("/api/v1/admin/users/{id}", id).with(admin("admin-elig-single")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pushEligible").value(true));
     }
 }

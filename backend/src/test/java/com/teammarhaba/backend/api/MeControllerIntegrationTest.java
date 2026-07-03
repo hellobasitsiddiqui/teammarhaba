@@ -154,10 +154,13 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void notificationPrefDefaultsToEmailUntilSet() throws Exception {
+    void notificationPrefDefaultsToBothForNewAccounts() throws Exception {
+        // TM-427: a brand-new account is provisioned with BOTH email and push (was EMAIL-only), so it is
+        // set up to receive push the moment a device registers rather than silently missing it. The
+        // migration only changes the default for new rows — existing accounts keep their preference.
         mockMvc.perform(get("/api/v1/me").with(caller("uid-default-pref", "eve@example.com")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"))
                 .andExpect(jsonPath("$.firstName").doesNotExist());
     }
 

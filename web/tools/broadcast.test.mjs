@@ -28,6 +28,10 @@ import {
   fetchAllUsers,
   selectionCapMessage,
   coverageNote,
+  isPushEligible,
+  pushStatusLabel,
+  eligibleRecipients,
+  PUSH_INELIGIBLE_HINT,
 } from "../src/assets/broadcast.js";
 
 // --- caps mirror the backend DTO (BroadcastPushRequest) --------------------------------------
@@ -428,4 +432,52 @@ test("coverageNote degrades honestly when the true total is unknown", () => {
 
 test("coverageNote never reports a total smaller than what is loaded", () => {
   assert.ok(coverageNote(50, 10).includes("first 50")); // clamped, not "50 of 10"
+});
+
+// --- push-eligibility guard (TM-427): only reachable users can be selected -----------------------
+//
+// The bug: an admin could pick a user who couldn't receive push (push off, or no device) and the
+// broadcast was silently lost. The backend now sends a per-user `pushEligible` flag; these guard the
+// UI's "can this user be selected as a recipient?" decision (the DOM wiring in admin.js is thin over
+// them: disabled checkboxes, eligible-only select-all, and the "Push"/"No push" badge).
+
+test("isPushEligible is true ONLY for an explicit pushEligible === true", () => {
+  assert.equal(isPushEligible({ pushEligible: true }), true);
+  assert.equal(isPushEligible({ pushEligible: false }), false);
+});
+
+test("isPushEligible fails safe for a missing/absent or non-boolean flag", () => {
+  // A row from an older payload (no field), or a truthy-but-not-true value, must NOT be selectable.
+  assert.equal(isPushEligible({}), false);
+  assert.equal(isPushEligible(), false);
+  assert.equal(isPushEligible({ pushEligible: "true" }), false);
+  assert.equal(isPushEligible({ pushEligible: 1 }), false);
+  assert.equal(isPushEligible(null), false);
+});
+
+test("pushStatusLabel reads 'Push' when reachable and 'No push' when not", () => {
+  assert.equal(pushStatusLabel({ pushEligible: true }), "Push");
+  assert.equal(pushStatusLabel({ pushEligible: false }), "No push");
+  assert.equal(pushStatusLabel({}), "No push");
+});
+
+test("eligibleRecipients keeps only reachable users, in order", () => {
+  const users = [
+    { id: 1, pushEligible: true },
+    { id: 2, pushEligible: false }, // opted out or no device — excluded
+    { id: 3, pushEligible: true },
+    { id: 4 }, // no flag — excluded (fail safe)
+  ];
+  assert.deepEqual(eligibleRecipients(users).map((u) => u.id), [1, 3]);
+});
+
+test("eligibleRecipients tolerates non-array input without throwing", () => {
+  assert.deepEqual(eligibleRecipients(null), []);
+  assert.deepEqual(eligibleRecipients(undefined), []);
+  assert.deepEqual(eligibleRecipients("nope"), []);
+});
+
+test("PUSH_INELIGIBLE_HINT is a non-empty explanation mentioning push", () => {
+  assert.equal(typeof PUSH_INELIGIBLE_HINT, "string");
+  assert.match(PUSH_INELIGIBLE_HINT, /push/i);
 });

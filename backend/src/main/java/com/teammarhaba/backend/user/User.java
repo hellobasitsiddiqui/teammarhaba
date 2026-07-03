@@ -74,9 +74,16 @@ public class User {
     @Column(name = "phone")
     private String phone;
 
+    /**
+     * Delivery preference. New accounts default to {@link NotificationPref#BOTH} (email + push) so a
+     * fresh account can receive push as soon as a device token registers, rather than silently missing
+     * pushes because it defaulted to email-only (TM-427). Hibernate writes this field on insert, so the
+     * Java default — not the DB column default — is what every provisioned account gets; the DB default
+     * is kept in step by {@code V19__default_notification_pref_both}. Existing rows are untouched.
+     */
     @Enumerated(EnumType.STRING)
     @Column(name = "notification_pref", nullable = false)
-    private NotificationPref notificationPref = NotificationPref.EMAIL;
+    private NotificationPref notificationPref = NotificationPref.BOTH;
 
     @Column(name = "timezone")
     private String timezone;

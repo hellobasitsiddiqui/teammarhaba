@@ -18,7 +18,7 @@ import java.time.Instant;
  * @param city                 free-text city (may be {@code null})
  * @param age                  age in years (may be {@code null})
  * @param phone                phone number (may be {@code null})
- * @param notificationPref     delivery preference — defaults to {@code EMAIL}
+ * @param notificationPref     delivery preference — new accounts default to {@code BOTH} (email + push, TM-427)
  * @param timezone             IANA timezone id (may be {@code null})
  * @param locale               BCP-47 language tag (may be {@code null})
  * @param role                 the caller's role — defaults to {@code "USER"} until claims land (TM-110)
