@@ -16,15 +16,30 @@
     </style>
 
 
-    <!-- Launch theme (TM-299). Uses the Android 12+ SplashScreen API: the window background is the
-         TeamMarhaba teal (matching capacitor.config.json SplashScreen.backgroundColor and the
-         @drawable/splash bitmap) so the very first frame is branded teal, not a white flash, while the
-         hosted web UI loads. The legacy splash bitmap is kept as android:background for pre-12 devices.
-         @capacitor/splash-screen then holds/hides the splash on the real web-ready signal (launchAutoHide
-         is false). -->
+    <!-- Launch theme (TM-299, fixed in TM-347). On Capacitor 8 the launch splash IS the Android 12
+         system splash, on EVERY API level: @capacitor/splash-screen drives it through the
+         core-splashscreen compat library, and only falls back to its legacy overlay (the splash.png
+         ImageView + spinner described in capacitor.config.json) when installSplashScreen() throws —
+         which core-splashscreen 1.2.0 no longer does. The legacy image/spinner path is therefore dead
+         code on Android, and the splash must be fully described by THESE attributes:
+
+         - windowSplashScreenBackground: the TeamMarhaba teal, matching SplashScreen.backgroundColor
+           in capacitor.config.json, so the very first frame is branded teal rather than white.
+         - windowSplashScreenAnimatedIcon: the TM-347 fix. Theme.SplashScreen DEFAULTS the centre icon
+           to @android:drawable/sym_def_app_icon — the generic Android placeholder, NOT the launcher
+           icon — which is why no BRANDED splash was ever recognisable on device. Pointing it at the
+           adaptive launcher icon renders the standard masked disc + TeamMarhaba mark on the teal
+           field (Android 12+ natively; pre-12 via the compat starting-window drawable).
+         - postSplashScreenTheme: the theme installSplashScreen() applies once launch completes.
+
+         The legacy @drawable/splash bitmap stays as android:background purely for the pre-12
+         starting window. Splash lifetime is timed (launchShowDuration + launchAutoHide true in
+         capacitor.config.json) because the hosted SPA cannot reliably call SplashScreen.hide() —
+         see TM-347. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
         <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

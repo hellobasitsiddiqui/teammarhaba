@@ -14,7 +14,8 @@
   },
   "plugins": {
     "SplashScreen": {
-      "launchAutoHide": false,
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
       "backgroundColor": "#0f9d8cff",
       "androidScaleType": "CENTER_CROP",
       "showSpinner": true,
