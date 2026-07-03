@@ -54,16 +54,26 @@ function toastHost() {
 
 /**
  * Show a toast. Returns a `dismiss()` function.
+ *
+ * `timeout: 0` makes the card PERSISTENT — it stays until the user hits × / the action, or the
+ * caller invokes the returned dismiss. That's the seam the foreground-push card (TM-374) uses so a
+ * notification can't silently vanish. `onDismiss` (fires exactly once, however the card goes away)
+ * lets such callers react — e.g. mark the underlying notification as seen.
  * @param {string} message
- * @param {{type?: "success"|"error"|"info", action?: {label: string, onClick: Function}, timeout?: number}} [opts]
+ * @param {{type?: "success"|"error"|"info", action?: {label: string, onClick: Function},
+ *   timeout?: number, onDismiss?: Function}} [opts]
  */
-export function toast(message, { type = "info", action = null, timeout = 5000 } = {}) {
+export function toast(message, { type = "info", action = null, timeout = 5000, onDismiss = null } = {}) {
   const host = toastHost();
   const card = el("div", { class: `tm-toast tm-toast-${type}` }, [el("span", { text: message })]);
   let timer;
+  let dismissed = false;
   const dismiss = () => {
+    if (dismissed) return; // idempotent: action-click + caller + timeout can all race onto this.
+    dismissed = true;
     clearTimeout(timer);
     card.remove();
+    if (typeof onDismiss === "function") onDismiss();
   };
   if (action && typeof action.onClick === "function") {
     card.append(el(

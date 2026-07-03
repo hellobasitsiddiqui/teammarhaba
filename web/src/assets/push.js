@@ -40,7 +40,7 @@ import { onAuthChanged } from "./auth.js";
 import { getPushPlugin, isPushSupported, platformFor } from "./push-env.js";
 import { routeFromNotification, DEFAULT_ROUTE } from "./push-deeplink.js";
 import { registerDevice, deregisterDevice } from "./api.js";
-import { toast } from "./ui.js";
+import { notifyForegroundPush } from "./notification-center.js";
 
 // The most-recently-registered FCM token, kept so sign-out can deregister exactly that token. Lives
 // only in memory (never persisted/logged) — Firebase/FCM owns token storage and rotation.
@@ -153,18 +153,17 @@ function attachListeners(plugin) {
     handleTap(action && action.notification);
   });
 
-  // FOREGROUND (TM-285): on Android, a notification arriving while the app is in the foreground does
-  // NOT appear in the system tray — Capacitor delivers it here instead. Rather than dropping it
-  // silently, surface an in-app toast with a "View" action that deep-links to the same route the tap
-  // would. (Background/closed-app notifications still go to the system tray as normal.)
+  // FOREGROUND (TM-285, reworked by TM-374): on Android, a notification arriving while the app is in
+  // the foreground does NOT appear in the system tray — Capacitor delivers it here instead. The
+  // original transient toast proved too easy to miss (delivered ≠ seen: the reporter missed his own
+  // broadcast), so hand it to the notification centre, which shows a PERSISTENT dismissible card
+  // (stays until ×-dismissed or its View action is tapped — View deep-links to the same route a tray
+  // tap would) AND records it in the localStorage-backed recent-notifications inbox behind the nav
+  // bell's unread badge, so a push that got no interaction is still recoverable — even after a
+  // restart. (Background/closed-app notifications still go to the system tray as normal; that native
+  // path is untouched.)
   plugin.addListener("pushNotificationReceived", (notification) => {
-    const title = (notification && (notification.title || notification.body)) || "New notification";
-    const route = routeFromNotification(notification);
-    toast(title, {
-      type: "info",
-      // Only offer "View" when the payload actually carries a destination; a bare info toast otherwise.
-      action: route ? { label: "View", onClick: () => navigateTo(route) } : null,
-    });
+    notifyForegroundPush(notification);
   });
 }
 

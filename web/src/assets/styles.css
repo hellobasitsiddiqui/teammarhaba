@@ -2740,3 +2740,95 @@ html {
         flex-basis: 100%;
     }
 }
+
+/* ===== Foreground-push notification centre (TM-374) =====
+   A nav bell + unread badge, and the recent-notifications inbox rendered inside the existing ui.js
+   modal. Built from theme tokens ONLY (accent family, surfaces, borders, --muted, the radius scale)
+   so clean / doodle / sketch all render it natively — the unread side-stripe reuses the exact accent
+   -stripe language of .tm-toast / .tm-verify-banner. The bell is created by notification-center.js
+   only once the device has ever received a foreground push, so the plain web build renders exactly
+   as before. */
+
+/* The bell rides as a direct child of .app-nav (next to the hamburger on narrow screens, where the
+   native shell lives) and inherits the .app-nav button quiet-action look; this just squares it up
+   to the same 44px tap target as .app-nav-toggle and anchors the badge. */
+.tm-notif-bell {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    line-height: 1;
+}
+
+/* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
+   to a corner pill. The --page-bg ring separates it from whatever sits behind the nav. */
+.tm-notif-badge {
+    position: absolute;
+    top: -0.35rem;
+    right: -0.35rem;
+    min-width: 1.15rem;
+    padding: 0.05rem 0.3rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: 2px solid var(--page-bg);
+    border-radius: var(--radius-pill);
+}
+
+/* The inbox list inside the ui.js modal. */
+.tm-notif-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: min(20rem, 78vw);
+    text-align: left;
+}
+
+/* One notification row — a quiet card. Rows with a deep-link route are real <button>s (hover wash
+   + pointer); route-less rows are static <div>s with the identical look. The transparent left
+   border keeps read/unread rows aligned. */
+.tm-notif-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding: 0.5rem 0.7rem;
+    font: inherit;
+    text-align: left;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-left: 4px solid transparent;
+    border-radius: var(--radius);
+}
+
+button.tm-notif-item {
+    cursor: pointer;
+}
+
+button.tm-notif-item:hover {
+    background: var(--accent-soft);
+}
+
+/* Unread: the same accent side-stripe .tm-toast / .tm-verify-banner use. */
+.tm-notif-item-unread {
+    border-left-color: var(--accent);
+}
+
+.tm-notif-item-title {
+    font-weight: 600;
+}
+
+.tm-notif-item-time {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.tm-notif-empty {
+    margin: 0;
+    color: var(--muted);
+}
