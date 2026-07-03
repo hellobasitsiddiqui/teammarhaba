@@ -15,7 +15,10 @@ import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditEvent;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.event.AttendanceState;
 import com.teammarhaba.backend.event.Event;
+import com.teammarhaba.backend.event.EventAttendance;
+import com.teammarhaba.backend.event.EventAttendanceRepository;
 import com.teammarhaba.backend.event.EventLifecycleEvent;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.event.EventStatus;
@@ -88,6 +91,9 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private ApplicationEvents applicationEvents;
 
+    @Autowired
+    private EventAttendanceRepository attendance;
+
     private static RequestPostProcessor admin(String uid) {
         return principal(uid, "ROLE_ADMIN");
     }
@@ -118,6 +124,12 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 creatorId,
                 now);
         return events.saveAndFlush(event);
+    }
+
+    /** Register a fresh user as attending an event in the given state (for the count assertions). */
+    private void attend(long eventId, String uid, AttendanceState state) {
+        Long userId = users.saveAndFlush(new User(uid, uid + "@example.com", uid)).getId();
+        attendance.saveAndFlush(new EventAttendance(eventId, userId, state));
     }
 
     private List<AuditAction> auditActionsFor(long eventId) {
@@ -421,5 +433,36 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.id").value(seeded.getId()))
                 .andExpect(jsonPath("$.heading").value("Read me"))
                 .andExpect(jsonPath("$.visibilityStart").value("2030-01-01T00:00:00Z"));
+    }
+
+    @Test
+    void listAndGetCarryAttendanceCounts() throws Exception {
+        // TM-430: the admin projection must carry going/waitlist counts so the console shows real
+        // numbers instead of "— / —".
+        Event event =
+                seedEvent("Counted", Instant.parse("2030-03-01T00:00:00Z"), Instant.parse("2030-04-01T00:00:00Z"));
+        attend(event.getId(), "count-going-1", AttendanceState.GOING);
+        attend(event.getId(), "count-going-2", AttendanceState.GOING);
+        attend(event.getId(), "count-wait-1", AttendanceState.WAITLISTED);
+        // A second event with no attendance proves the fallback is a real 0, not null/"—".
+        Event empty =
+                seedEvent("Uncounted", Instant.parse("2030-03-01T00:00:00Z"), Instant.parse("2030-04-01T00:00:00Z"));
+
+        // Single GET carries both counts.
+        mockMvc.perform(get("/api/v1/admin/events/{id}", event.getId()).with(admin("events-admin-counts")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.goingCount").value(2))
+                .andExpect(jsonPath("$.waitlistCount").value(1));
+
+        // The list carries per-event counts (one tally query, no N+1); the countless event is 0/0.
+        mockMvc.perform(get("/api/v1/admin/events")
+                        .param("size", "100")
+                        .param("sort", "id,desc")
+                        .with(admin("events-admin-counts")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + event.getId() + ")].goingCount").value(2))
+                .andExpect(jsonPath("$.items[?(@.id == " + event.getId() + ")].waitlistCount").value(1))
+                .andExpect(jsonPath("$.items[?(@.id == " + empty.getId() + ")].goingCount").value(0))
+                .andExpect(jsonPath("$.items[?(@.id == " + empty.getId() + ")].waitlistCount").value(0));
     }
 }
