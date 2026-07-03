@@ -127,6 +127,15 @@ app:
     #     london: 12
     #     dubai: 6
     city-hours: {}
+  # Event listing state (TM-412). The PUBLIC events list surfaces live events ("happening now",
+  # sorted to the top) and drops finished ones; the detail endpoint 404s a finished event. An event
+  # is finished once now is past its effective end: end_at when set, else start_at + default-duration
+  # for open-ended events (no end_at). This is the assumed run-length of such an event — a product
+  # trade-off: shorter hides finished open-ended events sooner but risks dropping a still-running one;
+  # longer keeps live ones visible but lets ended ones linger. Non-positive falls back to 3h so an
+  # open-ended event is never hidden the instant it starts. Tunable, not a secret.
+  event-listing:
+    default-duration-hours: ${EVENT_DEFAULT_DURATION_HOURS:3}   # assumed run-length when end_at is null
   # Waitlist offer cascade (TM-397): a fixed-delay @Scheduled sweep that offers a freed GOING spot to
   # the FIFO waitlist, widening one member every 5 minutes until the spot is claimed or the list is
   # exhausted. `enabled: false` skips creating the scheduler bean entirely (the test profile does this

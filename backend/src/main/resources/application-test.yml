@@ -18,3 +18,7 @@ app:
   # stamps/pushes a test sets up itself.
   offer-cascade:
     enabled: false
+  # Pin the open-ended default duration (TM-412) so listing-state integration tests are deterministic
+  # regardless of any future change to the shipped prod default.
+  event-listing:
+    default-duration-hours: 3

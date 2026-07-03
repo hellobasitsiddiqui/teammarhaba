@@ -30,6 +30,10 @@ import java.time.Instant;
  * @param myState           the caller's own state on this event
  * @param locationRevealed  whether the exact location is public yet
  * @param locationRevealsAt the instant the exact location becomes public ({@code startAt − revealHours})
+ * @param status            the temporal phase (TM-412); on the listing only {@code UPCOMING} or
+ *     {@code HAPPENING_NOW} — finished events are excluded from it
+ * @param happeningNow      convenience flag ({@code status == HAPPENING_NOW}); the "Happening now"
+ *     badge the client renders and the signal it groups live cards by
  */
 public record EventCard(
         Long id,
@@ -44,4 +48,6 @@ public record EventCard(
         long goingCount,
         MyState myState,
         boolean locationRevealed,
-        Instant locationRevealsAt) {}
+        Instant locationRevealsAt,
+        EventPhase status,
+        boolean happeningNow) {}

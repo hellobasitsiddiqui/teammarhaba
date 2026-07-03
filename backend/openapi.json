@@ -318,6 +318,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "happeningNow" : {
+            "type" : "boolean"
+          },
           "heading" : {
             "type" : "string"
           },
@@ -344,6 +347,10 @@
           },
           "startAt" : {
             "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "UPCOMING", "HAPPENING_NOW", "FINISHED" ],
             "type" : "string"
           },
           "timezone" : {
@@ -377,6 +384,9 @@
           "goingCount" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "happeningNow" : {
+            "type" : "boolean"
           },
           "heading" : {
             "type" : "string"
@@ -413,6 +423,10 @@
           },
           "startAt" : {
             "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "UPCOMING", "HAPPENING_NOW", "FINISHED" ],
             "type" : "string"
           },
           "timezone" : {
