@@ -96,6 +96,11 @@ test("utcIsoToZoned renders a UTC instant into the event's local wall clock", ()
   assert.equal(utcIsoToZoned("2026-01-10T18:30:00.000Z", "Europe/London"), "2026-01-10T18:30");
   assert.equal(utcIsoToZoned("2026-07-10T22:30:00.000Z", "America/New_York"), "2026-07-10T18:30");
   assert.equal(utcIsoToZoned("", "Europe/London"), "");
+  // A missing instant is blank, NOT the epoch. `new Date(null)` is 1970-01-01 (getTime() === 0, not
+  // NaN), so without an explicit null guard an open-ended event's null endAt would render as
+  // "1970-01-01…" and block its own edit (TM-429). null and undefined must both come back "".
+  assert.equal(utcIsoToZoned(null, "Europe/London"), "");
+  assert.equal(utcIsoToZoned(undefined, "Europe/London"), "");
 });
 
 test("zonedToUtcIso ∘ utcIsoToZoned round-trips a local value", () => {
@@ -275,6 +280,32 @@ test("toFormModel ∘ buildEventPayload round-trips an EventResponse's instants"
   assert.equal(body.endAt, event.endAt);
   assert.equal(body.visibilityStart, event.visibilityStart);
   assert.equal(body.capacity, 12);
+});
+
+test("an open-ended event (null endAt) prefills blank and stays editable (TM-429)", () => {
+  const event = {
+    heading: "Coffee & Code",
+    description: "Bring your laptop.",
+    locationText: "The corner cafe",
+    city: "London",
+    timezone: "Europe/London",
+    startAt: "2026-07-10T17:30:00.000Z",
+    endAt: null, // open-ended: the event never had an end time
+    visibilityStart: "2026-07-01T09:00:00.000Z",
+    visibilityEnd: "2026-07-10T12:00:00.000Z",
+    capacity: 10,
+  };
+  const model = toFormModel(event);
+  // The End field must be BLANK, not 1970 — else it poisons the form.
+  assert.equal(model.endAt, "");
+  // The edit draft must be saveable (endAt no longer fails "end after start").
+  const { errors, canSave } = validateEventDraft(model, { requireForCreate: false });
+  assert.equal(errors.endAt, undefined);
+  assert.equal(canSave, true);
+  // And the PATCH body must OMIT endAt (leave-unchanged), not send a bogus 1970 instant.
+  const body = buildEventPayload(model);
+  assert.equal("endAt" in body, false);
+  assert.equal(body.startAt, event.startAt);
 });
 
 // --- display derivations ----------------------------------------------------------------------
