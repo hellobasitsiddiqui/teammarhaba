@@ -75,13 +75,19 @@ public class UserAdminController {
         // best-effort) so a phone-auth account with no email/name renders identifiably, not blank.
         Map<String, String> authPhones = adminService.authPhonesByUid(
                 accounts.getContent().stream().map(User::getFirebaseUid).toList());
-        return PagedResponse.from(accounts, u -> UserResponse.from(u, authPhones.get(u.getFirebaseUid())));
+        // TM-427: enrich each row with its push-eligibility (pref permits push AND a device token
+        // exists) — one batched device-token query — so the send-notification page can flag and block
+        // accounts a push can't reach.
+        Map<Long, Boolean> pushEligible = adminService.pushEligibilityByUserId(accounts.getContent());
+        return PagedResponse.from(accounts, u -> UserResponse.from(
+                u, authPhones.get(u.getFirebaseUid()), pushEligible.getOrDefault(u.getId(), false)));
     }
 
     @GetMapping("/{id}")
     public UserResponse get(@PathVariable long id) {
         User user = adminService.get(id);
-        return UserResponse.from(user, adminService.authPhoneFor(user.getFirebaseUid()));
+        return UserResponse.from(
+                user, adminService.authPhoneFor(user.getFirebaseUid()), adminService.isPushEligible(user));
     }
 
     @PatchMapping("/{id}")
@@ -91,8 +97,9 @@ public class UserAdminController {
             @AuthenticationPrincipal VerifiedUser caller) {
         User user = adminService.update(id, request.enabled(), request.role(), caller.uid());
         // Enriched like list/get: the console replaces its row with this body, so a PATCH must not
-        // silently wipe the phone identifier off a phone-only account's row (TM-372).
-        return UserResponse.from(user, adminService.authPhoneFor(user.getFirebaseUid()));
+        // silently wipe the phone identifier (TM-372) or the push-eligibility flag (TM-427) off the row.
+        return UserResponse.from(
+                user, adminService.authPhoneFor(user.getFirebaseUid()), adminService.isPushEligible(user));
     }
 
     /**

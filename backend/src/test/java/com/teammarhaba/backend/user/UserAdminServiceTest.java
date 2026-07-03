@@ -15,6 +15,7 @@ import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.RoleService;
+import com.teammarhaba.backend.device.DeviceTokenRepository;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
@@ -31,6 +32,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Rules of admin user-management (TM-111): 404 semantics, self-protection, claim-first role change,
@@ -43,15 +45,65 @@ class UserAdminServiceTest {
     private final RoleService roleService = mock(RoleService.class);
     private final AuditService audit = mock(AuditService.class);
     private final PushNotificationService push = mock(PushNotificationService.class);
+    private final DeviceTokenRepository deviceTokens = mock(DeviceTokenRepository.class);
 
     @SuppressWarnings("unchecked")
     private final ObjectProvider<FirebaseAuth> firebaseAuthProvider = mock(ObjectProvider.class);
 
     private final UserAdminService service =
-            new UserAdminService(users, roleService, audit, push, firebaseAuthProvider);
+            new UserAdminService(users, roleService, audit, push, deviceTokens, firebaseAuthProvider);
 
     private static User account(String uid) {
         return new User(uid, uid + "@example.com", null);
+    }
+
+    /** An account with an explicit id + notification preference — for the push-eligibility tests (TM-427). */
+    private static User account(String uid, long id, NotificationPref pref) {
+        User u = account(uid);
+        ReflectionTestUtils.setField(u, "id", id);
+        u.setNotificationPref(pref);
+        return u;
+    }
+
+    // --- push-eligibility signal for the admin send-notification page (TM-427) -------------------
+
+    @Test
+    void pushEligibilityCombinesPushPreferenceAndDevicePresence() {
+        // Eligible == pref permits push (PUSH/BOTH) AND a device token exists — all four combinations:
+        User pushWithDevice = account("push-dev", 1L, NotificationPref.BOTH);
+        User pushNoDevice = account("push-nodev", 2L, NotificationPref.PUSH);
+        User emailWithDevice = account("email-dev", 3L, NotificationPref.EMAIL); // has a device but opted out
+        User emailNoDevice = account("email-nodev", 4L, NotificationPref.EMAIL);
+        when(deviceTokens.findUserIdsWithTokens(any())).thenReturn(List.of(1L, 3L));
+
+        Map<Long, Boolean> eligibility = service.pushEligibilityByUserId(
+                List.of(pushWithDevice, pushNoDevice, emailWithDevice, emailNoDevice));
+
+        assertThat(eligibility)
+                .containsEntry(1L, true) // push pref + device
+                .containsEntry(2L, false) // push pref, no device — a push would be lost
+                .containsEntry(3L, false) // has a device but is opted out of push
+                .containsEntry(4L, false); // neither
+    }
+
+    @Test
+    void pushEligibilityOfAnEmptyPageIsEmptyAndSkipsTheQuery() {
+        assertThat(service.pushEligibilityByUserId(List.of())).isEmpty();
+        verifyNoInteractions(deviceTokens);
+    }
+
+    @Test
+    void isPushEligibleTrueOnlyWithBothAPushPrefAndADevice() {
+        User pushUser = account("solo", 7L, NotificationPref.BOTH);
+        when(deviceTokens.existsByUserId(7L)).thenReturn(true);
+        assertThat(service.isPushEligible(pushUser)).isTrue();
+
+        when(deviceTokens.existsByUserId(7L)).thenReturn(false);
+        assertThat(service.isPushEligible(pushUser)).isFalse(); // pref permits push, but no device to reach
+
+        User emailUser = account("email-solo", 8L, NotificationPref.EMAIL);
+        // Opted out of push — the device check is short-circuited (never queried), so no stub is needed.
+        assertThat(service.isPushEligible(emailUser)).isFalse();
     }
 
     @Test

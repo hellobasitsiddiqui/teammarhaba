@@ -31,6 +31,48 @@ export const MAX_RECIPIENTS = 500;
 /** The sentinel dropdown value for "no deep-link" (maps to a null `route` on the wire). */
 export const NO_ROUTE = "";
 
+// --- push-eligibility guard for the send-notification page (TM-427) ----------------------------
+//
+// The bug: an admin could pick a user who can't receive push (push not enabled, or no registered
+// device) and the broadcast was silently lost. The admin list payload now carries a per-user
+// `pushEligible` flag from the backend (the account's pref permits push AND it has a device token —
+// mirroring the BroadcastService opt-out/no-device skip). These pure helpers are how the console
+// SHOWS that status and REFUSES to select an ineligible user, so a push is never fired into the void.
+
+/** Tooltip/hint shown on an ineligible user's disabled checkbox and its "No push" badge (TM-427). */
+export const PUSH_INELIGIBLE_HINT =
+  "This user can't receive push — they haven't enabled push, or have no registered device.";
+
+/**
+ * Whether a push could actually reach this user — the backend `pushEligible` flag. Defensive: only an
+ * explicit `true` counts, so a row from an older payload without the field (or any non-boolean) is
+ * treated as INELIGIBLE. Fail-safe by design — never let the UI select a user it can't confirm is
+ * reachable.
+ *
+ * @param {{pushEligible?: unknown}} [user]
+ * @returns {boolean}
+ */
+export function isPushEligible(user = {}) {
+  return user?.pushEligible === true;
+}
+
+/** The push-status badge text for a user row: "Push" when reachable, "No push" when not (TM-427). */
+export function pushStatusLabel(user = {}) {
+  return isPushEligible(user) ? "Push" : "No push";
+}
+
+/**
+ * Of `users`, only those a push can actually reach (TM-427) — what select-all and the recipient set
+ * are built from, so an ineligible user can never enter the broadcast selection. Order preserved;
+ * non-array input yields [].
+ *
+ * @param {Array<{pushEligible?: unknown}>} users
+ * @returns {Array}
+ */
+export function eligibleRecipients(users) {
+  return Array.isArray(users) ? users.filter(isPushEligible) : [];
+}
+
 /**
  * Validate a compose draft against the same rules the backend enforces, so we fail fast in the
  * browser AND only ever POST something the server will accept. Returns per-field error messages

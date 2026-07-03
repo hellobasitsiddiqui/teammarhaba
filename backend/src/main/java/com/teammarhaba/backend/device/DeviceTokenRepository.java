@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.device;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -21,6 +22,22 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, Long> 
     Optional<DeviceToken> findByToken(String token);
 
     List<DeviceToken> findByUserId(Long userId);
+
+    /**
+     * Whether {@code userId} has at least one registered device token — the "has a device push could
+     * reach" half of the admin push-eligibility signal (TM-427). Backs the single-account admin read
+     * (GET/PATCH {@code /admin/users/{id}}); the list path uses the batched
+     * {@link #findUserIdsWithTokens(Collection)} instead of one query per row.
+     */
+    boolean existsByUserId(Long userId);
+
+    /**
+     * Of the given {@code userIds}, those that own at least one device token (TM-427) — a single batched
+     * query so the admin users list can compute per-row push-eligibility without an N+1 fan-out. Returns
+     * the distinct owning user ids; ids with no token are simply absent from the result.
+     */
+    @Query("select distinct d.userId from DeviceToken d where d.userId in :userIds")
+    List<Long> findUserIdsWithTokens(@Param("userIds") Collection<Long> userIds);
 
     /**
      * Delete a token by its value, regardless of owner. Returns the number of rows removed (0 if the

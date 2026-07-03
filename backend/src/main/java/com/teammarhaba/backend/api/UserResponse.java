@@ -18,23 +18,45 @@ import com.teammarhaba.backend.user.User;
  *                    admin console never renders a blank row. Distinct from the user-editable
  *                    profile {@code phone} field, which is not exposed here. {@code null} whenever
  *                    the account has no phone identity or Firebase couldn't be read (best-effort).
+ * @param pushEligible whether a push notification could actually reach this account (TM-427): its
+ *                    {@code notificationPref} permits push <strong>and</strong> it has at least one
+ *                    registered device token. The admin send-notification page surfaces this and
+ *                    blocks selecting/sending push to an ineligible account, so an admin can't fire a
+ *                    push into the void. Mirrors the server-side broadcast opt-out/no-device skip
+ *                    ({@code BroadcastService}) so the UI's "can receive push" and the send path agree.
  */
 public record UserResponse(
-        Long id, String email, String displayName, String role, boolean enabled, String phoneNumber) {
+        Long id,
+        String email,
+        String displayName,
+        String role,
+        boolean enabled,
+        String phoneNumber,
+        boolean pushEligible) {
 
-    /** Projection without Firebase enrichment — the auth phone is unknown here, not known-absent. */
+    /** Projection without enrichment — no auth phone, and push-eligibility unknown (defaults false). */
     public static UserResponse from(User user) {
-        return from(user, null);
+        return from(user, null, false);
     }
 
-    /** Projection plus the auth phone the caller read from Firebase (TM-372); may be {@code null}. */
+    /** Projection plus the auth phone (TM-372); push-eligibility not computed here (defaults false). */
     public static UserResponse from(User user, String authPhone) {
+        return from(user, authPhone, false);
+    }
+
+    /**
+     * Full admin projection (TM-372 auth phone + TM-427 push-eligibility). {@code pushEligible} is
+     * computed by {@code UserAdminService} (pref permits push AND a device token exists), so the send
+     * page can flag and exclude accounts a push can't reach.
+     */
+    public static UserResponse from(User user, String authPhone, boolean pushEligible) {
         return new UserResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getDisplayName(),
                 user.getRole().name(),
                 user.isEnabled(),
-                authPhone);
+                authPhone,
+                pushEligible);
     }
 }

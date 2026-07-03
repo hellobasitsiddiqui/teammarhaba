@@ -44,12 +44,12 @@ import org.springframework.transaction.annotation.Transactional;
  * gated, so a broadcast only ever reaches accounts that opted in and can receive it:
  *
  * <ul>
- *   <li><strong>Opt-out respected.</strong> A recipient whose {@link User#getNotificationPref()} is not
- *       {@link NotificationPref#PUSH} or {@link NotificationPref#BOTH} is skipped
- *       ({@link Outcome#SKIPPED_OPTED_OUT}). This is the first send path in the app to honour
- *       {@code notificationPref}; note it defaults to {@link NotificationPref#EMAIL} for every existing
- *       account, so a broadcast reaches only users who have actively opted into push — the honest reading
- *       of "respect opt-out" (there is no separate OFF value; EMAIL-only <em>is</em> the push opt-out).</li>
+ *   <li><strong>Opt-out respected.</strong> A recipient whose {@link User#getNotificationPref()} does not
+ *       {@linkplain NotificationPref#permitsPush() permit push} ({@link NotificationPref#PUSH} or
+ *       {@link NotificationPref#BOTH}) is skipped ({@link Outcome#SKIPPED_OPTED_OUT}). New accounts now
+ *       default to {@link NotificationPref#BOTH} (TM-427), so a broadcast reaches them once a device
+ *       registers; an account set to {@link NotificationPref#EMAIL} is the push opt-out — there is no
+ *       separate OFF value; EMAIL-only <em>is</em> the push opt-out.</li>
  *   <li><strong>Skip disabled.</strong> A suspended account ({@code enabled == false}) is skipped
  *       ({@link Outcome#SKIPPED_DISABLED}) — {@code sendToUser} does not check {@code enabled}, so this
  *       gate is explicit here.</li>
@@ -222,7 +222,7 @@ public class BroadcastService {
                 skipped++;
                 continue;
             }
-            if (!isPushEligible(user.getNotificationPref())) {
+            if (!user.getNotificationPref().permitsPush()) {
                 // Opted out of push (notificationPref is EMAIL / not PUSH|BOTH). First honour of the pref.
                 recipients.add(new RecipientResult(userId, Outcome.SKIPPED_OPTED_OUT, PushFanout.EMPTY));
                 skippedOptedOut++;
@@ -282,11 +282,6 @@ public class BroadcastService {
         // Record the cooldown window only now the broadcast has actually completed.
         lastBroadcast.put(actorUid, now);
         return result;
-    }
-
-    /** Push-eligible == the pref opted into push. EMAIL (the default) is the push opt-out. */
-    private static boolean isPushEligible(NotificationPref pref) {
-        return pref == NotificationPref.PUSH || pref == NotificationPref.BOTH;
     }
 
     /**
