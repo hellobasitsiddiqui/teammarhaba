@@ -29,6 +29,10 @@ class UserListIntegrationTest extends AbstractIntegrationTest {
     @BeforeEach
     void seed() {
         // Clean slate so totals are deterministic regardless of test ordering on the shared container.
+        // Child tables first: events.created_by (and event_attendance.user_id) FK-reference users,
+        // so users can only be wiped after their dependents (TM-391 added the events schema).
+        jdbc.update("DELETE FROM event_attendance");
+        jdbc.update("DELETE FROM events");
         jdbc.update("DELETE FROM users");
         // Five active accounts: ada, bea, cyd, dan, eve.
         users.save(new User("uid-ada", "ada@example.com", "Ada"));
