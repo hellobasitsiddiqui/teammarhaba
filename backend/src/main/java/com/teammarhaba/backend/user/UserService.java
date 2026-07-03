@@ -21,6 +21,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -73,6 +74,24 @@ public class UserService {
     @Transactional
     public User provision(VerifiedUser caller) {
         return users.findByFirebaseUid(caller.uid()).orElseGet(() -> reactivateOrInsert(caller));
+    }
+
+    /**
+     * Take a {@code SELECT ... FOR UPDATE} row lock on the caller's {@code users} row — the per-user
+     * serialisation point behind "one active event at a time" (TM-413/TM-423).
+     *
+     * <p>Each capacity command locks only its own {@code events} row, so two concurrent GOING-landings
+     * by the same user on <em>different</em> events lock different rows and never mutually exclude:
+     * both pass the non-locking active-event guard and the user ends up GOING to two events. Locking
+     * the user row first makes those commands queue — the second waits, then sees the first's committed
+     * GOING and is refused. Callers take this <strong>before</strong> the event lock, giving a
+     * consistent user-then-event lock order (deadlock-free). {@link Propagation#MANDATORY} enforces the
+     * only correct usage: inside the command's own transaction (without one the lock would be released
+     * immediately and serialise nothing).
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockForUpdate(Long userId) {
+        users.findByIdForUpdate(userId);
     }
 
     /**

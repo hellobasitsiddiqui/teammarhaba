@@ -1,9 +1,11 @@
 package com.teammarhaba.backend.user;
 
+import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -27,6 +29,18 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Query(value = "SELECT * FROM users WHERE firebase_uid = :firebaseUid", nativeQuery = true)
     Optional<User> findAnyByFirebaseUid(@Param("firebaseUid") String firebaseUid);
+
+    /**
+     * Load the account holding a {@code SELECT ... FOR UPDATE} row lock — the per-user serialisation
+     * point for the "one active event at a time" rule (TM-413/TM-423), mirroring
+     * {@code EventRepository.findByIdForUpdate}. Taking this lock at the top of a GOING-landing command
+     * (RSVP/claim) makes a single user's concurrent commands queue, so the non-locking active-event
+     * guard can't be bypassed across two different events. The {@code @SQLRestriction} still applies
+     * (soft-deleted rows don't load or lock); callers lock a just-provisioned, active row.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from User u where u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
 
     /**
      * Paged, filtered listing for the admin users console (TM-115). Each filter is optional — a

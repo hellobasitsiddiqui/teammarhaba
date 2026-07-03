@@ -21,6 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
  * resolve strictly first-come-first-served (first-claim-wins). Contention is per event — commands
  * on different events never queue behind each other.
  *
+ * <p>The GOING-landing commands (RSVP, claim) additionally take a {@code SELECT ... FOR UPDATE}
+ * lock on the caller's own {@code users} row <em>before</em> the event lock (TM-423), serialising a
+ * single user's GOING-landings so the "one active event" guard below can't be bypassed by concurrent
+ * landings on two <em>different</em> events (each locks only its own event row, so without this they
+ * never mutually exclude). User-then-event lock order is consistent across every command, so there is
+ * no deadlock; {@code cancelRsvp} (leaving is never gated) takes no user lock.
+ *
  * <p><b>Offer-cascade policy (owner decision 2026-07-03, supersedes auto-promotion)</b> — when a
  * {@code GOING} spot frees, nobody is promoted automatically. The freed spot is <em>recorded</em>
  * purely by derivation (free spots = {@code capacity − GOING count}; see {@code V13}); TM-397
@@ -113,6 +120,7 @@ public class EventRsvpService {
     @Transactional
     public RsvpResult rsvp(VerifiedUser caller, Long eventId) {
         User user = users.provision(caller);
+        users.lockForUpdate(user.getId()); // TM-423: user-row lock serialises this caller's GOING-landings
         Instant now = Instant.now();
         Event event = lockedVisibleEvent(eventId, now);
         if (event.hasStartedBy(now)) {
@@ -219,6 +227,7 @@ public class EventRsvpService {
     @Transactional
     public RsvpResult claim(VerifiedUser caller, Long eventId) {
         User user = users.provision(caller);
+        users.lockForUpdate(user.getId()); // TM-423: user-row lock serialises this caller's GOING-landings
         Instant now = Instant.now();
         Event event = lockedVisibleEvent(eventId, now);
         if (event.hasStartedBy(now)) {
@@ -262,8 +271,11 @@ public class EventRsvpService {
      * The {@code 409} names that blocking event so the client can be honest about why. Called only on
      * the {@code GOING} paths (a GOING RSVP, a claim) — waitlisting is never blocked. Leaving the
      * blocker, or the blocker finishing/being cancelled, clears it (see
-     * {@link EventRepository#findActiveGoingForUser}). Runs inside the command's transaction; it is a
-     * plain read (no extra lock), scanning only this caller's own attendance.
+     * {@link EventRepository#findActiveGoingForUser}). This is a plain, non-locking read scanning only
+     * this caller's own attendance; correctness across two <em>different</em> events under concurrency
+     * comes from the caller having taken a {@code SELECT ... FOR UPDATE} lock on their own
+     * {@code users} row before this guard ({@link UserService#lockForUpdate}, TM-423), so a single
+     * user's GOING-landings serialise and the second sees the first's committed GOING.
      */
     private void guardOneActiveEvent(Long userId, Long currentEventId, Instant now) {
         events.findActiveGoingForUser(userId, currentEventId, now, PageRequest.of(0, 1)).stream()
