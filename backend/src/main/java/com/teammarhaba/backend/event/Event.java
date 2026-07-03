@@ -62,6 +62,22 @@ public class Event {
     @Column(name = "online_url")
     private String onlineUrl;
 
+    /**
+     * Optional coarse locality, e.g. {@code "London"} (TM-408). Two roles: the only location hint
+     * the public API exposes before reveal, and the key into the config-driven per-city reveal
+     * default. {@code null} = no hint / no per-city default.
+     */
+    @Column(name = "city")
+    private String city;
+
+    /**
+     * Per-event override of the location-reveal window, in whole hours before {@code startAt}
+     * (TM-408). {@code null} = inherit — {@link LocationRevealPolicy} then falls back to the
+     * per-city default and finally the app default (24h).
+     */
+    @Column(name = "location_reveal_hours")
+    private Integer locationRevealHours;
+
     /** IANA timezone id of the event's locale; pairs with the UTC instants for client rendering. */
     @Column(name = "timezone", nullable = false)
     private String timezone;
@@ -183,6 +199,22 @@ public class Event {
 
     public void setOnlineUrl(String onlineUrl) {
         this.onlineUrl = onlineUrl;
+    }
+
+    public String getCity() {
+        return city;
+    }
+
+    public void setCity(String city) {
+        this.city = city;
+    }
+
+    public Integer getLocationRevealHours() {
+        return locationRevealHours;
+    }
+
+    public void setLocationRevealHours(Integer locationRevealHours) {
+        this.locationRevealHours = locationRevealHours;
     }
 
     public String getTimezone() {

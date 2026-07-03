@@ -96,6 +96,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.EventRsvpService eventRsvpService;
 
+    // EventAdminController (TM-408) also needs a LocationRevealPolicy — supply it so the slice loads.
+    @MockitoBean
+    private com.teammarhaba.backend.event.LocationRevealPolicy locationRevealPolicy;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

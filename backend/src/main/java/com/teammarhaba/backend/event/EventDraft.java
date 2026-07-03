@@ -7,7 +7,10 @@ import java.time.Instant;
  * {@code api} package's {@code CreateEventRequest} maps onto, so this package never depends on the
  * HTTP DTOs (mirrors {@code ProfileUpdate} in the {@code user} package). Values arrive already
  * bean-validated at the API edge; the optional fields ({@code mapUrl}, {@code onlineUrl},
- * {@code endAt}, {@code capacity}, {@code imagePath}) are {@code null} when absent.
+ * {@code endAt}, {@code capacity}, {@code imagePath}, {@code city}, {@code locationRevealHours})
+ * are {@code null} when absent. {@code city} is the coarse locality (pre-reveal hint + per-city
+ * default key); {@code locationRevealHours} is the per-event reveal-window override ({@code null}
+ * = inherit the city/app default) — both TM-408.
  */
 public record EventDraft(
         String heading,
@@ -15,10 +18,12 @@ public record EventDraft(
         String locationText,
         String mapUrl,
         String onlineUrl,
+        String city,
         String timezone,
         Instant startAt,
         Instant endAt,
         Instant visibilityStart,
         Instant visibilityEnd,
         Integer capacity,
-        String imagePath) {}
+        String imagePath,
+        Integer locationRevealHours) {}

@@ -4,6 +4,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.EventAdminService;
+import com.teammarhaba.backend.event.LocationRevealPolicy;
 import jakarta.validation.Valid;
 import java.util.Set;
 import org.springframework.data.domain.Sort;
@@ -59,9 +60,11 @@ public class EventAdminController {
     private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.DESC, "startAt");
 
     private final EventAdminService adminService;
+    private final LocationRevealPolicy reveal;
 
-    public EventAdminController(EventAdminService adminService) {
+    public EventAdminController(EventAdminService adminService, LocationRevealPolicy reveal) {
         this.adminService = adminService;
+        this.reveal = reveal;
     }
 
     @GetMapping
@@ -70,19 +73,20 @@ public class EventAdminController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String sort) {
         return PageResponse.from(
-                adminService.list(PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT)), EventResponse::from);
+                adminService.list(PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT)),
+                event -> EventResponse.from(event, reveal));
     }
 
     @GetMapping("/{id}")
     public EventResponse get(@PathVariable long id) {
-        return EventResponse.from(adminService.get(id));
+        return EventResponse.from(adminService.get(id), reveal);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public EventResponse create(
             @RequestBody @Valid CreateEventRequest request, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.create(caller, request.toDraft()));
+        return EventResponse.from(adminService.create(caller, request.toDraft()), reveal);
     }
 
     @PatchMapping("/{id}")
@@ -90,7 +94,7 @@ public class EventAdminController {
             @PathVariable long id,
             @RequestBody @Valid UpdateEventRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.update(caller, id, request.toPatch()));
+        return EventResponse.from(adminService.update(caller, id, request.toPatch()), reveal);
     }
 
     /**
@@ -100,6 +104,6 @@ public class EventAdminController {
      */
     @PostMapping("/{id}/cancel")
     public EventResponse cancel(@PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.cancel(caller, id));
+        return EventResponse.from(adminService.cancel(caller, id), reveal);
     }
 }

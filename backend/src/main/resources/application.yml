@@ -102,6 +102,18 @@ app:
     enabled: ${EVENT_REMINDERS_ENABLED:true}
     scan-interval-ms: ${EVENT_REMINDERS_SCAN_INTERVAL_MS:60000}   # gap between scan passes
     initial-delay-ms: ${EVENT_REMINDERS_INITIAL_DELAY_MS:15000}   # startup grace before the first pass
+  # Event location-reveal policy (TM-408). The PUBLIC events list/detail withhold an event's exact
+  # venue (location_text address, map_url, online_url) until now >= start − revealHours; before then
+  # only the coarse `city` hint + the reveal timestamp are exposed (server-side data-leak guard in
+  # EventQueryService). revealHours resolves per event: event.locationRevealHours override →
+  # this per-city map → default-hours. Tunables, not secrets; prod may override via the env.
+  location-reveal:
+    default-hours: ${LOCATION_REVEAL_DEFAULT_HOURS:24}   # app default when neither event nor city supplies one
+    # Optional per-city defaults (city name → whole hours), matched case-insensitively. Example:
+    #   city-hours:
+    #     london: 12
+    #     dubai: 6
+    city-hours: {}
   # Current published terms/privacy version (TM-170). The client gates the app until the user's
   # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
   # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as

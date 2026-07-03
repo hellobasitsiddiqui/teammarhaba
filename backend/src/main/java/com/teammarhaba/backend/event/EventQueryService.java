@@ -45,11 +45,17 @@ public class EventQueryService {
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
     private final UserRepository users;
+    private final LocationRevealPolicy reveal;
 
-    public EventQueryService(EventRepository events, EventAttendanceRepository attendance, UserRepository users) {
+    public EventQueryService(
+            EventRepository events,
+            EventAttendanceRepository attendance,
+            UserRepository users,
+            LocationRevealPolicy reveal) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
+        this.reveal = reveal;
     }
 
     /**
@@ -60,7 +66,8 @@ public class EventQueryService {
      */
     @Transactional(readOnly = true)
     public PageResponse<EventCard> visibleNow(String callerUid, Pageable pageable) {
-        Page<Event> page = events.findVisibleAt(Instant.now(), EventStatus.PUBLISHED, pageable);
+        Instant now = Instant.now();
+        Page<Event> page = events.findVisibleAt(now, EventStatus.PUBLISHED, pageable);
         List<Long> eventIds = page.getContent().stream().map(Event::getId).toList();
 
         Map<Long, Long> goingCounts = eventIds.isEmpty()
@@ -76,17 +83,25 @@ public class EventQueryService {
                         .collect(Collectors.toMap(EventAttendance::getEventId, EventAttendance::getState)))
                 .orElse(Map.of());
 
-        return PageResponse.from(page, event -> new EventCard(
-                event.getId(),
-                event.getHeading(),
-                event.getLocationText(),
-                event.getTimezone(),
-                event.getStartAt(),
-                event.getEndAt(),
-                event.getCapacity(),
-                event.getImagePath(),
-                goingCounts.getOrDefault(event.getId(), 0L),
-                MyState.of(myStates.get(event.getId()))));
+        return PageResponse.from(page, event -> {
+            // Location-reveal guard (TM-408): withhold the exact venue until the reveal boundary;
+            // the coarse city hint + reveal timestamp are always safe to expose.
+            boolean revealed = reveal.isRevealed(event, now);
+            return new EventCard(
+                    event.getId(),
+                    event.getHeading(),
+                    revealed ? event.getLocationText() : null,
+                    event.getCity(),
+                    event.getTimezone(),
+                    event.getStartAt(),
+                    event.getEndAt(),
+                    event.getCapacity(),
+                    event.getImagePath(),
+                    goingCounts.getOrDefault(event.getId(), 0L),
+                    MyState.of(myStates.get(event.getId())),
+                    revealed,
+                    reveal.revealsAt(event));
+        });
     }
 
     /**
@@ -98,8 +113,9 @@ public class EventQueryService {
      */
     @Transactional(readOnly = true)
     public EventDetail detail(String callerUid, Long eventId) {
+        Instant now = Instant.now();
         Event event = events.findById(eventId)
-                .filter(e -> e.isVisibleAt(Instant.now()))
+                .filter(e -> e.isVisibleAt(now))
                 .orElseThrow(() -> new ResourceNotFoundException(EventRsvpService.EVENT_NOT_FOUND));
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
@@ -111,13 +127,19 @@ public class EventQueryService {
         boolean spotAvailableToClaim =
                 spotFree && mine.map(EventAttendance::hasOpenOffer).orElse(false);
 
+        // Location-reveal guard (TM-408): the exact venue/map/online link are withheld until the
+        // reveal boundary, uniformly for every caller (GOING/WAITLISTED included). Pre-reveal the
+        // client has only the coarse city hint + the reveal timestamp.
+        boolean revealed = reveal.isRevealed(event, now);
+
         return new EventDetail(
                 event.getId(),
                 event.getHeading(),
                 event.getDescription(),
-                event.getLocationText(),
-                event.getMapUrl(),
-                event.getOnlineUrl(),
+                revealed ? event.getLocationText() : null,
+                revealed ? event.getMapUrl() : null,
+                revealed ? event.getOnlineUrl() : null,
+                event.getCity(),
                 event.getTimezone(),
                 event.getStartAt(),
                 event.getEndAt(),
@@ -127,7 +149,9 @@ public class EventQueryService {
                 waitlisted,
                 avatars(eventId),
                 MyState.of(mine.map(EventAttendance::getState).orElse(null)),
-                spotAvailableToClaim);
+                spotAvailableToClaim,
+                revealed,
+                reveal.revealsAt(event));
     }
 
     /**

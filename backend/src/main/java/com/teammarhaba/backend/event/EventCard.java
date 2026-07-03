@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.event;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
@@ -9,25 +10,38 @@ import java.time.Instant;
  * entity. Instants are UTC; clients pair them with {@code timezone} (IANA id) to display local
  * times, DST-correctly.
  *
- * @param id           the event id (detail link)
- * @param heading      short display title
- * @param locationText free-text venue line (always present, "Online" for online events)
- * @param timezone     IANA timezone id pairing with the instants
- * @param startAt      when the event starts (UTC)
- * @param endAt        optional end instant; {@code null} = open-ended
- * @param capacity     max GOING attendees; {@code null} = unlimited
- * @param imagePath    optional storage path of the event image; {@code null} = themed placeholder
- * @param goingCount   number of attendees currently holding a GOING spot
- * @param myState      the caller's own state on this event
+ * <p><b>Location reveal (TM-408)</b> — {@code locationText} is the <em>exact</em> venue and is a
+ * server-side privacy guard: it is only populated once {@code locationRevealed} is {@code true}
+ * ({@code now >= startAt − revealHours}) and is otherwise <b>absent</b> from the JSON
+ * ({@link JsonInclude.Include#NON_NULL}), never merely blanked. Before reveal the client shows the
+ * coarse {@code city} hint and {@code locationRevealsAt}; the guard is uniform for every caller,
+ * GOING/WAITLISTED included.
+ *
+ * @param id                the event id (detail link)
+ * @param heading           short display title
+ * @param locationText      exact venue line — present only once revealed, else absent
+ * @param city              coarse locality hint (may be {@code null}); safe to show pre-reveal
+ * @param timezone          IANA timezone id pairing with the instants
+ * @param startAt           when the event starts (UTC)
+ * @param endAt             optional end instant; {@code null} = open-ended
+ * @param capacity          max GOING attendees; {@code null} = unlimited
+ * @param imagePath         optional storage path of the event image; {@code null} = themed placeholder
+ * @param goingCount        number of attendees currently holding a GOING spot
+ * @param myState           the caller's own state on this event
+ * @param locationRevealed  whether the exact location is public yet
+ * @param locationRevealsAt the instant the exact location becomes public ({@code startAt − revealHours})
  */
 public record EventCard(
         Long id,
         String heading,
-        String locationText,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String locationText,
+        String city,
         String timezone,
         Instant startAt,
         Instant endAt,
         Integer capacity,
         String imagePath,
         long goingCount,
-        MyState myState) {}
+        MyState myState,
+        boolean locationRevealed,
+        Instant locationRevealsAt) {}

@@ -105,9 +105,11 @@ public class EventAdminService {
                 now);
         event.setMapUrl(draft.mapUrl());
         event.setOnlineUrl(draft.onlineUrl());
+        event.setCity(draft.city());
         event.setEndAt(draft.endAt());
         event.setCapacity(draft.capacity());
         event.setImagePath(draft.imagePath());
+        event.setLocationRevealHours(draft.locationRevealHours());
         requireConsistentTimes(event);
 
         Event saved = events.saveAndFlush(event);
@@ -145,6 +147,7 @@ public class EventAdminService {
                 patch.locationText(), event.getLocationText(), event::setLocationText, "locationText", changed);
         applyIfChanged(patch.mapUrl(), event.getMapUrl(), event::setMapUrl, "mapUrl", changed);
         applyIfChanged(patch.onlineUrl(), event.getOnlineUrl(), event::setOnlineUrl, "onlineUrl", changed);
+        applyIfChanged(patch.city(), event.getCity(), event::setCity, "city", changed);
         applyIfChanged(patch.timezone(), event.getTimezone(), event::setTimezone, "timezone", changed);
         applyIfChanged(patch.startAt(), event.getStartAt(), event::setStartAt, "startAt", changed);
         applyIfChanged(patch.endAt(), event.getEndAt(), event::setEndAt, "endAt", changed);
@@ -158,6 +161,12 @@ public class EventAdminService {
                 patch.visibilityEnd(), event.getVisibilityEnd(), event::setVisibilityEnd, "visibilityEnd", changed);
         applyIfChanged(patch.capacity(), event.getCapacity(), event::setCapacity, "capacity", changed);
         applyIfChanged(patch.imagePath(), event.getImagePath(), event::setImagePath, "imagePath", changed);
+        applyIfChanged(
+                patch.locationRevealHours(),
+                event.getLocationRevealHours(),
+                event::setLocationRevealHours,
+                "locationRevealHours",
+                changed);
 
         requireConsistentTimes(event);
 
