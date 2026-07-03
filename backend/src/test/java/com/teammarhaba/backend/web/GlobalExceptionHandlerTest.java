@@ -84,6 +84,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.notify.BroadcastService broadcastService;
 
+    // EventAdminController (TM-392) needs an EventAdminService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.event.EventAdminService eventAdminService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

@@ -49,5 +49,17 @@ public enum AuditAction {
      * per send; the full header (title/body/recipient-count/outcome) lives in {@code
      * notification_broadcasts}.
      */
-    BROADCAST_SENT
+    BROADCAST_SENT,
+
+    /** An admin created a meetup event via {@code POST /api/v1/admin/events} (TM-392). */
+    EVENT_CREATED,
+
+    /** An admin edited an event via {@code PATCH /api/v1/admin/events/{id}} (TM-392). */
+    EVENT_UPDATED,
+
+    /**
+     * An admin cancelled an event via {@code POST /api/v1/admin/events/{id}/cancel} (TM-392). The
+     * row is kept (status {@code CANCELLED}) — cancel is not delete.
+     */
+    EVENT_CANCELLED
 }
