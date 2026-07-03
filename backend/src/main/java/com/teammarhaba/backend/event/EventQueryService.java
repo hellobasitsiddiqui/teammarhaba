@@ -46,28 +46,34 @@ public class EventQueryService {
     private final EventAttendanceRepository attendance;
     private final UserRepository users;
     private final LocationRevealPolicy reveal;
+    private final EventPhasePolicy phase;
 
     public EventQueryService(
             EventRepository events,
             EventAttendanceRepository attendance,
             UserRepository users,
-            LocationRevealPolicy reveal) {
+            LocationRevealPolicy reveal,
+            EventPhasePolicy phase) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.reveal = reveal;
+        this.phase = phase;
     }
 
     /**
-     * The visible-now listing: {@code PUBLISHED} events whose visibility window contains now, in
-     * the caller-supplied page order (the API fixes soonest-first). Going counts come from one
-     * grouped tally and the caller's states from one batched lookup — no N+1 regardless of page
-     * size.
+     * The visible-now listing: {@code PUBLISHED} events whose visibility window contains now and
+     * which have not finished (TM-412 — a live/upcoming event survives, a finished one drops out),
+     * in the caller-supplied page order (the API fixes soonest-first, which sorts live events ahead
+     * of upcoming ones). Each card carries its temporal {@link EventPhase} and a {@code happeningNow}
+     * flag for the live badge. Going counts come from one grouped tally and the caller's states from
+     * one batched lookup — no N+1 regardless of page size.
      */
     @Transactional(readOnly = true)
     public PageResponse<EventCard> visibleNow(String callerUid, Pageable pageable) {
         Instant now = Instant.now();
-        Page<Event> page = events.findVisibleAt(now, EventStatus.PUBLISHED, pageable);
+        Page<Event> page =
+                events.findVisibleAt(now, phase.openEndedStartFloor(now), EventStatus.PUBLISHED, pageable);
         List<Long> eventIds = page.getContent().stream().map(Event::getId).toList();
 
         Map<Long, Long> goingCounts = eventIds.isEmpty()
@@ -87,6 +93,7 @@ public class EventQueryService {
             // Location-reveal guard (TM-408): withhold the exact venue until the reveal boundary;
             // the coarse city hint + reveal timestamp are always safe to expose.
             boolean revealed = reveal.isRevealed(event, now);
+            EventPhase phaseNow = phase.phaseAt(event, now);
             return new EventCard(
                     event.getId(),
                     event.getHeading(),
@@ -100,7 +107,9 @@ public class EventQueryService {
                     goingCounts.getOrDefault(event.getId(), 0L),
                     MyState.of(myStates.get(event.getId())),
                     revealed,
-                    reveal.revealsAt(event));
+                    reveal.revealsAt(event),
+                    phaseNow,
+                    phaseNow == EventPhase.HAPPENING_NOW);
         });
     }
 
@@ -114,8 +123,10 @@ public class EventQueryService {
     @Transactional(readOnly = true)
     public EventDetail detail(String callerUid, Long eventId) {
         Instant now = Instant.now();
+        // A finished event is hidden just like a cancelled / out-of-window one (TM-412): its detail
+        // 404s indistinguishably from a missing id, consistent with it dropping out of the listing.
         Event event = events.findById(eventId)
-                .filter(e -> e.isVisibleAt(now))
+                .filter(e -> e.isVisibleAt(now) && !phase.isFinished(e, now))
                 .orElseThrow(() -> new ResourceNotFoundException(EventRsvpService.EVENT_NOT_FOUND));
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
@@ -131,6 +142,7 @@ public class EventQueryService {
         // reveal boundary, uniformly for every caller (GOING/WAITLISTED included). Pre-reveal the
         // client has only the coarse city hint + the reveal timestamp.
         boolean revealed = reveal.isRevealed(event, now);
+        EventPhase phaseNow = phase.phaseAt(event, now);
 
         return new EventDetail(
                 event.getId(),
@@ -151,7 +163,9 @@ public class EventQueryService {
                 MyState.of(mine.map(EventAttendance::getState).orElse(null)),
                 spotAvailableToClaim,
                 revealed,
-                reveal.revealsAt(event));
+                reveal.revealsAt(event),
+                phaseNow,
+                phaseNow == EventPhase.HAPPENING_NOW);
     }
 
     /**

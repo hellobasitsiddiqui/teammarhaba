@@ -40,6 +40,9 @@ import java.util.List;
  * @param spotAvailableToClaim {@code true} when an open spot and a live offer exist for the caller
  * @param locationRevealed     whether the exact location is public yet
  * @param locationRevealsAt    the instant the exact location becomes public ({@code startAt − revealHours})
+ * @param status               the temporal phase (TM-412); {@code UPCOMING} or {@code HAPPENING_NOW}
+ *     — a finished event's detail 404s, so {@code FINISHED} is never returned here
+ * @param happeningNow         convenience flag ({@code status == HAPPENING_NOW}) for the live badge
  */
 public record EventDetail(
         Long id,
@@ -60,4 +63,6 @@ public record EventDetail(
         MyState myState,
         boolean spotAvailableToClaim,
         boolean locationRevealed,
-        Instant locationRevealsAt) {}
+        Instant locationRevealsAt,
+        EventPhase status,
+        boolean happeningNow) {}

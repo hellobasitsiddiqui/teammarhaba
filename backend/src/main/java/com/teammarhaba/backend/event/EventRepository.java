@@ -21,11 +21,16 @@ import org.springframework.data.repository.query.Param;
 public interface EventRepository extends JpaRepository<Event, Long> {
 
     /**
-     * The visible-now listing: events whose visibility window contains {@code now} and whose status
+     * The visible-now listing: events whose visibility window contains {@code now}, whose status
      * matches (the public listing passes {@link EventStatus#PUBLISHED}; cancelled events drop out
-     * immediately). Soft-deleted events are excluded by the {@code @SQLRestriction}. Callers supply
-     * the order via {@code pageable} — the listing sorts by {@code startAt} ascending (soonest
-     * first).
+     * immediately) <em>and</em> which have not finished (TM-412). An event is finished once
+     * {@code now} is past its effective end: {@code endAt} when set, else {@code startAt +
+     * defaultDuration} for open-ended events — so open-ended events are kept while
+     * {@code startAt ≥ openEndedStartFloor} ({@code = now − defaultDuration}, precomputed by
+     * {@link EventPhasePolicy#openEndedStartFloor} to keep this a plain column comparison). Live
+     * events ({@code startAt ≤ now}) naturally sort ahead of upcoming ones ({@code startAt > now})
+     * under the {@code startAt}-ascending order the caller supplies, so "live to the top" falls out
+     * of soonest-first. Soft-deleted events are excluded by the {@code @SQLRestriction}.
      */
     @Query(
             """
@@ -33,8 +38,16 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             where e.status = :status
               and e.visibilityStart <= :now
               and e.visibilityEnd >= :now
+              and (
+                (e.endAt is not null and e.endAt >= :now)
+                or (e.endAt is null and e.startAt >= :openEndedStartFloor)
+              )
             """)
-    Page<Event> findVisibleAt(@Param("now") Instant now, @Param("status") EventStatus status, Pageable pageable);
+    Page<Event> findVisibleAt(
+            @Param("now") Instant now,
+            @Param("openEndedStartFloor") Instant openEndedStartFloor,
+            @Param("status") EventStatus status,
+            Pageable pageable);
 
     /**
      * The reminder scanner's candidate window (TM-394): events of {@code status} starting inside

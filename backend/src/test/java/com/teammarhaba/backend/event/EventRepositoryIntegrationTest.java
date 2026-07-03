@@ -3,6 +3,7 @@ package com.teammarhaba.backend.event;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import com.teammarhaba.backend.config.EventListingProperties;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Duration;
@@ -56,6 +57,11 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
                 visibilityEnd,
                 creatorId,
                 now);
+    }
+
+    /** An open-ended event survives the finished-exclusion while {@code startAt ≥ now − default}. */
+    private static Instant openEndedFloor(Instant now) {
+        return now.minus(EventListingProperties.DEFAULT_DURATION_HOURS, ChronoUnit.HOURS);
     }
 
     @Test
@@ -117,7 +123,7 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
         cancelled.cancel(now);
         Long cancelledId = events.save(cancelled).getId();
 
-        List<Long> visibleIds = events.findVisibleAt(now, EventStatus.PUBLISHED, SOONEST_FIRST).stream()
+        List<Long> visibleIds = events.findVisibleAt(now, openEndedFloor(now), EventStatus.PUBLISHED, SOONEST_FIRST).stream()
                 .map(Event::getId)
                 .toList();
 
@@ -125,11 +131,50 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void finishedEventsDropOutOfTheVisibleNowListing() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        // All four share an open visibility window, so only the finished-exclusion (TM-412) decides
+        // membership — not the window/status filters.
+        Instant winStart = now.minus(Duration.ofDays(1));
+        Instant winEnd = now.plus(Duration.ofDays(1));
+
+        Event liveWithEnd = newEvent("Live explicit end", winStart, winEnd);
+        liveWithEnd.setStartAt(now.minus(Duration.ofHours(1)));
+        liveWithEnd.setEndAt(now.plus(Duration.ofHours(1)));
+        Long live = events.save(liveWithEnd).getId();
+
+        Event finishedWithEnd = newEvent("Finished explicit end", winStart, winEnd);
+        finishedWithEnd.setStartAt(now.minus(Duration.ofHours(5)));
+        finishedWithEnd.setEndAt(now.minus(Duration.ofHours(1)));
+        Long finished = events.save(finishedWithEnd).getId();
+
+        // Open-ended (endAt null): live while startAt ≥ now − 3h, finished once past it.
+        Event openLiveEvent = newEvent("Open-ended within window", winStart, winEnd);
+        openLiveEvent.setStartAt(now.minus(Duration.ofHours(1))); // effective end now + 2h → live
+        Long openLive = events.save(openLiveEvent).getId();
+
+        Event openFinishedEvent = newEvent("Open-ended past window", winStart, winEnd);
+        openFinishedEvent.setStartAt(now.minus(Duration.ofHours(5))); // effective end now − 2h → finished
+        Long openFinished = events.save(openFinishedEvent).getId();
+
+        List<Long> visibleIds = events
+                .findVisibleAt(now, openEndedFloor(now), EventStatus.PUBLISHED, SOONEST_FIRST)
+                .stream()
+                .map(Event::getId)
+                .toList();
+
+        assertThat(visibleIds)
+                .as("live events stay; finished events — explicit end or open-ended past the default — drop out")
+                .contains(live, openLive)
+                .doesNotContain(finished, openFinished);
+    }
+
+    @Test
     void cancellingDropsAnEventFromTheListingButKeepsItReadable() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         Long id = events.save(newEvent("To cancel", now.minus(Duration.ofHours(1)), now.plus(Duration.ofDays(1))))
                 .getId();
-        assertThat(events.findVisibleAt(now, EventStatus.PUBLISHED, SOONEST_FIRST))
+        assertThat(events.findVisibleAt(now, openEndedFloor(now), EventStatus.PUBLISHED, SOONEST_FIRST))
                 .extracting(Event::getId)
                 .contains(id);
 
@@ -137,7 +182,7 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
         event.cancel(now);
         events.save(event);
 
-        assertThat(events.findVisibleAt(now, EventStatus.PUBLISHED, SOONEST_FIRST))
+        assertThat(events.findVisibleAt(now, openEndedFloor(now), EventStatus.PUBLISHED, SOONEST_FIRST))
                 .extracting(Event::getId)
                 .doesNotContain(id);
         // Still readable directly — cancelled is a status, not a deletion.
@@ -158,7 +203,7 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(events.findById(id)).isEmpty(); // @SQLRestriction hides the tombstone
         assertThat(events.findAll()).extracting(Event::getId).doesNotContain(id);
-        assertThat(events.findVisibleAt(now, EventStatus.PUBLISHED, SOONEST_FIRST))
+        assertThat(events.findVisibleAt(now, openEndedFloor(now), EventStatus.PUBLISHED, SOONEST_FIRST))
                 .extracting(Event::getId)
                 .doesNotContain(id);
     }
