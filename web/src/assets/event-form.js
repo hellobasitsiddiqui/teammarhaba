@@ -169,6 +169,12 @@ export function zonedToUtcIso(localValue, timeZone) {
  * @returns {string}
  */
 export function utcIsoToZoned(iso, timeZone) {
+  // No instant → blank field. Guard BEFORE `new Date()`: `new Date(null)` is the Unix epoch (its
+  // getTime() is 0, NOT NaN), so a null `endAt` (a legit open-ended event) would otherwise render as
+  // "1970-01-01…" and poison the edit form — the End field then fails "end after start" and blocks
+  // Save on an event that never had an end time (TM-429). `undefined`/`""` already fall out as NaN,
+  // but we return early for all three so intent is explicit.
+  if (iso == null || iso === "") return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime()) || !isValidTimeZone(timeZone)) return "";
   const p = new Intl.DateTimeFormat("en-CA", {
