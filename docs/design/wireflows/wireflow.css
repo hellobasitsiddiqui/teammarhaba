@@ -1,0 +1,458 @@
+/*
+ * TM-377 — wireflow LAYOUT stylesheet (storyboard scaffolding only).
+ *
+ * ── The exactness rule ────────────────────────────────────────────────────────────────────────
+ * Every journey page loads the app's REAL stylesheet first:
+ *
+ *     <link rel="stylesheet" href="../../../web/src/assets/styles.css" />   (unmodified)
+ *
+ * with `data-theme="sketch"` hard-set on <html>, so the shipped Sketch token block
+ * (web/src/assets/styles.css lines 762–921) supplies ALL of the visual language:
+ *   • palette        — graphite ink #2b2b2b on off-white paper #fafafa (--fg / --page-bg / --surface*)
+ *   • strokes        — 2px pencil borders (--border-width + the --fg-line* mixes)
+ *   • wobbly corners — the irregular hand-drawn radii (--radius*)
+ *   • hand-drawn edge— filter: url(#wobble-soft), the SAME SVG filter the app ships in
+ *                      web/src/index.html lines 25–30 (each page copies that def verbatim)
+ *   • typography     — Patrick Hand body, Gochi Hand headings/buttons, Shadows Into Light accents
+ *   • paper ruling   — the graph-paper grid on `[data-theme="sketch"] body` (lines 832–845)
+ *   • depth          — the flat pencil offset shadows (--shadow-*)
+ *
+ * THIS file adds no visual language of its own. It only:
+ *   1. lays screens out side-by-side with arrows (flex strip instead of the app's centred grid);
+ *   2. draws the wireflow-only primitives a storyboard needs (phone frame, arrows, sticky notes,
+ *      chat bubbles, list rows, avatars) — every colour/border/radius/shadow/font in them is read
+ *      from the app's theme tokens via var(--token), and hand-drawn edges reuse url(#wobble-soft),
+ *      exactly the discipline the app's own components follow.
+ * Rendered under any other theme these pages would restyle with it — nothing here is hard-coded.
+ */
+
+/* ── Canvas ──────────────────────────────────────────────────────────────────────────────────
+   styles.css `body` centres a single app column (display:grid; place-items:center). A storyboard
+   is a wide sheet, so relax the LAYOUT only — the sketch body background (the ruled paper grid,
+   styles.css 832–845) is untouched and keeps painting the canvas. */
+body {
+    display: block;
+    width: max-content;
+    min-width: 100%;
+    padding: 40px 48px 48px;
+}
+
+/* Sheet title — <h2> + .tagline so the faces come from the app's own sketch rules
+   (h2 → Gochi Hand, .tagline → Shadows Into Light; styles.css 887–900). */
+.wf-title {
+    margin: 0 0 20px;
+}
+
+.wf-title h2 {
+    margin: 0;
+    font-size: 1.9rem;
+}
+
+.wf-title .tagline {
+    margin: 0.15rem 0 0;
+    font-size: 1.05rem;
+}
+
+/* ── The strip: steps + arrows in a row ─────────────────────────────────────────────────────── */
+.wf-strip {
+    display: flex;
+    align-items: flex-start;
+}
+
+.wf-step {
+    flex: 0 0 320px;
+    width: 320px;
+}
+
+/* Screen name above each frame — an <h3>, so the sketch theme's own heading rule
+   (styles.css 887–895) supplies the Gochi Hand hand-lettering. */
+.wf-step h3 {
+    margin: 0 0 8px;
+    font-size: 1.12rem;
+    line-height: 1.2;
+}
+
+/* Hand-circled step number, drawn with the theme's ink + wobble. */
+.wf-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5em;
+    height: 1.5em;
+    margin-right: 0.35em;
+    border: 2px solid var(--fg);
+    border-radius: 52% 48% 55% 45% / 48% 55% 45% 52%;
+    filter: url("#wobble-soft");
+}
+
+/*
+ * ── The phone frame ─────────────────────────────────────────────────────────────────────────
+ * Each screen renders inside a phone-shaped sheet. Border/shadow/radius/edge are the theme's
+ * pencil tokens; the screen background repeats the EXACT ruled-paper layers the app paints on
+ * `[data-theme="sketch"] body` (styles.css 837–843 — copied verbatim; the --grid-line /
+ * --grid-line-minor / --grid custom properties are inherited from that very body rule), minus
+ * `background-attachment: fixed`, so each phone reads as its own sheet of the app's sketch paper.
+ */
+.wf-phone {
+    position: relative;
+    height: 600px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    overflow-wrap: anywhere;                  /* 320px frame: long emails/URLs wrap, never clip */
+    padding: 26px 12px 14px;
+    border: 3px solid var(--fg-line-stronger);
+    border-radius: var(--radius-lg);
+    background-color: var(--page-bg);
+    background-image:
+        repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        repeating-linear-gradient(to right, var(--grid-line-minor) 0 1px, transparent 1px var(--grid)),
+        repeating-linear-gradient(to bottom, var(--grid-line-minor) 0 1px, transparent 1px var(--grid));
+    box-shadow: var(--shadow-md);
+    filter: url("#wobble-soft");
+}
+
+/* Speaker slit — the one bit of "device" chrome, in pencil. */
+.wf-phone::before {
+    content: "";
+    position: absolute;
+    top: 9px;
+    left: 50%;
+    width: 56px;
+    height: 5px;
+    margin-left: -28px;
+    border-radius: var(--radius-pill);
+    background: var(--fg-line);
+}
+
+/* ── In-phone layout shims (sizes only — the classes themselves stay app-styled) ───────────── */
+/* The app column (.app) centres with 2rem padding for a real viewport; tighten inside 320px. */
+.wf-phone .app {
+    padding: 0.6rem 0.4rem;
+}
+
+.wf-phone .app h1 {
+    font-size: 1.7rem;
+}
+
+.wf-phone .tagline {
+    font-size: 0.92rem;
+    margin-bottom: 0.9rem;
+}
+
+/* The auth column (.auth) sizes itself for a real viewport (styles.css 343–347); fit the frame. */
+.wf-phone .auth {
+    margin: 0.4rem 0 0;
+    max-width: none;
+}
+
+.wf-phone .auth-card {
+    padding: 1rem 0.9rem;
+    gap: 0.6rem;
+}
+
+/* Screen body area between header chrome and any pinned footer (e.g. a chat composer). */
+.wf-screen-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    text-align: left;
+}
+
+/* In-phone top bar: back chevron + screen title + trailing action (pure layout; text styling
+   comes from the theme's heading/body faces). */
+.wf-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.15rem 0 0.35rem;
+}
+
+.wf-topbar h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.25rem;
+    text-align: left;
+}
+
+/* Wireframe placeholder text lines — the classic lo-fi squiggle, in the theme's pencil line
+   colour + wobble (widths set per-line via the w-* utilities below). */
+.wf-textline {
+    height: 0;
+    margin: 0.5rem 0;
+    border: none;
+    border-top: 2px solid var(--fg-line);
+    filter: url("#wobble-soft");
+}
+
+.w-95 { width: 95%; }
+.w-85 { width: 85%; }
+.w-70 { width: 70%; }
+.w-55 { width: 55%; }
+.w-40 { width: 40%; }
+
+/* ── List rows (chats list, search results, attendees) ──────────────────────────────────────
+   Same recipe as the app's cards: surface-card fill, pencil border, irregular radius, wobble. */
+.wf-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    filter: url("#wobble-soft");
+}
+
+.wf-row-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.wf-row-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.wf-row-sub {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.wf-row-sub > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wf-time {
+    font-size: 0.72rem;
+    color: var(--muted);
+    flex: none;
+}
+
+/* Avatar — initial in a hand-drawn circle (Gochi Hand via the theme's h-face on .wf-avatar text
+   is inherited body face; the initial reads hand-lettered under Patrick Hand already). */
+.wf-avatar {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    font-weight: 600;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--fg-line-strong);
+    border-radius: 52% 48% 50% 50% / 48% 52% 50% 50%;
+    filter: url("#wobble-soft");
+}
+
+.wf-avatar-sm {
+    width: 26px;
+    height: 26px;
+    font-size: 0.75rem;
+}
+
+/* Unread-count pill — the accent fill exactly as the app paints primary fills
+   (--accent / --on-accent; under sketch both resolve to graphite ink / paper). */
+.wf-unread {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    padding: 0 0.3rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--on-accent);
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+    filter: url("#wobble-soft");
+}
+
+/* ── Chat bubbles (TM-376 language: sent = accent fill, received = card + pencil border) ───── */
+.wf-bubble {
+    max-width: 82%;
+    padding: 0.45rem 0.6rem;
+    font-size: 0.88rem;
+    line-height: 1.3;
+    text-align: left;
+    border-radius: var(--radius-md);
+    filter: url("#wobble-soft");
+}
+
+.wf-bubble .wf-meta {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.68rem;
+    text-align: right;
+    opacity: 0.75;
+}
+
+.wf-bubble-sent {
+    align-self: flex-end;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--accent);
+    border-end-end-radius: 4px;              /* the tail-side corner */
+}
+
+.wf-bubble-recv {
+    align-self: flex-start;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line-strong);
+    border-end-start-radius: 4px;
+}
+
+/* Chat composer pinned to the bottom of the phone. */
+.wf-composer {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.wf-composer input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ── Overlays (tour coachmark, RSVP confirm) — the theme's own dim + dialog treatment ──────── */
+.wf-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 0.8rem;
+    background: var(--overlay);
+}
+
+/* .tm-dialog/.tm-modal size themselves against the real viewport (min(28rem,96vw)); fit the frame.
+   Their look (surface, border, radius, shadow, wobble) still comes from styles.css. */
+.wf-phone .tm-dialog {
+    width: 100%;
+    padding: 0.9rem;
+}
+
+/* ── Event cards ────────────────────────────────────────────────────────────────────────────── */
+.wf-card {
+    padding: 0.6rem 0.7rem;
+    text-align: left;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    filter: url("#wobble-soft");
+}
+
+.wf-card h4 {
+    margin: 0 0 0.2rem;
+    font-size: 1rem;
+}
+
+.wf-card .wf-card-meta {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.wf-card-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.4rem;
+    gap: 0.4rem;
+}
+
+/* ── Flow arrows between steps — hand-drawn ink, wobbled like every other stroke ───────────── */
+.wf-arrow {
+    flex: 0 0 120px;
+    width: 120px;
+    margin-top: 285px;                        /* mid-phone (600px frame + heading above) */
+    text-align: center;
+    color: var(--fg);                         /* the arrow SVG strokes currentColor = theme ink */
+}
+
+.wf-arrow svg {
+    display: block;
+    width: 104px;
+    margin: 0 auto;
+    filter: url("#wobble-soft");
+}
+
+/* The advancing action, hand-written under the arrow (Shadows Into Light via the app's
+   .tagline rule — styles.css 897–900). */
+.wf-arrow .tagline,
+.wf-action {
+    margin: 0.25rem 0 0;
+    font-size: 0.95rem;
+    line-height: 1.25;
+}
+
+/* ── Sticky notes — edge/error states, pinned under a frame like a paper aside ─────────────── */
+.wf-sticky {
+    margin: 14px 6px 0;
+    padding: 0.55rem 0.65rem;
+    font-size: 0.95rem;
+    line-height: 1.25;
+    text-align: left;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+    transform: rotate(-1.4deg);
+    filter: url("#wobble-soft");
+}
+
+.wf-sticky.tagline {
+    margin-top: 14px;                          /* .tagline resets margins; restore the pin gap */
+}
+
+.wf-sticky-alt {
+    transform: rotate(1.2deg);
+}
+
+/* ── Hand-drawn "circle the control" ring for the tap target that advances the flow ────────── */
+.wf-ring {
+    position: relative;
+    display: inline-block;
+}
+
+.wf-ring::after {
+    content: "";
+    position: absolute;
+    inset: -7px -13px;
+    border: 2.5px solid var(--fg);
+    border-radius: 50% 46% 54% 48% / 56% 50% 46% 52%;
+    transform: rotate(-2deg);
+    filter: url("#wobble-soft");
+    pointer-events: none;
+}
+
+/* End-of-flow marker. */
+.wf-end {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 10px;
+    padding: 0.35rem 0.8rem;
+    font-weight: 600;
+    border: 2.5px solid var(--fg);
+    border-radius: var(--radius-pill);
+    filter: url("#wobble-soft");
+}

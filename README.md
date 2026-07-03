@@ -14,7 +14,7 @@ A multi-surface application: a one-page **web** app, a **WebView** wrapper, a na
 | `/android` | Native Android app |
 | `/infra` | Infrastructure & deployment config (GCP, CI/CD) |
 | `/scripts` | Developer & automation scripts |
-| `/docs` | Architecture, decision records (ADRs), and agent operating docs |
+| `/docs` | Architecture, decision records (ADRs), agent operating docs, and the core-journey wireflows ([`docs/design/wireflows/`](./docs/design/wireflows/index.md)) |
 
 Each directory has its own README. Most are stubs at this stage — the foundation tickets fill them in.
 
