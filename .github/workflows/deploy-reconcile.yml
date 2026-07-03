@@ -69,9 +69,12 @@ jobs:
             exit 0
           fi
 
-          # Which revision serves 100% of untagged (production) traffic, and what image does it run?
+          # Which revision serves 100% of production traffic, and what image does it run?
+          # Select on percent alone: since TM-270 the deploy assigns a `candidate` traffic
+          # tag, and the serving entry may carry that tag too — an entry with `percent`
+          # routes main-URL traffic regardless of any tag on it.
           gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/svc.json
-          SERVING_REV="$(jq -r '.status.traffic[] | select((.percent==100) and (has("tag")|not)) | .revisionName' /tmp/svc.json | head -n1)"
+          SERVING_REV="$(jq -r '[.status.traffic[]? | select(.percent==100) | .revisionName] | first // empty' /tmp/svc.json)"
           if [ -z "${SERVING_REV}" ] || [ "${SERVING_REV}" = "null" ]; then
             echo "::warning::Could not determine the serving revision — re-dispatching Deploy to converge."
             gh workflow run deploy.yml --ref main

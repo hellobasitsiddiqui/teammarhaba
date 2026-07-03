@@ -11,7 +11,7 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 | **Port** | 8080 (Spring binds Cloud Run's `PORT`) |
 | **Scaling** | min `0` (scale-to-zero) · max `3` · startup CPU boost on |
 | **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client` + `firebaseauth.admin` for RBAC custom-claim writes — TM-140) |
-| **Auth** | **public** (`--allow-unauthenticated`) — `allUsers` has `roles/run.invoker`. The org enforces domain-restricted sharing, so this is permitted via a scoped exception (see **Public access** below / **TM-96**). The app still requires a Firebase Bearer token; only `/health` is open. |
+| **Auth** | **public** — `allUsers` has `roles/run.invoker`, permitted via the scoped org-policy exception (see **Public access** below / **TM-96**). Since **TM-270** the deploy passes **no** `--[no-]allow-unauthenticated` flag at all: CD never modifies the IAM policy — the binding is *added* (idempotently, best-effort) by the public-access step and never removed. The app still requires a Firebase Bearer token; only `/health` is open. |
 
 ## How it deploys
 
@@ -30,22 +30,67 @@ On run:
 
 1. **Auth (deploy-time)** — keyless WIF (TM-67), impersonating `gha-deployer`
    (`roles/run.admin`, `iam.serviceAccountUser` to act-as the runtime SA). No JSON key.
-2. **Wait for image** — CI's `backend-image` job (`ci.yml`) pushes `:<sha>` on the
-   same merge event, so the deploy polls Artifact Registry until that immutable tag
-   exists (≈10 min cap) before deploying. If CI fails, the deploy times out and fails.
-3. **Deploy** — `gcloud run deploy` of the SHA-tagged image, running as the dedicated
-   **runtime SA** `teammarhaba-run` (so the container — not the deploy SA — is what
-   reads the DB secret / connects to Cloud SQL). Config below.
-4. **Enable public access** *(best-effort, replay-safe)* — (re)assert the `allUsersIngress`
-   tag on the service and bind `allUsers` as `run.invoker`, retrying while the org-policy
-   condition propagates. **Every command here is non-fatal:** in an environment without the
-   TM-96 exception (e.g. a fresh replay project), the bindings fail and the service simply
-   stays private — the deploy still succeeds. See *Public access (TM-96)* below.
-5. **Verify rollout** — assert the service has a `latestReadyRevisionName`. Cloud Run
-   only marks a revision Ready after the `/health` **startup probe** passes, so a Ready
-   revision *is* the proof `/health` serves `200` (this check is fatal). The step then
-   **reports** whether unauthenticated `/health` returns `200` (public) or not (private) —
-   informational only, so the deploy is green whether it ended public or private.
+2. **Resolve image** (TM-194) — deploy `backend:<HEAD>` when that image exists (short
+   bounded wait for a racing CI build), else walk ancestry and deploy the newest commit
+   whose image *does* exist (docs-only HEADs build no image). Fails loudly if none found.
+3. **Deploy a zero-traffic candidate** (TM-270) — `gcloud run deploy --no-traffic
+   --tag=candidate` of the SHA-tagged image, running as the dedicated **runtime SA**
+   `teammarhaba-run` (so the container — not the deploy SA — is what reads the DB secret /
+   connects to Cloud SQL). The live revision keeps serving 100%; the candidate gets its own
+   `https://candidate---…` URL. **No `--[no-]allow-unauthenticated` flag is passed** — the
+   deploy never touches the public-access binding. (First-ever deploy of the service:
+   `--no-traffic` is skipped — the first revision must take traffic, and there is nothing
+   live to protect.)
+4. **Health-gate the candidate** (TM-270) — assert the new revision reached **Ready**
+   (Cloud Run only marks Ready after the `/health` startup probe passes), then curl the
+   candidate tag URL's `/health` **directly** (never the service URL, which still routes to
+   the old revision). `200` required where the service is public; `401/403` tolerated in an
+   env without the TM-96 exception (Ready already proved health). Any other failure stops
+   the deploy with traffic and IAM untouched.
+5. **Promote** (TM-270) — `gcloud run services update-traffic --to-revisions=<candidate>=100`,
+   **by name**. A single atomic API call: on failure, traffic simply stays 100% on the
+   previous healthy revision.
+6. **Enable public access** *(best-effort, replay-safe, `if: always()`)* — (re)assert the
+   `allUsersIngress` tag on the service and bind `allUsers` as `run.invoker`, retrying while
+   the org-policy condition propagates. **Every command here is non-fatal:** in an environment
+   without the TM-96 exception (e.g. a fresh replay project), the bindings fail and the service
+   simply stays private — the deploy still succeeds. Since TM-270 it runs on **every** outcome
+   (`if: always()`), as defense-in-depth: it heals bootstrap/drift, and there is nothing to
+   "restore" because the deploy never strips the binding. See *Public access (TM-96)* below.
+7. **Verify rollout** (TM-131) — assert the revision serving 100% of traffic **is exactly the
+   revision this run created** (this check is fatal — a green pipeline serving stale code is
+   the TM-131 bug). The step then **reports** whether unauthenticated `/health` returns `200`
+   (public) or not (private) — informational only.
+
+### Deploy atomicity — the TM-270 invariant
+
+> **A deploy may never leave the service less available or less public than it found it.**
+
+Cause (TM-269 outage): the deploy used to run `gcloud run deploy --no-allow-unauthenticated`
+(which **strips** the `allUsers` invoker binding) and re-bound public access in a *later* step.
+A revision that failed its startup probe aborted the job **between** strip and re-bind →
+prod was left private → `403` for every caller (SPA included), even though traffic had safely
+stayed on the previous healthy revision. Any failed backend deploy took prod down.
+
+The invariant is enforced by construction:
+
+| Failure point | What happens | Service state |
+| --- | --- | --- |
+| No image found (build failed) | Resolve step fails | Untouched — old revision serving, public |
+| Candidate never becomes Ready (bad startup) | `gcloud run deploy --no-traffic` exits non-zero | Traffic untouched (100% on old revision), IAM untouched — **stays public + serving** |
+| Candidate Ready but direct `/health` fails | Gate step fails before any traffic moves | Same — old revision serving, public |
+| Promote (`update-traffic`) fails | Single atomic call fails | Traffic still 100% on old revision, public |
+| Serving revision ≠ just-built (TM-131) | Verify fails loudly | Whatever Cloud Run reports — investigate; IAM still untouched |
+
+Plus: the public-access step runs `if: always()` (even after a failure upstream), so any
+pre-existing missing binding is healed on every run regardless of deploy outcome.
+
+**Traffic model consequence:** traffic is now pinned **by revision name** (not `LATEST`), so an
+ad-hoc `gcloud run deploy` outside the workflow creates a revision that does **not** take
+traffic by itself — promotion is always the explicit, health-gated `update-traffic` step. To
+roll forward manually, deploy and then `update-traffic --to-revisions=<rev>=100` (or just
+re-run the **Deploy** workflow). The `candidate` traffic tag always points at the most
+recently deployed revision; after promotion its URL and the service URL serve the same thing.
 
 ### Health probes (`/health`)
 
@@ -197,7 +242,12 @@ never hits the DRS wall.** The org-level setup (tag key/value, conditional polic
 role grants) is the only human/one-time piece, and it persists across replays of the same org.
 
 **Security note:** public = network-reachable only; every real endpoint still requires a
-Firebase Bearer token (TM-108). Preview revisions (TM-65) are *not* tagged → stay private.
+Firebase Bearer token (TM-108). Cloud Run IAM (and the org tag binding) is **per-service, not
+per-revision** — so tag URLs (`candidate---…`, `pr-N---…` previews from TM-65) share the
+service's policy and are network-reachable wherever the service is public; they are still
+gated by the Firebase Bearer token like everything else. This service-level scope is also why
+`--no-allow-unauthenticated` on *any* deploy to the service (including a preview) used to
+strip prod's public access — since TM-270 no deploy lane passes an IAM flag at all.
 
 ## First admin (replay setup — not code)
 

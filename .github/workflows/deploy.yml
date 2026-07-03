@@ -314,19 +314,41 @@ jobs:
           echo "env=${MAIL_ENV}" >> "$GITHUB_OUTPUT"
 
       # Deploy the immutable SHA-tagged image (EFFECTIVE_SHA, resolved above — HEAD when its
-      # image exists, else the newest ancestor that has one; TM-194). Probes hit /health so a revision only
-      # takes traffic once healthy (startup probe gates traffic; liveness restarts a
-      # wedged container). Scale-to-zero (min-instances 0) for dev cost; cpu-boost
-      # softens the cold start.
+      # image exists, else the newest ancestor that has one; TM-194) as a ZERO-TRAFFIC
+      # CANDIDATE revision (TM-270). The atomicity contract — the fix for the TM-269 outage:
+      #
+      #   1. `--no-traffic` — the candidate is created and startup-probed WITHOUT taking
+      #      traffic; the previous revision keeps serving 100% until the candidate is proven
+      #      healthy by the gate step below. If the candidate never becomes Ready,
+      #      `gcloud run deploy` exits non-zero right here with NO partial state: traffic
+      #      untouched, IAM untouched, service still public + serving.
+      #   2. `--tag=candidate` — gives the candidate its own directly-addressable URL
+      #      (https://candidate---…) so the gate can hit ITS /health, not the service URL
+      #      (which still routes to the OLD revision — curling that would be the TM-131
+      #      false-green all over again). The tag simply moves to each new candidate.
+      #   3. NO IAM flag — deliberately NEITHER --allow-unauthenticated NOR
+      #      --no-allow-unauthenticated. Root cause of TM-269: `--no-allow-unauthenticated`
+      #      STRIPS the allUsers run.invoker binding at deploy time, and the re-bind lived
+      #      in a later step — so a revision that failed its startup probe aborted the job
+      #      BETWEEN strip and re-bind, leaving prod PRIVATE (403 for every caller, SPA
+      #      included) even though traffic had safely stayed on the old healthy revision.
+      #      Omitting both flags leaves the service's IAM policy completely untouched: a
+      #      public service STAYS public no matter where this workflow fails. Replay-safety
+      #      is preserved: a brand-new service is created private by default (no allUsers
+      #      binding exists yet), and the best-effort TM-96 step below upgrades it where the
+      #      org-policy exception exists — exactly as before.
+      #
+      # First-ever deploy (fresh replay project): the first revision of a new service must
+      # take traffic (there is nothing else to route to), so --no-traffic only applies when
+      # the service already exists. No previous revision to protect ⇒ atomicity is moot.
+      #
+      # Probes hit /health so Cloud Run only marks a revision Ready once healthy (startup
+      # probe; liveness restarts a wedged container); cpu-boost softens the cold start.
+      # While the candidate awaits promotion the old + new revisions briefly coexist
+      # (one transient extra instance — pennies).
       #
       # Runtime identity: a dedicated least-privilege SA (teammarhaba-run) reads the DB
       # secret + connects to Cloud SQL — NOT the default compute SA (which lacks access).
-      # Deploy PRIVATE here (--no-allow-unauthenticated); public access is enabled in a
-      # SEPARATE best-effort step below. This ordering is deliberately replay-safe: the
-      # org enforces domain-restricted sharing, so binding `allUsers` only works where the
-      # TM-96 exception (org policy + `allUsersIngress` tag) exists. Deploying private first
-      # always succeeds (incl. a fresh replay env that lacks the exception); the public step
-      # then upgrades it where allowed and no-ops (stays private, still green) where not.
       #
       # Secrets/env (TM-62): the full required-var set is documented in .env.example
       # (the contract the 1.4.5 validator enforces at boot). Non-sensitive config is
@@ -340,7 +362,7 @@ jobs:
       # doesn't exist yet (TM-252 not done) — so the comma-join below drops them cleanly and
       # the deploy never references a missing secret. When present they append
       # MAIL_PASSWORD (secret) + MAIL_HOST/MAIL_PORT/MAIL_USERNAME (env) to turn delivery on.
-      - name: Deploy to Cloud Run
+      - name: Deploy to Cloud Run (candidate revision, no traffic — TM-270)
         env:
           MAIL_SECRETS: ${{ steps.mail.outputs.secrets }}
           MAIL_ENV: ${{ steps.mail.outputs.env }}
@@ -349,12 +371,24 @@ jobs:
           # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD (empty -> no trailing comma).
           SECRETS="DB_PASSWORD=teammarhaba-db-app-password:latest${MAIL_SECRETS:+,${MAIL_SECRETS}}"
           ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }}${MAIL_ENV:+,${MAIL_ENV}}"
+
+          # --no-traffic is only meaningful when a previous revision holds traffic; on the
+          # first-ever deploy of the service (fresh replay) the first revision must serve.
+          TRAFFIC_FLAGS=(--no-traffic)
+          if ! gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
+               --format='value(metadata.name)' >/dev/null 2>&1; then
+            echo "Service ${SERVICE} does not exist yet — bootstrap deploy (first revision takes traffic; nothing live to protect)."
+            TRAFFIC_FLAGS=()
+          fi
+
+          # TM-270: no --[no-]allow-unauthenticated — this command must NEVER touch IAM.
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
             --image="${IMAGE}:${EFFECTIVE_SHA}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
-            --no-allow-unauthenticated \
+            "${TRAFFIC_FLAGS[@]}" \
+            --tag=candidate \
             --min-instances=1 --max-instances=1 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
@@ -363,14 +397,105 @@ jobs:
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
             --quiet
-          # Record the revision THIS deploy created, so the verify step can assert it is
-          # the one actually serving traffic (the TM-131 guard — see "Verify rollout").
+          # Record the revision THIS deploy created: the health gate probes it, the promote
+          # step routes to it BY NAME, and the TM-131 verify asserts it ends up serving.
           NEW_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
             --format='value(status.latestCreatedRevisionName)')
-          echo "Deploy created revision: ${NEW_REV}"
+          echo "Deploy created candidate revision: ${NEW_REV}"
           echo "NEW_REV=${NEW_REV}" >> "$GITHUB_ENV"
 
-      # Enable public (unauthenticated) access — best-effort, replay-safe (TM-96).
+      # Gate (TM-270): prove the CANDIDATE revision is healthy before ANY traffic moves.
+      # Two layers:
+      #   1. Ready condition — Cloud Run marks a revision Ready only after its /health
+      #      startup probe passes, so Ready == "the container booted and /health serves".
+      #      Environment-independent (works even where the service is private), so this is
+      #      the load-bearing check.
+      #   2. Direct HTTP check — curl the candidate's OWN tagged URL (…candidate---…/health).
+      #      Requires unauthenticated access: a 401/403 means this env has no TM-96 public
+      #      exception (e.g. a fresh replay project) — tolerated with a warning, because
+      #      layer 1 already proved health and this deploy never changes IAM either way.
+      #      Any OTHER failure (5xx / timeout / connection refused) after retries FAILS the
+      #      job: traffic never moves.
+      # On ANY failure here: 100% of traffic is still on the previous revision and IAM was
+      # never touched → the service stays public + serving while the job fails loudly.
+      - name: Gate — candidate must be healthy before taking traffic (TM-270)
+        run: |
+          set -euo pipefail
+          if [ -z "${NEW_REV:-}" ]; then
+            echo "::error::NEW_REV not set — the Deploy step did not record the candidate revision."
+            exit 1
+          fi
+
+          # Layer 1 — Ready condition (backed by the /health startup probe).
+          gcloud run revisions describe "${NEW_REV}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/rev.json
+          READY=$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .status] | first // "Unknown"' /tmp/rev.json)
+          if [ "${READY}" != "True" ]; then
+            MSG=$(jq -r '[.status.conditions[]? | select(.type=="Ready") | .message] | first // ""' /tmp/rev.json)
+            echo "::error::Candidate ${NEW_REV} is not Ready (status=${READY}). ${MSG}"
+            echo "::error::No traffic was moved and public access was not touched — the previous revision is still serving. Fix the revision and redeploy."
+            exit 1
+          fi
+          echo "Candidate ${NEW_REV} is Ready (startup probe /health passed)."
+
+          # Layer 2 — direct /health on the candidate's tagged URL (never the service URL,
+          # which still routes to the OLD revision at this point).
+          gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/svc-gate.json
+          CAND_URL=$(jq -r '[.status.traffic[]? | select(.tag=="candidate") | .url] | first // empty' /tmp/svc-gate.json)
+          if [ -z "${CAND_URL}" ]; then
+            echo "::warning::No 'candidate' tag URL on the service — skipping the direct HTTP check (the Ready gate above already passed)."
+            exit 0
+          fi
+          echo "Candidate URL: ${CAND_URL}"
+          code=000
+          for i in $(seq 1 6); do
+            code=$(curl -sS -o /tmp/cand-health.json -w '%{http_code}' --max-time 15 "${CAND_URL}/health" 2>/dev/null || true)
+            code=${code:-000}
+            if [ "${code}" = "200" ]; then
+              echo "Candidate /health -> 200 $(cat /tmp/cand-health.json 2>/dev/null || true) — healthy, safe to promote."
+              exit 0
+            fi
+            if [ "${code}" = "401" ] || [ "${code}" = "403" ]; then
+              echo "::warning::Candidate /health -> ${code}: unauthenticated access is blocked in this env (no TM-96 exception — e.g. a fresh replay). The Ready gate already proved /health passes; proceeding."
+              exit 0
+            fi
+            echo "Candidate /health -> ${code} (attempt ${i}/6) — retrying in 10s (tag URL may still be propagating)..."
+            sleep 10
+          done
+          echo "::error::Candidate ${NEW_REV} failed the direct /health check (last status ${code}). No traffic was moved; public access untouched; the previous revision is still serving."
+          exit 1
+
+      # Promote (TM-270): the candidate is proven healthy — shift 100% of traffic to it,
+      # BY NAME. Explicit --to-revisions (not --to-latest) so traffic can only land on the
+      # exact revision this run built AND health-gated (deploys are already serialized by
+      # the concurrency group; by-name makes it watertight and self-documenting). A traffic
+      # update is a single atomic API call: if it fails, traffic simply stays 100% on the
+      # previous (public, healthy) revision and the job fails loudly — no in-between state.
+      # Consequence of by-name pinning: an ad-hoc `gcloud run deploy` outside this workflow
+      # no longer auto-shifts traffic — promotion is always an explicit step (documented in
+      # infra/gcp/cloud-run.md).
+      - name: Promote — shift 100% traffic to the healthy candidate (TM-270)
+        run: |
+          set -euo pipefail
+          if [ -z "${NEW_REV:-}" ]; then
+            echo "::error::NEW_REV not set — refusing to promote blindly."
+            exit 1
+          fi
+          gcloud run services update-traffic "${SERVICE}" \
+            --project="${PROJECT}" --region="${REGION}" \
+            --to-revisions="${NEW_REV}=100" --quiet
+          echo "Promoted: ${NEW_REV} now takes 100% of traffic."
+
+      # (Re)assert public (unauthenticated) access — best-effort, replay-safe (TM-96).
+      # Since TM-270 the deploy NEVER strips this binding (no --no-allow-unauthenticated
+      # above), so this step is pure healing/bootstrap, not restoration:
+      #   - fresh replay env: the first deploy creates the service private → this upgrades
+      #     it to public where the TM-96 exception (org tag + conditional DRS policy) exists;
+      #   - normal redeploy: binding already present → idempotent no-op;
+      #   - drift (allUsers stripped out-of-band): re-binds it.
+      # Runs on EVERY outcome (if: always()) — even when the deploy/gate/promote failed —
+      # as defense-in-depth for the TM-269 failure mode: no deploy outcome may leave the
+      # service less public than it started (the ticket's "re-enable in a finally step"
+      # option, layered on top of never-strip).
       # The org enforces domain-restricted sharing (iam.allowedPolicyMemberDomains); binding
       # `allUsers` is permitted ONLY for resources carrying the `allUsersIngress=True` org tag
       # (the conditional exception set up in TM-96). This step:
@@ -380,7 +505,8 @@ jobs:
       # EVERYTHING here is non-fatal: in an environment WITHOUT the TM-96 exception/tag
       # (e.g. a fresh replay project), the bindings simply fail and the service stays private —
       # the deploy still succeeds. So a replay never hits the org-policy wall.
-      - name: Enable public access (best-effort, TM-96)
+      - name: Enable public access (best-effort, TM-96 — always runs, TM-270)
+        if: always()
         run: |
           ORG=103553953969
           gcloud resource-manager tags bindings create \
@@ -397,18 +523,18 @@ jobs:
             sleep 15
           done || true
 
-      # Verify the rollout — TM-131 hardening. A green deploy is NOT enough: in TM-131 the
-      # backend served an ancient revision (#5) for the whole project while every deploy
-      # reported success, because (a) new revisions failed the /health startup probe (Flyway
-      # couldn't auth to Cloud SQL) so never became Ready, and (b) traffic stayed pinned to a
-      # stale revision. The old verify only curled /health — which 200s on the STALE revision
-      # too — so it false-greened. This step instead proves the revision THIS run created is
-      # the one actually serving 100% of traffic, and fails loudly otherwise.
+      # Verify the rollout — TM-131 hardening, kept as the FINAL gate after the TM-270
+      # candidate flow. A green deploy is NOT enough: in TM-131 the backend served an
+      # ancient revision (#5) for the whole project while every deploy reported success,
+      # because new revisions failed the /health startup probe so never became Ready,
+      # traffic stayed pinned to a stale revision, and the old verify curled the service
+      # /health — which 200s on the STALE revision too — so it false-greened.
       #
-      #   AC-H2: roll traffic forward to the latest Ready revision (never leave it pinned).
-      #          If the new revision failed to become Ready, --to-latest routes to an OLDER
-      #          Ready revision, so the AC-H1 match below fails — exactly the TM-131 signal.
-      #   AC-H1: assert the revision serving 100% traffic == the revision this deploy created.
+      # This step proves the revision THIS run created (then health-gated, then promoted)
+      # is the one actually serving 100% of traffic, and fails loudly otherwise. The old
+      # "AC-H2 roll forward with --to-latest" half of this step is gone: promotion is now
+      # the explicit by-name Promote step above, which only runs after the health gate
+      # (TM-270) — verify is a pure assertion again.
       - name: Verify rollout (new revision is actually serving)
         run: |
           set -euo pipefail
@@ -417,18 +543,18 @@ jobs:
             exit 1
           fi
 
-          # AC-H2 — roll traffic forward to the latest Ready revision (idempotent).
-          gcloud run services update-traffic "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --to-latest --quiet
-
-          # AC-H1 — which revision is serving 100% of (untagged) traffic right now?
+          # Which revision is serving 100% of traffic right now? (An entry carrying a
+          # `percent` routes main-URL traffic whether or not it also carries a tag — the
+          # `candidate` tag from TM-270 may share the entry or sit in its own, so select on
+          # percent alone.)
           gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format=json > /tmp/svc.json
-          SERVING_REV=$(jq -r '.status.traffic[] | select((.percent==100) and (has("tag")|not)) | .revisionName' /tmp/svc.json | head -n1)
+          SERVING_REV=$(jq -r '[.status.traffic[]? | select(.percent==100) | .revisionName] | first // empty' /tmp/svc.json)
           echo "Deploy created revision : ${NEW_REV}"
           echo "Revision serving traffic: ${SERVING_REV}"
 
           if [ "${SERVING_REV}" != "${NEW_REV}" ]; then
-            echo "::error::Stale rollout — traffic is on '${SERVING_REV}', not the just-deployed '${NEW_REV}'."
-            echo "::error::The new revision likely failed its /health startup probe (check boot logs: Flyway/Cloud SQL/Firebase) so traffic stayed on an older Ready revision."
+            echo "::error::Stale rollout — traffic is on '${SERVING_REV:-<none>}', not the just-deployed '${NEW_REV}'."
+            echo "::error::This should be unreachable after the TM-270 gate+promote — investigate before re-running (check the service's traffic block and revision Ready states)."
             exit 1
           fi
           echo "OK — the revision built by this run is serving 100% of traffic (current code is live)."

@@ -123,6 +123,12 @@ jobs:
       # codes are logged, never emailed — so a throwaway preview can't spam real inboxes or burn the
       # Workspace app password's quota. Real email-code delivery is wired only in the production
       # deploy (deploy.yml), gated on the mail secret existing.
+      #
+      # NO --[no-]allow-unauthenticated flag, ON PURPOSE (TM-270): Cloud Run IAM is per-SERVICE,
+      # not per-revision, so the old `--no-allow-unauthenticated` here stripped the allUsers
+      # invoker binding from the shared PRODUCTION service on every preview deploy — the same
+      # left-private outage vector as TM-269, from the preview lane, with no re-bind step in
+      # this workflow at all. A preview deploy must never touch the service's IAM policy.
       - name: Deploy backend preview revision (tagged, no traffic)
         id: backend
         continue-on-error: true
@@ -133,7 +139,6 @@ jobs:
             --tag="${PREVIEW}" --no-traffic \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
-            --no-allow-unauthenticated \
             --min-instances=0 --max-instances=2 \
             --cpu=1 --memory=512Mi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
