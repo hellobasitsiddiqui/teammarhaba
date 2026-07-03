@@ -103,7 +103,10 @@ gcloud secrets add-iam-policy-binding teammarhaba-mail-app-password --project="$
 ```
 
 The runtime SA is **`teammarhaba-run@teammarhaba.iam.gserviceaccount.com`** (see `cloud-run.md`)
-— the same least-privilege identity the container runs as for the DB secret. Rotate the same way as
+— the same least-privilege identity the container runs as for the DB secret. Its full role set
+(incl. `roles/iam.serviceAccountTokenCreator` **on itself** — needed so the Admin SDK can sign
+Firebase custom tokens via IAM signBlob for the email-code login, TM-272) lives in `cloud-run.md`'s
+runtime-SA setup block; secret-accessor grants here stay scoped per secret. Rotate the same way as
 the DB password: `gcloud secrets versions add teammarhaba-mail-app-password --data-file=-`, then the
 next deploy picks up `:latest`.
 

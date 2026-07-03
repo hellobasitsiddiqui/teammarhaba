@@ -10,7 +10,7 @@ Cloud Run provides the managed runtime, HTTPS endpoint, and autoscaling.
 | **Image** | `europe-west2-docker.pkg.dev/teammarhaba/containers/backend:<sha>` (from TM-55) |
 | **Port** | 8080 (Spring binds Cloud Run's `PORT`) |
 | **Scaling** | min `0` (scale-to-zero) · max `3` · startup CPU boost on |
-| **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client` + `firebaseauth.admin` for RBAC custom-claim writes — TM-140) |
+| **Runtime SA** | `teammarhaba-run@teammarhaba.iam.gserviceaccount.com` (least-privilege: `secretmanager.secretAccessor` on the DB secret + `cloudsql.client` + `firebaseauth.admin` for RBAC custom-claim writes — TM-140 + `iam.serviceAccountTokenCreator` **on itself** for Firebase custom-token signing via IAM signBlob — email-code login, TM-234/TM-272) |
 | **Auth** | **public** — `allUsers` has `roles/run.invoker`, permitted via the scoped org-policy exception (see **Public access** below / **TM-96**). Since **TM-270** the deploy passes **no** `--[no-]allow-unauthenticated` flag at all: CD never modifies the IAM policy — the binding is *added* (idempotently, best-effort) by the public-access step and never removed. The app still requires a Firebase Bearer token; only `/health` is open. |
 
 ## How it deploys
@@ -143,6 +143,15 @@ gcloud projects add-iam-policy-binding "$PROJECT" \
 # silently fails in prod (TM-140).
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${RUN_SA}" --role="roles/firebaseauth.admin" --condition=None
+
+# Sign Firebase custom tokens — REQUIRED for the email-code login (TM-234). On Cloud Run
+# the Admin SDK runs on ADC with no private key, so FirebaseAuth.createCustomToken signs
+# via the IAM Credentials signBlob API — which requires the runtime SA to hold Token
+# Creator ON ITSELF (member = the SA, resource = the SA; note this is `service-accounts
+# add-iam-policy-binding`, not `projects`). Nothing else in the app mints custom tokens,
+# so omitting it stays invisible until the first prod email-code verify 500s (TM-272).
+gcloud iam service-accounts add-iam-policy-binding "$RUN_SA" --project="$PROJECT" \
+  --member="serviceAccount:${RUN_SA}" --role="roles/iam.serviceAccountTokenCreator"
 ```
 
 The deploy SA `gha-deployer` already holds project-level `roles/iam.serviceAccountUser`,
