@@ -8,9 +8,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.teammarhaba.backend.config.LocationRevealProperties;
 import com.teammarhaba.backend.event.EventLifecycleEvent.Kind;
 import com.teammarhaba.backend.notify.PushMessage;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,13 +37,34 @@ class EventLifecycleNotifierTest {
 
     private static final long EVENT_ID = 42L;
     private static final String HEADING = "Iftar Meetup";
+    private static final Instant NOW = Instant.parse("2026-07-03T12:00:00Z");
 
     @Mock private EventAttendanceRepository attendance;
+    @Mock private EventRepository events;
     @Mock private EventAttendeeNotifier notifier;
     @Mock private WaitlistOfferCascadeService cascade;
 
+    // Real reveal helper (default 24h window) + fixed clock so the reveal boundary is deterministic.
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+    private final EventPushLocation pushLocation =
+            new EventPushLocation(new LocationRevealPolicy(new LocationRevealProperties(null, Map.of())));
+
     private EventLifecycleNotifier notifierUnderTest() {
-        return new EventLifecycleNotifier(attendance, notifier, cascade);
+        return new EventLifecycleNotifier(attendance, events, notifier, cascade, pushLocation, clock);
+    }
+
+    /** An event starting at {@code startAt} with the given venue (default 24h reveal, no override). */
+    private Event eventAt(Instant startAt, String locationText) {
+        return new Event(
+                HEADING,
+                "desc",
+                locationText,
+                "Europe/London",
+                startAt,
+                startAt.minus(Duration.ofDays(7)),
+                startAt.plus(Duration.ofDays(7)),
+                9L,
+                NOW);
     }
 
     private EventLifecycleEvent updated(Set<String> changedFields) {
@@ -101,6 +129,41 @@ class EventLifecycleNotifierTest {
         assertThat(message.getValue().body()).contains("time and location");
     }
 
+    // ------------------------------------------------------------------ location reveal (TM-416)
+
+    @Test
+    void locationEditAfterRevealNamesTheNewVenue() {
+        // Event starts in 1h — well past its 24h reveal boundary — so the update push may name where
+        // it moved to (TM-416: post-reveal pushes include location).
+        stubGoing(1L);
+        when(events.findById(EVENT_ID))
+                .thenReturn(Optional.of(eventAt(NOW.plus(Duration.ofHours(1)), "New Venue, 99 Side St")));
+
+        notifierUnderTest().onLifecycle(updated(Set.of("locationText")));
+
+        ArgumentCaptor<PushMessage> message = ArgumentCaptor.forClass(PushMessage.class);
+        verify(notifier).pushToUsers(anyCollection(), message.capture());
+        assertThat(message.getValue().body()).contains("location").contains("New Venue, 99 Side St");
+    }
+
+    @Test
+    void locationEditBeforeRevealWithholdsTheNewVenue() {
+        // Same edit, but the event is 100 days out (default 24h reveal window not yet open): the new
+        // address must NOT appear — the push just points at the app, closing the leak (TM-416 AC1).
+        stubGoing(1L);
+        when(events.findById(EVENT_ID))
+                .thenReturn(Optional.of(eventAt(NOW.plus(Duration.ofDays(100)), "Secret Venue, 5 Hidden Ln")));
+
+        notifierUnderTest().onLifecycle(updated(Set.of("locationText")));
+
+        ArgumentCaptor<PushMessage> message = ArgumentCaptor.forClass(PushMessage.class);
+        verify(notifier).pushToUsers(anyCollection(), message.capture());
+        assertThat(message.getValue().body())
+                .doesNotContain("Secret Venue", "5 Hidden Ln")
+                .contains("location")
+                .contains("tap for details");
+    }
+
     @Test
     void nonMaterialEditsNeverNotify() {
         EventLifecycleNotifier notifierUnderTest = notifierUnderTest();
@@ -115,7 +178,7 @@ class EventLifecycleNotifierTest {
         notifierUnderTest.onLifecycle(updated(Set.of())); // (belt-and-braces; the admin service never emits this)
 
         // No recipients ever resolved, nothing pushed — a non-material edit is fully silent.
-        verifyNoInteractions(notifier, cascade, attendance);
+        verifyNoInteractions(notifier, cascade, attendance, events);
     }
 
     @Test
@@ -135,7 +198,7 @@ class EventLifecycleNotifierTest {
     void createNotifiesNobodyAndTouchesNothing() {
         notifierUnderTest().onLifecycle(new EventLifecycleEvent(EVENT_ID, HEADING, Kind.CREATED));
 
-        verifyNoInteractions(notifier, cascade, attendance);
+        verifyNoInteractions(notifier, cascade, attendance, events);
     }
 
     @Test

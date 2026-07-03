@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.teammarhaba.backend.config.LocationRevealProperties;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
@@ -24,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,9 +57,21 @@ class EventReminderServiceTest {
     @Mock private DeviceTokenRepository deviceTokens;
     @Mock private PushNotificationService push;
 
+    // A real reveal helper (default 24h app window, no per-city overrides) so the location gate is
+    // exercised end-to-end against the actual policy rather than a mock (TM-416).
+    private final EventPushLocation pushLocation =
+            new EventPushLocation(new LocationRevealPolicy(new LocationRevealProperties(null, Map.of())));
+
     private EventReminderService service() {
         return new EventReminderService(
-                events, attendance, markers, users, deviceTokens, push, Clock.fixed(T0, java.time.ZoneOffset.UTC));
+                events,
+                attendance,
+                markers,
+                users,
+                deviceTokens,
+                push,
+                pushLocation,
+                Clock.fixed(T0, java.time.ZoneOffset.UTC));
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -378,6 +392,61 @@ class EventReminderServiceTest {
         assertThat(message.getValue().title()).isEqualTo("Starting soon: Iftar Meetup");
         assertThat(message.getValue().body()).isEqualTo("Fri 3 Jul, 13:30 · Marhaba Cafe, 12 High St");
         assertThat(message.getValue().route()).isEqualTo("#/events/" + EVENT_ID);
+    }
+
+    // ------------------------------------------------------------------ location reveal (TM-416)
+
+    @Test
+    void shortRevealEventOmitsAddressFromTheT24hReminder() {
+        // The venue only reveals 2h before start, but the 24h reminder fires 24h out — 22h before the
+        // address is public. The body must carry the honest placeholder, never the address (AC1/AC3).
+        Event e = event(EVENT_ID, T0.plus(Duration.ofHours(24)), T0.minus(Duration.ofDays(2)));
+        e.setLocationRevealHours(2);
+        stubScanReturns(e);
+        when(markers.findByEventIdIn(List.of(EVENT_ID))).thenReturn(List.of());
+        stubClaimSucceeds();
+        when(events.findById(EVENT_ID)).thenReturn(Optional.of(e));
+        when(attendance.findByEventIdAndState(EVENT_ID, AttendanceState.GOING))
+                .thenReturn(List.of(going(EVENT_ID, 1L)));
+        when(users.findAllById(List.of(1L))).thenReturn(List.of(user(1L, NotificationPref.PUSH)));
+        stubTokens(1L, "tok-1");
+        when(push.sendToTokens(anyCollection(), any(PushMessage.class))).thenReturn(new PushFanout(1, 1, 0, 0));
+
+        assertThat(service().remindDueEvents()).isEqualTo(1);
+
+        ArgumentCaptor<PushMessage> message = ArgumentCaptor.forClass(PushMessage.class);
+        verify(push).sendToTokens(anyCollection(), message.capture());
+        assertThat(message.getValue().title()).isEqualTo("Reminder: Iftar Meetup"); // the T-24h milestone
+        assertThat(message.getValue().body())
+                .doesNotContain("Marhaba Cafe", "12 High St")
+                .contains("Location shared ~2h before — check the app");
+    }
+
+    @Test
+    void postRevealReminderIncludesTheVenue() {
+        // Same short 2h reveal window, but this reminder fires inside it (T-1h, 1h out < 2h): the
+        // venue is now public, so it appears in the body as normal (AC3, "post-reveal includes it").
+        Event e = event(EVENT_ID, T0.plus(Duration.ofMinutes(30)), T0.minus(Duration.ofDays(2)));
+        e.setLocationRevealHours(2);
+        stubScanReturns(e);
+        when(markers.findByEventIdIn(List.of(EVENT_ID)))
+                .thenReturn(List.of(new EventReminderSend(EVENT_ID, ReminderMilestone.T_MINUS_24H)));
+        stubClaimSucceeds();
+        when(events.findById(EVENT_ID)).thenReturn(Optional.of(e));
+        when(attendance.findByEventIdAndState(EVENT_ID, AttendanceState.GOING))
+                .thenReturn(List.of(going(EVENT_ID, 1L)));
+        when(users.findAllById(List.of(1L))).thenReturn(List.of(user(1L, NotificationPref.PUSH)));
+        stubTokens(1L, "tok-1");
+        when(push.sendToTokens(anyCollection(), any(PushMessage.class))).thenReturn(new PushFanout(1, 1, 0, 0));
+
+        service().remindDueEvents();
+
+        ArgumentCaptor<PushMessage> message = ArgumentCaptor.forClass(PushMessage.class);
+        verify(push).sendToTokens(anyCollection(), message.capture());
+        assertThat(message.getValue().title()).isEqualTo("Starting soon: Iftar Meetup"); // the T-1h milestone
+        assertThat(message.getValue().body())
+                .contains("Marhaba Cafe, 12 High St")
+                .doesNotContain("check the app");
     }
 
     @Test

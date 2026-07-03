@@ -58,13 +58,15 @@ class EventReminderIntegrationTest extends AbstractIntegrationTest {
     @Autowired private UserRepository users;
     @Autowired private DeviceTokenRepository deviceTokens;
     @Autowired private PushNotificationService pushService;
+    @Autowired private EventPushLocation pushLocation;
     @Autowired private RecordingPushSender sender;
     @Autowired private JdbcTemplate jdbc;
 
     private final MutableClock clock = new MutableClock(Instant.now());
 
     private EventReminderService service() {
-        return new EventReminderService(events, attendance, markers, users, deviceTokens, pushService, clock);
+        return new EventReminderService(
+                events, attendance, markers, users, deviceTokens, pushService, pushLocation, clock);
     }
 
     @BeforeEach
