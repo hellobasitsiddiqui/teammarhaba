@@ -1,0 +1,2747 @@
+/* FROZEN SNAPSHOT of web/src/assets/styles.css taken 2026-07-03 for TM-377.
+   Owner decision: storyboards use their OWN canonical style, strictly independent of the
+   app's live themes — so this copy is deliberately frozen. Do NOT re-sync it from web/src;
+   a theme change in the app must never restyle the storyboards. Style source of truth for
+   storyboards = this file + wireflow.css. */
+/*
+ * ===== Theme token contract (TM-210, extends TM-133) =====
+ *
+ * Two independent axes drive the look, and they compose:
+ *   • dark / light   — TM-133 axis, chosen by the OS via `@media (prefers-color-scheme: dark)`.
+ *   • theme family    — TM-210 axis, chosen by config and reflected as `[data-theme="<name>"]` on
+ *                        <html> by theme.js. Allowed: "clean" | "doodle" | "sketch" (sketch is the
+ *                        default since TM-323).
+ *
+ * The base `:root` below holds the token contract — colours, fonts, radii, borders, surfaces.
+ * These ARE the "clean" theme: it needs no override block, so an unset/unknown config (which
+ * theme.js resolves to "clean") renders exactly today's look — no visual change.
+ *
+ * To add a theme family:  add a `[data-theme="<name>"]` block (and its dark variant under the
+ * media query) that overrides only the tokens it changes; everything else inherits these defaults.
+ * Components must read tokens via `var(--token)` only — never hard-code a themed value — so a new
+ * family is a pure token swap with no component edits.
+ */
+:root {
+    color-scheme: light dark;
+    --fg: #1a1a2e;
+    --accent: #0f9d8c;
+    /* Type + shape tokens (TM-210) — part of the contract themes may override. Defaults match the
+       current look (system font stack, the radii/borders already used across the UI below). */
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --border-width: 1px;
+    --page-bg: #f6f7fb;
+
+    /* ── Shape scale (TM-211) ──────────────────────────────────────────────────────────────────
+       The remaining radii used across the UI, named so a theme can reshape every corner at once.
+       `clean` keeps today's exact values. (Geometric 50% circles stay literal — they're aspect,
+       not theme.) `--radius`/`--radius-lg` above complete this scale. */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-pill: 999px;
+
+    /* ── Foreground-on-accent (TM-211) ─────────────────────────────────────────────────────────
+       Text/icons sitting on an `--accent` (or danger/success) fill. White today; a theme with a
+       light accent can flip it without touching every button. */
+    --on-accent: #fff;
+
+    /* ── Tint helpers (TM-211) ─────────────────────────────────────────────────────────────────
+       Translucent washes the UI used as literal rgba()s, re-expressed against the colour tokens
+       they were derived from so they track the theme. `color-mix(... X%, transparent)` is exactly
+       equivalent to `rgba(<token-rgb>, X)` — same pixels under `clean`, now themeable. */
+    --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);   /* nav-button hover wash */
+    --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);  /* nav-button border */
+    --fg-line: color-mix(in srgb, var(--fg) 10%, transparent);          /* auth-card border */
+    --fg-line-strong: color-mix(in srgb, var(--fg) 20%, transparent);   /* input border */
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 25%, transparent); /* google-button border */
+
+    /* ── Status colours (TM-211) ───────────────────────────────────────────────────────────────
+       Success was a bare hex in three spots; `--danger` already exists (below). Named here so the
+       "ok" badge / success toast follow the theme's palette. */
+    --success: #0a7d57;
+
+    /* ── Elevation + overlay (TM-211) ──────────────────────────────────────────────────────────
+       The shadow ramp + the dim used behind modals/tour. Tokenised so a flatter/heavier theme can
+       restyle depth globally; `clean` keeps the exact prior shadows. */
+    --shadow-sm: 0 1px 3px color-mix(in srgb, var(--fg) 8%, transparent);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.18);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.3);
+    --shadow-menu: 0 6px 20px rgba(0, 0, 0, 0.22);
+    --overlay: rgba(0, 0, 0, 0.45);  /* modal backdrop */
+    --overlay-strong: rgba(0, 0, 0, 0.55);  /* tour spotlight + dim */
+}
+
+* {
+    box-sizing: border-box;
+}
+
+/*
+ * The router toggles view/nav visibility with the `hidden` attribute (router.js, TM-109). The UA
+ * rule `[hidden] { display: none }` has the same specificity as a class, so any class that sets
+ * `display` (e.g. `.auth-card { display: flex }`, `.admin-console`) overrides it on source order and
+ * the element stays visible despite `hidden` — which left the sign-in form on screen after login
+ * (TM-141). `!important` makes `hidden` always win, so the attribute means what it says everywhere.
+ */
+[hidden] {
+    display: none !important;
+}
+
+/*
+ * ===== Touch responsiveness (TM-305) =====
+ *
+ * Mobile-feel polish for every tappable control (buttons, links, the nav hamburger, label-wrapped
+ * inputs). Theme-safe: it sets no colours and no geometry that a theme owns — only interaction
+ * behaviour — so clean / doodle / sketch are all unaffected visually.
+ *
+ *   • `touch-action: manipulation` removes the legacy ~300ms tap delay and the double-tap-to-zoom
+ *     gesture on these controls, so a tap registers immediately (the single biggest "unresponsive"
+ *     cause inside a WebView).
+ *   • `-webkit-tap-highlight-color: transparent` drops the default grey flash; we replace it below
+ *     with an explicit, theme-token `:active` state so feedback is intentional, not a UA artefact.
+ *
+ * Scoped to actual controls (not `*`) so we never change scroll/zoom behaviour of content regions.
+ */
+button,
+a,
+label.field,
+[role="button"],
+.linkish {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * Immediate pressed feedback (TM-305). A tiny scale-down on `:active` reads as a physical press the
+ * instant the finger lands — no colour change, so it composes with every theme (including the doodle
+ * / sketch `filter: url(#wobble-soft)` on buttons, since transform and filter stack). Dropped under
+ * reduced-motion. transform-only keeps it cheap (compositor) and theme-neutral.
+ */
+button:active:not(:disabled),
+.linkish:active,
+[role="button"]:active {
+    transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:active:not(:disabled),
+    .linkish:active,
+    [role="button"]:active {
+        transform: none;
+    }
+}
+
+body {
+    margin: 0;
+    /* 100vh first as the universal fallback; 100dvh (TM-295) overrides it where supported so the
+       app fills the *dynamic* viewport — on mobile WebViews 100vh is the largest possible height
+       (toolbars retracted), which left a dead band under the content when the bars were showing.
+       dvh tracks the visible area as the browser/native chrome grows and shrinks. */
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-sans);
+    background: var(--page-bg);
+    color: var(--fg);
+}
+
+.app {
+    text-align: center;
+    /* Base padding plus the device safe-area insets (TM-295). With viewport-fit=cover the WebView
+       draws under the status bar / nav bar / notch; adding env(safe-area-inset-*) keeps the centred
+       content clear of them. env() is 0 on every non-notched surface (desktop, normal mobile web),
+       so this collapses to the original 2rem there — no desktop/web regression. */
+    padding: calc(2rem + env(safe-area-inset-top)) calc(2rem + env(safe-area-inset-right))
+             calc(2rem + env(safe-area-inset-bottom)) calc(2rem + env(safe-area-inset-left));
+}
+
+.app h1 {
+    margin: 0 0 0.25rem;
+    font-size: 2.5rem;
+    color: var(--accent);
+}
+
+.tagline {
+    margin: 0 0 1.5rem;
+    opacity: 0.7;
+}
+
+.status {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+/* Build/version stamp (TM-142) — deliberately faint; informational, never dominant. */
+.app-footer {
+    margin-top: 2.5rem;
+    text-align: center;
+}
+
+.build-info {
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Attribution byline (TM-254) — subtle, secondary-text credit on its own footer line. Uses theme
+   tokens only (--muted / --fg), so it renders correctly under clean / doodle / sketch. The link is
+   muted (not accent) so it reads as a quiet credit, not a primary action; it brightens to --fg on
+   hover/focus. Its own line + margin so it never disturbs the build-stamp / privacy lines above. */
+.app-byline {
+    margin: 0.6rem 0 0;
+    font-size: 0.72rem;
+    color: var(--muted);
+}
+
+.app-byline a {
+    color: var(--muted);
+    text-decoration: underline;
+}
+
+.app-byline a:hover,
+.app-byline a:focus-visible {
+    color: var(--fg);
+}
+
+/* "Get the app" store badges (TM-276) — a small Android + iOS badge pair in the footer.
+   Built from theme tokens ONLY (surfaces, borders, --fg/--muted, the radius/border scale), so the
+   pair renders correctly across clean / doodle / sketch with no hard-coded colours and no external
+   badge images (CSP/offline-safe inline SVG glyphs). Its own footer block above the build/privacy
+   lines, centred to match the rest of the footer. */
+.app-store-badges {
+    margin: 1.25rem 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.app-store-badges-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+}
+
+.app-store-badges-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+}
+
+/* A store-style badge: a pill-ish card with a platform glyph + two stacked lines. Anchor (Android)
+   and button (iOS placeholder) share the look via this class. */
+.store-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.95rem;
+    min-width: 9.5rem;
+    text-align: left;
+    text-decoration: none;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.store-badge:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+}
+
+.store-badge:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.store-badge-glyph {
+    flex: 0 0 auto;
+    color: var(--fg);
+}
+
+.store-badge-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+.store-badge-line1 {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.store-badge-line2 {
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+/* iOS "Coming soon" placeholder — visibly disabled, non-interactive, announced unavailable via the
+   `disabled`/`aria-disabled` attributes on the <button>. Dimmed and shows a not-allowed cursor; the
+   hover/focus affordances above are suppressed so it never looks clickable. */
+.store-badge-disabled,
+.store-badge-disabled:hover {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: var(--surface-card);
+    border-color: var(--fg-line-strong);
+    box-shadow: none;
+}
+
+/* Narrow widths: stack the two badges vertically and let each fill the row for an easy tap target. */
+@media (max-width: 28rem) {
+    .app-store-badges-row {
+        flex-direction: column;
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .store-badge {
+        justify-content: center;
+        min-width: 0;
+    }
+}
+
+/* Account nav (TM-109) */
+.app-nav {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0;
+    min-height: 1.5rem;
+}
+
+.app-nav a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.app-nav a:hover {
+    text-decoration: underline;
+}
+
+.app-nav button {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: transparent;
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.app-nav button:hover {
+    background: var(--accent-soft);
+}
+
+/* Auth UI (TM-106) */
+.auth {
+    margin: 1.75rem auto 0;
+    max-width: 22rem;
+    text-align: left;
+}
+
+.auth-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.auth-card h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.field input {
+    padding: 0.55rem 0.7rem;
+    font-size: 1rem;
+    border: var(--border-width) solid var(--fg-line-strong);
+    border-radius: var(--radius);
+    background: var(--surface-card);
+    color: var(--fg);
+}
+
+.field input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.auth-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* TM-305: keep each wrapped button a comfortable, equal-width tap target. When the row wraps on a
+   narrow phone (e.g. Sign in / Resend / Use a different email), `flex: 1` with a sensible basis stops
+   any single button collapsing to a hairline or sitting awkwardly off to one side — they stay aligned
+   in a tidy grid-like flow. Theme-neutral (layout only). */
+.auth-actions button {
+    flex: 1 1 8rem;
+}
+
+.auth button {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.auth button.secondary {
+    color: var(--accent);
+    background: transparent;
+}
+
+.auth button.google {
+    width: 100%;
+    color: var(--fg);
+    background: var(--surface-card);
+    border-color: var(--fg-line-stronger);
+}
+
+.auth button:hover:not(:disabled) {
+    filter: brightness(0.96);
+}
+
+.auth button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+/* TM-305: "Try another way" disclosure (#try-another-btn.linkish). It was never given its own rule,
+   so `.auth button` above painted it as a full-width accent-filled primary button — visually it
+   competed with the real "Email me a code" CTA and sat mis-aligned in the card. It's a quiet
+   disclosure toggle, so reset it to a centred, underlined text link that uses theme tokens only
+   (--accent), keeping it theme-safe. min-height keeps it a ≥44px tap target on touch. */
+.auth button.linkish {
+    flex: none;
+    align-self: center;
+    min-height: 44px;
+    padding: 0.4rem 0.6rem;
+    color: var(--accent);
+    background: transparent;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.auth button.linkish:hover:not(:disabled) {
+    filter: none;
+    text-decoration: none;
+}
+
+/* TM-305: the "Try another way" alternative blocks were bare <fieldset>s — default UA fieldset
+   margin/border/padding didn't match the card and could nudge content off-centre / overflow on a
+   narrow phone. Normalise them to the card's own rhythm with a light themed divider. Layout + token
+   colours only, so clean / doodle / sketch all stay correct. */
+.auth-alt {
+    margin: 0;
+    padding: 0.75rem;
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius);
+    min-width: 0;
+}
+
+.auth-alt legend {
+    padding: 0 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+/* TM-305: the alternatives container + each step stack cleanly with the card's gap rhythm so the
+   revealed SMS / email-password / Google blocks line up under the primary form rather than bunching. */
+#auth-alternatives,
+.auth-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.auth-alt-google button.google {
+    margin-top: 0;
+}
+
+.auth-error {
+    margin: 0;
+    color: var(--danger);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* TM-242: SMS consent/disclosure line — secondary copy shown before the "Text me a code" button. */
+.auth-disclosure {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+/* TM-242: footer privacy note — quiet legal copy alongside the build stamp. */
+.privacy-note {
+    margin: 0.4rem 0 0;
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+/* ===== Admin console + reusable UI primitives (TM-133) ===== */
+
+/* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. These
+   surface/border/muted tokens are part of the TM-210 contract a theme family may override. */
+:root {
+    --surface: #ffffff;
+    --surface-2: #f1f2f8;
+    --border: rgba(26, 26, 46, 0.12);
+    --muted: rgba(26, 26, 46, 0.6);
+    --danger: #b00020;
+    /* Auth surfaces (card/inputs/Google button) are intentionally white in BOTH light and dark
+       today — they get no dark override below — so this is a distinct token from `--surface`,
+       which does darken. Tokenised (TM-211) so a theme can restyle the sign-in chrome; `clean`
+       keeps it white everywhere, preserving the exact current look. */
+    --surface-card: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fg: #e8e8f0;
+        --surface: #20202e;
+        --surface-2: #181822;
+        --border: rgba(255, 255, 255, 0.14);
+        --muted: rgba(232, 232, 240, 0.6);
+        --page-bg: #12121a;
+    }
+
+    body {
+        background: var(--page-bg);
+    }
+}
+
+/*
+ * The "clean" theme family (TM-210). It deliberately adds NO overrides — it inherits every token
+ * from the base `:root` above, so it equals the current look. This empty-by-design block is the
+ * documented seam: a sibling family like `[data-theme="doodle"] { --accent: …; --font-sans: …; }`
+ * (plus its dark variant) drops in alongside it and changes the whole app via tokens alone.
+ */
+[data-theme="clean"] {
+    /* intentionally empty — clean == the base :root token contract */
+}
+
+/*
+ * ===== The "doodle" theme family (TM-213) =====
+ *
+ * A hand-drawn, black-&-white "social events" skin. It is purely a TOKEN OVERRIDE plus a reusable
+ * "wobble" filter: by re-pointing the same TM-210/TM-211 tokens the components already read via
+ * `var(--token)`, the WHOLE app restyles with no per-component edits. `clean` is untouched — every
+ * rule below is scoped to `[data-theme="doodle"]` (and doodle-only assets live in index.html).
+ *
+ * Palette: ink (#161616) on paper (#f6f2e9), B&W only; cards/inputs a touch lighter paper.
+ * Fonts: hand-lettered Google fonts (loaded in index.html, degrade to system) — Gochi Hand for
+ * headings/buttons, Patrick Hand for body, Shadows Into Light for accents.
+ * Shape: sketchy ~2.5–3px ink borders + slightly irregular radii.
+ * Wobble: an SVG feTurbulence + feDisplacementMap filter (defs in index.html) applied to the
+ * chrome (cards / inputs / buttons / dividers) — decorative only, never on text, and reduced /
+ * dropped under `prefers-reduced-motion` (see the media query at the end of this block).
+ */
+[data-theme="doodle"] {
+    /* ── Palette: ink on paper, black & white only ──────────────────────────────────────────── */
+    --fg: #161616;
+    --accent: #161616;            /* no colour — links/buttons are ink, distinguished by shape/weight */
+    --on-accent: #f6f2e9;         /* paper text sits on ink fills */
+    --page-bg: #f6f2e9;
+    --surface: #f6f2e9;
+    --surface-2: #efe9da;
+    --surface-card: #faf7ef;      /* cards/inputs a touch lighter paper */
+    --muted: #5a5650;
+    --danger: #161616;            /* B&W only — danger reads via copy/weight, not hue */
+    --success: #161616;
+
+    /* Sketchy ink lines (re-derived against the ink token so washes still track the theme). */
+    --border-width: 2.5px;
+    --border: color-mix(in srgb, var(--fg) 85%, transparent);
+    --fg-line: color-mix(in srgb, var(--fg) 80%, transparent);
+    --fg-line-strong: color-mix(in srgb, var(--fg) 85%, transparent);
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 90%, transparent);
+    --accent-line: color-mix(in srgb, var(--fg) 85%, transparent);
+    --accent-soft: color-mix(in srgb, var(--fg) 8%, transparent);
+
+    /* Irregular, hand-drawn corners — asymmetric horizontal/vertical radii read as "wobbly". */
+    --radius-sm: 10px 8px 12px 7px / 8px 12px 7px 10px;
+    --radius: 14px 11px 16px 10px / 12px 16px 10px 14px;
+    --radius-md: 16px 13px 18px 12px / 13px 18px 12px 16px;
+    --radius-lg: 20px 15px 22px 16px / 16px 22px 16px 20px;
+    --radius-pill: 999px;
+
+    /* Hand-lettered fonts; system stack as the graceful fallback if the web fonts don't load. */
+    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+
+    /* Flatter, inkier depth than clean's soft drop-shadows. */
+    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 22%, transparent);
+    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 28%, transparent);
+    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 30%, transparent);
+    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 26%, transparent);
+    --overlay: color-mix(in srgb, var(--fg) 45%, transparent);
+    --overlay-strong: color-mix(in srgb, var(--fg) 55%, transparent);
+
+    /* Faint paper grain (a tiny inline SVG noise data-URI at low opacity). Decorative background;
+       text contrast (ink #161616 on paper #f6f2e9 ≈ 16:1) stays well above WCAG AAA. */
+    background-image:
+        radial-gradient(transparent, color-mix(in srgb, var(--fg) 1.5%, transparent)),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");
+}
+
+/* Dark variant: doodle is paper-on-ink in dark mode (still strictly B&W, contrast preserved). */
+@media (prefers-color-scheme: dark) {
+    [data-theme="doodle"] {
+        --fg: #f3eee2;
+        --accent: #f3eee2;
+        --on-accent: #161616;
+        --page-bg: #14130f;
+        --surface: #1b1a15;
+        --surface-2: #14130f;
+        --surface-card: #211f19;
+        --muted: rgba(243, 238, 226, 0.6);
+    }
+}
+
+/*
+ * The reusable "wobble" skin (TM-213) — decorative hand-drawn jitter. `#wobble-soft` is an SVG
+ * filter defined in index.html. We apply it to surfaces, dividers, AND to text-bearing controls
+ * (buttons, nav buttons, inputs), so it applies a mild whole-element displacement to those controls
+ * and does lightly warp their labels — keep the filter's `scale` ≤ ~2.5 so labels stay legible. It
+ * is dropped under reduced-motion. The `.tm-wobble` / `.tm-wobble-soft` utility classes let future
+ * doodle markup opt in explicitly.
+ */
+[data-theme="doodle"] .tm-wobble,
+[data-theme="doodle"] .auth-card,
+[data-theme="doodle"] .tm-modal,
+[data-theme="doodle"] .tm-menu {
+    filter: url("#wobble-soft");
+}
+
+[data-theme="doodle"] .tm-wobble-soft,
+[data-theme="doodle"] .field input,
+[data-theme="doodle"] .tm-input,
+[data-theme="doodle"] .auth button,
+[data-theme="doodle"] .app-nav button,
+[data-theme="doodle"] .tm-btn,
+[data-theme="doodle"] hr {
+    filter: url("#wobble-soft");
+}
+
+/* Headings/logo + accents pick up the hand-lettered display faces (text itself is NOT wobbled). */
+[data-theme="doodle"] .app h1,
+[data-theme="doodle"] h2,
+[data-theme="doodle"] h3,
+[data-theme="doodle"] .auth button,
+[data-theme="doodle"] .app-nav button,
+[data-theme="doodle"] .tm-btn {
+    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+
+[data-theme="doodle"] .tagline,
+[data-theme="doodle"] .build-info {
+    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+}
+
+/*
+ * Doodle asset pack sizing (TM-214). The inline SVG line-art doodles (assets/doodles.js) ink with
+ * the theme because they're authored with `stroke="currentColor"`, so they inherit `color` from
+ * wherever they're mounted — no colour set here. These rules only own SIZE/SPACING and are scoped to
+ * `[data-theme="doodle"]`, so the pack is inert on `clean` (where the doodles aren't mounted anyway —
+ * TM-215 mounts them doodle-only). `tm-doodle` is the base class every builder sets; `.tm-doodle-*`
+ * are optional size variants a page can add.
+ */
+[data-theme="doodle"] .tm-doodle {
+    display: inline-block;
+    vertical-align: middle;
+    color: var(--fg);              /* ink — currentColor in the SVG resolves to this */
+    max-width: 100%;
+    height: auto;
+}
+
+/* A header flourish: a modest doodle beside a heading. */
+[data-theme="doodle"] .tm-doodle-header {
+    width: 56px;
+    margin-inline-end: 0.6rem;
+    opacity: 0.92;
+}
+
+/* An empty-state hero (e.g. "no events yet"): a larger, gently faded centrepiece. */
+[data-theme="doodle"] .tm-doodle-empty {
+    display: block;
+    width: clamp(96px, 28vw, 160px);
+    margin: 0 auto 1rem;
+    opacity: 0.85;
+}
+
+/* A full-width section divider (the squiggle): stretches, ink at reduced weight. */
+[data-theme="doodle"] .tm-doodle-divider {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 1.4rem auto;
+    opacity: 0.7;
+}
+
+/*
+ * Doodle placement (TM-215). The TM-214 doodles are wired into the real pages (landing/login/home
+ * headers, the profile + admin heads, and the admin/profile empty states). They are decorative only,
+ * so they must show ONLY under the doodle theme: every builder sets the base `tm-doodle` class, so
+ * this single rule hides every mounted doodle whenever <html> isn't `[data-theme="doodle"]`. That
+ * keeps `clean` byte-for-byte the current look even though the nodes are present in the DOM — no
+ * per-page forks, no JS branching on the theme. Under doodle, the `.tm-doodle-*` size variants above
+ * take over.
+ */
+:root:not([data-theme="doodle"]) .tm-doodle {
+    display: none;
+}
+
+/* Header flourish: let a heading host an inline doodle beside its text without disturbing the
+ * existing flex head layouts. Only meaningful under doodle (the doodle is hidden otherwise). */
+[data-theme="doodle"] h1:has(.tm-doodle-header),
+[data-theme="doodle"] h2:has(.tm-doodle-header) {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Empty / error states: centre the doodle hero over its explanatory line (admin "No users yet",
+ * profile load error). Inert on clean (the doodle is hidden, the text stays left as before). */
+[data-theme="doodle"] .tm-empty {
+    text-align: center;
+}
+
+/*
+ * A11y — reduced motion (TM-213). The wobble is purely decorative. Users who ask for reduced
+ * motion get the displacement removed entirely (the filter is dropped), so corners render as the
+ * plain irregular CSS radii with no SVG jitter; fonts/palette/borders are unaffected.
+ */
+@media (prefers-reduced-motion: reduce) {
+    [data-theme="doodle"] .tm-wobble,
+    [data-theme="doodle"] .tm-wobble-soft,
+    [data-theme="doodle"] .auth-card,
+    [data-theme="doodle"] .tm-modal,
+    [data-theme="doodle"] .tm-menu,
+    [data-theme="doodle"] .field input,
+    [data-theme="doodle"] .tm-input,
+    [data-theme="doodle"] .auth button,
+    [data-theme="doodle"] .app-nav button,
+    [data-theme="doodle"] .tm-btn,
+    [data-theme="doodle"] .tm-doodle.tm-wobble-soft,
+    [data-theme="doodle"] hr {
+        filter: none;
+    }
+}
+
+/*
+ * ===== The "sketch" wireframe theme family — the DEFAULT (TM-236; default since TM-323) =====
+ *
+ * The hand-drawn pencil-sketch WIREFRAME look — a grayscale "napkin mockup": graphite pencil ink on
+ * off-white paper, sketchy borders/buttons, hand-lettered faces, and a faint ruled GRID behind
+ * everything (reuses the `#wobble-soft` SVG filter for the hand-drawn edge). This is the product
+ * direction, so it's the unconfigured default (TM-323). `clean` and `doodle` stay selectable.
+ *
+ * Like doodle, this is a pure TOKEN OVERRIDE: it re-points the same TM-210/TM-211 tokens every
+ * component already reads via `var(--token)`, so the WHOLE app restyles with no per-page edits.
+ * `clean` and `doodle` are untouched — every rule below is scoped to `[data-theme="sketch"]`.
+ *
+ * Palette (TM-323): strictly GRAYSCALE — graphite pencil ink (#2b2b2b) on off-white paper (#fafafa),
+ * no hue, to read as a pencil wireframe / napkin mockup. Ink on paper ≈ 14:1, well above WCAG AAA,
+ * so copy stays crisp over the faint ruling (grid lines sit at ~6–9% ink, far below text). `danger`
+ * keeps a desaturated red so destructive copy still reads, but the chrome is monochrome graphite.
+ * Fonts: reuse the hand-lettered faces already loaded in index.html (Patrick Hand body, Gochi Hand
+ * for headings/buttons) to keep the pencil-wireframe feel; degrade to the system stack.
+ * Shape: sketchy ~2px graphite borders + slightly irregular radii (a touch tighter than doodle).
+ * Wobble: reuses the SAME `#wobble-soft` SVG filter (defs in index.html) on the chrome — decorative
+ * only, never relied on for meaning, and dropped under `prefers-reduced-motion` (media query below).
+ */
+[data-theme="sketch"] {
+    /* ── Palette: graphite pencil ink on off-white paper, grayscale only ─────────────────────── */
+    --fg: #2b2b2b;                /* graphite pencil ink */
+    --accent: #2b2b2b;            /* no colour — links/buttons are graphite, distinguished by shape/weight */
+    --on-accent: #fafafa;         /* paper text sits on graphite fills */
+    --page-bg: #fafafa;           /* off-white paper (the ruling is layered on top via `body`) */
+    --surface: #fafafa;
+    --surface-2: #f0f0f0;
+    --surface-card: #ffffff;      /* cards/inputs crisp white so the ruling shows through the page */
+    --muted: #6a6a6a;
+    --danger: #8a2b2b;            /* a desaturated red still reads in a grayscale wireframe */
+    --success: #2b2b2b;           /* grayscale — success reads via copy/weight, not hue */
+
+    /* Sketchy pencil lines, re-derived against the ink token so washes track the theme. */
+    --border-width: 2px;
+    --border: color-mix(in srgb, var(--fg) 72%, transparent);
+    --fg-line: color-mix(in srgb, var(--fg) 58%, transparent);
+    --fg-line-strong: color-mix(in srgb, var(--fg) 72%, transparent);
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 82%, transparent);
+    --accent-line: color-mix(in srgb, var(--fg) 72%, transparent);
+    --accent-soft: color-mix(in srgb, var(--fg) 7%, transparent);
+
+    /* Irregular, hand-drawn corners (a touch tighter than doodle so it reads "wireframe"). */
+    --radius-sm: 7px 5px 8px 5px / 5px 8px 5px 7px;
+    --radius: 9px 7px 10px 6px / 7px 10px 6px 9px;
+    --radius-md: 11px 8px 12px 8px / 8px 12px 8px 11px;
+    --radius-lg: 14px 10px 15px 11px / 10px 15px 11px 14px;
+    --radius-pill: 999px;
+
+    /* Hand-lettered fonts (shared with doodle); system stack as the graceful fallback. */
+    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+
+    /* Flat, inky offset depth in the pencil colour — keeps the technical-sketch feel. */
+    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 16%, transparent);
+    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 24%, transparent);
+    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+    --overlay: color-mix(in srgb, var(--fg) 40%, transparent);
+    --overlay-strong: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+
+/*
+ * The faint ruled-paper grid (TM-236; grayscaled in TM-323). A subtle CSS `repeating-linear-gradient`
+ * on BOTH axes — graphite ruling on the off-white page, layered behind everything via `body` (whose
+ * background otherwise paints flat `--page-bg` and would cover a grid set on <html>). A bolder line
+ * every 5th cell gives the classic "major/minor" ruling of graph/sketch paper. Purely decorative: the
+ * lines sit at ~6–9% ink, far below text, so contrast (graphite ink ≈ 14:1 on the paper) stays well
+ * above WCAG AAA. Tinted off the `--fg` token, so it stays monochrome with the pencil theme.
+ */
+[data-theme="sketch"] body {
+    --grid-line: color-mix(in srgb, var(--fg) 9%, transparent);
+    --grid-line-minor: color-mix(in srgb, var(--fg) 6%, transparent);
+    --grid: 22px;            /* minor cell size */
+    background-color: var(--page-bg);
+    background-image:
+        /* major lines (every 5th) — vertical then horizontal */
+        repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
+        /* minor lines — vertical then horizontal */
+        repeating-linear-gradient(to right, var(--grid-line-minor) 0 1px, transparent 1px var(--grid)),
+        repeating-linear-gradient(to bottom, var(--grid-line-minor) 0 1px, transparent 1px var(--grid));
+    background-attachment: fixed;
+}
+
+/* Dark variant: pencil-on-slate — pale graphite ruling/ink on near-black paper. Still strictly
+   grayscale; contrast preserved (pale ink ≈ 13:1 on the slate). */
+@media (prefers-color-scheme: dark) {
+    [data-theme="sketch"] {
+        --fg: #e6e6e6;
+        --accent: #e6e6e6;
+        --on-accent: #1a1a1a;
+        --page-bg: #1a1a1a;
+        --surface: #1a1a1a;
+        --surface-2: #242424;
+        --surface-card: #202020;
+        --muted: rgba(230, 230, 230, 0.62);
+    }
+
+    [data-theme="sketch"] body {
+        --grid-line: color-mix(in srgb, var(--fg) 16%, transparent);
+        --grid-line-minor: color-mix(in srgb, var(--fg) 9%, transparent);
+    }
+}
+
+/*
+ * The reusable "wobble" skin reused for sketch (TM-236) — same `#wobble-soft` SVG filter as doodle
+ * (defs in index.html), applied to the chrome (cards / inputs / buttons / dividers) for the
+ * hand-drawn wireframe edge. Decorative only; never on standalone text; dropped under reduced motion.
+ */
+[data-theme="sketch"] .tm-wobble,
+[data-theme="sketch"] .auth-card,
+[data-theme="sketch"] .tm-modal,
+[data-theme="sketch"] .tm-menu,
+[data-theme="sketch"] .tm-wobble-soft,
+[data-theme="sketch"] .field input,
+[data-theme="sketch"] .tm-input,
+[data-theme="sketch"] .auth button,
+[data-theme="sketch"] .app-nav button,
+[data-theme="sketch"] .tm-btn,
+[data-theme="sketch"] hr {
+    filter: url("#wobble-soft");
+}
+
+/* Headings/buttons pick up the hand-lettered display face (the text itself is NOT wobbled). */
+[data-theme="sketch"] .app h1,
+[data-theme="sketch"] h2,
+[data-theme="sketch"] h3,
+[data-theme="sketch"] .auth button,
+[data-theme="sketch"] .app-nav button,
+[data-theme="sketch"] .tm-btn {
+    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    letter-spacing: 0.3px;
+}
+
+[data-theme="sketch"] .tagline,
+[data-theme="sketch"] .build-info {
+    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+}
+
+/*
+ * A11y — reduced motion (TM-236, mirrors the doodle handling). The wobble is purely decorative, so
+ * users who ask for reduced motion get the displacement filter dropped (the grid, palette, borders
+ * and irregular radii are unaffected — they carry no motion).
+ */
+@media (prefers-reduced-motion: reduce) {
+    [data-theme="sketch"] .tm-wobble,
+    [data-theme="sketch"] .tm-wobble-soft,
+    [data-theme="sketch"] .auth-card,
+    [data-theme="sketch"] .tm-modal,
+    [data-theme="sketch"] .tm-menu,
+    [data-theme="sketch"] .field input,
+    [data-theme="sketch"] .tm-input,
+    [data-theme="sketch"] .auth button,
+    [data-theme="sketch"] .app-nav button,
+    [data-theme="sketch"] .tm-btn,
+    [data-theme="sketch"] hr {
+        filter: none;
+    }
+}
+
+.app-nav {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.app-nav a,
+.app-nav button {
+    color: var(--accent);
+    background: none;
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.home-links {
+    margin-top: 0.5rem;
+}
+
+.home-links a {
+    color: var(--accent);
+}
+
+/* Console shell */
+.admin-console {
+    width: min(72rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.tm-admin-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.tm-admin-head h2 {
+    margin: 0;
+}
+
+.tm-muted {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+/* Stats bar */
+.tm-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+
+.tm-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.tm-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-stat-label {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+/* Toolbar */
+.tm-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.tm-input {
+    padding: 0.5rem 0.7rem;
+    font: inherit;
+    color: var(--fg);
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius);
+}
+
+.tm-toolbar .tm-input[type="search"] {
+    flex: 1 1 12rem;
+}
+
+.tm-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Table */
+.tm-table-wrap {
+    overflow-x: auto;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+}
+
+.tm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+.tm-table th,
+.tm-table td {
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    border-bottom: var(--border-width) solid var(--border);
+    vertical-align: middle;
+}
+
+.tm-table thead th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    background: var(--surface-2);
+    user-select: none;
+}
+
+.tm-table th.tm-sortable {
+    cursor: pointer;
+}
+
+.tm-table tbody tr:hover {
+    background: var(--surface-2);
+}
+
+.tm-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.tm-row-self {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.tm-you {
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.7rem;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
+.tm-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+/* Badges */
+.tm-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-pill);
+    border: var(--border-width) solid var(--border);
+}
+
+.tm-badge-role-admin {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tm-badge-ok {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    border-color: transparent;
+}
+
+.tm-badge-off {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    border-color: transparent;
+}
+
+/* Account-state "unknown" variant (TM-168): used when a Firebase-sourced flag couldn't be read
+   (credential-free dev, or the admin list projection). Neutral — never reads as pass or fail. */
+.tm-badge-unknown {
+    color: var(--muted);
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    border-color: transparent;
+}
+
+/* Inline cluster of account-state badges (TM-168). */
+.tm-badge-group {
+    display: inline-flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Account-state badge row under the profile summary (TM-168). */
+.tm-profile-badges:not(:empty) {
+    margin: 0.25rem 0 0.75rem;
+}
+
+/* Buttons */
+.tm-btn {
+    padding: 0.45rem 0.8rem;
+    font: inherit;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.tm-btn-sm {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.82rem;
+}
+
+.tm-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.tm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tm-btn-primary {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tm-btn-danger {
+    color: var(--on-accent);
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+.tm-copy {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: none;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+/* Pager */
+.tm-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.tm-pager-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tm-error {
+    padding: 1rem;
+    text-align: center;
+}
+
+/* Toasts */
+.tm-toasts {
+    position: fixed;
+    /* Offset by the safe-area insets (TM-295) so toasts don't tuck under the home-indicator /
+       gesture bar or a side notch in the WebView. env() is 0 elsewhere → unchanged on desktop/web. */
+    right: calc(1rem + env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 1000;
+}
+
+.tm-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    max-width: 22rem;
+    padding: 0.6rem 0.8rem;
+    color: var(--fg);
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+}
+
+.tm-toast-success {
+    border-left-color: var(--success);
+}
+
+.tm-toast-error {
+    border-left-color: var(--danger);
+}
+
+.tm-toast-action {
+    margin-left: auto;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tm-toast-close {
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+/* Dialog / modal */
+.tm-backdrop {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    /* Inset-aware padding (TM-295): keeps a tall dialog clear of the status bar / home-indicator
+       under viewport-fit=cover. Collapses to a flat 1rem where env() is 0 (desktop/web). */
+    padding: calc(1rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right))
+             calc(1rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left));
+    background: var(--overlay);
+    z-index: 1100;
+}
+
+.tm-dialog {
+    width: min(28rem, 96vw);
+    padding: 1.25rem;
+    background: var(--surface);
+    color: var(--fg);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+.tm-modal {
+    width: min(34rem, 96vw);
+}
+
+.tm-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tm-dialog-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.15rem;
+}
+
+.tm-modal-head .tm-dialog-title {
+    margin: 0;
+}
+
+.tm-dialog-msg {
+    margin: 0 0 1rem;
+    color: var(--muted);
+}
+
+.tm-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.tm-modal-body {
+    margin-top: 0.75rem;
+}
+
+.tm-detail {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    gap: 0.4rem 1rem;
+    margin: 0;
+}
+
+.tm-detail dt {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.tm-detail dd {
+    margin: 0;
+    display: flex;
+    align-items: center;
+}
+
+.tm-detail-h {
+    margin: 1rem 0 0.4rem;
+    font-size: 1rem;
+}
+
+.tm-activity {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+@media (max-width: 640px) {
+    .tm-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ===== Onboarding product tour (TM-135) ===== */
+
+.app-nav #nav-help {
+    cursor: pointer;
+}
+
+/* Full-screen tour layer. Only the blocker + callout capture pointer events. */
+.tm-tour {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    pointer-events: none;
+}
+
+.tm-tour-blocker {
+    position: fixed;
+    inset: 0;
+    pointer-events: auto;
+    background: transparent;
+}
+
+/* Targetless cards dim the whole screen (no spotlight to do it). */
+.tm-tour-dim .tm-tour-blocker {
+    background: var(--overlay-strong);
+}
+
+/* The spotlight: a transparent box over the target whose huge box-shadow dims everything else. */
+.tm-tour-spotlight {
+    position: fixed;
+    border-radius: var(--radius);
+    box-shadow: 0 0 0 9999px var(--overlay-strong);
+    pointer-events: none;
+    transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+
+.tm-tour-callout {
+    position: fixed;
+    width: min(20rem, calc(100vw - 2rem));
+    padding: 1rem 1.1rem;
+    background: var(--surface);
+    color: var(--fg);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
+    transition: top 0.2s ease, left 0.2s ease;
+}
+
+.tm-tour-callout-center {
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%);
+    text-align: center;
+}
+
+/* Reduced motion: no sliding. */
+.tm-tour-reduced .tm-tour-spotlight,
+.tm-tour-reduced .tm-tour-callout {
+    transition: none;
+}
+
+.tm-tour-close {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.5rem;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tm-tour-title {
+    margin: 0 1.2rem 0.4rem 0;
+    font-size: 1.05rem;
+}
+
+.tm-tour-body {
+    margin: 0 0 0.9rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--fg);
+}
+
+.tm-tour-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.tm-tour-callout-center .tm-tour-foot {
+    justify-content: center;
+}
+
+.tm-tour-progress {
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-tour-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tm-tour-link {
+    font: inherit;
+    font-size: 0.82rem;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+/* Help replay menu */
+.tm-help-menu {
+    position: fixed;
+    z-index: 2100;
+    display: flex;
+    flex-direction: column;
+    min-width: 12rem;
+    padding: 0.3rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-menu);
+}
+
+.tm-help-item {
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    text-align: left;
+    color: var(--fg);
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.tm-help-item:hover {
+    background: var(--surface-2);
+}
+
+/* ===== Edit-profile page (TM-167) ===== */
+
+/* Same shell width/alignment as the admin console so the two protected pages feel consistent. */
+.profile-view {
+    width: min(48rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+/* First-login profile gate (TM-250) — the #/onboarding view. A centred, focused card so the new
+   user does this one thing; reuses the shared .tm-form-* primitives for the fields/actions, and the
+   theme tokens (--surface-card / spacing) so it follows clean + doodle skins automatically. */
+.onboarding-view {
+    width: min(34rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.tm-onboarding-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1.25rem, 4vw, 2rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.tm-onboarding-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1rem;
+}
+
+/* Terms/privacy acceptance gate (TM-170). Reuses the onboarding card; theme-safe (tokens only,
+   so it reads right across clean / doodle / sketch). The version line is a quiet status; the
+   Terms/Privacy links use the accent token like the other in-app links. */
+.tm-terms-version {
+    margin-top: 0.25rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-terms-links {
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.tm-terms-links a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.tm-terms-links a:hover,
+.tm-terms-links a:focus-visible {
+    color: var(--fg);
+}
+
+.tm-terms-card .tm-form-actions {
+    margin-top: 1.5rem;
+}
+
+/* Single-column form: the gate has only three fields, so don't split them into the profile grid. */
+.tm-onboarding-form .tm-form-grid {
+    grid-template-columns: 1fr;
+}
+
+.tm-profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1rem;
+}
+
+/* Avatar slot — disabled placeholder pending TM-166. */
+.tm-profile-avatar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.tm-avatar-frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 3.5rem;
+    height: 3.5rem;
+    flex: 0 0 auto;
+    font-size: 1.6rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+/* The uploaded avatar image fills the round frame (object-fit so non-square images don't distort). */
+.tm-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tm-avatar-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.tm-avatar-note {
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+/* File input + upload progress for the avatar control (TM-166). */
+.tm-avatar-file {
+    font-size: 0.85rem;
+    max-width: 16rem;
+}
+
+.tm-avatar-progress {
+    height: 0.4rem;
+    width: 100%;
+    max-width: 16rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+}
+
+.tm-avatar-progress-bar {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width 0.15s ease;
+}
+
+/* Round avatar shown in the account nav (TM-166), reflecting the user's photoURL. */
+.tm-nav-avatar {
+    display: inline-grid;
+    place-items: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    font-size: 1rem;
+    vertical-align: middle;
+}
+
+.tm-nav-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tm-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+@media (max-width: 32rem) {
+    .tm-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tm-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+/* A field whose input sits beside a one-tap "Use mine" button (timezone/locale — TM-167 union). */
+.tm-field-fill {
+    display: flex;
+    gap: 0.4rem;
+    align-items: stretch;
+}
+
+.tm-field-fill .tm-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.tm-field-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tm-field-hint {
+    margin: 0;
+    font-size: 0.78rem;
+}
+
+.tm-field-error {
+    margin: 0;
+    color: var(--danger);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.tm-input.tm-field-invalid {
+    border-color: var(--danger);
+}
+
+.tm-form-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* A multi-line message input — the textarea sibling of .tm-input (TM-365). Inherits .tm-input's
+   colours/border/focus; adds vertical resize + a sensible min height. */
+.tm-textarea {
+    display: block;
+    width: 100%;
+    min-height: 4.5rem;
+    resize: vertical;
+    line-height: 1.4;
+}
+
+/* The leading checkbox column in the admin users table (TM-365): tight, centred, non-selectable. */
+.tm-check-cell {
+    width: 1%;
+    white-space: nowrap;
+    text-align: center;
+    padding-right: 0.4rem;
+}
+
+.tm-check {
+    width: 1.05rem;
+    height: 1.05rem;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.tm-check:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* ===== Broadcast compose panel (TM-365) ===== a card matching .tm-toolbar's visual language:
+   the same surface, border, radius tokens as the stats/toolbar so it reads as part of the console. */
+.tm-broadcast {
+    margin: 0 0 1rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.tm-broadcast-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.tm-broadcast-title {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+/* Live 'N selected' count — reuses the badge shape but tinted so it reads as a running total. */
+.tm-broadcast-count {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.tm-broadcast-note {
+    margin: 0.35rem 0 0.85rem;
+    font-size: 0.82rem;
+}
+
+/* Two columns on a roomy screen (form beside preview); collapses to one on narrow (mobile rule below). */
+.tm-broadcast-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 16rem);
+    gap: 1rem;
+    align-items: start;
+}
+
+.tm-broadcast-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.tm-broadcast-preview-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+/* The faithful notification preview — a rounded "shade" card. Surface-2 so it lifts off the panel;
+   the title reads as the headline, the body beneath, exactly as on a device shade. */
+.tm-push-preview {
+    padding: 0.7rem 0.85rem;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.tm-push-preview-app {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+
+.tm-push-preview-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.tm-push-preview-appname {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.tm-push-preview-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+}
+
+.tm-push-preview-body {
+    margin: 0.15rem 0 0;
+    font-size: 0.88rem;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+}
+
+/* Placeholder copy (empty title/body) reads as muted, so the admin can tell real text from the hint. */
+.tm-push-preview-placeholder {
+    color: var(--muted);
+    font-weight: 500;
+}
+
+/* The tap destination is invisible metadata on a real push — shown here as a caption, not a headline. */
+.tm-push-preview-caption {
+    margin: 0.5rem 0 0;
+    padding-top: 0.4rem;
+    border-top: var(--border-width) solid var(--border);
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.tm-broadcast-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.85rem;
+    flex-wrap: wrap;
+}
+
+/*
+ * ===== Responsive mobile-web polish (TM-229) =====
+ *
+ * Foundation of the Mobile epic: make every view usable at phone widths (≈320–430px) and inside
+ * the Android/iOS WebView wrappers, WITHOUT a framework — vanilla CSS plus the tiny nav-toggle.js.
+ * This EXTENDS the existing 640px / 32rem media queries above (per the ticket: extend, don't
+ * restart); it adds the nav hamburger, tap-target floors, and the small-screen breakpoints.
+ *
+ * It is theme-agnostic: every rule uses the same `var(--token)`s the components already read, so it
+ * holds under clean / doodle / sketch alike (no hard-coded colours, no per-theme forks).
+ */
+
+/* --- Global: never allow horizontal page scroll on a phone (a stray wide child = the classic
+   mobile break). Width-cap the page container so a long unbroken string can't force a sideways
+   scroll, and let long words/URLs wrap instead of overflowing. ----------------------------------- */
+html {
+    overflow-x: hidden;
+}
+
+.app {
+    width: 100%;
+    max-width: 100vw;
+    overflow-wrap: break-word;
+}
+
+/* --- Nav: hamburger scaffolding (TM-229) -------------------------------------------------------
+   These rules are layout-only and inert on wide screens (the toggle stays display:none until the
+   narrow breakpoint below reveals it). #nav-items is the collapsible group; on wide screens it's a
+   normal inline row that flows with the rest of the nav. */
+.app-nav {
+    flex-wrap: wrap;
+    position: relative;
+}
+
+.app-nav-items {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* The hamburger button: a 44px square tap target, drawn with three CSS bars (no icon font/asset).
+   Hidden on wide screens; the narrow breakpoint flips it to inline-grid. */
+.app-nav-toggle {
+    display: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    color: var(--accent);
+    background: transparent;
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.app-nav-toggle:hover {
+    background: var(--accent-soft);
+}
+
+.app-nav-toggle-bars,
+.app-nav-toggle-bars::before,
+.app-nav-toggle-bars::after {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 2px;
+}
+
+.app-nav-toggle-bars {
+    position: relative;
+}
+
+.app-nav-toggle-bars::before,
+.app-nav-toggle-bars::after {
+    content: "";
+    position: absolute;
+    left: 0;
+}
+
+.app-nav-toggle-bars::before {
+    top: -6px;
+}
+
+.app-nav-toggle-bars::after {
+    top: 6px;
+}
+
+/*
+ * --- Nav breakpoint: collapse the row into a hamburger menu (≤ 33rem ≈ 528px) ------------------
+ * Below this, the nav stacks behind the toggle (matches the matchMedia("min-width:33rem") in
+ * nav-toggle.js). The toggle appears; #nav-items becomes an absolutely-positioned dropdown card
+ * that only shows when nav-toggle.js sets [data-nav-open="true"] on the nav.
+ */
+@media (max-width: 33rem) {
+    .app-nav-toggle {
+        display: inline-grid;
+    }
+
+    .app-nav-items {
+        position: absolute;
+        top: calc(100% + 0.4rem);
+        right: 0;
+        z-index: 1500;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.25rem;
+        min-width: 12rem;
+        max-width: min(16rem, 90vw);
+        padding: 0.4rem;
+        background: var(--surface);
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-menu);
+    }
+
+    /* Collapsed by default; nav-toggle.js opens it. An empty menu (signed out, nothing to show but
+       the Sign-in link) still behaves — the link is the only visible child. */
+    .app-nav:not([data-nav-open="true"]) .app-nav-items {
+        display: none;
+    }
+
+    /* Inside the dropdown, every item is a full-width ≥44px tap row, left-aligned like a menu. */
+    .app-nav-items > a,
+    .app-nav-items > button {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        min-height: 44px;
+        padding: 0.5rem 0.6rem;
+        border-radius: var(--radius-sm);
+        text-align: left;
+    }
+
+    .app-nav-items > a:hover,
+    .app-nav-items > button:hover {
+        background: var(--surface-2);
+        text-decoration: none;
+    }
+
+    /* The nav avatar sits inline with a label-less row; give it room and centre it. */
+    .app-nav-items > .tm-nav-avatar {
+        align-self: center;
+        margin: 0.15rem auto;
+    }
+}
+
+/*
+ * --- Phone layout polish (≤ 30rem ≈ 480px) ----------------------------------------------------
+ * Tighter padding, full-bleed cards, single-column stats, and ≥44px tap targets across the
+ * interactive controls so nothing is fiddly to hit on a touch screen.
+ */
+@media (max-width: 30rem) {
+    .app {
+        /* Tighter phone padding (TM-229) — but keep the safe-area insets folded in (TM-295) so the
+           header/nav clears the notch/status bar and the footer clears the home-indicator/nav bar.
+           env() is 0 without a notch, so this is the plain 1.1rem/0.85rem/2rem on those devices. */
+        padding: calc(1.1rem + env(safe-area-inset-top)) calc(0.85rem + env(safe-area-inset-right))
+                 calc(2rem + env(safe-area-inset-bottom)) calc(0.85rem + env(safe-area-inset-left));
+    }
+
+    .app h1 {
+        font-size: 2rem;
+    }
+
+    /* Auth card spans the screen (minus the page padding) instead of a fixed 22rem. */
+    .auth {
+        max-width: none;
+    }
+
+    /* Tap-target floor for the primary auth + Google buttons. */
+    .auth button {
+        min-height: 44px;
+    }
+
+    /* Inputs at 16px font already (avoids iOS zoom-on-focus); give them a comfortable height. */
+    .field input,
+    .tm-input {
+        min-height: 44px;
+        font-size: 16px;
+    }
+
+    /* Stats: a single column reads better than a cramped 2×2 on the narrowest phones. */
+    .tm-stats {
+        grid-template-columns: 1fr;
+    }
+
+    /* Admin head: let the Refresh button drop under the heading rather than squeeze beside it. */
+    .tm-admin-head {
+        flex-wrap: wrap;
+    }
+
+    /* Toolbar: each control takes a full row so the selects aren't hairline-thin. */
+    .tm-toolbar .tm-input,
+    .tm-toolbar .tm-input[type="search"] {
+        flex: 1 1 100%;
+        min-height: 44px;
+    }
+
+    /* Broadcast compose (TM-365): stack the form above the preview on a phone, and keep the message
+       textarea taller than the 44px input floor above (a 3-line message needs room). */
+    .tm-broadcast-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .tm-textarea {
+        min-height: 5rem;
+    }
+
+    /* The admin table stays a horizontally-scrollable wrapper (.tm-table-wrap already has
+       overflow-x:auto) — the ticket's accepted option. Hint the scroll with momentum on iOS and
+       stop a wide table forcing the whole page sideways. */
+    .tm-table-wrap {
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+    }
+
+    /* Per-row action buttons: ≥44px tall and allowed to wrap so they never overflow the cell. */
+    .tm-actions .tm-btn,
+    .tm-btn,
+    .tm-btn-sm {
+        min-height: 44px;
+    }
+
+    /* Pager wraps to two rows on a narrow screen instead of overflowing. */
+    .tm-pager {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+
+    /* Modals / dialogs / toasts: fit the viewport with a small inset instead of a fixed rem width. */
+    .tm-dialog,
+    .tm-modal {
+        width: calc(100vw - 1.5rem);
+    }
+
+    .tm-toasts {
+        left: 0.75rem;
+        right: 0.75rem;
+        bottom: 0.75rem;
+    }
+
+    .tm-toast {
+        max-width: none;
+    }
+
+    /* Profile form actions stack full-width so Save/Cancel are easy to hit. */
+    .tm-form-actions {
+        flex-direction: column;
+    }
+
+    .tm-form-actions .tm-btn {
+        width: 100%;
+    }
+
+    /* The Help replay menu can otherwise sit half off the right edge on a phone. */
+    .tm-help-menu {
+        max-width: calc(100vw - 1.5rem);
+    }
+}
+
+/*
+ * --- Tour coachmarks on small screens (TM-229) ------------------------------------------------
+ * The callout width is already capped to `100vw - 2rem` (above); here we keep its controls a
+ * comfortable tap size and let the foot wrap so Back/Next/Done never overflow a narrow callout.
+ * Positioning is handled in tour.js placeCallout() (now overlap- and viewport-safe on short
+ * screens). The help dropdown + spotlight need no per-width rules — they're measured from the live
+ * viewport in JS.
+ */
+@media (max-width: 30rem) {
+    .tm-tour-callout {
+        width: calc(100vw - 1.5rem);
+    }
+
+    .tm-tour-foot {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .tm-tour-actions .tm-btn {
+        min-height: 44px;
+    }
+}
+
+/* ===== Help page (TM-255) ===== */
+/* The static #/help guide. A single centred, readable card built from theme tokens only, so it
+   follows clean / doodle / sketch automatically and stays responsive at phone widths + inside the
+   Android WebView. text-align:left keeps prose readable; width clamps to the viewport on narrow
+   screens (no horizontal page scroll — the responsive-mobile invariant). */
+.help-view {
+    width: min(44rem, 96vw);
+    margin: 1.5rem auto 0;
+    text-align: left;
+}
+
+.help-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1.25rem, 4vw, 2rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.help-card h2 {
+    margin: 0 0 0.25rem;
+    color: var(--fg);
+}
+
+.help-intro {
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+}
+
+.help-section {
+    margin-top: 1.5rem;
+}
+
+.help-section h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.help-section p {
+    margin: 0.4rem 0;
+    color: var(--fg);
+    line-height: 1.55;
+}
+
+.help-list {
+    margin: 0.4rem 0;
+    padding-left: 1.25rem;
+}
+
+.help-list li {
+    margin: 0.5rem 0;
+    color: var(--fg);
+    line-height: 1.55;
+}
+
+.help-support-link {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    /* Long emails shouldn't force a horizontal scroll on a narrow phone screen. */
+    word-break: break-word;
+}
+
+.help-support-link:hover,
+.help-support-link:focus-visible {
+    text-decoration: underline;
+}
+
+/* ===== Annotated help guide (TM-178) ===== */
+/* The static "annotated screenshot" guide that lives inside the #/help page: a DOM-drawn MOCK of each
+   key screen with positioned callout notes + arrows. Everything is theme-token-styled so it follows
+   clean / doodle / sketch + dark mode automatically — there is no captured image to re-shoot when the
+   UI changes. Layout is percentage-based over a fixed-aspect "stage" so the mock + its callouts scale
+   together and never need pixel-pushing. */
+.tm-guide-heading {
+    margin: 0 0 0.4rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-guide-intro {
+    margin: 0 0 1rem;
+    color: var(--muted);
+    line-height: 1.55;
+}
+
+.tm-guide-figure {
+    margin: 0 0 1.5rem;
+}
+
+.tm-guide-figure-title {
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 0.5rem;
+}
+
+/* The stage: a fixed-aspect canvas the mock + callouts are positioned over (percentages of this box). */
+.tm-guide-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border: var(--border-width, 1px) solid var(--fg-line, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 8px);
+    background: var(--surface, #fff);
+    overflow: hidden;
+}
+
+.tm-guide-mock {
+    position: absolute;
+    inset: 0;
+}
+
+/* A labelled box on the mock — the representative "screenshot" regions. */
+.tm-guide-region {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: var(--w);
+    height: var(--h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.4rem;
+    box-sizing: border-box;
+    font-size: clamp(0.55rem, 2.2vw, 0.8rem);
+    color: var(--fg);
+    background: var(--surface-card, #fff);
+    border: var(--border-width, 1px) solid var(--fg-line-strong, rgba(0, 0, 0, 0.2));
+    border-radius: var(--radius-sm, 6px);
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.tm-guide-region-brand {
+    font-weight: 700;
+    color: var(--accent);
+    background: transparent;
+    border-color: transparent;
+    justify-content: flex-start;
+}
+
+.tm-guide-region-nav {
+    background: var(--accent-soft, transparent);
+    border-color: var(--accent-line, rgba(0, 0, 0, 0.2));
+}
+
+.tm-guide-region-card {
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 0.6rem;
+    white-space: normal;
+}
+
+/* A callout note overlaid on the stage, anchored at (--at-x,--at-y) and offset to one side. */
+.tm-guide-callout {
+    position: absolute;
+    left: var(--at-x);
+    top: var(--at-y);
+    width: min(15rem, 60%);
+    display: flex;
+    gap: 0.4rem;
+    align-items: flex-start;
+    padding: 0.45rem 0.55rem;
+    box-sizing: border-box;
+    font-size: clamp(0.6rem, 2.4vw, 0.8rem);
+    line-height: 1.4;
+    color: var(--fg);
+    background: var(--surface-card, #fff);
+    border: var(--border-width, 1px) solid var(--accent-line, rgba(0, 0, 0, 0.25));
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.12));
+    z-index: 2;
+}
+
+/* Side placement: translate the note relative to its anchor point. */
+.tm-guide-callout-bottom { transform: translate(-50%, 0.6rem); }
+.tm-guide-callout-top { transform: translate(-50%, calc(-100% - 0.6rem)); }
+.tm-guide-callout-left { transform: translate(calc(-100% - 0.6rem), -50%); }
+.tm-guide-callout-right { transform: translate(0.6rem, -50%); }
+
+.tm-guide-callout-num {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-pill, 999px);
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    font-weight: 700;
+    font-size: 0.7rem;
+}
+
+.tm-guide-callout-title {
+    display: block;
+    margin-bottom: 0.1rem;
+}
+
+/* The little arrow pointing from the note back at the anchor point. A CSS triangle, theme-coloured. */
+.tm-guide-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 0.4rem solid transparent;
+}
+
+.tm-guide-callout-bottom .tm-guide-arrow {
+    top: -0.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-top .tm-guide-arrow {
+    bottom: -0.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-left .tm-guide-arrow {
+    right: -0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+.tm-guide-callout-right .tm-guide-arrow {
+    left: -0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: var(--accent-line, rgba(0, 0, 0, 0.35));
+}
+
+/* The accessible, linear restatement of the callouts beneath the picture. Always reads cleanly even
+   when the absolutely-positioned notes overlap on a small screen — the screen-reader path. */
+.tm-guide-notes {
+    margin: 0.75rem 0 0;
+    padding-left: 1.25rem;
+    color: var(--fg);
+}
+
+.tm-guide-notes li {
+    margin: 0.4rem 0;
+    line-height: 1.5;
+}
+
+/* On very narrow screens the floating callouts get cramped; hide the decorative overlay notes and lean
+   on the numbered list, which carries the same content accessibly. The numbered regions stay visible. */
+@media (max-width: 30rem) {
+    .tm-guide-callout {
+        position: static;
+        transform: none;
+        width: auto;
+        margin: 0;
+    }
+
+    .tm-guide-callout .tm-guide-arrow {
+        display: none;
+    }
+
+    /* Pull the now-static callouts out of the stage flow: keep the stage as the clean picture and let
+       the numbered list below do the talking. */
+    .tm-guide-stage .tm-guide-callout {
+        display: none;
+    }
+}
+
+/* ----------------------------------------------------------------------------------------------
+ * Biometric security (TM-282): the app-lock full-screen overlay + the settings switch.
+ * All colours read theme tokens (var(--token)) so both themes + dark mode are covered for free.
+ * -------------------------------------------------------------------------------------------- */
+
+/* Full-screen opaque lock. OPAQUE (not a dim) so app content is never visible behind it while the
+ * device is locked. Sits above everything including modals/toasts. */
+.tm-lock-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: var(--page-bg);
+}
+
+.tm-lock-overlay[hidden] {
+    display: none;
+}
+
+.tm-lock-card {
+    width: 100%;
+    max-width: 22rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.tm-lock-title {
+    margin: 0;
+    font-size: 1.3rem;
+    color: var(--fg);
+}
+
+.tm-lock-hint {
+    margin: 0;
+    color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+
+.tm-lock-unlock {
+    min-height: 44px;
+    min-width: 10rem;
+}
+
+/* Security settings section on the profile page. */
+.tm-security-settings {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: var(--border-width) solid var(--fg-line);
+}
+
+.tm-security-settings h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-switch-hint {
+    margin: 0.4rem 0 0;
+    font-size: 0.9rem;
+}
+
+/* Accessible toggle switch: a real checkbox (visually hidden, keyboard + a11y intact) driving a
+ * pill track + thumb via :checked. */
+.tm-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+}
+
+.tm-switch-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.tm-switch-track {
+    position: relative;
+    width: 2.6rem;
+    height: 1.5rem;
+    flex: none;
+    border-radius: var(--radius-pill);
+    background: var(--fg-line-strong);
+    transition: background 0.15s ease;
+}
+
+.tm-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(1.5rem - 4px);
+    height: calc(1.5rem - 4px);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.15s ease;
+}
+
+.tm-switch-input:checked + .tm-switch-track {
+    background: var(--accent);
+}
+
+.tm-switch-input:checked + .tm-switch-track .tm-switch-thumb {
+    transform: translateX(1.1rem);
+}
+
+.tm-switch-input:focus-visible + .tm-switch-track {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tm-switch-text {
+    color: var(--fg);
+}
+
+/* Diagnostics view (TM-297) — the QA #/diagnostics screen: stacked cards for GPS / Push / Environment.
+   Purely theme-token styled so it renders correctly under clean / doodle / sketch, at phone widths and
+   inside the Android WebView. Cosmetic only — no behaviour depends on these rules. */
+.tm-diag {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tm-diag > h2 {
+    margin: 0 0 0.25rem;
+    color: var(--fg);
+}
+
+.tm-diag-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+    border-radius: var(--radius, 12px);
+    padding: clamp(1rem, 3vw, 1.5rem);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.tm-diag-card h3 {
+    margin: 0 0 0.6rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+.tm-diag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+    padding: 0.3rem 0;
+}
+
+.tm-diag-key {
+    font-weight: 600;
+    color: var(--fg);
+    min-width: 12rem;
+}
+
+.tm-diag-val {
+    color: var(--fg);
+    word-break: break-word;
+}
+
+.tm-diag-subhead {
+    margin: 0.75rem 0 0.25rem;
+    font-weight: 600;
+}
+
+.tm-diag-out {
+    margin-top: 0.75rem;
+}
+
+.tm-diag-error {
+    margin: 0.5rem 0 0;
+    color: var(--danger, #b00020);
+    line-height: 1.5;
+}
+
+.tm-diag-chip {
+    display: inline-block;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tm-diag-chip-on {
+    background: color-mix(in srgb, var(--success) 18%, transparent);
+    color: var(--success);
+}
+
+.tm-diag-chip-off {
+    background: var(--surface-2);
+    color: var(--muted);
+}
+
+.tm-diag-token-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.tm-diag-token {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    background: var(--surface-2);
+    color: var(--fg);
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+    word-break: break-all;
+    max-width: 100%;
+}
+
+/* The Diagnostics link in the profile/settings area (TM-297). */
+.tm-diag-link {
+    margin-top: 1rem;
+}
+/* Appearance / theme switcher section on the profile page (TM-298). Mirrors the
+   .tm-security-settings divider so the in-app theme picker reads as its own settings block. */
+.tm-theme-settings {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: var(--border-width) solid var(--fg-line);
+}
+
+.tm-theme-settings h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    color: var(--fg);
+}
+
+/* Email-verification banner (TM-169). A dismissible "verify your email" prompt with a Resend action,
+   shown to a signed-in user whose Firebase emailVerified flag is false. Built from theme tokens ONLY
+   (surfaces, the accent wash/stripe, --fg/--muted, the radius/border scale) so it renders correctly
+   across clean / doodle / sketch with no hard-coded colours. The doodle/sketch wobble filter on
+   surfaces is inherited automatically. */
+.tm-verify-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.75rem 0 0;
+    padding: 0.6rem 0.85rem;
+    color: var(--fg);
+    background: var(--accent-soft);
+    border: var(--border-width) solid var(--accent-line);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+}
+
+.tm-verify-banner-icon {
+    flex: none;
+}
+
+.tm-verify-banner-text {
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+.tm-verify-banner-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+}
+
+/* Resend reuses the quiet-action look (accent text on a card surface), a ≥44px tap target on touch. */
+.tm-verify-banner-resend {
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.7rem;
+    min-height: 2rem;
+    cursor: pointer;
+}
+
+.tm-verify-banner-resend:hover {
+    background: var(--surface);
+}
+
+.tm-verify-banner-resend:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.7;
+}
+
+.tm-verify-banner-dismiss {
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 0.25rem;
+}
+
+/* Stack the actions under the message on narrow screens so nothing is clipped. */
+@media (max-width: 30rem) {
+    .tm-verify-banner {
+        flex-wrap: wrap;
+    }
+    .tm-verify-banner-text {
+        flex-basis: 100%;
+    }
+}
