@@ -87,6 +87,15 @@ public class Event {
     @Column(name = "booking_cutoff_hours")
     private Integer bookingCutoffHours;
 
+    /**
+     * Per-event override of the cancellation window, in whole hours before {@code startAt} (TM-414):
+     * an un-RSVP inside it counts as a late cancellation. {@code null} = inherit — {@link
+     * CancellationPolicy} then falls back to the per-city default and finally the app default (24h),
+     * the same event → city → app-default order as the reveal window above.
+     */
+    @Column(name = "cancellation_window_hours")
+    private Integer cancellationWindowHours;
+
     /** IANA timezone id of the event's locale; pairs with the UTC instants for client rendering. */
     @Column(name = "timezone", nullable = false)
     private String timezone;
@@ -232,6 +241,14 @@ public class Event {
 
     public void setBookingCutoffHours(Integer bookingCutoffHours) {
         this.bookingCutoffHours = bookingCutoffHours;
+    }
+
+    public Integer getCancellationWindowHours() {
+        return cancellationWindowHours;
+    }
+
+    public void setCancellationWindowHours(Integer cancellationWindowHours) {
+        this.cancellationWindowHours = cancellationWindowHours;
     }
 
     public String getTimezone() {

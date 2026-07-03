@@ -114,6 +114,19 @@ app:
     #     london: 12
     #     dubai: 6
     city-hours: {}
+  # Event cancellation window (TM-414). Un-RSVPing when now >= start − windowHours counts as a LATE
+  # cancellation: it bumps the user's late_cancel_count (a lightweight strike counter — not the full
+  # reliability-points economy, deferred to TM-409) and the cancel response carries an honest pre-confirm
+  # message. Cancelling earlier is free and silent. windowHours resolves per event, same order as
+  # location-reveal: event.cancellationWindowHours override → this per-city map → default-hours. Kept in
+  # its own namespace so operators can tune it apart from the reveal window. Tunables, not secrets.
+  cancellation-window:
+    default-hours: ${CANCELLATION_WINDOW_DEFAULT_HOURS:24}   # app default when neither event nor city supplies one
+    # Optional per-city defaults (city name → whole hours), matched case-insensitively. Example:
+    #   city-hours:
+    #     london: 12
+    #     dubai: 6
+    city-hours: {}
   # Waitlist offer cascade (TM-397): a fixed-delay @Scheduled sweep that offers a freed GOING spot to
   # the FIFO waitlist, widening one member every 5 minutes until the spot is claimed or the list is
   # exhausted. `enabled: false` skips creating the scheduler bean entirely (the test profile does this

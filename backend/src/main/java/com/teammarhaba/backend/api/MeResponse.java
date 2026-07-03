@@ -37,6 +37,10 @@ import java.time.Instant;
  * @param lastActiveAt         when the account last made an authenticated {@code /me} call (TM-164);
  *                             <strong>our</strong> DB column, stamped on every authenticated read.
  *                             {@code null} only before the very first such call.
+ * @param lateCancelCount      running count of the account's late event cancellations (TM-414) —
+ *                             un-RSVPs made inside an event's cancellation window. Exposed so the
+ *                             client (and later TM-409 / admin) can build on it; {@code 0} until the
+ *                             first late cancel. No consequence is enforced on it yet.
  */
 public record MeResponse(
         String uid,
@@ -57,4 +61,5 @@ public record MeResponse(
         String currentTermsVersion,
         boolean ageVerified,
         AccountState accountState,
-        Instant lastActiveAt) {}
+        Instant lastActiveAt,
+        int lateCancelCount) {}

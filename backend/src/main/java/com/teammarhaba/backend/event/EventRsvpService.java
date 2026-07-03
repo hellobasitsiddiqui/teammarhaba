@@ -75,6 +75,7 @@ public class EventRsvpService {
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
     private final UserService users;
+    private final CancellationPolicy cancellationPolicy;
     private final ApplicationEventPublisher publisher;
     private final BookingCutoffPolicy bookingCutoff;
 
@@ -82,11 +83,13 @@ public class EventRsvpService {
             EventRepository events,
             EventAttendanceRepository attendance,
             UserService users,
+            CancellationPolicy cancellationPolicy,
             ApplicationEventPublisher publisher,
             BookingCutoffPolicy bookingCutoff) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
+        this.cancellationPolicy = cancellationPolicy;
         this.publisher = publisher;
         this.bookingCutoff = bookingCutoff;
     }
@@ -131,22 +134,64 @@ public class EventRsvpService {
     }
 
     /**
+     * Un-RSVP the caller (leave the event), committing the change — see
+     * {@link #cancelRsvp(VerifiedUser, Long, boolean)} for the full contract (late-cancellation
+     * detection, the strike counter, and the returned message). Equivalent to that method with
+     * {@code preview = false}.
+     */
+    @Transactional
+    public CancelResult cancelRsvp(VerifiedUser caller, Long eventId) {
+        return cancelRsvp(caller, eventId, false);
+    }
+
+    /**
      * Un-RSVP the caller (leave the event) — idempotent: leaving an event you are not on is a
      * quiet no-op. Removing a {@code GOING} attendee frees a spot, and that is the whole
      * "recording" the offer cascade needs: free spots are derived ({@code capacity − GOING count},
      * see {@code V13}), so the moment this transaction commits, TM-397's cascade can see a spot to
      * offer. Deliberately <b>no promotion happens here</b> — waitlisted members stay
      * {@code WAITLISTED} until one of them claims.
+     *
+     * <p><b>Late cancellation (TM-414)</b> — surrendering a spot you were {@code GOING} to hold,
+     * inside the event's cancellation window (resolved event → city → app-default 24h by
+     * {@link CancellationPolicy}), is a <em>late cancellation</em>: it increments the caller's
+     * running {@code late_cancel_count} in this same transaction and the {@link CancelResult} carries
+     * an honest message with the new total. Cancelling earlier — or leaving a {@code WAITLISTED} or
+     * absent slot, which surrenders no committed spot — is free and silent (no strike, no message).
+     * No consequence is enforced on the count yet; that is the deferred reliability system (TM-409).
+     *
+     * <p>Pass {@code preview = true} for a non-committing dry-run: it resolves the same verdict and
+     * the count the user <em>would</em> reach, writes nothing (no delete, no increment), and returns
+     * it — the honest pre-confirm the client shows before the user actually commits.
      */
     @Transactional
-    public void cancelRsvp(VerifiedUser caller, Long eventId) {
+    public CancelResult cancelRsvp(VerifiedUser caller, Long eventId, boolean preview) {
         User user = users.provision(caller);
         Instant now = Instant.now();
         Event event = lockedVisibleEvent(eventId, now);
         if (event.hasStartedBy(now)) {
             throw new ConflictException(EVENT_STARTED);
         }
+
+        // A late cancel is giving up a spot you actually HELD (GOING) inside the window. Leaving a
+        // WAITLISTED or absent slot surrenders no committed spot, so it never counts as a strike.
+        boolean holdingSpot = attendance
+                .findByEventIdAndUserId(eventId, user.getId())
+                .map(a -> a.getState() == AttendanceState.GOING)
+                .orElse(false);
+        boolean lateCancel = holdingSpot && cancellationPolicy.isLateCancellation(event, now);
+
+        if (preview) {
+            return lateCancel
+                    ? CancelResult.previewLate(user.getLateCancelCount() + 1)
+                    : CancelResult.free(true, user.getLateCancelCount());
+        }
+
         attendance.deleteByEventIdAndUserId(eventId, user.getId());
+        // A committed late cancel bumps the strike counter (dirty-checking flushes on commit).
+        return lateCancel
+                ? CancelResult.committedLate(user.recordLateCancel())
+                : CancelResult.free(false, user.getLateCancelCount());
     }
 
     /**

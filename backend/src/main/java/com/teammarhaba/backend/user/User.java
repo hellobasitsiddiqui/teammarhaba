@@ -104,6 +104,16 @@ public class User {
     @Column(name = "last_active_at")
     private Instant lastActiveAt;
 
+    /**
+     * Running tally of the account's late event cancellations (TM-414) — un-RSVPs made inside an
+     * event's cancellation window (default 24h before start; see {@code CancellationPolicy}). A
+     * lightweight strike counter, not a points ledger: it only ever moves up, one per late cancel,
+     * and carries no enforced consequence yet. The full reliability economy (ledger, thresholds,
+     * downgrade, on-time credit) is TM-409, which is designed to wrap this same counter.
+     */
+    @Column(name = "late_cancel_count", nullable = false)
+    private int lateCancelCount = 0;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
     private Role role = Role.USER;
@@ -254,6 +264,21 @@ public class User {
     /** Stamp the "last active" marker (TM-164). Called on every authenticated {@code GET /me}. */
     public void markActive(Instant when) {
         this.lastActiveAt = when;
+    }
+
+    /** Running late-cancellation strike count (TM-414). {@code 0} for an account that has never late-cancelled. */
+    public int getLateCancelCount() {
+        return lateCancelCount;
+    }
+
+    /**
+     * Record one late event cancellation (TM-414): bump the strike counter and return the new
+     * running total (used for the honest "this is your Nth" pre-confirm copy). Called from the
+     * un-RSVP path inside its transaction; dirty-checking flushes the change on commit. Increment
+     * only — a late cancel is never undone here (no on-time credit / restoration: that is TM-409).
+     */
+    public int recordLateCancel() {
+        return ++this.lateCancelCount;
     }
 
     public Role getRole() {

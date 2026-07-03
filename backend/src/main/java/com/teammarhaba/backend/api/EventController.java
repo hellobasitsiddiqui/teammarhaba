@@ -3,6 +3,7 @@ package com.teammarhaba.backend.api;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.CancelResult;
 import com.teammarhaba.backend.event.EventCard;
 import com.teammarhaba.backend.event.EventDetail;
 import com.teammarhaba.backend.event.EventQueryService;
@@ -10,14 +11,12 @@ import com.teammarhaba.backend.event.EventRsvpService;
 import com.teammarhaba.backend.event.RsvpResult;
 import java.util.Set;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -78,11 +77,23 @@ public class EventController {
         return rsvps.rsvp(caller, id);
     }
 
-    /** Leave the event (idempotent). {@code 204} — there is no body to return. */
+    /**
+     * Leave the event (idempotent). Returns a {@link CancelResult}: whether leaving now counts as a
+     * <b>late cancellation</b> (TM-414 — inside the event's cancellation window, default 24h before
+     * start), the running strike count, and an honest message to show ({@code null} for an early or
+     * no-op cancel, which is free and silent).
+     *
+     * <p>{@code ?preview=true} runs a non-committing pre-confirm: it reports the same verdict and the
+     * count the caller <em>would</em> reach, but does not leave the event or record a strike — the
+     * check the UI makes before asking the user to confirm. (A deliberate dry-run on the DELETE verb,
+     * same spirit as a {@code dryRun} flag; it keeps the whole pre-confirm on the un-RSVP path.)
+     */
     @DeleteMapping("/events/{id}/rsvp")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    void cancelRsvp(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
-        rsvps.cancelRsvp(caller, id);
+    CancelResult cancelRsvp(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean preview) {
+        return rsvps.cancelRsvp(caller, id, preview);
     }
 
     /** Claim an open spot from the waitlist — first-claim-wins, capacity-safe. */

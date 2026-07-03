@@ -157,6 +157,24 @@
         },
         "type" : "object"
       },
+      "CancelResult" : {
+        "properties" : {
+          "lateCancel" : {
+            "type" : "boolean"
+          },
+          "lateCancelCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "preview" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
       "CreateEventRequest" : {
         "properties" : {
           "capacity" : {
@@ -520,6 +538,10 @@
           },
           "lastName" : {
             "type" : "string"
+          },
+          "lateCancelCount" : {
+            "format" : "int32",
+            "type" : "integer"
           },
           "locale" : {
             "type" : "string"
@@ -1495,10 +1517,25 @@
             "format" : "int64",
             "type" : "integer"
           }
+        }, {
+          "in" : "query",
+          "name" : "preview",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
         } ],
         "responses" : {
-          "204" : {
-            "description" : "No Content"
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CancelResult"
+                }
+              }
+            },
+            "description" : "OK"
           }
         },
         "tags" : [ "event-controller" ]
