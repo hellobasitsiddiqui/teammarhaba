@@ -64,6 +64,13 @@ tooling. Run `make` (or `make help`) to list everything.
 backend targets (`test`/`lint`/`fmt`/`run`) — the backend uses the bundled `./mvnw`, so no
 system Maven is needed. `make test` boots Testcontainers, so Docker must be running for it too.
 
+## Testing
+
+The fast PR gate (`ci.yml`) runs automatically. Everything heavier — the golden-path, soak,
+load (k6), and per-feature e2e suites, across web / mobile-web / Android / iOS — is an
+on-demand library: see [`docs/agents/TEST-SUITES.md`](./docs/agents/TEST-SUITES.md) for what
+each suite is, how to fire it, and where the evidence lands.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch, commit, and PR conventions. In

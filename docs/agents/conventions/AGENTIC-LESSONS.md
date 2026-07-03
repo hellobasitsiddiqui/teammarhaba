@@ -8,6 +8,7 @@ anti-patterns we paid to learn. **How to orchestrate agents well**, distinct fro
 | `blackboard.md` | per-run operational scratch (env quirks, "main is red") — disposable |
 | `COMMON-FEATURES.md` | generic base-product feature coverage |
 | `.claude/skills/` | how-to for specific tasks (ticket-writing, claiming, MCP gotchas) |
+| [`TEST-SUITES.md`](../TEST-SUITES.md) | the on-demand test-suite library — what each suite is, how to fire it, where evidence lands |
 | **this file** | **how to run the fleet** — decomposition, parallelism, drift, scope, replay |
 
 Kept on replay. **Append a dated lesson whenever the fleet teaches you one**, so each run is better than the last.
