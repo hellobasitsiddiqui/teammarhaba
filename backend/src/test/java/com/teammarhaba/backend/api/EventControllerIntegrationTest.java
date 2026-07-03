@@ -200,7 +200,7 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk());
 
         mockMvc.perform(delete("/api/v1/events/" + event.getId() + "/rsvp").with(going))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk());
 
         // No auto-promotion: the freed spot is recorded (derived) for the offer cascade, and the
         // queued member is still WAITLISTED — now with a claimable open spot behind the scenes.
@@ -210,7 +210,42 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.myState").value("WAITLISTED"));
         // Leaving again (or never having joined) is a quiet no-op.
         mockMvc.perform(delete("/api/v1/events/" + event.getId() + "/rsvp").with(going))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void lateCancellationReturnsRunningCountMessageAndPreviewDoesNotCommit() throws Exception {
+        // Event starting inside the 24h cancellation window: leaving a held spot is a late cancel (TM-414).
+        Event event = saveEvent(
+                "Latecancel " + UUID.randomUUID(),
+                creatorId(),
+                e -> e.setStartAt(Instant.now().plus(12, ChronoUnit.HOURS)));
+        RequestPostProcessor me = caller("uid-latecancel-" + UUID.randomUUID());
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(me))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("GOING"));
+
+        // Pre-confirm dry-run: reports the verdict + the count it WOULD reach, but writes nothing.
+        mockMvc.perform(delete("/api/v1/events/" + event.getId() + "/rsvp?preview=true").with(me))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preview").value(true))
+                .andExpect(jsonPath("$.lateCancel").value(true))
+                .andExpect(jsonPath("$.lateCancelCount").value(1))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("late cancellation")));
+        // Still GOING — the preview left the RSVP untouched.
+        mockMvc.perform(get("/api/v1/events/" + event.getId()).with(me))
+                .andExpect(jsonPath("$.myState").value("GOING"));
+
+        // Commit: the strike lands and the honest message carries the running count.
+        mockMvc.perform(delete("/api/v1/events/" + event.getId() + "/rsvp").with(me))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.preview").value(false))
+                .andExpect(jsonPath("$.lateCancel").value(true))
+                .andExpect(jsonPath("$.lateCancelCount").value(1))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("your 1st")));
+        // And the caller has left the event.
+        mockMvc.perform(get("/api/v1/events/" + event.getId()).with(me))
+                .andExpect(jsonPath("$.myState").value("NONE"));
     }
 
     @Test
@@ -250,7 +285,7 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.spotAvailableToClaim").value(false));
 
         mockMvc.perform(delete("/api/v1/events/" + event.getId() + "/rsvp").with(holder))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk());
         stampOffer(event, queuedUid); // TM-397's cascade notifies the queued member
 
         mockMvc.perform(get("/api/v1/events/" + event.getId()).with(queued))

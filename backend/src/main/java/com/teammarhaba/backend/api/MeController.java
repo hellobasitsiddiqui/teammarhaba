@@ -207,6 +207,7 @@ public class MeController {
                 termsProperties.currentVersion(),
                 user.isAgeVerified(),
                 accountState,
-                user.getLastActiveAt());
+                user.getLastActiveAt(),
+                user.getLateCancelCount());
     }
 }
