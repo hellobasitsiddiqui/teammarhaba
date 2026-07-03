@@ -17,6 +17,7 @@
 
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
+import { enterAdminEvents } from "./admin-events.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
 import { enterOnboarding } from "./onboarding.js";
@@ -30,6 +31,9 @@ import { toast } from "./ui.js";
 const LOGIN = "#/login";
 const HOME = "#/home";
 const ADMIN = "#/admin";
+// Admin events console (TM-395) — protected + ADMIN-only, the same gate as #/admin. Its own hash so
+// it's a distinct exact-match route; admin-events.js mounts into #admin-events-view.
+const ADMIN_EVENTS = "#/admin/events";
 // Self-service edit-profile view (TM-167) — protected, available to any signed-in user.
 const PROFILE = "#/profile";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
@@ -52,7 +56,7 @@ const DIAGNOSTICS = "#/diagnostics";
 // it can't live in the exact-match PROTECTED set, so events routes are matched by prefix instead
 // (see isEventsRoute / isProtected below).
 const EVENTS = "#/events";
-const PROTECTED = new Set([HOME, ADMIN, PROFILE, ONBOARDING, TERMS, DIAGNOSTICS]);
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -85,6 +89,8 @@ let isOnboarded = true;
 let needsTerms = false;
 // Whether the admin console is currently mounted/loaded, so we (re)load it only on entry.
 let adminActive = false;
+// Same lifecycle for the admin events console (TM-395): mount once, (re)load on entry.
+let adminEventsActive = false;
 // Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
 let profileActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
@@ -109,7 +115,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
@@ -133,6 +139,7 @@ function render() {
   const loginView = $("auth-signed-out");
   const homeView = $("auth-signed-in");
   const adminView = $("admin-view");
+  const adminEventsView = $("admin-events-view");
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
   const termsView = $("terms-view");
@@ -142,6 +149,7 @@ function render() {
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
+  if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   if (profileView) profileView.hidden = route !== PROFILE;
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
@@ -159,6 +167,7 @@ function render() {
   const navSignIn = $("nav-signin");
   const navSignOut = $("signout-btn");
   const navAdmin = $("nav-admin");
+  const navAdminEvents = $("nav-admin-events");
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
@@ -174,6 +183,8 @@ function render() {
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
   if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
+  // The admin events console link (TM-395) follows the same ADMIN-only, hidden-while-gated rule.
+  if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
   const homeAdminLink = $("home-admin-link");
   if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
 }
@@ -247,6 +258,14 @@ function guard() {
     go(HOME);
     return;
   }
+  // Admin events console is ADMIN-only too (TM-395), same rule as #/admin — the backend (TM-392) is
+  // the real gate; this just avoids showing an unusable page to a non-admin.
+  if (route === ADMIN_EVENTS && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminEventsActive = false;
+    go(HOME);
+    return;
+  }
   render();
   // Load the console on entry into the admin route (and reset on leaving so re-entry reloads).
   if (route === ADMIN && isAdmin) {
@@ -256,6 +275,16 @@ function guard() {
     }
   } else {
     adminActive = false;
+  }
+  // Admin events console (TM-395): mount on entry, (re)load its list each entry, reset on leaving so
+  // a future entry reloads. Same lifecycle as the users console above.
+  if (route === ADMIN_EVENTS && isAdmin) {
+    if (!adminEventsActive) {
+      adminEventsActive = true;
+      enterAdminEvents();
+    }
+  } else {
+    adminEventsActive = false;
   }
   // Same lifecycle for the edit-profile view (TM-167): mount + reload its values on entry.
   if (route === PROFILE) {
