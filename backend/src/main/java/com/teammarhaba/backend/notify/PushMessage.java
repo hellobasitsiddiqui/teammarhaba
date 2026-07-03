@@ -7,16 +7,18 @@ package com.teammarhaba.backend.notify;
  *
  * <p>An optional {@code route} (TM-290) carries a deep-link destination: when present, the sender puts
  * it into the FCM message's {@code data.route} so a notification tap navigates the app there (the
- * client side, TM-285). It is constrained to the app's known hash routes ({@link PushRoutes#KNOWN}) —
- * a {@code null} route means "no destination" (open the app as before), and a non-null-but-unknown
- * route is rejected here so an off-list/crafted route never reaches the wire. Callers that take a route
- * from untrusted input should validate it ({@link PushRoutes#isKnown}) and surface a clean 400 before
- * constructing the message; this constructor is the last-line guard.
+ * client side, TM-285). It is constrained to the app's allow-listed hash routes — the exact
+ * {@link PushRoutes#KNOWN} set or an allow-listed pattern route like the event detail link
+ * ({@link PushRoutes#isAllowed}, TM-394) — a {@code null} route means "no destination" (open the app
+ * as before), and a non-null-but-off-list route is rejected here so a crafted route never reaches the
+ * wire. Callers that take a route from untrusted input should validate it (admin input against the
+ * stricter {@link PushRoutes#isKnown}) and surface a clean 400 before constructing the message; this
+ * constructor is the last-line guard.
  *
  * @param title the short headline shown on the notification
  * @param body  the longer line beneath the title
  * @param route an optional in-app hash route to deep-link to on tap ({@code null} = none); if non-null
- *              it must be one of {@link PushRoutes#KNOWN}
+ *              it must satisfy {@link PushRoutes#isAllowed}
  */
 public record PushMessage(String title, String body, String route) {
 
@@ -27,9 +29,10 @@ public record PushMessage(String title, String body, String route) {
         if (body == null || body.isBlank()) {
             throw new IllegalArgumentException("Push body must not be blank.");
         }
-        if (route != null && !PushRoutes.isKnown(route)) {
+        if (route != null && !PushRoutes.isAllowed(route)) {
             throw new IllegalArgumentException(
-                    "Push route '" + route + "' is not a known deep-link route. Allowed: " + PushRoutes.KNOWN);
+                    "Push route '" + route + "' is not an allow-listed deep-link route. Allowed: "
+                            + PushRoutes.KNOWN + " or the event-detail pattern #/events/{id}");
         }
     }
 

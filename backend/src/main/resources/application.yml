@@ -93,6 +93,15 @@ springdoc:
 # Prod can tighten any value via the environment. A non-positive ttl/length/limit fails startup
 # loudly (Bean Validation in EmailCodeProperties) rather than silently weakening the flow.
 app:
+  # Event reminder scan (TM-394): a fixed-delay @Scheduled tick that pushes the T-24h and T-1h
+  # nudges to an event's GOING attendees. `enabled: false` skips creating the scheduler bean
+  # entirely (the test profile does this so integration tests stay deterministic and drive the
+  # service directly). Cadence knobs are tunables, not secrets; per-(event, milestone) idempotency
+  # is a DB unique claim (V12), so any number of instances may tick concurrently.
+  event-reminders:
+    enabled: ${EVENT_REMINDERS_ENABLED:true}
+    scan-interval-ms: ${EVENT_REMINDERS_SCAN_INTERVAL_MS:60000}   # gap between scan passes
+    initial-delay-ms: ${EVENT_REMINDERS_INITIAL_DELAY_MS:15000}   # startup grace before the first pass
   # Current published terms/privacy version (TM-170). The client gates the app until the user's
   # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
   # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as

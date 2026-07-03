@@ -26,6 +26,14 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
     long countByEventIdAndState(Long eventId, AttendanceState state);
 
     /**
+     * All attendance rows of one state on one event — the reminder fan-out's recipient source
+     * ({@code GOING} only, TM-394). Rows, not people: callers must resolve each {@code userId}
+     * through {@code UserRepository} (see the class note). Covered by
+     * {@code idx_event_attendance_event_state}.
+     */
+    List<EventAttendance> findByEventIdAndState(Long eventId, AttendanceState state);
+
+    /**
      * Per-state tallies for many events in one query — the listing API's "N going" badges without
      * an N+1. States with no rows simply don't appear.
      */

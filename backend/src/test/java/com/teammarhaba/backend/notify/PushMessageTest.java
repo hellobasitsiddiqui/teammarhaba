@@ -42,4 +42,15 @@ class PushMessageTest {
         assertThatThrownBy(() -> new PushMessage("t", "b", "/profile"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void anEventDetailPatternRouteIsAccepted() {
+        // The one allow-listed route PATTERN (TM-394): server-built #/events/{id} passes the
+        // last-line guard; anything off the pattern's exact shape still does not.
+        assertThat(new PushMessage("t", "b", PushRoutes.eventDetail(42L)).route()).isEqualTo("#/events/42");
+        assertThatThrownBy(() -> new PushMessage("t", "b", "#/events"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PushMessage("t", "b", "#/events/abc"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

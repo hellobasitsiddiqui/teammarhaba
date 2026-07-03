@@ -8,3 +8,8 @@ app:
     instance-connection-name: test
   firebase:
     project-id: teammarhaba-test
+  # No background reminder ticks during tests (TM-394): integration tests call
+  # EventReminderService directly with a controlled clock, so a live schedule would only inject
+  # nondeterminism (a mid-test tick could claim a marker the test expects to claim itself).
+  event-reminders:
+    enabled: false
