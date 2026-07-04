@@ -362,6 +362,33 @@ body {
     font-size: 1.1rem;
 }
 
+/* TM-431: login welcome header — a centered brand mark + heading + supporting lead, adapting the
+   design-kit hero/CTA pattern into the login card. Presentational only, token-driven so it renders
+   correctly across clean / doodle / sketch. The header is centered for a warm "front door" hierarchy;
+   the form fields below stay left-aligned for scanning. */
+.auth-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    text-align: center;
+}
+
+/* The mark is drawn with currentColor, so `color` themes it: brand accent under clean/doodle,
+   graphite pencil under sketch. */
+.auth-mark {
+    color: var(--accent);
+}
+
+.auth-subtitle {
+    margin: 0;
+    max-width: 26ch;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.4;
+    font-weight: 500;
+}
+
 .field {
     display: flex;
     flex-direction: column;
@@ -649,6 +676,7 @@ body {
 [data-theme="doodle"] .auth button,
 [data-theme="doodle"] .app-nav button,
 [data-theme="doodle"] .tm-btn,
+[data-theme="doodle"] .auth-mark,
 [data-theme="doodle"] hr {
     filter: url("#wobble-soft");
 }
@@ -879,6 +907,7 @@ body {
 [data-theme="sketch"] .auth button,
 [data-theme="sketch"] .app-nav button,
 [data-theme="sketch"] .tm-btn,
+[data-theme="sketch"] .auth-mark,
 [data-theme="sketch"] hr {
     filter: url("#wobble-soft");
 }
