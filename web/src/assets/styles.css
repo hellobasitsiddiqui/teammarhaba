@@ -18,8 +18,55 @@
  */
 :root {
     color-scheme: light dark;
+
+    /* ═══ Design-kit PRIMITIVES (TM-510) — the single authoritative source of truth ══════════════
+       Reconciles the shipped theme tokens (TM-210/211/236/323) with the approved wireframe kit
+       (docs/design/wireflows + blunt.css). These are RAW values — a neutral/ink ramp, a spacing
+       scale and a type scale. The SEMANTIC tokens further down and the per-theme `[data-theme]`
+       blocks ALIAS these primitives; components must read a semantic token (`--fg`, `--surface`,
+       `--space-*`, `--fs-*`, …) via `var()`, never a raw hex/px — so a theme stays a pure token swap.
+       `clean` keeps its historic coloured palette; the grayscale ramp is what the `sketch` (default)
+       and `doodle` wireframe families resolve their neutrals from. Full reference (name → value →
+       usage): docs/design/design-tokens.md. ══════════════════════════════════════════════════════ */
+
+    /* Neutral / ink ramp — grayscale, lightest → darkest (the wireframe kit palette). */
+    --white: #ffffff;   /* pure white — always-white chrome (toggle thumbs, crisp cards) */
+    --g1: #fafafa;      /* off-white paper — the lightest surface */
+    --g2: #f0f0f0;      /* faint raised surface / hairline fill */
+    --g3: #e0e0e0;      /* dividers, disabled fills */
+    --g4: #c4c4c4;      /* placeholder ink, faint strokes */
+    --g5: #6a6a6a;      /* muted / secondary text */
+    --g6: #3a3a3a;      /* strong secondary ink */
+    --ink: #2b2b2b;     /* graphite pencil ink — the kit's primary "colour" */
+
+    /* Spacing scale — 4px-based rhythm; the rem steps already used across the UI, named so screens
+       and the shared component library (TM-511) share one spacing vocabulary. */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+
+    /* Type scale — one body face (Inter/system) plus two hand faces the wireframe themes swap in.
+       `--font-display` = headings/buttons, `--font-accent` = taglines/script accents; `clean` keeps
+       them equal to the body face (no visual change), doodle/sketch override them (see those blocks).
+       `--fs-*` are the size steps the headings/body already use. */
+    --font-display: var(--font-sans);
+    --font-accent: var(--font-sans);
+    --fs-1: 0.75rem;    /* fine print / meta */
+    --fs-2: 0.875rem;   /* secondary body */
+    --fs-3: 1rem;       /* body */
+    --fs-4: 1.25rem;    /* subheading */
+    --fs-5: 1.5rem;     /* section heading */
+    --fs-6: 2rem;       /* page heading */
+    --fs-hero: 2.5rem;  /* the landing wordmark (.app h1) */
+
+    /* ═══ SEMANTIC tokens — `clean` == the base contract; alias the primitives above ═════════════ */
     --fg: #1a1a2e;
     --accent: #0f9d8c;
+    --accent-light: color-mix(in srgb, var(--accent) 45%, var(--white));  /* lightened accent for fills/hovers */
     /* Type + shape tokens (TM-210) — part of the contract themes may override. Defaults match the
        current look (system font stack, the radii/borders already used across the UI below). */
     --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -63,6 +110,7 @@
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.18);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.3);
     --shadow-menu: 0 6px 20px rgba(0, 0, 0, 0.22);
+    --shadow-card: 0 6px 24px rgba(0, 0, 0, 0.06);  /* soft raised-card ambient (onboarding / help / diagnostics cards) */
     --overlay: rgba(0, 0, 0, 0.45);  /* modal backdrop */
     --overlay-strong: rgba(0, 0, 0, 0.55);  /* tour spotlight + dim */
 }
@@ -153,7 +201,7 @@ body {
 
 .app h1 {
     margin: 0 0 0.25rem;
-    font-size: 2.5rem;
+    font-size: var(--fs-hero);
     color: var(--accent);
 }
 
@@ -623,8 +671,11 @@ body {
     --radius-lg: 20px 15px 22px 16px / 16px 22px 16px 20px;
     --radius-pill: 999px;
 
-    /* Hand-lettered fonts; system stack as the graceful fallback if the web fonts don't load. */
+    /* Hand-lettered fonts; system stack as the graceful fallback if the web fonts don't load. Aliased
+       into the type-scale tokens so headings/buttons/taglines read one source (used by the rules below). */
     --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+    --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    --font-accent: "Shadows Into Light", "Patrick Hand", cursive;
 
     /* Flatter, inkier depth than clean's soft drop-shadows. */
     --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 22%, transparent);
@@ -688,13 +739,13 @@ body {
 [data-theme="doodle"] .auth button,
 [data-theme="doodle"] .app-nav button,
 [data-theme="doodle"] .tm-btn {
-    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    font-family: var(--font-display);
     letter-spacing: 0.3px;
 }
 
 [data-theme="doodle"] .tagline,
 [data-theme="doodle"] .build-info {
-    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+    font-family: var(--font-accent);
 }
 
 /*
@@ -809,17 +860,20 @@ body {
  * only, never relied on for meaning, and dropped under `prefers-reduced-motion` (media query below).
  */
 [data-theme="sketch"] {
-    /* ── Palette: graphite pencil ink on off-white paper, grayscale only ─────────────────────── */
-    --fg: #2b2b2b;                /* graphite pencil ink */
-    --accent: #2b2b2b;            /* no colour — links/buttons are graphite, distinguished by shape/weight */
-    --on-accent: #fafafa;         /* paper text sits on graphite fills */
-    --page-bg: #fafafa;           /* off-white paper (the ruling is layered on top via `body`) */
-    --surface: #fafafa;
-    --surface-2: #f0f0f0;
-    --surface-card: #ffffff;      /* cards/inputs crisp white so the ruling shows through the page */
-    --muted: #6a6a6a;
-    --danger: #8a2b2b;            /* a desaturated red still reads in a grayscale wireframe */
-    --success: #2b2b2b;           /* grayscale — success reads via copy/weight, not hue */
+    /* ── Palette: graphite pencil ink on off-white paper, grayscale only ─────────────────────────
+       Resolved from the design-kit neutral ramp (the `:root` primitives, TM-510) — the aliases below
+       are byte-for-byte the previous literals (--ink #2b2b2b, --g1 #fafafa, --g2 #f0f0f0, --white #fff,
+       --g5 #6a6a6a), so the wireframe look is unchanged; it now flows from the single source of truth. */
+    --fg: var(--ink);             /* graphite pencil ink */
+    --accent: var(--ink);         /* no colour — links/buttons are graphite, distinguished by shape/weight */
+    --on-accent: var(--g1);       /* paper text sits on graphite fills */
+    --page-bg: var(--g1);         /* off-white paper (the ruling is layered on top via `body`) */
+    --surface: var(--g1);
+    --surface-2: var(--g2);
+    --surface-card: var(--white); /* cards/inputs crisp white so the ruling shows through the page */
+    --muted: var(--g5);
+    --danger: #8a2b2b;            /* a desaturated red still reads in a grayscale wireframe (off-ramp on purpose) */
+    --success: var(--ink);        /* grayscale — success reads via copy/weight, not hue */
 
     /* Sketchy pencil lines, re-derived against the ink token so washes track the theme. */
     --border-width: 2px;
@@ -837,8 +891,11 @@ body {
     --radius-lg: 14px 10px 15px 11px / 10px 15px 11px 14px;
     --radius-pill: 999px;
 
-    /* Hand-lettered fonts (shared with doodle); system stack as the graceful fallback. */
+    /* Hand-lettered fonts (shared with doodle); system stack as the graceful fallback. Aliased into
+       the type-scale tokens so headings/buttons/taglines read one source (used by the rules below). */
     --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+    --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    --font-accent: "Shadows Into Light", "Patrick Hand", cursive;
 
     /* Flat, inky offset depth in the pencil colour — keeps the technical-sketch feel. */
     --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 16%, transparent);
@@ -919,13 +976,13 @@ body {
 [data-theme="sketch"] .auth button,
 [data-theme="sketch"] .app-nav button,
 [data-theme="sketch"] .tm-btn {
-    font-family: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    font-family: var(--font-display);
     letter-spacing: 0.3px;
 }
 
 [data-theme="sketch"] .tagline,
 [data-theme="sketch"] .build-info {
-    font-family: "Shadows Into Light", "Patrick Hand", cursive;
+    font-family: var(--font-accent);
 }
 
 /*
@@ -951,10 +1008,10 @@ body {
 
 .app-nav {
     display: flex;
-    gap: 1rem;
+    gap: var(--space-4);
     justify-content: center;
     align-items: center;
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
 }
 
 .app-nav a,
@@ -1562,7 +1619,7 @@ body {
     border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
     border-radius: var(--radius, 12px);
     padding: clamp(1.25rem, 4vw, 2rem);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-card);
 }
 
 .tm-onboarding-form {
@@ -2339,7 +2396,7 @@ html {
     border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
     border-radius: var(--radius, 12px);
     padding: clamp(1.25rem, 4vw, 2rem);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-card);
 }
 
 .help-card h2 {
@@ -2694,7 +2751,7 @@ html {
     width: calc(1.5rem - 4px);
     height: calc(1.5rem - 4px);
     border-radius: 50%;
-    background: #fff;
+    background: var(--white);
     box-shadow: var(--shadow-sm);
     transition: transform 0.15s ease;
 }
@@ -2735,7 +2792,7 @@ html {
     border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
     border-radius: var(--radius, 12px);
     padding: clamp(1rem, 3vw, 1.5rem);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-card);
 }
 
 .tm-diag-card h3 {
