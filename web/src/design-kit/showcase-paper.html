@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="sketch">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>TeamMarhaba — Component library (TM-511)</title>
+
+    <!--
+      Storybook / gallery for the shared UI component library (TM-511). Renders EVERY component tile
+      so the wireframe building blocks can be reviewed in one place (AC3), and flips clean ⇄ doodle ⇄
+      sketch live to prove the components restyle from the design tokens with no per-component edits
+      (AC2). Defaults to `sketch` — the product-direction hand-drawn wireframe look (TM-323), hence
+      "showcase-paper".
+
+      This is a SOURCE-SERVED design/QA tool: it references the live /assets/styles.css + the live
+      /assets/components.js so it is always the single source of truth (never a duplicated copy). It
+      is meant to be viewed off web/src (local dev, the e2e static server, `npx http-server web/src`),
+      not fingerprinted into the production SPA — exactly like the other secondary pages under web/src.
+    -->
+
+    <!-- Same hand-lettered fonts index.html loads; only used under the doodle/sketch themes. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+
+    <style>
+        /* Gallery chrome only — itself token-driven so the page tracks the selected theme. */
+        .dk-wrap { width: min(72rem, 96vw); margin: 0 auto; padding: 1.5rem 0 4rem; text-align: left; }
+        .dk-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+        .dk-head h1 { margin: 0; font-size: var(--fs-6); color: var(--fg); }
+        .dk-head p { margin: 0.25rem 0 0; color: var(--muted); font-size: var(--fs-2); max-width: 46ch; }
+        .dk-themebar { display: inline-flex; gap: 0.4rem; }
+        /* Responsive tile grid: 1 column at phone width (AC4), filling to more as the viewport grows. */
+        .dk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
+        .dk-tile { display: flex; flex-direction: column; gap: 0.9rem; padding: 1rem; background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); }
+        .dk-tile h2 { margin: 0; font-size: var(--fs-3); color: var(--fg); }
+        .dk-tile-note { margin: 0; font-size: var(--fs-1); color: var(--muted); }
+        .dk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+        .dk-col { display: flex; flex-direction: column; gap: 0.6rem; }
+        .dk-cap { font-size: var(--fs-1); color: var(--muted); }
+        /* A phone-width frame proving the components hold at mobile width and scale up (AC4). */
+        .dk-phone-tile { align-items: center; }
+        .dk-phone { width: 100%; max-width: 20rem; }
+    </style>
+</head>
+<body>
+    <!-- The doodle/sketch "wobble" hand-drawn filter (same def as index.html) so the chrome renders
+         its hand-drawn edge here too. Decorative; dropped under prefers-reduced-motion by styles.css. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <filter id="wobble-soft">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+        </filter>
+    </svg>
+
+    <main class="app dk-wrap">
+        <header class="dk-head">
+            <div>
+                <h1>Component library</h1>
+                <p>The approved wireframe building blocks (TM-511), built on the reconciled design
+                   tokens. Flip the theme to see every tile restyle from the tokens alone.</p>
+            </div>
+            <div class="dk-themebar" id="dk-themebar" role="group" aria-label="Theme"></div>
+        </header>
+
+        <section class="dk-grid" id="dk-grid" aria-label="Components"></section>
+    </main>
+
+    <script type="module">
+        import * as C from "/assets/components.js";
+
+        // A labelled gallery tile: a heading, an optional note, then the rendered component(s).
+        function tile(title, note, ...nodes) {
+            const el = document.createElement("section");
+            el.className = "dk-tile";
+            const h = document.createElement("h2");
+            h.textContent = title;
+            el.append(h);
+            if (note) {
+                const p = document.createElement("p");
+                p.className = "dk-tile-note";
+                p.textContent = note;
+                el.append(p);
+            }
+            el.append(...nodes);
+            return el;
+        }
+        // A horizontal row / vertical column wrapper for arranging examples inside a tile.
+        function row(...kids) { const d = document.createElement("div"); d.className = "dk-row"; d.append(...kids); return d; }
+        function col(...kids) { const d = document.createElement("div"); d.className = "dk-col"; d.append(...kids); return d; }
+        // A tiny captioned example (state name under a component), used for the read-receipt states.
+        function labelled(caption, node) {
+            const wrap = document.createElement("div");
+            wrap.className = "dk-col";
+            const cap = document.createElement("span");
+            cap.className = "dk-cap";
+            cap.textContent = caption;
+            wrap.append(node, cap);
+            return wrap;
+        }
+
+        const grid = document.getElementById("dk-grid");
+
+        // 1 — Buttons
+        grid.append(tile("Buttons", "primary · ghost · danger · neutral · small · disabled",
+            row(
+                C.button("Primary"),
+                C.button("Ghost", { variant: "ghost" }),
+                C.button("Danger", { variant: "danger" }),
+                C.button("Neutral", { variant: "neutral" }),
+            ),
+            row(
+                C.button("Small", { size: "sm" }),
+                C.button("Disabled", { disabled: true }),
+            ),
+        ));
+
+        // 2 — Tags
+        grid.append(tile("Tags", "static category labels",
+            row(C.tag("Padel"), C.tag("Going", { variant: "accent" }), C.tag("Draft", { variant: "muted" })),
+        ));
+
+        // 3 — Chips
+        grid.append(tile("Chips", "selectable filter chips + a removable input chip",
+            row(
+                C.chip("Sport", { selected: true }),
+                C.chip("Food"),
+                C.chip("Outdoors"),
+                C.chip("Riyadh", { removable: true }),
+            ),
+        ));
+
+        // 4 — Segmented control
+        grid.append(tile("Segmented control", "one-of-N selector",
+            C.segmented([{ value: "up", label: "Upcoming" }, { value: "past", label: "Past" }], { ariaLabel: "Events filter" }),
+        ));
+
+        // 5 — Toggle
+        grid.append(tile("Toggle", "role=switch — off / on / labelled",
+            row(C.toggle({ ariaLabel: "Off example" }), C.toggle({ checked: true, ariaLabel: "On example" })),
+            C.toggle({ label: "Email notifications", checked: true }),
+        ));
+
+        // 6 — Text field
+        grid.append(tile("Text field", "labelled input + hint",
+            C.textInput({ label: "Display name", placeholder: "e.g. Omar", hint: "Shown to people you meet." }),
+            C.textInput({ label: "Email", type: "email", placeholder: "you@example.com" }),
+        ));
+
+        // 7 — Progress
+        grid.append(tile("Progress", "determinate + indeterminate",
+            col(
+                C.progress({ value: 25 }),
+                C.progress({ value: 60 }),
+                C.progress({ value: 100 }),
+                C.progress({ indeterminate: true }),
+            ),
+        ));
+
+        // 8 — Avatar
+        grid.append(tile("Avatar", "initials chip in three sizes + a cluster",
+            row(
+                C.avatar("Sara", { size: "sm" }),
+                C.avatar("Omar Farouk"),
+                C.avatar("Layla Noor", { size: "lg" }),
+            ),
+            row(C.avatar("Omar"), C.avatar("Layla"), C.avatar("Hamza"), C.avatar("Mona")),
+        ));
+
+        // 9 — Reaction
+        grid.append(tile("Reaction", "emoji + count, pressable",
+            row(C.reaction("👍", { count: 3 }), C.reaction("❤️", { count: 5, reacted: true }), C.reaction("🎉", { count: 1 })),
+        ));
+
+        // 10 — Badges
+        grid.append(tile("Badges", "status pills + a count bubble",
+            row(
+                C.badge("New"),
+                C.badge("Going", { variant: "ok" }),
+                C.badge("Off", { variant: "off" }),
+                C.badge("Unknown", { variant: "unknown" }),
+                C.badge("Admin", { variant: "admin" }),
+                C.countBadge(4),
+                C.countBadge(150),
+            ),
+        ));
+
+        // 11 — Read-receipt ticks (incl. the TM-433 whole-group-read triple tick)
+        grid.append(tile("Read receipts", "sent → delivered → read → whole-group-read (triple tick, TM-433)",
+            row(
+                labelled("sent", C.readReceipt("sent")),
+                labelled("delivered", C.readReceipt("delivered")),
+                labelled("read", C.readReceipt("read")),
+                labelled("group-read", C.readReceipt("group-read")),
+            ),
+        ));
+
+        // 12 — Overlays: modal + bottom sheet
+        grid.append(tile("Overlays", "modal + bottom sheet (mobile-docked, centred on web)",
+            row(
+                C.button("Open modal", {
+                    variant: "neutral",
+                    onClick: () => C.modal("Example modal", [(() => { const p = document.createElement("p"); p.textContent = "A centred dialog built from the shared modal primitive."; return p; })()]),
+                }),
+                C.button("Open bottom sheet", {
+                    variant: "neutral",
+                    onClick: () => {
+                        const p = document.createElement("p");
+                        p.textContent = "A bottom-docked sheet on mobile that becomes a centred card on wider viewports.";
+                        C.bottomSheet("Filters", [p, C.segmented([{ value: "all", label: "All" }, { value: "mine", label: "Mine" }], { ariaLabel: "Scope" })]);
+                    },
+                }),
+            ),
+        ));
+
+        // Theme switcher — sets data-theme on <html>, exactly how the app's theme.js drives the tokens.
+        const THEMES = [["sketch", "Sketch"], ["doodle", "Doodle"], ["clean", "Clean"]];
+        const bar = document.getElementById("dk-themebar");
+        function paintActive() {
+            const active = document.documentElement.getAttribute("data-theme");
+            for (const b of bar.children) b.setAttribute("aria-pressed", String(b.dataset.theme === active));
+        }
+        for (const [value, label] of THEMES) {
+            const btn = C.button(label, {
+                variant: "ghost",
+                size: "sm",
+                onClick: () => { document.documentElement.setAttribute("data-theme", value); paintActive(); },
+            });
+            btn.dataset.theme = value;
+            bar.append(btn);
+        }
+        paintActive();
+    </script>
+</body>
+</html>
