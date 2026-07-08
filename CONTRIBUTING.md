@@ -68,6 +68,20 @@ cd backend && ./mvnw -B verify
 
 This runs Spotless (format gate), the test suite, and produces the CycloneDX SBOM.
 
+## Testing — a bug fix ships with its test
+
+**Every bug fix ships with a regression test, written test-first.** Before changing the code, add a
+test that **reproduces the defect** — it must **fail on the current code** and **pass once the fix
+lands**. This proves the fix works and stops the bug ever silently coming back. It is part of the
+Definition of Done: a bug-fix PR without a failing-first regression test is not complete.
+
+- Put the test where the logic is testable. If the defect lives in a side-effectful module,
+  **extract the pure logic** into its own module and test that (e.g. `settleOrFallback` was pulled
+  out of `router.js` into `async-util.js` to backfill the TM-307 login-dead-end guard).
+- Prefer a fast unit test (backend JUnit / web `node --test`) over a slow e2e where the logic
+  allows it; add an e2e only when the bug is genuinely integration-level.
+- Name the test after the defect so the guard is self-documenting (reference the ticket).
+
 ## API contract (OpenAPI drift check)
 
 The REST API is pinned by a committed spec, `backend/openapi.json`, guarded by `OpenApiDriftTest`

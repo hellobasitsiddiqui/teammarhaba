@@ -28,6 +28,7 @@ import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
+import { settleOrFallback } from "./async-util.js";
 
 const LOGIN = "#/login";
 const HOME = "#/home";
@@ -412,29 +413,6 @@ function onTermsComplete() {
 // re-guarding with fresh role/onboarding values; if it doesn't arrive in time we proceed with the
 // fail-safe defaults rather than stalling the user on the login card.
 const ROLE_RESOLVE_TIMEOUT_MS = 8000;
-
-/** Resolve `promise`, or `fallback` if it neither resolves nor rejects within `ms`. Never rejects. */
-function settleOrFallback(promise, ms, fallback) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (value) => {
-      if (!done) {
-        done = true;
-        resolve(value);
-      }
-    };
-    const timer = setTimeout(() => finish({ timedOut: true, value: fallback }), ms);
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        finish({ timedOut: false, value });
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        finish({ timedOut: false, error: err, value: fallback });
-      });
-  });
-}
 
 // Resolve the role (from the token) AND onboarding + terms-acceptance state (from GET /me) so the
 // admin route/nav, the first-login gate (TM-250) AND the terms gate (TM-170) decisions use fresh
