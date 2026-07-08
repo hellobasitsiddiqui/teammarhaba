@@ -7,21 +7,21 @@
          clipped. width/initial-scale unchanged from TM-229. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>TeamMarhaba</title>
-    <!-- Hand-lettered fonts for the "doodle" theme family (TM-213). Loaded for every page but only
-         referenced under [data-theme="doodle"] (see styles.css); other themes never use them, so
-         this is inert for "clean". If the request fails the doodle skin degrades to the system font
-         stack declared in --font-sans. preconnect warms the Google Fonts hosts. -->
+    <!-- Hand-lettered fonts for the Paper theme (TM-529; faces from TM-213). Patrick Hand is the
+         body face, Gochi Hand the display face, Shadows Into Light the accent face (see --font-*
+         tokens in styles.css). Loaded for every page; if the request fails, Paper degrades to the
+         system font stack declared in --font-sans. preconnect warms the Google Fonts hosts. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
-    <!-- Hidden inline SVG def for the doodle theme's "wobble" skin (TM-213). This feTurbulence +
-         feDisplacementMap filter makes straight CSS edges look hand-drawn; styles.css applies it
-         via filter:url(#wobble-soft) only under [data-theme="doodle"], to surfaces, dividers and
-         controls, and drops it under prefers-reduced-motion. Inert for every other theme.
-         aria-hidden + zero box so it never affects layout or a11y. -->
+    <!-- Hidden inline SVG def for the Paper "wavy/sketchy" wobble skin (TM-529; filter from TM-213).
+         This feTurbulence + feDisplacementMap filter makes straight CSS edges look hand-drawn;
+         styles.css applies it via filter:url(#wobble-soft) only under [data-sketchy="on"], to
+         surfaces, dividers and controls, and drops it under prefers-reduced-motion. Absent in clean
+         Paper. aria-hidden + zero box so it never affects layout or a11y. -->
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
         <filter id="wobble-soft">
             <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
@@ -88,8 +88,8 @@
                      adapting the design-kit hero/CTA pattern into the login card so the front door
                      reads as the product, not a bare "Sign in" over an email box. Purely presentational:
                      it sits ABOVE the unchanged email-code step and touches no id or flow the auth JS
-                     relies on. The mark is aria-hidden decoration drawn with currentColor, so it themes
-                     with the card (and picks up the sketch wobble edge) across clean / doodle / sketch. -->
+                     relies on. The mark is aria-hidden decoration drawn with currentColor, so it inks
+                     with the card (and picks up the wobble edge when the sketchy toggle is on). -->
                 <div class="auth-head">
                     <svg class="auth-mark" viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" focusable="false">
                         <!-- two figures = "find your people"; the rear one is faded for depth -->
@@ -204,7 +204,7 @@
             <section class="tm-home" id="auth-signed-in" hidden aria-label="Home">
                 <!-- Section header (paper-home): the "Events near you" title + the "<city> · this
                      week" context line (home.js fills the city from /me, best-effort). Kept an <h2> so
-                     the doodle decoration (TM-215) still finds the home heading under the doodle theme. -->
+                     the doodle decoration (TM-215) still finds the home heading under sketchy Paper. -->
                 <div class="tm-home-head">
                     <h2 class="tm-home-title">Events near you</h2>
                     <p class="tm-home-sub" id="tm-home-context">Near you · this week</p>
@@ -369,7 +369,7 @@
          so it's a top-level fixed element in the thumb zone, not constrained by the centred column;
          styles.css pins it with env(safe-area-inset-bottom) so it clears the iPhone home indicator /
          Android gesture nav. Each tab is a plain hash-link with a hand-drawn glyph (inline SVG,
-         stroke=currentColor → themes across clean / doodle / sketch, picks up the sketch wobble edge)
+         stroke=currentColor → inks with Paper, picks up the wobble edge when the sketchy toggle is on)
          + a visible text label that NAMES the link for a11y (the SVG is decorative → aria-hidden). The
          bar is a keyboard-navigable <nav> landmark (links are natively tabbable). It starts `hidden`
          (signed-out); the router removes that once the session is signed-in + un-gated. -->
@@ -424,12 +424,12 @@
     </nav>
 
     <script src="/assets/config.js"></script>
-    <!-- Theme system core (TM-210). Classic script, runs right after config.js + before paint:
-         reads window.TEAMMARHABA_CONFIG.theme and sets data-theme on <html> (default/fallback
-         "doodle"). Picks the visual family; the dark/light axis (TM-133) still follows the OS.
-         A dev override (TM-216) — `?theme=clean|doodle` in the URL query, or a `tm-theme`
-         localStorage key — forces a theme over config for testing; harmless client-side toggle. -->
-    <script src="/assets/theme.js"></script>
+    <!-- Paper appearance boot (TM-529). Classic script, runs right after config.js + before paint:
+         sets [data-sketchy] on <html> (default ON) and re-points the per-user accent from a
+         localStorage HINT, so there's no flash of the wrong look. The server (GET /me) is the source
+         of truth, applied by appearance-sync.js once auth resolves. The dark/light axis (TM-133)
+         still follows the OS. Paper is the single theme — there is no theme-family switch any more. -->
+    <script src="/assets/appearance.js"></script>
     <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
     <script src="/assets/build-info.js"></script>
     <!-- Hide the "Get the app" store badges inside the Android WebView (TM-330): inert in a browser,
@@ -460,13 +460,14 @@
          each page's tour on first visit; replayable from the Help menu. -->
     <script type="module" src="/assets/tours.js"></script>
     <!-- Doodle decoration for the static panels (TM-215): mounts a few tasteful TM-214 doodles into
-         the landing/login/home headers + dividers. Visual only; CSS gates them to the doodle theme. -->
+         the landing/login/home headers + dividers. Visual only; CSS shows them only when the
+         wavy/sketchy toggle is on (hidden in clean Paper). -->
     <script type="module" src="/assets/doodle-decor.js"></script>
-    <!-- Signed-out theme switcher (TM-332): mounts the SAME "Appearance" picker (TM-298) into the login
-         card so a signed-out user (and the Android WebView, where the ?theme= URL override is
-         unreachable) can change the theme. Reuses theme-settings.js — same tm-theme key, live applyTheme,
-         no reload; the Profile instance keeps working and the two stay in sync. -->
-    <script type="module" src="/assets/login-theme.js"></script>
+    <!-- App-wide Paper appearance sync (TM-529): once auth resolves, reads the user's chosen accent
+         swatch + wavy/sketchy toggle from GET /api/v1/me and applies them on <html> for EVERY page
+         (and refreshes the no-flash boot hint). The profile settings control changes + persists them;
+         this owns the load-time apply. Signed out → Paper defaults. -->
+    <script type="module" src="/assets/appearance-sync.js"></script>
     <!-- Push-notifications client (TM-279): inside the Capacitor Android shell, requests the OS
          notification permission on login and registers the device's FCM token with
          POST /api/v1/me/devices (deregisters on sign-out). Fully inert on the browser/PWA build —

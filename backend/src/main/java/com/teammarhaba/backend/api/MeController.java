@@ -125,7 +125,9 @@ public class MeController {
                 r.phone(),
                 r.notificationPref(),
                 r.timezone(),
-                r.locale());
+                r.locale(),
+                r.themeAccent(),
+                r.themeSketchy());
     }
 
     /**
@@ -208,6 +210,8 @@ public class MeController {
                 user.isAgeVerified(),
                 accountState,
                 user.getLastActiveAt(),
-                user.getLateCancelCount());
+                user.getLateCancelCount(),
+                user.getThemeAccent(),
+                user.isThemeSketchy());
     }
 }

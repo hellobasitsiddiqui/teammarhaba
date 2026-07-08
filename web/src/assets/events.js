@@ -24,8 +24,8 @@ const $ = (id) => document.getElementById(id);
 // ── Inline SVG icons (TM-513) ─────────────────────────────────────────────────────────────────
 // The paper wireframes ink a clock / pin beside the meta lines and a chevron in the hero back button.
 // These are ALWAYS-VISIBLE structural icons — unlike the doodle asset pack (assets/doodles.js), which
-// styles.css hides outside `[data-theme="doodle"]` — so at the production default (sketch) theme the
-// wireframe's icons still render. Built via a tiny namespaced factory (createElement can't make SVG),
+// styles.css hides in clean Paper (shown only when the sketchy toggle is on) — so the wireframe's
+// icons always render. Built via a tiny namespaced factory (createElement can't make SVG),
 // attribute-only like ui.js `el()` / doodles.js — no innerHTML seam, all shapes are static.
 const SVG_NS = "http://www.w3.org/2000/svg";
 function svgEl(tag, attrs = {}, children = []) {
@@ -363,7 +363,7 @@ function paintDetail(view, detail, me) {
  * The detail hero (the wireframe's boxed banner). A bordered box carrying the event image (when it's a
  * resolvable http(s) URL) with the circular back button overlaid top-left and, for a live event, a
  * "Happening now" tag top-right. With no image it's the plain bordered box the wireframe shows (the
- * doodle placeholder is intentionally dropped — it's `display:none` outside the doodle theme anyway).
+ * doodle placeholder is intentionally dropped — it's `display:none` in clean Paper anyway).
  */
 function detailHero(detail, { live }) {
   const path = (detail?.imagePath || "").trim();

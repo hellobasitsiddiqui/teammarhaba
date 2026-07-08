@@ -168,6 +168,17 @@ public class UserService {
                 user.setLocale(loc);
             }
         }
+        // Paper appearance prefs (TM-529). Both are partial-update like the rest: a null leaves the
+        // stored value unchanged. The accent swatch id is already constrained to the curated palette
+        // by the web boundary (@Pattern), so only a known-good, paper-legible swatch reaches here.
+        if (update.themeAccent() != null && !Objects.equals(user.getThemeAccent(), update.themeAccent())) {
+            changes.add(change("themeAccent", user.getThemeAccent(), update.themeAccent()));
+            user.setThemeAccent(update.themeAccent());
+        }
+        if (update.themeSketchy() != null && user.isThemeSketchy() != update.themeSketchy()) {
+            changes.add(change("themeSketchy", user.isThemeSketchy(), update.themeSketchy()));
+            user.setThemeSketchy(update.themeSketchy());
+        }
 
         if (!changes.isEmpty()) {
             // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the

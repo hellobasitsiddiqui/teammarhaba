@@ -25,7 +25,7 @@ import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
-import { buildThemeSettings } from "./theme-settings.js";
+import { buildAppearanceSettings } from "./appearance-settings.js";
 // Pure Profile-screen logic (TM-514) — the identity/strength/public-preview models + route→mode map,
 // unit-tested in web/tools/profile-core.test.mjs.
 import {
@@ -557,7 +557,7 @@ function buildField(field) {
 }
 
 // A gear icon (paper-profile top bar). Decorative → aria-hidden; the link that wraps it carries the
-// accessible label. Drawn with currentColor so it themes across clean / doodle / sketch.
+// accessible label. Drawn with currentColor so it inks with the Paper foreground token.
 function gearIcon() {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -684,10 +684,11 @@ function buildShell(view) {
   // ── Edit profile (paper-edit-profile) ── the shipped self-service form, restyled into a kit card.
   const editCard = pfCard("Edit profile", [form], "tm-pf-edit");
 
-  // Security + Appearance settings blocks (TM-282 / TM-298) — self-rendering, hide themselves when
-  // inapplicable. Wrapped in a labelled block the "Privacy & my data" menu row scrolls to.
+  // Security + Appearance settings blocks (TM-282 / TM-529) — self-rendering. Appearance = the Paper
+  // per-user controls (accent swatch + wavy/sketchy toggle), persisted server-side. Wrapped in a
+  // labelled block the "Privacy & my data" menu row scrolls to.
   const security = buildSecuritySettings();
-  const appearance = buildThemeSettings();
+  const appearance = buildAppearanceSettings();
   const settingsBlock = el("section", { class: "tm-pf-settings", id: "profile-settings" }, [
     appearance,
     security,
@@ -717,7 +718,7 @@ function buildShell(view) {
   clear(view).append(
     el("div", { class: "tm-pf" }, [
       el("header", { class: "tm-pf-topbar" }, [
-        // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
+        // A host-badge doodle beside the heading (TM-215) — decorative; CSS shows it only when the sketchy toggle is on.
         el("h2", { class: "tm-pf-title" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
         el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
       ]),
@@ -757,7 +758,7 @@ function renderStatus() {
   if (state.error) {
     shell.form.hidden = true;
     shell.status.append(el("div", { class: "tm-error tm-empty" }, [
-      // An empty-state doodle (TM-215) so a load failure still reads warmly; CSS gates it to doodle.
+      // An empty-state doodle (TM-215) so a load failure still reads warmly; CSS shows it only under sketchy Paper.
       doodle("chat", { class: "tm-doodle-empty", title: "Couldn't load your profile" }),
       el("p", { text: state.error }),
       el("button", { class: "tm-btn", type: "button", onClick: load }, "Retry"),

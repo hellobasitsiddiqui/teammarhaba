@@ -56,19 +56,21 @@ not a secret — see `/.gitleaks.toml`). The sign-in UI (TM-106) and Bearer-toke
 
 ## Doodle asset pack (TM-214)
 
-`src/assets/doodles.js` is a small pack of hand-drawn, MVP-rough **SVG line-art doodles** for the
-**`doodle` theme** (TM-213). Motifs are social-events only — people meeting at events (dates, RSVPs,
-places, a crowd, a hello wave, a celebration). They decorate doodle-theme **headers**, **empty states**
-(e.g. "no events yet") and **dividers**. They are **visual only**; TM-215 wires them into pages.
+`src/assets/doodles.js` is a small pack of hand-drawn, MVP-rough **SVG line-art doodles** (TM-213;
+faces retained under Paper in TM-529). Motifs are social-events only — people meeting at events (dates,
+RSVPs, places, a crowd, a hello wave, a celebration). They decorate **headers**, **empty states**
+(e.g. "no events yet") and **dividers** as part of the hand-drawn **wavy/sketchy** Paper look. They are
+**visual only**; TM-215 wires them into pages.
 
 Properties:
 
 - **Themeable** — every doodle uses `stroke="currentColor"` + `fill="none"` (solids use
-  `currentColor`), so it inks with the TM-210/211 tokens (`var(--fg)`) wherever it's mounted and flips
-  with the doodle dark variant. No hardcoded colours.
+  `currentColor`), so it inks with the Paper foreground token (`var(--fg)`) wherever it's mounted and
+  flips with dark mode. No hardcoded colours.
 - **XSS-safe** — built from a namespaced element factory (attributes + a single static `<text>` via
   `textContent`); no innerHTML, no user data. Every doodle is static inline SVG.
-- **Doodle-theme-only** — mount under `[data-theme="doodle"]`; the pack adds **nothing** to `clean`.
+- **Sketchy-only** — shown under `[data-sketchy="on"]`; the pack adds **nothing** to clean Paper (the
+  sketchy toggle off), where a CSS rule hides every mounted `.tm-doodle`.
 - **No owls / mascots / animals.**
 
 Motifs: `calendar` · `ticket` (RSVP) · `pin` (location/map) · `crowd` (group of people) · `chat`
@@ -92,9 +94,9 @@ section.after(doodles.divider({ class: "tm-doodle-divider", tag: true }));
 
 Each builder returns a fresh detached `<svg>` element. Options: `size` (px), `title` (adds `<title>`
 + `role="img"`/`aria-label`; omit → `aria-hidden` decorative), `class` (extra classes appended after
-`tm-doodle`), `wobble:true` (adds `tm-wobble-soft` to pick up the theme's hand-drawn jitter filter).
-Sizing/spacing classes (`.tm-doodle`, `.tm-doodle-header`, `.tm-doodle-empty`, `.tm-doodle-divider`)
-live under `[data-theme="doodle"]` in `styles.css`.
+`tm-doodle`), `wobble:true` (adds `tm-wobble-soft` to pick up the hand-drawn jitter filter when the
+sketchy toggle is on). Sizing/spacing classes (`.tm-doodle`, `.tm-doodle-header`, `.tm-doodle-empty`,
+`.tm-doodle-divider`) live under `[data-sketchy="on"]` in `styles.css`.
 
 ## Deploy
 

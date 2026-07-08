@@ -1,46 +1,32 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN, TARGET } from "../fixtures.mjs";
 
-// Theme-switch guard (TM-216; extended for sketch in TM-236). Proves a theme can't silently break a
-// page: the app boots in the CONFIGURED theme, and every key page renders under EVERY registered
-// family (`clean`, `doodle`, `sketch`) with its primary control still visible and un-covered (no
-// layout break). New families join by being added to the THEMES constant below. This is the test side of the
-// Grows-Skin epic — it asserts the *mechanism* (data-theme is right) and a cheap *visual* invariant
-// (the primary control isn't clipped to nothing or hidden under an overlay), without pinning exact
-// pixels. It rides the existing E2E workflow (main + manual dispatch), never the PR gate.
-//
-// How it flips themes WITHOUT a redeploy: the TM-216 dev override in theme.js. serve.mjs injects an
-// e2e config with NO `theme` key, so config resolves to the default ("sketch" since TM-323). Adding
-// `?theme=clean` (or `?theme=doodle`) to the URL query forces that theme at boot, layered over
-// config. Because the app hash-routes (`/#/...`), the query must sit BEFORE the hash: `/?theme=clean#/login`.
+// Paper appearance guard (TM-216 origin; rewritten for the single Paper theme in TM-529). The
+// multi-theme family system (clean/doodle/sketch + the ?theme= override) is retired — Paper is the
+// only theme, and the two things a user personalises are surfaced in profile settings:
+//   • the accent swatch (a fixed curated palette), and
+//   • the wavy/sketchy toggle (`<html data-sketchy="on|off">`).
+// This spec proves (a) every key page renders under Paper with its primary control usable (a cheap
+// "no layout break" invariant, no pixel snapshots), and (b) the two per-user controls apply LIVE and
+// PERSIST SERVER-SIDE — a reload re-reads the choice from GET /api/v1/me, not localStorage. It rides
+// the existing E2E workflow (main + manual dispatch), never the PR gate.
 //
 // Waits mirror the existing specs (TM-198 lesson — always wait for the async load to settle before
-// asserting): we wait for each view's container to be visible, and for signed-in pages we wait for
-// `#signout-btn` (auth has resolved) before checking nav-driven controls.
+// asserting): we wait for each view's container, and for signed-in pages we wait for `#signout-btn`.
 
-const THEMES = ["clean", "doodle", "sketch"];
-
-/** Build a hash route carrying the `?theme=` dev override in the query (before the hash). */
-function routeWithTheme(theme, hashRoute) {
-  return `/?theme=${theme}#${hashRoute}`;
+/** Read <html data-sketchy> (the wavy/sketchy state applied by appearance.js / appearance-sync.js). */
+async function sketchyState(page) {
+  return page.evaluate(() => document.documentElement.getAttribute("data-sketchy"));
 }
 
-/** Assert <html data-theme> is the one we asked for (the override actually took effect at boot). */
-async function expectTheme(page, theme) {
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
-    .toBe(theme);
+/** Read the inline --accent custom property (set by the swatch picker / appearance-sync). */
+async function inlineAccent(page) {
+  return page.evaluate(() => document.documentElement.style.getPropertyValue("--accent").trim());
 }
 
-// Cheap "no layout break" invariant for a primary control: it must be visible and, after scrolling
-// it into view if needed, sit inside the viewport with a real (non-zero) box. This catches a theme
-// that hides a control, collapses it, or pushes/shoves it off-screen, without the flakiness of
-// exact-pixel snapshots.
+// Cheap "no layout break" invariant for a primary control: it must be visible, on-screen and
+// interactable — catches a look that hides/collapses/shoves a control without exact-pixel flake.
 async function expectControlUsable(page, locator) {
-  // "Usable" = visible, on-screen, and interactable. Use Playwright's built-ins, NOT a manual
-  // elementFromPoint hit-test — that false-fails on controls below the fold or with inner content
-  // at their centre (TM-216). scrollIntoViewIfNeeded + toBeInViewport is a reliable no-layout-break
-  // signal; if a theme regression hid or shoved a control off-screen, this catches it.
   await expect(locator).toBeVisible();
   await locator.scrollIntoViewIfNeeded();
   await expect(locator).toBeInViewport();
@@ -55,10 +41,8 @@ async function signInAsAdmin(page) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
-// Suppress the first-run product tour (TM-147): its modal + dimmed backdrop would overlay the pages
-// under test (covering controls, blocking nav). The tour persists `{done:true}` in localStorage
-// keyed by uid+tourId; make any `tm.tour.*` key read as completed at boot so no tour auto-runs
-// (works for any uid). General hygiene — the tour will flake any spec that lingers long enough.
+// Suppress the first-run product tour (TM-147): its modal + backdrop would overlay the pages under
+// test. Make any `tm.tour.*` key read as completed at boot so no tour auto-runs (works for any uid).
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const orig = Storage.prototype.getItem;
@@ -70,132 +54,104 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe("@theme the app boots in the configured theme", () => {
-  test("with no override, config resolves to the default sketch theme", async ({ page }) => {
-    // serve.mjs injects a config WITHOUT `theme`, so resolveTheme() falls back to DEFAULT_THEME.
+test.describe("@theme the app renders the single Paper theme", () => {
+  test("boots to Paper with the sketchy toggle on by default and no theme-family switch", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "sketch");
-
-    // The contract helpers are published for reuse, and the default is sketch (TM-323).
-    const contract = await page.evaluate(() => ({
-      def: window.TeamMarhabaTheme?.DEFAULT_THEME,
-      allowed: window.TeamMarhabaTheme?.ALLOWED,
-    }));
-    expect(contract.def).toBe("sketch");
-    expect(contract.allowed).toEqual(["clean", "doodle", "sketch"]);
-  });
-
-  test("an unknown override value is ignored (falls back to the configured theme)", async ({ page }) => {
-    // `?theme=neon` isn't ALLOWED → ignored → config's default (sketch) wins. A bad value never
-    // breaks or blanks the page.
-    await page.goto("/?theme=neon#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "sketch");
+    // Default (signed-out / brand-new) = sketchy ON (the app's character, TM-529).
+    await expect.poll(() => sketchyState(page)).toBe("on");
+    // The retired multi-theme axis is gone — <html> carries no data-theme.
+    const hasThemeAttr = await page.evaluate(() => document.documentElement.hasAttribute("data-theme"));
+    expect(hasThemeAttr).toBe(false);
   });
 });
 
-// The login page is reachable anonymously — exercise it directly under both themes.
-test.describe("@theme login page renders under both themes", () => {
-  for (const theme of THEMES) {
-    test(`login is usable under ${theme}`, async ({ page }) => {
-      await page.goto(routeWithTheme(theme, "/login"));
-      await expect(page.locator("#auth-signed-out")).toBeVisible();
-      await expectTheme(page, theme);
-      // Primary control: the email-code "Email me a code" submit, the default front door (TM-234).
-      await expectControlUsable(page, page.locator("#emailcode-send-btn"));
-    });
-  }
-});
-
-// Signed-out theme switcher (TM-332). The in-app picker (TM-298) used to live ONLY on the Profile
-// page, so it was unreachable until you signed in (and in the Android WebView, where the ?theme= URL
-// override doesn't exist, there was NO way to change the theme). It's now also mounted on the login
-// card. This proves a SIGNED-OUT user can change the theme there, it applies live (no reload), and it
-// persists across a reload — using the real UI control, not the ?theme= override.
-test.describe("@theme signed-out user can change the theme from the login page", () => {
-  test("changing the login-card theme applies live and persists across reload", async ({ page }) => {
-    // Boot with NO override → config default (sketch). The login card is anonymous-reachable.
+// The login page is reachable anonymously — exercise it directly under Paper.
+test.describe("@theme login page renders under Paper", () => {
+  test("login is usable", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "sketch");
-
-    // The signed-out picker is the login-card instance (id-suffixed so it can co-exist with the
-    // profile one). Its <label> is bound to the <select>, so select-by-label proves the a11y wiring.
-    const select = page.locator("#theme-select-login");
-    await expectControlUsable(page, select);
-    await expect(page.getByLabel("Theme")).toBeVisible();
-
-    // Change to "clean" via the real control (a signed-out user driving the UI, not ?theme=).
-    await select.selectOption("clean");
-    await expectTheme(page, "clean"); // applied live, no reload
-    // Persisted to the same tm-theme override key the dev param writes.
-    await expect
-      .poll(() => page.evaluate(() => window.localStorage.getItem("tm-theme")))
-      .toBe("clean");
-
-    // Reload with NO ?theme= query — the persisted tm-theme override must still win over the config
-    // default, proving the signed-out change survives a relaunch (the WebView cold-start case).
-    await page.goto("/#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await expectTheme(page, "clean");
-    // The picker reflects the persisted choice on load.
-    await expect(page.locator("#theme-select-login")).toHaveValue("clean");
+    // Primary control: the email-code "Email me a code" submit, the default front door (TM-234).
+    await expectControlUsable(page, page.locator("#emailcode-send-btn"));
   });
 });
 
-// The authenticated pages (home, profile, admin) under both themes. One sign-in per theme, then
-// walk the three views. Sign in as ADMIN so the admin nav/view is available too.
-//
-// We load the override ONCE via the initial `?theme=` query, then move between views WITHOUT a full
-// page reload — by clicking nav links or setting the hash. This is both closer to real usage and
-// avoids the guard's brief sign-in bounce that a fresh deep-link load of a protected route incurs
-// (a full reload restores the Firebase session async, so the guard can flash #/login first). The
-// `?theme=` value lives in location.search, which survives hash navigation, and theme.js sets
-// data-theme once at boot — so the theme stays applied across the whole walk.
-test.describe("@theme authenticated pages render under both themes", () => {
-  for (const theme of THEMES) {
-    test(`home, profile and admin are usable under ${theme}`, async ({ page }) => {
-      // Sign in on the login route already carrying the override. As an ADMIN the guard lands us on
-      // the admin console (TM-141); we then navigate explicitly to each view below.
-      await page.goto(routeWithTheme(theme, "/login"));
-      await expect(page.locator("#auth-signed-out")).toBeVisible();
-      await expectTheme(page, theme);
-      await signInAsAdmin(page);
+// The authenticated pages (home, profile, admin) under Paper. One sign-in, then walk the views by
+// hash (no reload) — closer to real usage and avoids the guard's sign-in bounce on a deep-link load.
+test.describe("@theme authenticated pages render under Paper", () => {
+  test("home, profile and admin are usable", async ({ page }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
 
-      // HOME (#/home, #auth-signed-in). Navigate via the hash (no reload) and assert the home card
-      // plus a primary control (the Profile nav link, shown for any signed-in user).
-      await page.evaluate(() => (window.location.hash = "#/home"));
-      await expect(page.locator("#auth-signed-in")).toBeVisible();
-      await expectTheme(page, theme);
-      await expectControlUsable(page, page.locator("#nav-profile"));
+    // HOME.
+    await page.evaluate(() => (window.location.hash = "#/home"));
+    await expect(page.locator("#auth-signed-in")).toBeVisible();
+    await expectControlUsable(page, page.locator("#nav-profile"));
 
-      // PROFILE (#/profile) — reached by clicking the nav link, the real path a user takes. Wait for
-      // the async GET /me populate to settle before asserting (the form mounts empty and fills from
-      // that response — TM-198). Arm the wait BEFORE the click that triggers the mount GET.
-      const meLoaded = page.waitForResponse(
-        (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
-      );
-      await page.evaluate(() => (window.location.hash = "#/profile"));
-      await expect(page.locator("#profile-form")).toBeVisible();
-      await meLoaded;
-      await expectTheme(page, theme);
-      // Primary control: the Save changes submit button.
-      await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
+    // PROFILE — wait for the async GET /me populate before asserting (TM-198).
+    const meLoaded = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
+    );
+    await page.evaluate(() => (window.location.hash = "#/profile"));
+    await expect(page.locator("#profile-form")).toBeVisible();
+    await meLoaded;
+    await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
 
-      // ADMIN (#/admin) — navigate by hash (robust; avoids nav-link click-actionability flake). The
-      // console builds its table into #admin-view; assert the table renders and the target user's
-      // row is present (the view actually populated, not just an empty shell).
-      await page.evaluate(() => (window.location.hash = "#/admin"));
-      await expect(page.locator("#admin-view")).toBeVisible();
-      await expect(page.locator("#admin-table")).toBeVisible();
-      const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
-      await expect(targetRow).toBeVisible();
-      await expectTheme(page, theme);
-      // Primary control: the row's first action button — by role, NOT the "Disable" text. An earlier
-      // spec (admin-walkthrough) may have already disabled this user (shared emulator state), which
-      // flips the button to "Enable"; we only assert the row's primary action is usable.
-      await expectControlUsable(page, targetRow.getByRole("button").first());
-    });
-  }
+    // ADMIN — navigate by hash; assert the table populated with the target user's row.
+    await page.evaluate(() => (window.location.hash = "#/admin"));
+    await expect(page.locator("#admin-view")).toBeVisible();
+    await expect(page.locator("#admin-table")).toBeVisible();
+    const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
+    await expect(targetRow).toBeVisible();
+    await expectControlUsable(page, targetRow.getByRole("button").first());
+  });
+});
+
+// The two per-user Paper controls in profile settings — the heart of TM-529. Proves each applies LIVE
+// and PERSISTS SERVER-SIDE: after changing them we RELOAD, and appearance-sync re-reads the choice
+// from GET /api/v1/me (not localStorage) and re-applies it. This is the server round-trip, end to end.
+test.describe("@theme the accent swatch + wavy/sketchy toggle persist per user", () => {
+  test("changing the accent + toggle applies live and survives a reload", async ({ page }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+
+    // Open profile; wait for /me so the controls reflect the stored choice.
+    await page.evaluate(() => (window.location.hash = "#/profile"));
+    await expect(page.locator("#profile-form")).toBeVisible();
+    await page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "GET");
+
+    const appearance = page.locator("#appearance-settings");
+    await expectControlUsable(page, appearance);
+
+    // Turn the wavy/sketchy toggle OFF (→ clean Paper). Arm the PATCH wait before the click.
+    let patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
+    await page.locator("#appearance-sketchy").uncheck();
+    await patched;
+    await expect.poll(() => sketchyState(page)).toBe("off"); // applied live, no reload
+
+    // Pick the coral accent swatch (→ re-tints --accent live + persists).
+    patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
+    await page.locator('.tm-swatch[data-accent="coral"]').click();
+    await patched;
+    await expect.poll(() => inlineAccent(page)).toBe("#d1495b");
+
+    // RELOAD with no ?theme= trick — the persisted choice must be re-read from the server and applied.
+    await page.goto("/#/login");
+    // Warm session restores; appearance-sync fires on auth-resolve and reads GET /me.
+    await page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "GET");
+    await expect.poll(() => sketchyState(page)).toBe("off");
+    await expect.poll(() => inlineAccent(page)).toBe("#d1495b");
+
+    // Restore the defaults so the shared emulator account doesn't leak state into other specs.
+    await page.evaluate(() => (window.location.hash = "#/profile"));
+    await expect(page.locator("#appearance-settings")).toBeVisible();
+    patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
+    await page.locator("#appearance-sketchy").check();
+    await patched;
+    patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
+    await page.locator('.tm-swatch[data-accent="teal"]').click();
+    await patched;
+  });
 });

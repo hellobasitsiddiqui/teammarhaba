@@ -15,18 +15,13 @@
 // the same way it injects `apiBaseUrl` (TM-142), so the live first page can show which build it
 // is — and reveal a stale surface at a glance.
 //
-// `theme` selects the app-wide visual family (TM-210). It's the `data-theme` axis that scopes the
-// CSS token contract in styles.css; theme.js reads it here at boot and sets it on <html>. The
-// default is now "sketch" (TM-323) — the hand-drawn pencil-sketch WIREFRAME look ("napkin mockup":
-// grayscale, sketchy borders/buttons) — so an UNCONFIGURED deploy looks like the product-direction
-// MVP. The deploy injects the real per-environment value over it (TM-212), the same seam as
-// `apiBaseUrl`/`buildVersion` above; `clean` and `doodle` stay fully selectable (set theme/THEME =
-// "clean"|"doodle"), and any unknown value falls back to "sketch" in theme.js, so a bad config
-// never breaks the page (never blank).
+// NOTE (TM-529): there is no longer a `theme` config key. The multi-theme family system
+// (clean/doodle/sketch) is retired — Paper is the single app theme. The only look the user can
+// change is now PER-USER, from profile settings: the accent swatch + the wavy/sketchy toggle,
+// persisted server-side (see appearance.js / appearance-settings.js). Nothing app-wide to configure.
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
     storageEmulatorHost: null,
     buildVersion: "dev",
-    theme: "sketch",
 });

@@ -19,4 +19,6 @@ public record ProfileUpdate(
         String phone,
         NotificationPref notificationPref,
         String timezone,
-        String locale) {}
+        String locale,
+        String themeAccent,
+        Boolean themeSketchy) {}

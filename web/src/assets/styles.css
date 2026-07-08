@@ -1,20 +1,24 @@
 /*
- * ===== Theme token contract (TM-210, extends TM-133) =====
+ * ===== Paper token contract (TM-529; supersedes the TM-210 multi-theme system) =====
  *
- * Two independent axes drive the look, and they compose:
- *   • dark / light   — TM-133 axis, chosen by the OS via `@media (prefers-color-scheme: dark)`.
- *   • theme family    — TM-210 axis, chosen by config and reflected as `[data-theme="<name>"]` on
- *                        <html> by theme.js. Allowed: "clean" | "doodle" | "sketch" (sketch is the
- *                        default since TM-323).
+ * Paper is the SINGLE app theme. The old multi-theme family axis (`clean`/`doodle`/`sketch`,
+ * TM-210/213/236/323) is retired — there is no more `data-theme` switch. Two independent axes now
+ * drive the look, and they compose:
+ *   • dark / light  — TM-133 axis, chosen by the OS via `@media (prefers-color-scheme: dark)`.
+ *   • wavy / clean  — TM-529 axis, a PER-USER toggle reflected as `[data-sketchy="on"|"off"]` on
+ *                     <html> by appearance.js. `on` (the default) adds the hand-drawn wobble skin,
+ *                     the ruled-paper grid, the irregular hand-drawn corners and the doodle
+ *                     decorations; `off` is clean Paper (crisp straight edges, no grid/doodles).
  *
- * The base `:root` below holds the token contract — colours, fonts, radii, borders, surfaces.
- * These ARE the "clean" theme: it needs no override block, so an unset/unknown config (which
- * theme.js resolves to "clean") renders exactly today's look — no visual change.
+ * The base `:root` below holds the whole Paper token contract — colours, the hand-lettered faces,
+ * radii, inky borders, paper surfaces. It renders fully on its own (that's clean Paper). The
+ * `[data-sketchy="on"]` blocks further down layer the hand-drawn character on top; nothing else
+ * changes the palette.
  *
- * To add a theme family:  add a `[data-theme="<name>"]` block (and its dark variant under the
- * media query) that overrides only the tokens it changes; everything else inherits these defaults.
- * Components must read tokens via `var(--token)` only — never hard-code a themed value — so a new
- * family is a pure token swap with no component edits.
+ * PER-USER ACCENT (TM-529): `--accent` is the one colour a user personalises, from a fixed curated
+ * palette (the `--accent-paper-*` swatch tokens below). Picking a swatch re-points `--accent` (and
+ * `--on-accent`) live via an inline style on <html> (appearance.js), so the whole Paper theme
+ * re-tints from one token — every component reads `var(--accent)`, never a hard-coded colour.
  */
 :root {
     color-scheme: light dark;
@@ -22,11 +26,11 @@
     /* ═══ Design-kit PRIMITIVES (TM-510) — the single authoritative source of truth ══════════════
        Reconciles the shipped theme tokens (TM-210/211/236/323) with the approved wireframe kit
        (docs/design/wireflows + blunt.css). These are RAW values — a neutral/ink ramp, a spacing
-       scale and a type scale. The SEMANTIC tokens further down and the per-theme `[data-theme]`
-       blocks ALIAS these primitives; components must read a semantic token (`--fg`, `--surface`,
-       `--space-*`, `--fs-*`, …) via `var()`, never a raw hex/px — so a theme stays a pure token swap.
-       `clean` keeps its historic coloured palette; the grayscale ramp is what the `sketch` (default)
-       and `doodle` wireframe families resolve their neutrals from. Full reference (name → value →
+       scale and a type scale. The SEMANTIC Paper tokens further down ALIAS these primitives;
+       components must read a semantic token (`--fg`, `--surface`, `--space-*`, `--fs-*`, …) via
+       `var()`, never a raw hex/px — so the look stays a pure token swap. Paper (the single theme,
+       TM-529) resolves its neutrals from the grayscale ramp; the one coloured token is the per-user
+       accent (a curated palette, re-pointed at runtime). Full reference (name → value →
        usage): docs/design/design-tokens.md. ══════════════════════════════════════════════════════ */
 
     /* Neutral / ink ramp — grayscale, lightest → darkest (the wireframe kit palette). */
@@ -49,12 +53,13 @@
     --space-6: 2rem;
     --space-7: 3rem;
 
-    /* Type scale — one body face (Inter/system) plus two hand faces the wireframe themes swap in.
-       `--font-display` = headings/buttons, `--font-accent` = taglines/script accents; `clean` keeps
-       them equal to the body face (no visual change), doodle/sketch override them (see those blocks).
-       `--fs-*` are the size steps the headings/body already use. */
-    --font-display: var(--font-sans);
-    --font-accent: var(--font-sans);
+    /* Type scale — the Paper hand-lettered faces (TM-529). Paper is the single theme, so the hand
+       faces are the base type contract, not a per-theme override: `--font-sans` = Patrick Hand body,
+       `--font-display` = Gochi Hand for headings/buttons, `--font-accent` = Shadows Into Light for
+       taglines/script accents. All degrade to the system stack if the web fonts don't load (loaded
+       in index.html). `--fs-*` are the size steps the headings/body already use. */
+    --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+    --font-accent: "Shadows Into Light", "Patrick Hand", cursive;
     --fs-1: 0.75rem;    /* fine print / meta */
     --fs-2: 0.875rem;   /* secondary body */
     --fs-3: 1rem;       /* body */
@@ -63,56 +68,72 @@
     --fs-6: 2rem;       /* page heading */
     --fs-hero: 2.5rem;  /* the landing wordmark (.app h1) */
 
-    /* ═══ SEMANTIC tokens — `clean` == the base contract; alias the primitives above ═════════════ */
-    --fg: #1a1a2e;
-    --accent: #0f9d8c;
+    /* ═══ SEMANTIC tokens — the Paper contract (TM-529): graphite ink on off-white paper, one ═════
+       curated colour accent. Aliases the primitives above; components read these, never a raw hex. */
+    --fg: var(--ink);             /* graphite pencil ink — Paper's primary ink */
+
+    /* ── Curated Paper accent palette (TM-529) ─────────────────────────────────────────────────
+       The FIXED set of accent swatches a user may pick (no free colour picker). Every swatch is a
+       mid-to-deep tone chosen to stay legible against the off-white Paper surfaces both as a fill
+       (with --on-accent) and as link/heading text. The default (teal) IS the shipped TM-510
+       --accent. appearance-core.js mirrors these exact hexes; the picker re-points --accent (and
+       --on-accent) to the chosen swatch inline on <html>, so the whole theme re-tints from here. */
+    --accent-paper-teal: #0f9d8c;
+    --accent-paper-indigo: #4f46e5;
+    --accent-paper-coral: #d1495b;
+    --accent-paper-amber: #b45309;
+    --accent-paper-plum: #7c3aed;
+    --accent-paper-ink: #2b2b2b;
+    --accent: var(--accent-paper-teal);   /* default swatch (teal) — re-pointed per user (TM-529) */
     --accent-light: color-mix(in srgb, var(--accent) 45%, var(--white));  /* lightened accent for fills/hovers */
-    /* Type + shape tokens (TM-210) — part of the contract themes may override. Defaults match the
-       current look (system font stack, the radii/borders already used across the UI below). */
-    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    /* Type + shape tokens. `--font-sans` is Patrick Hand (the Paper body face); the crisp radii
+       below are clean-Paper corners — `[data-sketchy="on"]` overrides them to irregular hand-drawn
+       ones. Borders are 2px inky Paper lines. */
+    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
     --radius: 8px;
     --radius-lg: 12px;
-    --border-width: 1px;
-    --page-bg: #f6f7fb;
+    --border-width: 2px;
+    --page-bg: var(--g1);         /* off-white paper (the sketchy grid layers on top via `body`) */
 
     /* ── Shape scale (TM-211) ──────────────────────────────────────────────────────────────────
-       The remaining radii used across the UI, named so a theme can reshape every corner at once.
-       `clean` keeps today's exact values. (Geometric 50% circles stay literal — they're aspect,
-       not theme.) `--radius`/`--radius-lg` above complete this scale. */
+       The remaining radii used across the UI, named so the corners can be reshaped at once. These
+       are the crisp clean-Paper corners; the sketchy toggle swaps in irregular ones. (Geometric
+       50% circles stay literal — they're aspect, not theme.) */
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-pill: 999px;
 
     /* ── Foreground-on-accent (TM-211) ─────────────────────────────────────────────────────────
-       Text/icons sitting on an `--accent` (or danger/success) fill. White today; a theme with a
-       light accent can flip it without touching every button. */
+       Text/icons sitting on an `--accent` (or danger/success) fill. White for the default swatch;
+       the picker flips it to paper for the light/ink swatches so labels stay legible on the fill. */
     --on-accent: #fff;
 
     /* ── Tint helpers (TM-211) ─────────────────────────────────────────────────────────────────
-       Translucent washes the UI used as literal rgba()s, re-expressed against the colour tokens
-       they were derived from so they track the theme. `color-mix(... X%, transparent)` is exactly
-       equivalent to `rgba(<token-rgb>, X)` — same pixels under `clean`, now themeable. */
-    --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);   /* nav-button hover wash */
-    --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);  /* nav-button border */
-    --fg-line: color-mix(in srgb, var(--fg) 10%, transparent);          /* auth-card border */
-    --fg-line-strong: color-mix(in srgb, var(--fg) 20%, transparent);   /* input border */
-    --fg-line-stronger: color-mix(in srgb, var(--fg) 25%, transparent); /* google-button border */
+       Inky Paper lines/washes, derived from the ink token so they track the theme. The nav-button
+       border/hover are ink (not the accent) so all Paper chrome shares one 2px ink line; the accent
+       colour shows through fills and text instead. */
+    --accent-soft: color-mix(in srgb, var(--fg) 7%, transparent);       /* nav-button hover wash */
+    --accent-line: color-mix(in srgb, var(--fg) 72%, transparent);      /* nav-button border */
+    --fg-line: color-mix(in srgb, var(--fg) 58%, transparent);          /* auth-card border */
+    --fg-line-strong: color-mix(in srgb, var(--fg) 72%, transparent);   /* input border */
+    --fg-line-stronger: color-mix(in srgb, var(--fg) 82%, transparent); /* google-button border */
 
     /* ── Status colours (TM-211) ───────────────────────────────────────────────────────────────
-       Success was a bare hex in three spots; `--danger` already exists (below). Named here so the
-       "ok" badge / success toast follow the theme's palette. */
+       Paper is a coloured theme, so success/danger keep their hue (unlike the retired grayscale
+       sketch family). */
     --success: #0a7d57;
 
     /* ── Elevation + overlay (TM-211) ──────────────────────────────────────────────────────────
-       The shadow ramp + the dim used behind modals/tour. Tokenised so a flatter/heavier theme can
-       restyle depth globally; `clean` keeps the exact prior shadows. */
-    --shadow-sm: 0 1px 3px color-mix(in srgb, var(--fg) 8%, transparent);
-    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.18);
-    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.3);
-    --shadow-menu: 0 6px 20px rgba(0, 0, 0, 0.22);
+       Flat, inky OFFSET shadows in the pencil colour — the Paper "sketched drop-shadow" (TM-529).
+       `--shadow-card` (below) keeps its soft ambient for the raised content cards. */
+    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 16%, transparent);
+    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 24%, transparent);
+    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
     --shadow-card: 0 6px 24px rgba(0, 0, 0, 0.06);  /* soft raised-card ambient (onboarding / help / diagnostics cards) */
-    --overlay: rgba(0, 0, 0, 0.45);  /* modal backdrop */
-    --overlay-strong: rgba(0, 0, 0, 0.55);  /* tour spotlight + dim */
+    --overlay: color-mix(in srgb, var(--fg) 40%, transparent);   /* modal backdrop */
+    --overlay-strong: color-mix(in srgb, var(--fg) 50%, transparent);  /* tour spotlight + dim */
 }
 
 * {
@@ -135,7 +156,7 @@
  *
  * Mobile-feel polish for every tappable control (buttons, links, the nav hamburger, label-wrapped
  * inputs). Theme-safe: it sets no colours and no geometry that a theme owns — only interaction
- * behaviour — so clean / doodle / sketch are all unaffected visually.
+ * behaviour — so any accent + both toggle states are all unaffected visually.
  *
  *   • `touch-action: manipulation` removes the legacy ~300ms tap delay and the double-tap-to-zoom
  *     gesture on these controls, so a tap registers immediately (the single biggest "unresponsive"
@@ -156,8 +177,8 @@ label.field,
 
 /*
  * Immediate pressed feedback (TM-305). A tiny scale-down on `:active` reads as a physical press the
- * instant the finger lands — no colour change, so it composes with every theme (including the doodle
- * / sketch `filter: url(#wobble-soft)` on buttons, since transform and filter stack). Dropped under
+ * instant the finger lands — no colour change, so it composes with the sketchy wobble
+ * (`filter: url(#wobble-soft)` on buttons, since transform and filter stack). Dropped under
  * reduced-motion. transform-only keeps it cheap (compositor) and theme-neutral.
  */
 button:active:not(:disabled),
@@ -229,7 +250,7 @@ body {
 }
 
 /* Attribution byline (TM-254) — subtle, secondary-text credit on its own footer line. Uses theme
-   tokens only (--muted / --fg), so it renders correctly under clean / doodle / sketch. The link is
+   tokens only (--muted / --fg), so it renders correctly under any accent + both toggle states. The link is
    muted (not accent) so it reads as a quiet credit, not a primary action; it brightens to --fg on
    hover/focus. Its own line + margin so it never disturbs the build-stamp / privacy lines above. */
 .app-byline {
@@ -250,7 +271,7 @@ body {
 
 /* "Get the app" store badges (TM-276) — a small Android + iOS badge pair in the footer.
    Built from theme tokens ONLY (surfaces, borders, --fg/--muted, the radius/border scale), so the
-   pair renders correctly across clean / doodle / sketch with no hard-coded colours and no external
+   pair renders correctly across any accent + both toggle states with no hard-coded colours and no external
    badge images (CSP/offline-safe inline SVG glyphs). Its own footer block above the build/privacy
    lines, centred to match the rest of the footer. */
 .app-store-badges {
@@ -412,7 +433,7 @@ body {
 
 /* TM-431: login welcome header — a centered brand mark + heading + supporting lead, adapting the
    design-kit hero/CTA pattern into the login card. Presentational only, token-driven so it renders
-   correctly across clean / doodle / sketch. The header is centered for a warm "front door" hierarchy;
+   correctly across any accent + both toggle states. The header is centered for a warm "front door" hierarchy;
    the form fields below stay left-aligned for scanning. */
 .auth-head {
     display: flex;
@@ -422,8 +443,7 @@ body {
     text-align: center;
 }
 
-/* The mark is drawn with currentColor, so `color` themes it: brand accent under clean/doodle,
-   graphite pencil under sketch. */
+/* The mark is drawn with currentColor, so `color` inks it with the Paper foreground token. */
 .auth-mark {
     color: var(--accent);
 }
@@ -532,7 +552,7 @@ body {
 /* TM-305: the "Try another way" alternative blocks were bare <fieldset>s — default UA fieldset
    margin/border/padding didn't match the card and could nudge content off-centre / overflow on a
    narrow phone. Normalise them to the card's own rhythm with a light themed divider. Layout + token
-   colours only, so clean / doodle / sketch all stay correct. */
+   colours only, so any accent + both toggle states all stay correct. */
 .auth-alt {
     margin: 0;
     padding: 0.75rem;
@@ -586,29 +606,29 @@ body {
 
 /* ===== Admin console + reusable UI primitives (TM-133) ===== */
 
-/* Theme surfaces — honour dark/light. Light defaults here, dark via prefers-color-scheme. These
-   surface/border/muted tokens are part of the TM-210 contract a theme family may override. */
+/* Paper surfaces — off-white paper, honouring dark/light. Light defaults here, dark via
+   prefers-color-scheme. These surface/border/muted tokens are part of the Paper contract; the
+   inky `--border` is derived from the ink token so it tracks light/dark automatically (TM-529). */
 :root {
-    --surface: #ffffff;
-    --surface-2: #f1f2f8;
-    --border: rgba(26, 26, 46, 0.12);
-    --muted: rgba(26, 26, 46, 0.6);
+    --surface: var(--g1);         /* off-white paper */
+    --surface-2: var(--g2);
+    --border: color-mix(in srgb, var(--fg) 72%, transparent);  /* 2px inky Paper line */
+    --muted: var(--g5);
     --danger: #b00020;
-    /* Auth surfaces (card/inputs/Google button) are intentionally white in BOTH light and dark
-       today — they get no dark override below — so this is a distinct token from `--surface`,
-       which does darken. Tokenised (TM-211) so a theme can restyle the sign-in chrome; `clean`
-       keeps it white everywhere, preserving the exact current look. */
-    --surface-card: #fff;
+    --surface-card: var(--white); /* crisp white cards so the sketchy grid shows through the page */
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --fg: #e8e8f0;
-        --surface: #20202e;
-        --surface-2: #181822;
-        --border: rgba(255, 255, 255, 0.14);
-        --muted: rgba(232, 232, 240, 0.6);
-        --page-bg: #12121a;
+        /* Paper in the dark = pencil-on-slate: pale ink on near-black paper. --border/--accent-line
+           inherit the ink-derived color-mixes above and re-resolve against the pale --fg, so they
+           stay legible without an explicit override. The accent stays coloured (Paper is coloured). */
+        --fg: #e6e6e6;
+        --surface: #1a1a1a;
+        --surface-2: #242424;
+        --surface-card: #202020;
+        --muted: rgba(230, 230, 230, 0.62);
+        --page-bg: #1a1a1a;
     }
 
     body {
@@ -617,146 +637,37 @@ body {
 }
 
 /*
- * The "clean" theme family (TM-210). It deliberately adds NO overrides — it inherits every token
- * from the base `:root` above, so it equals the current look. This empty-by-design block is the
- * documented seam: a sibling family like `[data-theme="doodle"] { --accent: …; --font-sans: …; }`
- * (plus its dark variant) drops in alongside it and changes the whole app via tokens alone.
- */
-[data-theme="clean"] {
-    /* intentionally empty — clean == the base :root token contract */
-}
-
-/*
- * ===== The "doodle" theme family (TM-213) =====
+ * ===== Paper heading + tagline faces (TM-529) =====
  *
- * A hand-drawn, black-&-white "social events" skin. It is purely a TOKEN OVERRIDE plus a reusable
- * "wobble" filter: by re-pointing the same TM-210/TM-211 tokens the components already read via
- * `var(--token)`, the WHOLE app restyles with no per-component edits. `clean` is untouched — every
- * rule below is scoped to `[data-theme="doodle"]` (and doodle-only assets live in index.html).
- *
- * Palette: ink (#161616) on paper (#f6f2e9), B&W only; cards/inputs a touch lighter paper.
- * Fonts: hand-lettered Google fonts (loaded in index.html, degrade to system) — Gochi Hand for
- * headings/buttons, Patrick Hand for body, Shadows Into Light for accents.
- * Shape: sketchy ~2.5–3px ink borders + slightly irregular radii.
- * Wobble: an SVG feTurbulence + feDisplacementMap filter (defs in index.html) applied to the
- * chrome (cards / inputs / buttons / dividers) — decorative only, never on text, and reduced /
- * dropped under `prefers-reduced-motion` (see the media query at the end of this block).
+ * Paper is the single theme, so the hand-lettered display/accent faces are UNCONDITIONAL (they were
+ * per-theme in the retired multi-theme system). Headings/buttons pick up the Gochi Hand
+ * display face; taglines + the build stamp pick up the Shadows Into Light accent face. The text
+ * itself is never wobbled — only chrome edges are (the sketchy skin below). `--font-sans` (Patrick
+ * Hand) is the body face, set on :root. All degrade to the system stack if the web fonts don't load.
  */
-[data-theme="doodle"] {
-    /* ── Palette: ink on paper, black & white only ──────────────────────────────────────────── */
-    --fg: #161616;
-    --accent: #161616;            /* no colour — links/buttons are ink, distinguished by shape/weight */
-    --on-accent: #f6f2e9;         /* paper text sits on ink fills */
-    --page-bg: #f6f2e9;
-    --surface: #f6f2e9;
-    --surface-2: #efe9da;
-    --surface-card: #faf7ef;      /* cards/inputs a touch lighter paper */
-    --muted: #5a5650;
-    --danger: #161616;            /* B&W only — danger reads via copy/weight, not hue */
-    --success: #161616;
-
-    /* Sketchy ink lines (re-derived against the ink token so washes still track the theme). */
-    --border-width: 2.5px;
-    --border: color-mix(in srgb, var(--fg) 85%, transparent);
-    --fg-line: color-mix(in srgb, var(--fg) 80%, transparent);
-    --fg-line-strong: color-mix(in srgb, var(--fg) 85%, transparent);
-    --fg-line-stronger: color-mix(in srgb, var(--fg) 90%, transparent);
-    --accent-line: color-mix(in srgb, var(--fg) 85%, transparent);
-    --accent-soft: color-mix(in srgb, var(--fg) 8%, transparent);
-
-    /* Irregular, hand-drawn corners — asymmetric horizontal/vertical radii read as "wobbly". */
-    --radius-sm: 10px 8px 12px 7px / 8px 12px 7px 10px;
-    --radius: 14px 11px 16px 10px / 12px 16px 10px 14px;
-    --radius-md: 16px 13px 18px 12px / 13px 18px 12px 16px;
-    --radius-lg: 20px 15px 22px 16px / 16px 22px 16px 20px;
-    --radius-pill: 999px;
-
-    /* Hand-lettered fonts; system stack as the graceful fallback if the web fonts don't load. Aliased
-       into the type-scale tokens so headings/buttons/taglines read one source (used by the rules below). */
-    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
-    --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
-    --font-accent: "Shadows Into Light", "Patrick Hand", cursive;
-
-    /* Flatter, inkier depth than clean's soft drop-shadows. */
-    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 22%, transparent);
-    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 28%, transparent);
-    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 30%, transparent);
-    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 26%, transparent);
-    --overlay: color-mix(in srgb, var(--fg) 45%, transparent);
-    --overlay-strong: color-mix(in srgb, var(--fg) 55%, transparent);
-
-    /* Faint paper grain (a tiny inline SVG noise data-URI at low opacity). Decorative background;
-       text contrast (ink #161616 on paper #f6f2e9 ≈ 16:1) stays well above WCAG AAA. */
-    background-image:
-        radial-gradient(transparent, color-mix(in srgb, var(--fg) 1.5%, transparent)),
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");
-}
-
-/* Dark variant: doodle is paper-on-ink in dark mode (still strictly B&W, contrast preserved). */
-@media (prefers-color-scheme: dark) {
-    [data-theme="doodle"] {
-        --fg: #f3eee2;
-        --accent: #f3eee2;
-        --on-accent: #161616;
-        --page-bg: #14130f;
-        --surface: #1b1a15;
-        --surface-2: #14130f;
-        --surface-card: #211f19;
-        --muted: rgba(243, 238, 226, 0.6);
-    }
-}
-
-/*
- * The reusable "wobble" skin (TM-213) — decorative hand-drawn jitter. `#wobble-soft` is an SVG
- * filter defined in index.html. We apply it to surfaces, dividers, AND to text-bearing controls
- * (buttons, nav buttons, inputs), so it applies a mild whole-element displacement to those controls
- * and does lightly warp their labels — keep the filter's `scale` ≤ ~2.5 so labels stay legible. It
- * is dropped under reduced-motion. The `.tm-wobble` / `.tm-wobble-soft` utility classes let future
- * doodle markup opt in explicitly.
- */
-[data-theme="doodle"] .tm-wobble,
-[data-theme="doodle"] .auth-card,
-[data-theme="doodle"] .tm-modal,
-[data-theme="doodle"] .tm-menu {
-    filter: url("#wobble-soft");
-}
-
-[data-theme="doodle"] .tm-wobble-soft,
-[data-theme="doodle"] .field input,
-[data-theme="doodle"] .tm-input,
-[data-theme="doodle"] .auth button,
-[data-theme="doodle"] .app-nav button,
-[data-theme="doodle"] .tm-btn,
-[data-theme="doodle"] .auth-mark,
-[data-theme="doodle"] hr {
-    filter: url("#wobble-soft");
-}
-
-/* Headings/logo + accents pick up the hand-lettered display faces (text itself is NOT wobbled). */
-[data-theme="doodle"] .app h1,
-[data-theme="doodle"] h2,
-[data-theme="doodle"] h3,
-[data-theme="doodle"] .auth button,
-[data-theme="doodle"] .app-nav button,
-[data-theme="doodle"] .tm-btn {
+.app h1,
+h2,
+h3,
+.auth button,
+.app-nav button,
+.tm-btn {
     font-family: var(--font-display);
     letter-spacing: 0.3px;
 }
 
-[data-theme="doodle"] .tagline,
-[data-theme="doodle"] .build-info {
+.tagline,
+.build-info {
     font-family: var(--font-accent);
 }
 
 /*
- * Doodle asset pack sizing (TM-214). The inline SVG line-art doodles (assets/doodles.js) ink with
- * the theme because they're authored with `stroke="currentColor"`, so they inherit `color` from
- * wherever they're mounted — no colour set here. These rules only own SIZE/SPACING and are scoped to
- * `[data-theme="doodle"]`, so the pack is inert on `clean` (where the doodles aren't mounted anyway —
- * TM-215 mounts them doodle-only). `tm-doodle` is the base class every builder sets; `.tm-doodle-*`
- * are optional size variants a page can add.
+ * Doodle asset pack sizing (TM-214/215), now part of the hand-drawn sketchy Paper look (TM-529). The
+ * inline SVG line-art doodles (assets/doodles.js) ink with `--fg` because they're authored with
+ * `stroke="currentColor"`. They are decorative, so they show ONLY when the sketchy toggle is on and
+ * are hidden in clean Paper (the hide rule below). `tm-doodle` is the base class every builder sets;
+ * `.tm-doodle-*` are optional size variants a page can add.
  */
-[data-theme="doodle"] .tm-doodle {
+[data-sketchy="on"] .tm-doodle {
     display: inline-block;
     vertical-align: middle;
     color: var(--fg);              /* ink — currentColor in the SVG resolves to this */
@@ -765,14 +676,14 @@ body {
 }
 
 /* A header flourish: a modest doodle beside a heading. */
-[data-theme="doodle"] .tm-doodle-header {
+[data-sketchy="on"] .tm-doodle-header {
     width: 56px;
     margin-inline-end: 0.6rem;
     opacity: 0.92;
 }
 
 /* An empty-state hero (e.g. "no events yet"): a larger, gently faded centrepiece. */
-[data-theme="doodle"] .tm-doodle-empty {
+[data-sketchy="on"] .tm-doodle-empty {
     display: block;
     width: clamp(96px, 28vw, 160px);
     margin: 0 auto 1rem;
@@ -780,7 +691,7 @@ body {
 }
 
 /* A full-width section divider (the squiggle): stretches, ink at reduced weight. */
-[data-theme="doodle"] .tm-doodle-divider {
+[data-sketchy="on"] .tm-doodle-divider {
     display: block;
     width: 100%;
     height: auto;
@@ -789,132 +700,58 @@ body {
 }
 
 /*
- * Doodle placement (TM-215). The TM-214 doodles are wired into the real pages (landing/login/home
- * headers, the profile + admin heads, and the admin/profile empty states). They are decorative only,
- * so they must show ONLY under the doodle theme: every builder sets the base `tm-doodle` class, so
- * this single rule hides every mounted doodle whenever <html> isn't `[data-theme="doodle"]`. That
- * keeps `clean` byte-for-byte the current look even though the nodes are present in the DOM — no
- * per-page forks, no JS branching on the theme. Under doodle, the `.tm-doodle-*` size variants above
- * take over.
+ * Doodle visibility (TM-529). The doodles are wired into the real pages (landing/login/home headers,
+ * the profile + admin heads, and the admin/profile empty states) but are decorative: every builder
+ * sets the base `tm-doodle` class, so this single rule hides every mounted doodle whenever the
+ * sketchy toggle is OFF (clean Paper). No per-page forks, no JS branching. Under sketchy, the
+ * `.tm-doodle-*` size variants above take over.
  */
-:root:not([data-theme="doodle"]) .tm-doodle {
+:root:not([data-sketchy="on"]) .tm-doodle {
     display: none;
 }
 
 /* Header flourish: let a heading host an inline doodle beside its text without disturbing the
- * existing flex head layouts. Only meaningful under doodle (the doodle is hidden otherwise). */
-[data-theme="doodle"] h1:has(.tm-doodle-header),
-[data-theme="doodle"] h2:has(.tm-doodle-header) {
+ * existing flex head layouts. Only meaningful under sketchy (the doodle is hidden otherwise). */
+[data-sketchy="on"] h1:has(.tm-doodle-header),
+[data-sketchy="on"] h2:has(.tm-doodle-header) {
     display: inline-flex;
     align-items: center;
 }
 
 /* Empty / error states: centre the doodle hero over its explanatory line (admin "No users yet",
- * profile load error). Inert on clean (the doodle is hidden, the text stays left as before). */
-[data-theme="doodle"] .tm-empty {
+ * profile load error). Inert in clean Paper (the doodle is hidden, the text stays left as before). */
+[data-sketchy="on"] .tm-empty {
     text-align: center;
 }
 
 /*
- * A11y — reduced motion (TM-213). The wobble is purely decorative. Users who ask for reduced
- * motion get the displacement removed entirely (the filter is dropped), so corners render as the
- * plain irregular CSS radii with no SVG jitter; fonts/palette/borders are unaffected.
+ * ===== The sketchy (wavy) Paper skin — the per-user "wavy/sketchy" toggle, ON by default (TM-529) =====
+ *
+ * When `[data-sketchy="on"]` is on <html> (appearance.js; the default for a new user), Paper gains its
+ * hand-drawn character on top of the base palette: irregular hand-drawn corners, a faint ruled-paper
+ * grid behind everything, the doodle decorations (above), and the reusable `#wobble-soft` SVG filter
+ * (defs in index.html) on the chrome for a hand-drawn edge. `[data-sketchy="off"]` is CLEAN Paper —
+ * crisp straight edges, no grid, no doodles, no wobble. This is a purely ADDITIVE layer: the palette
+ * (including the per-user `--accent`) is identical in both states, so every screen renders correctly
+ * whichever way the toggle is set, under any swatch. Decorative only; dropped under reduced motion.
  */
-@media (prefers-reduced-motion: reduce) {
-    [data-theme="doodle"] .tm-wobble,
-    [data-theme="doodle"] .tm-wobble-soft,
-    [data-theme="doodle"] .auth-card,
-    [data-theme="doodle"] .tm-modal,
-    [data-theme="doodle"] .tm-menu,
-    [data-theme="doodle"] .field input,
-    [data-theme="doodle"] .tm-input,
-    [data-theme="doodle"] .auth button,
-    [data-theme="doodle"] .app-nav button,
-    [data-theme="doodle"] .tm-btn,
-    [data-theme="doodle"] .tm-doodle.tm-wobble-soft,
-    [data-theme="doodle"] hr {
-        filter: none;
-    }
-}
-
-/*
- * ===== The "sketch" wireframe theme family — the DEFAULT (TM-236; default since TM-323) =====
- *
- * The hand-drawn pencil-sketch WIREFRAME look — a grayscale "napkin mockup": graphite pencil ink on
- * off-white paper, sketchy borders/buttons, hand-lettered faces, and a faint ruled GRID behind
- * everything (reuses the `#wobble-soft` SVG filter for the hand-drawn edge). This is the product
- * direction, so it's the unconfigured default (TM-323). `clean` and `doodle` stay selectable.
- *
- * Like doodle, this is a pure TOKEN OVERRIDE: it re-points the same TM-210/TM-211 tokens every
- * component already reads via `var(--token)`, so the WHOLE app restyles with no per-page edits.
- * `clean` and `doodle` are untouched — every rule below is scoped to `[data-theme="sketch"]`.
- *
- * Palette (TM-323): strictly GRAYSCALE — graphite pencil ink (#2b2b2b) on off-white paper (#fafafa),
- * no hue, to read as a pencil wireframe / napkin mockup. Ink on paper ≈ 14:1, well above WCAG AAA,
- * so copy stays crisp over the faint ruling (grid lines sit at ~6–9% ink, far below text). `danger`
- * keeps a desaturated red so destructive copy still reads, but the chrome is monochrome graphite.
- * Fonts: reuse the hand-lettered faces already loaded in index.html (Patrick Hand body, Gochi Hand
- * for headings/buttons) to keep the pencil-wireframe feel; degrade to the system stack.
- * Shape: sketchy ~2px graphite borders + slightly irregular radii (a touch tighter than doodle).
- * Wobble: reuses the SAME `#wobble-soft` SVG filter (defs in index.html) on the chrome — decorative
- * only, never relied on for meaning, and dropped under `prefers-reduced-motion` (media query below).
- */
-[data-theme="sketch"] {
-    /* ── Palette: graphite pencil ink on off-white paper, grayscale only ─────────────────────────
-       Resolved from the design-kit neutral ramp (the `:root` primitives, TM-510) — the aliases below
-       are byte-for-byte the previous literals (--ink #2b2b2b, --g1 #fafafa, --g2 #f0f0f0, --white #fff,
-       --g5 #6a6a6a), so the wireframe look is unchanged; it now flows from the single source of truth. */
-    --fg: var(--ink);             /* graphite pencil ink */
-    --accent: var(--ink);         /* no colour — links/buttons are graphite, distinguished by shape/weight */
-    --on-accent: var(--g1);       /* paper text sits on graphite fills */
-    --page-bg: var(--g1);         /* off-white paper (the ruling is layered on top via `body`) */
-    --surface: var(--g1);
-    --surface-2: var(--g2);
-    --surface-card: var(--white); /* cards/inputs crisp white so the ruling shows through the page */
-    --muted: var(--g5);
-    --danger: #8a2b2b;            /* a desaturated red still reads in a grayscale wireframe (off-ramp on purpose) */
-    --success: var(--ink);        /* grayscale — success reads via copy/weight, not hue */
-
-    /* Sketchy pencil lines, re-derived against the ink token so washes track the theme. */
-    --border-width: 2px;
-    --border: color-mix(in srgb, var(--fg) 72%, transparent);
-    --fg-line: color-mix(in srgb, var(--fg) 58%, transparent);
-    --fg-line-strong: color-mix(in srgb, var(--fg) 72%, transparent);
-    --fg-line-stronger: color-mix(in srgb, var(--fg) 82%, transparent);
-    --accent-line: color-mix(in srgb, var(--fg) 72%, transparent);
-    --accent-soft: color-mix(in srgb, var(--fg) 7%, transparent);
-
-    /* Irregular, hand-drawn corners (a touch tighter than doodle so it reads "wireframe"). */
+[data-sketchy="on"] {
+    /* Irregular, hand-drawn corners (override the crisp base radii from :root). */
     --radius-sm: 7px 5px 8px 5px / 5px 8px 5px 7px;
     --radius: 9px 7px 10px 6px / 7px 10px 6px 9px;
     --radius-md: 11px 8px 12px 8px / 8px 12px 8px 11px;
     --radius-lg: 14px 10px 15px 11px / 10px 15px 11px 14px;
     --radius-pill: 999px;
-
-    /* Hand-lettered fonts (shared with doodle); system stack as the graceful fallback. Aliased into
-       the type-scale tokens so headings/buttons/taglines read one source (used by the rules below). */
-    --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
-    --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
-    --font-accent: "Shadows Into Light", "Patrick Hand", cursive;
-
-    /* Flat, inky offset depth in the pencil colour — keeps the technical-sketch feel. */
-    --shadow-sm: 2px 2px 0 color-mix(in srgb, var(--fg) 16%, transparent);
-    --shadow-md: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
-    --shadow-lg: 4px 4px 0 color-mix(in srgb, var(--fg) 24%, transparent);
-    --shadow-menu: 3px 3px 0 color-mix(in srgb, var(--fg) 20%, transparent);
-    --overlay: color-mix(in srgb, var(--fg) 40%, transparent);
-    --overlay-strong: color-mix(in srgb, var(--fg) 50%, transparent);
 }
 
 /*
- * The faint ruled-paper grid (TM-236; grayscaled in TM-323). A subtle CSS `repeating-linear-gradient`
- * on BOTH axes — graphite ruling on the off-white page, layered behind everything via `body` (whose
+ * The faint ruled-paper grid (TM-236, now the sketchy layer). A subtle CSS `repeating-linear-gradient`
+ * on BOTH axes — ink ruling on the off-white page, layered behind everything via `body` (whose
  * background otherwise paints flat `--page-bg` and would cover a grid set on <html>). A bolder line
  * every 5th cell gives the classic "major/minor" ruling of graph/sketch paper. Purely decorative: the
- * lines sit at ~6–9% ink, far below text, so contrast (graphite ink ≈ 14:1 on the paper) stays well
- * above WCAG AAA. Tinted off the `--fg` token, so it stays monochrome with the pencil theme.
+ * lines sit at ~6–9% ink, far below text, so contrast stays well above WCAG AAA. Tinted off `--fg`.
  */
-[data-theme="sketch"] body {
+[data-sketchy="on"] body {
     --grid-line: color-mix(in srgb, var(--fg) 9%, transparent);
     --grid-line-minor: color-mix(in srgb, var(--fg) 6%, transparent);
     --grid: 22px;            /* minor cell size */
@@ -929,79 +766,51 @@ body {
     background-attachment: fixed;
 }
 
-/* Dark variant: pencil-on-slate — pale graphite ruling/ink on near-black paper. Still strictly
-   grayscale; contrast preserved (pale ink ≈ 13:1 on the slate). */
+/* Dark variant: the ruling brightens to stay visible on the near-black paper. */
 @media (prefers-color-scheme: dark) {
-    [data-theme="sketch"] {
-        --fg: #e6e6e6;
-        --accent: #e6e6e6;
-        --on-accent: #1a1a1a;
-        --page-bg: #1a1a1a;
-        --surface: #1a1a1a;
-        --surface-2: #242424;
-        --surface-card: #202020;
-        --muted: rgba(230, 230, 230, 0.62);
-    }
-
-    [data-theme="sketch"] body {
+    [data-sketchy="on"] body {
         --grid-line: color-mix(in srgb, var(--fg) 16%, transparent);
         --grid-line-minor: color-mix(in srgb, var(--fg) 9%, transparent);
     }
 }
 
 /*
- * The reusable "wobble" skin reused for sketch (TM-236) — same `#wobble-soft` SVG filter as doodle
- * (defs in index.html), applied to the chrome (cards / inputs / buttons / dividers) for the
- * hand-drawn wireframe edge. Decorative only; never on standalone text; dropped under reduced motion.
+ * The reusable "wobble" skin — the `#wobble-soft` SVG filter (defs in index.html) applied to the
+ * chrome (cards / inputs / buttons / dividers) for the hand-drawn edge. Decorative only; never on
+ * standalone text; dropped under reduced motion.
  */
-[data-theme="sketch"] .tm-wobble,
-[data-theme="sketch"] .auth-card,
-[data-theme="sketch"] .tm-modal,
-[data-theme="sketch"] .tm-menu,
-[data-theme="sketch"] .tm-wobble-soft,
-[data-theme="sketch"] .field input,
-[data-theme="sketch"] .tm-input,
-[data-theme="sketch"] .auth button,
-[data-theme="sketch"] .app-nav button,
-[data-theme="sketch"] .tm-btn,
-[data-theme="sketch"] .auth-mark,
-[data-theme="sketch"] hr {
+[data-sketchy="on"] .tm-wobble,
+[data-sketchy="on"] .auth-card,
+[data-sketchy="on"] .tm-modal,
+[data-sketchy="on"] .tm-menu,
+[data-sketchy="on"] .tm-wobble-soft,
+[data-sketchy="on"] .field input,
+[data-sketchy="on"] .tm-input,
+[data-sketchy="on"] .auth button,
+[data-sketchy="on"] .app-nav button,
+[data-sketchy="on"] .tm-btn,
+[data-sketchy="on"] .auth-mark,
+[data-sketchy="on"] hr {
     filter: url("#wobble-soft");
 }
 
-/* Headings/buttons pick up the hand-lettered display face (the text itself is NOT wobbled). */
-[data-theme="sketch"] .app h1,
-[data-theme="sketch"] h2,
-[data-theme="sketch"] h3,
-[data-theme="sketch"] .auth button,
-[data-theme="sketch"] .app-nav button,
-[data-theme="sketch"] .tm-btn {
-    font-family: var(--font-display);
-    letter-spacing: 0.3px;
-}
-
-[data-theme="sketch"] .tagline,
-[data-theme="sketch"] .build-info {
-    font-family: var(--font-accent);
-}
-
 /*
- * A11y — reduced motion (TM-236, mirrors the doodle handling). The wobble is purely decorative, so
- * users who ask for reduced motion get the displacement filter dropped (the grid, palette, borders
- * and irregular radii are unaffected — they carry no motion).
+ * A11y — reduced motion. The wobble is purely decorative, so users who ask for reduced motion get the
+ * displacement filter dropped (the grid, palette, borders and irregular radii carry no motion, so
+ * they're unaffected).
  */
 @media (prefers-reduced-motion: reduce) {
-    [data-theme="sketch"] .tm-wobble,
-    [data-theme="sketch"] .tm-wobble-soft,
-    [data-theme="sketch"] .auth-card,
-    [data-theme="sketch"] .tm-modal,
-    [data-theme="sketch"] .tm-menu,
-    [data-theme="sketch"] .field input,
-    [data-theme="sketch"] .tm-input,
-    [data-theme="sketch"] .auth button,
-    [data-theme="sketch"] .app-nav button,
-    [data-theme="sketch"] .tm-btn,
-    [data-theme="sketch"] hr {
+    [data-sketchy="on"] .tm-wobble,
+    [data-sketchy="on"] .tm-wobble-soft,
+    [data-sketchy="on"] .auth-card,
+    [data-sketchy="on"] .tm-modal,
+    [data-sketchy="on"] .tm-menu,
+    [data-sketchy="on"] .field input,
+    [data-sketchy="on"] .tm-input,
+    [data-sketchy="on"] .auth button,
+    [data-sketchy="on"] .app-nav button,
+    [data-sketchy="on"] .tm-btn,
+    [data-sketchy="on"] hr {
         filter: none;
     }
 }
@@ -1630,7 +1439,7 @@ body {
 }
 
 /* Terms/privacy acceptance gate (TM-170). Reuses the onboarding card; theme-safe (tokens only,
-   so it reads right across clean / doodle / sketch). The version line is a quiet status; the
+   so it reads right across any accent + both toggle states). The version line is a quiet status; the
    Terms/Privacy links use the accent token like the other in-app links. */
 .tm-terms-version {
     margin-top: 0.25rem;
@@ -1967,7 +1776,7 @@ body {
 
 /* ===== Admin events console (TM-395) ===== reuses the users-console language (.tm-admin-head,
    .tm-stats, .tm-toolbar, .tm-table, .tm-pager, .tm-badge); these are the events-only additions.
-   Token-only so they swap across clean / doodle / sketch (and dark) with everything else. */
+   Token-only so they swap across any accent + both toggle states (and dark) with everything else. */
 
 /* Button group beside the "Events" heading (New event / Refresh). */
 .tm-admin-head-actions {
@@ -2104,7 +1913,7 @@ body {
  * restart); it adds the nav hamburger, tap-target floors, and the small-screen breakpoints.
  *
  * It is theme-agnostic: every rule uses the same `var(--token)`s the components already read, so it
- * holds under clean / doodle / sketch alike (no hard-coded colours, no per-theme forks).
+ * holds under any accent + both toggle states alike (no hard-coded colours, no per-theme forks).
  */
 
 /* --- Global: never allow horizontal page scroll on a phone (a stray wide child = the classic
@@ -2382,7 +2191,7 @@ html {
 
 /* ===== Help page (TM-255) ===== */
 /* The static #/help guide. A single centred, readable card built from theme tokens only, so it
-   follows clean / doodle / sketch automatically and stays responsive at phone widths + inside the
+   follows any accent + both toggle states automatically and stays responsive at phone widths + inside the
    Android WebView. text-align:left keeps prose readable; width clamps to the viewport on narrow
    screens (no horizontal page scroll — the responsive-mobile invariant). */
 .help-view {
@@ -2452,7 +2261,7 @@ html {
 /* ===== Annotated help guide (TM-178) ===== */
 /* The static "annotated screenshot" guide that lives inside the #/help page: a DOM-drawn MOCK of each
    key screen with positioned callout notes + arrows. Everything is theme-token-styled so it follows
-   clean / doodle / sketch + dark mode automatically — there is no captured image to re-shoot when the
+   any accent + both toggle states + dark mode automatically — there is no captured image to re-shoot when the
    UI changes. Layout is percentage-based over a fixed-aspect "stage" so the mock + its callouts scale
    together and never need pixel-pushing. */
 .tm-guide-heading {
@@ -2774,7 +2583,7 @@ html {
 }
 
 /* Diagnostics view (TM-297) — the QA #/diagnostics screen: stacked cards for GPS / Push / Environment.
-   Purely theme-token styled so it renders correctly under clean / doodle / sketch, at phone widths and
+   Purely theme-token styled so it renders correctly under any accent + both toggle states, at phone widths and
    inside the Android WebView. Cosmetic only — no behaviour depends on these rules. */
 .tm-diag {
     display: flex;
@@ -2874,8 +2683,8 @@ html {
 .tm-diag-link {
     margin-top: 1rem;
 }
-/* Appearance / theme switcher section on the profile page (TM-298). Mirrors the
-   .tm-security-settings divider so the in-app theme picker reads as its own settings block. */
+/* Appearance settings section on the profile page (TM-529; was the TM-298 theme picker). Mirrors the
+   .tm-security-settings divider so the Paper accent + wavy/sketchy controls read as their own block. */
 .tm-theme-settings {
     margin-top: 2rem;
     padding-top: 1.5rem;
@@ -2888,10 +2697,48 @@ html {
     color: var(--fg);
 }
 
+/* Curated accent palette (TM-529): a row of round swatch buttons. Each carries its swatch colour in
+   the `--tm-swatch` custom prop (set inline, no free-text colour in CSS). The selected swatch
+   (aria-pressed) gets a ring. Also used by the component gallery. Reuses the 2px inky Paper border. */
+.tm-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin: 0.15rem 0 0;
+}
+
+.tm-swatch {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    flex: none;
+    border-radius: 50%;
+    border: var(--border-width) solid var(--fg);
+    background: var(--tm-swatch, var(--accent));
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.12s ease;
+}
+
+.tm-swatch:hover {
+    transform: scale(1.06);
+}
+
+/* Selected swatch: a clear ring drawn with the ink token so it reads on any swatch colour. */
+.tm-swatch[aria-pressed="true"] {
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+}
+
+.tm-swatch:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* Email-verification banner (TM-169). A dismissible "verify your email" prompt with a Resend action,
    shown to a signed-in user whose Firebase emailVerified flag is false. Built from theme tokens ONLY
    (surfaces, the accent wash/stripe, --fg/--muted, the radius/border scale) so it renders correctly
-   across clean / doodle / sketch with no hard-coded colours. The doodle/sketch wobble filter on
+   across any accent + both toggle states with no hard-coded colours. The doodle/sketch wobble filter on
    surfaces is inherited automatically. */
 .tm-verify-banner {
     display: flex;
@@ -2970,7 +2817,7 @@ html {
 /* ===== Foreground-push notification centre (TM-374) =====
    A nav bell + unread badge, and the recent-notifications inbox rendered inside the existing ui.js
    modal. Built from theme tokens ONLY (accent family, surfaces, borders, --muted, the radius scale)
-   so clean / doodle / sketch all render it natively — the unread side-stripe reuses the exact accent
+   so any accent + both toggle states all render it natively — the unread side-stripe reuses the exact accent
    -stripe language of .tm-toast / .tm-verify-banner. The bell is created by notification-center.js
    only once the device has ever received a foreground push, so the plain web build renders exactly
    as before. */
@@ -3062,7 +2909,7 @@ button.tm-notif-item:hover {
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
  * Events UI (TM-396) — the #/events browse list + #/events/{id} detail. Built entirely on the
  * design tokens (--accent / --surface-card / --border / --radius* / --muted …) so it reskins across
- * clean / doodle / sketch with no per-theme rules of its own (the sketch wobble/borders come from
+ * any accent + both toggle states with no per-theme rules of its own (the sketch wobble/borders come from
  * the theme blocks that already target .tm-btn, .auth-card, inputs, etc.).
  * ───────────────────────────────────────────────────────────────────────────────────────────── */
 .events-view {
@@ -3558,7 +3405,7 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
  * A fixed, full-width strip in the bottom thumb-zone, shown only on narrow / mobile + native
  * (WebView) viewports for a signed-in, un-gated user. DESKTOP / wide viewports never show it (base
  * `display:none`) and keep the top `.app-nav`, so there is exactly ONE primary nav per width. Styled
- * purely with theme tokens (var(--token)) so it renders across clean / doodle / sketch + dark, and
+ * purely with theme tokens (var(--token)) so it renders across any accent + both toggle states + dark, and
  * folds in env(safe-area-inset-bottom) so it clears the iPhone home indicator / Android gesture nav.
  * ============================================================================================== */
 .app-tabbar {
@@ -3694,18 +3541,16 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     }
 }
 
-/* Hand-drawn edge under the sketch (default) + doodle themes — the same #wobble-soft skin the nav /
-   cards use; dropped under reduced-motion since it's purely decorative. The label keeps the body face:
-   the design-token contract (TM-510) owns the hand-lettered faces via --font-display / --font-accent
-   on the heading + tagline rules only, so the bar's sketch character comes from the wobble edge here
-   rather than a per-rule font stack (which the token guard forbids). */
-[data-theme="sketch"] .app-tabbar,
-[data-theme="doodle"] .app-tabbar {
+/* Hand-drawn edge when the sketchy toggle is on (TM-529) — the same #wobble-soft skin the nav / cards
+   use; dropped under reduced-motion since it's purely decorative, and absent in clean Paper. The label
+   keeps the body face: the design-token contract (TM-510) owns the hand-lettered faces via
+   --font-display / --font-accent on the heading + tagline rules only, so the bar's sketchy character
+   comes from the wobble edge here rather than a per-rule font stack (which the token guard forbids). */
+[data-sketchy="on"] .app-tabbar {
     filter: url("#wobble-soft");
 }
 @media (prefers-reduced-motion: reduce) {
-    [data-theme="sketch"] .app-tabbar,
-    [data-theme="doodle"] .app-tabbar {
+    [data-sketchy="on"] .app-tabbar {
         filter: none;
     }
 }
@@ -3715,7 +3560,7 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
  * state + reaction picker) and the grouped #/notifications feed, refreshed to the paper wireframes
  * (paper-chat-list / -thread / -empty / -reaction-picker / paper-notifications). Every colour, border,
  * radius, shadow + spacing reads from a reconciled design token (TM-510) via var(), so the whole
- * section restyles with the theme (clean / doodle / sketch) with no per-rule edits; the shared
+ * section restyles with the accent + toggle with no per-rule edits; the shared
  * component library (avatar / badge / readReceipt / reaction / unreadDot) carries the reusable bits.
  * Replaces the old TM-434 "coming soon" placeholder styles.
  * ---------------------------------------------------------------------------------------------- */
@@ -4007,7 +3852,7 @@ button.tm-chat-bub { cursor: pointer; }
    The approved wireframe kit (design-kit/showcase-paper.html "Design elements · paper" tiles) built
    as reusable `.tm-c-*` components. Every value a theme owns — colour, font, radius, border, shadow,
    spacing — is read from a reconciled design token (TM-510) via var(); there are NO hard-coded
-   colours in this block, so the whole set restyles when the theme flips (clean / doodle / sketch)
+   colours in this block, so the whole set restyles when the accent/toggle changes
    with no per-component edits (the AC). Intrinsic control geometry (a 40px avatar, a 22px toggle
    track) stays in px — that's the component's shape, not a themed value. The hand-drawn edge under
    sketch/doodle is opted in per-node with the existing `.tm-wobble-soft` / `.tm-wobble` utility
@@ -4388,7 +4233,7 @@ button.tm-c-reaction {
  * wireframes (design-kit/pages/paper-profile, paper-edit-profile, paper-public-profile) at the
  * production default theme. SCOPED to this screen (`.tm-pf*`) and TOKEN-ONLY — every colour, border,
  * radius, shadow and space reads a TM-510 semantic token via var(), so the screen restyles across
- * clean / doodle / sketch with no per-theme rules (the sketch default resolves the wireframe's
+ * any accent + both toggle states with no per-theme rules (the sketch default resolves the wireframe's
  * grayscale ink-on-paper; the caribbean-green accent is the accent token in coloured themes). Added
  * as a new section at the end of the file so it stays additive and doesn't collide with the parallel
  * shared component library (TM-511); where a wireframe uses a shared component (chip/card/menu) the
@@ -4692,7 +4537,7 @@ button.tm-c-reaction {
  * `paper-home` / `app-home` + `paper-empty-home`), sitting inside the bottom-nav shell (TM-434).
  * Built ENTIRELY on the TM-510 design tokens (the neutral/ink ramp + spacing/type/shape scales and
  * their semantic aliases — --surface-card / --border / --accent / --muted / --space-* / --fs-* /
- * --radius-*), NO hard-coded colours or px, so it reskins across clean / doodle / sketch (+ dark)
+ * --radius-*), NO hard-coded colours or px, so it reskins across any accent + both toggle states (+ dark)
  * with no per-theme rules of its own — the sketch/doodle hand-drawn borders + wobble come from the
  * theme blocks that already target cards, inputs and .tm-btn. This is a NEW screen-scoped, additive
  * section (kept out of the shared/theme blocks) so it doesn't collide with TM-511's shared component
