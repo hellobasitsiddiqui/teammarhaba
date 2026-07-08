@@ -20,8 +20,11 @@ import {
   formatJoined,
 } from "../src/assets/profile-core.js";
 
-// A realistic /me payload (MeResponse shape): firstName/lastName/city/age/phone at the top level,
-// createdAt nested under accountState.
+// A realistic /me payload (real MeResponse shape): firstName/lastName/city/age/phone at the top
+// level, plus the Firebase-owned `accountState` block. That block mirrors the actual backend
+// AccountState contract (TM-164) — emailVerified/mfaEnabled/phoneVerified/photoURL/lastLoginAt —
+// and deliberately has NO `createdAt`: `/me` carries no account-creation timestamp, so a fixture
+// must not fabricate one (that false-green is exactly what TM-534 fixes).
 function me(overrides = {}) {
   return {
     uid: "abc",
@@ -32,7 +35,13 @@ function me(overrides = {}) {
     city: "Milton Keynes",
     age: 29,
     phone: "+44 7700 900123",
-    accountState: { createdAt: "2026-06-14T10:00:00Z", photoURL: null },
+    accountState: {
+      emailVerified: true,
+      mfaEnabled: false,
+      phoneVerified: false,
+      photoURL: null,
+      lastLoginAt: "2026-07-01T09:00:00Z",
+    },
     ...overrides,
   };
 }
@@ -120,17 +129,27 @@ test("profileStrength tolerates null input", () => {
 
 // ---- publicSummary + formatJoined -------------------------------------------------------------
 
-test("publicSummary builds the 'City · joined Mon YYYY' meta line from accountState.createdAt", () => {
+test("publicSummary builds the public-preview model (name, avatar, city) from the real /me shape", () => {
   const p = publicSummary(me());
   assert.equal(p.short, "Basit S.");
-  assert.equal(p.joined, "Jun 2026");
-  assert.equal(p.metaLine, "Milton Keynes · joined Jun 2026");
+  assert.equal(p.initial, "B");
+  assert.equal(p.city, "Milton Keynes");
+  // Meta line is the city alone — the wireframe's "joined Mon YYYY" clause is deferred (TM-534)
+  // because `/me` carries no account-creation timestamp. No fabricated `createdAt` in play.
+  assert.equal(p.metaLine, "Milton Keynes");
 });
 
-test("publicSummary omits the joined part when there is no created date", () => {
-  const p = publicSummary(me({ accountState: { createdAt: null } }));
-  assert.equal(p.joined, "");
-  assert.equal(p.metaLine, "Milton Keynes");
+test("publicSummary does not read a (non-existent) accountState.createdAt — the real contract has none", () => {
+  // The realistic fixture has NO createdAt; even injecting one must NOT resurrect the deferred
+  // 'joined' clause. This guards against the field silently creeping back into the meta line.
+  assert.equal(publicSummary(me()).metaLine, "Milton Keynes");
+  assert.equal(publicSummary(me({ accountState: { createdAt: "2026-06-14T10:00:00Z" } })).metaLine, "Milton Keynes");
+});
+
+test("publicSummary meta line is empty when no city is set", () => {
+  const p = publicSummary(me({ city: "" }));
+  assert.equal(p.metaLine, "");
+  assert.equal(p.city, "");
 });
 
 test("formatJoined returns '' for missing, invalid and future dates", () => {

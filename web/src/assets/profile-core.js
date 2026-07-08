@@ -116,23 +116,37 @@ export function profileStrength(me, { hasPhoto = false } = {}) {
 }
 
 /**
- * The public-profile preview model (paper-public-profile: avatar + name + "City · joined Mon YYYY").
+ * The public-profile preview model (paper-public-profile: avatar + name + city).
+ *
  * Renders how OTHERS see the signed-in user; a real other-user endpoint (`GET /users/{id}`) doesn't
  * exist yet (noted as a TM-514 follow-up), so the preview is built from the caller's own `/me`.
  *
+ * The wireframe's meta line reads "City · joined Mon YYYY", but the "joined Mon YYYY" clause is
+ * DEFERRED (TM-534): `/me` (MeResponse / AccountState — see web/src/api-docs/openapi.json) carries
+ * no account-creation timestamp (`AccountState` is emailVerified/mfaEnabled/phoneVerified/photoURL/
+ * lastLoginAt; `MeResponse` has no `createdAt`), so there was never a real value to format and the
+ * clause silently collapsed to "" for every real user. Rather than read a field the API never
+ * returns, the preview shows the city alone until a real joined date exists. Re-adding it — a
+ * backend `createdAt` on `MeResponse` wired through `formatJoined` — is the TM-534 / TM-514
+ * follow-up.
+ *
  * @param {object|null|undefined} me a `/me`-shaped object
- * @param {{ now?: Date }} [opts] injectable clock for deterministic tests
- * @returns {{ short: string, initial: string, metaLine: string, city: string, joined: string }}
+ * @returns {{ short: string, initial: string, metaLine: string, city: string }}
  */
-export function publicSummary(me, { now = new Date() } = {}) {
+export function publicSummary(me) {
   const id = identitySummary(me);
-  const created = me && me.accountState ? me.accountState.createdAt : null;
-  const joined = formatJoined(created, now);
-  const metaLine = [id.city, joined ? `joined ${joined}` : ""].filter(Boolean).join(" · ");
-  return { short: id.short, initial: id.initial, metaLine, city: id.city, joined };
+  // Meta line = city only (the "joined" clause is deferred — see the note above). `id.city` is
+  // already "" when no city is set, which the renderer (profile.js) swaps for its own prompt.
+  return { short: id.short, initial: id.initial, metaLine: id.city, city: id.city };
 }
 
-/** Format an ISO instant as "Mon YYYY" (e.g. "Jun 2026"); "" for a missing/invalid/future value. */
+/**
+ * Format an ISO instant as "Mon YYYY" (e.g. "Jun 2026"); "" for a missing/invalid/future value.
+ *
+ * Retained (exported + unit-tested) even though `publicSummary` no longer calls it: it is the
+ * ready-made formatter for the deferred "joined Mon YYYY" clause, to be wired back up once a real
+ * account-creation timestamp lands on `/me` (the TM-534 / TM-514 follow-up).
+ */
 export function formatJoined(iso, now = new Date()) {
   if (!iso) return "";
   const d = new Date(iso);
