@@ -44,6 +44,9 @@ import java.time.ZoneId;
  *     bound (TM-415)
  * @param ageMax          optional upper edge of the target age band, 13..120; omitted = no upper
  *     bound. Both omitted = open to all ages
+ * @param pricePence      optional ticket price in pence (minor units, GBP), ≥ 0; omitted = the £5
+ *     default ({@link com.teammarhaba.backend.event.Event#DEFAULT_PRICE_PENCE}). {@code 0} = free (TM-475)
+ * @param premium         optional premium-gating flag; omitted = {@code false} (TM-475)
  */
 public record CreateEventRequest(
         @NotBlank @Size(max = 120) String heading,
@@ -65,7 +68,9 @@ public record CreateEventRequest(
                 String imagePath,
         @Min(1) @Max(8760) Integer locationRevealHours,
         @Min(13) @Max(120) Integer ageMin,
-        @Min(13) @Max(120) Integer ageMax) {
+        @Min(13) @Max(120) Integer ageMax,
+        @Min(0) Integer pricePence,
+        Boolean premium) {
 
     /** The timezone must be a real IANA zone id — bad ids would break every client's rendering. */
     @JsonIgnore
@@ -113,6 +118,8 @@ public record CreateEventRequest(
                 imagePath,
                 locationRevealHours,
                 ageMin,
-                ageMax);
+                ageMax,
+                pricePence,
+                premium);
     }
 }

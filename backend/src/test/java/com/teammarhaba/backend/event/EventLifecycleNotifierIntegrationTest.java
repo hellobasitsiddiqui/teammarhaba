@@ -198,6 +198,8 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
         return admin.create(admin(), draft);
     }
@@ -225,19 +227,20 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
 
     private static EventPatch patchStartAt(Instant startAt) {
         return new EventPatch(
-                null, null, null, null, null, null, null, startAt, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, startAt, null, null, null, null, null, null, null, null,
+                null, null);
     }
 
     private static EventPatch patchLocation(String locationText) {
         return new EventPatch(
                 null, null, locationText, null, null, null, null, null, null, null, null, null, null, null, null,
-                null);
+                null, null, null);
     }
 
     private static EventPatch patchDescription(String description) {
         return new EventPatch(
                 null, description, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null);
+                null, null, null);
     }
 
     private List<Delivery> pushesTitled(String titlePrefix) {

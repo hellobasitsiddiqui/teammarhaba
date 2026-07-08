@@ -240,6 +240,14 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          },
           "startAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -357,6 +365,13 @@
             "enum" : [ "NONE", "GOING", "WAITLISTED" ],
             "type" : "string"
           },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "startAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -445,6 +460,13 @@
           "onlineUrl" : {
             "type" : "string"
           },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "spotAvailableToClaim" : {
             "type" : "boolean"
           },
@@ -532,6 +554,13 @@
           },
           "onlineUrl" : {
             "type" : "string"
+          },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "type" : "integer"
           },
           "startAt" : {
             "format" : "date-time",
@@ -908,6 +937,14 @@
             "maxLength" : 2048,
             "minLength" : 0,
             "type" : "string"
+          },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
           },
           "startAt" : {
             "format" : "date-time",

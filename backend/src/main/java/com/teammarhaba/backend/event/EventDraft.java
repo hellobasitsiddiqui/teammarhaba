@@ -11,7 +11,10 @@ import java.time.Instant;
  * are {@code null} when absent. {@code city} is the coarse locality (pre-reveal hint + per-city
  * default key); {@code locationRevealHours} is the per-event reveal-window override ({@code null}
  * = inherit the city/app default) — both TM-408. {@code ageMin}/{@code ageMax} are the optional
- * age-group band (TM-415); both {@code null} = open to all ages.
+ * age-group band (TM-415); both {@code null} = open to all ages. {@code pricePence} is the ticket
+ * price in pence and {@code premium} the premium-gating flag (TM-475); both are {@code null} when the
+ * admin omitted them on create, in which case {@link EventAdminService} leaves the entity defaults
+ * (£5 / not premium) in place.
  */
 public record EventDraft(
         String heading,
@@ -29,4 +32,6 @@ public record EventDraft(
         String imagePath,
         Integer locationRevealHours,
         Integer ageMin,
-        Integer ageMax) {}
+        Integer ageMax,
+        Integer pricePence,
+        Boolean premium) {}
