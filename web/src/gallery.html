@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" data-theme="sketch">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TeamMarhaba — Component gallery (TM-511)</title>
+
+    <!-- Same hand-lettered fonts + token stylesheet the app uses, so the gallery renders the
+         components exactly as a real screen would (TM-213/236/510). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/styles.css" />
+
+    <!-- The "wobble" SVG filter the sketch/doodle themes reference via filter:url(#wobble-soft).
+         Copied verbatim from index.html so the gallery shows the same hand-drawn edge. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+      <filter id="wobble-soft">
+        <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+      </filter>
+    </svg>
+
+    <!-- Gallery-page chrome only (layout of the review page itself). The COMPONENTS are styled by
+         styles.css `.tm-c-*`; these rules just lay out the tiles and are token-driven too. -->
+    <style>
+      body {
+        display: block;
+        place-items: initial;
+        margin: 0;
+        padding: var(--space-6) var(--space-5) var(--space-7);
+        text-align: left;
+      }
+      .g-head {
+        max-width: 60rem;
+        margin: 0 auto var(--space-5);
+      }
+      .g-head h1 {
+        margin: 0 0 var(--space-1);
+        color: var(--fg);
+      }
+      .g-sub {
+        margin: 0;
+        color: var(--muted);
+      }
+      .g-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-3);
+        max-width: 60rem;
+        margin: 0 auto var(--space-6);
+        padding: var(--space-3) var(--space-4);
+        background: var(--surface-card);
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .g-controls strong {
+        font-size: var(--fs-2);
+      }
+      .g-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+        gap: var(--space-4);
+        max-width: 60rem;
+        margin: 0 auto;
+      }
+      .g-tile {
+        padding: var(--space-4);
+        background: var(--surface-card);
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-card);
+      }
+      .g-tile__label {
+        margin-bottom: var(--space-3);
+        color: var(--muted);
+        font-size: var(--fs-2);
+      }
+      .g-tile__row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        align-items: center;
+      }
+      .g-group {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .g-group__cap {
+        color: var(--muted);
+        font-size: var(--fs-1);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="g-head">
+      <h1>Component gallery</h1>
+      <p class="g-sub">
+        The shared UI component library (TM-511) — every component from the approved paper wireframe
+        kit, built from the reconciled design tokens (TM-510). Flip the theme or the accent below and
+        watch every tile restyle from tokens alone.
+      </p>
+    </header>
+
+    <div class="g-controls" role="group" aria-label="Theme controls">
+      <strong>Theme</strong>
+      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="clean" aria-pressed="false">
+        Clean
+      </button>
+      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="doodle" aria-pressed="false">
+        Doodle
+      </button>
+      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="sketch" aria-pressed="true">
+        Sketch
+      </button>
+      <strong>Accent</strong>
+      <input type="color" id="g-accent" value="#37d4ad" aria-label="Override the accent token" />
+      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" id="g-accent-reset">Reset accent</button>
+    </div>
+
+    <main id="gallery" class="g-grid" aria-label="Components"></main>
+
+    <script type="module" src="/assets/gallery.js"></script>
+  </body>
+</html>
