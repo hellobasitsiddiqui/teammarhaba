@@ -1,0 +1,44 @@
+<!-- @dsCard group="Sections" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>CTA</title>
+<style>
+  :root{--bg:#f1f1f1;--fg:#111;--muted:#8a8a8a;--border:#c9c9c9;--r:8px;--maxw:900px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--fg);background:#fff}
+  section{background:var(--bg);padding:60px 48px}
+  .wrap{max-width:var(--maxw);margin:0 auto}
+  .center{text-align:center}
+  h2{font-size:26px;font-weight:700;margin:0 0 18px}
+  p{font-size:16px;line-height:1.6;max-width:46ch;margin:0 auto 26px}
+  .btn{display:inline-block;padding:15px 30px;border-radius:var(--r);background:var(--fg);color:#fff;font-weight:600;font-size:15px;text-decoration:none;border:1.5px solid var(--fg)}
+  .btn--sec{background:transparent;color:var(--fg)}
+  .split{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  .split h2{font-size:30px;margin:0;line-height:1.2}
+  .form{max-width:420px;margin:0 auto;text-align:center}
+  .form input{display:block;width:100%;padding:16px;border:1.5px solid var(--fg);border-radius:var(--r);margin:0 0 16px;font-size:15px;background:#fff}
+  .form .btn{display:block;width:100%}
+</style></head>
+<body>
+  <!-- centered CTA -->
+  <section><div class="wrap center">
+    <h2>Ready to get started?</h2>
+    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+    <a class="btn">Start free trial</a>
+  </div></section>
+
+  <!-- split CTA -->
+  <section><div class="wrap split">
+    <h2>Ready to get started?<br>Sign up or contact us</h2>
+    <div><a class="btn">Start free trial</a> <a class="btn btn--sec">Contact Us</a></div>
+  </div></section>
+
+  <!-- signup form CTA -->
+  <section><div class="wrap center">
+    <p style="font-weight:600;color:var(--fg)">Try the product out for free.</p>
+    <form class="form" onsubmit="return false">
+      <input placeholder="email" type="email">
+      <input placeholder="password" type="password">
+      <button class="btn" type="submit">Start free trial</button>
+    </form>
+  </div></section>
+</body></html>

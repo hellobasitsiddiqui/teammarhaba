@@ -1,0 +1,53 @@
+<!-- @dsCard group="App screens · paper" name="Sign in (paper)" -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Sign in (paper)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1B1B1B;--white:#FFFFFF;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3;}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .phone{width:384px;min-height:788px;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px;}
+    .statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500;}
+    main{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 28px 40px;}
+    .mark{width:66px;height:66px;margin:0 auto 14px;border:2.5px solid var(--ink);border-radius:50%;display:grid;place-items:center;background:var(--accent-light);}
+    .mark svg{width:38px;height:38px;stroke:var(--ink);fill:none;stroke-width:2;}
+    h1{font-size:34px;text-align:center;margin:0 0 2px;}
+    .tag{font-family:"Inter",sans-serif;font-weight:500;text-align:center;color:var(--g5);font-size:14px;margin:0 0 26px;}
+    label{display:block;font-family:"Inter",sans-serif;font-weight:500;font-size:12.5px;color:var(--g5);margin:0 0 5px;}
+    .inp{border:2px solid var(--ink);border-radius:11px;padding:11px 14px;font-family:"Inter",sans-serif;font-size:15px;color:var(--g5);background:var(--white);width:100%;}
+    .btn{font-size:17px;border:2px solid var(--ink);border-radius:12px;background:var(--accent);color:var(--ink);padding:12px 18px;width:100%;margin-top:14px;box-shadow:2px 2px 0 var(--ink);}
+    .btn.ghost{background:var(--white);box-shadow:none;display:flex;gap:8px;align-items:center;justify-content:center;}
+    .btn.ghost svg{width:18px;height:18px;}
+    .or{display:flex;align-items:center;gap:10px;color:var(--g4);font-family:"Inter",sans-serif;font-size:12px;margin:16px 0;}
+    .or::before,.or::after{content:"";flex:1;height:2px;background:var(--g2);}
+    .linkish{text-align:center;font-size:15px;margin-top:18px;color:var(--g5);}
+    .linkish b{color:var(--ink);}
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <main>
+      <div class="mark"><svg viewBox="0 0 48 48"><circle cx="18" cy="16" r="6"/><path d="M7.5 39c0-6.6 4.7-10.5 10.5-10.5S28.5 32.4 28.5 39"/><circle cx="33" cy="18" r="4.6"/><path d="M28.5 39c0-5.4 3.5-8.8 8.5-8.8 2.9 0 5.2 1.1 6.7 3"/></svg></div>
+      <h1>Marhaba</h1>
+      <div class="tag">Find your people. Plan the meetup.</div>
+      <label>Email</label>
+      <div class="inp">you@example.com</div>
+      <button class="btn">Email me a code</button>
+      <div class="or">or</div>
+      <button class="btn ghost"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#1B1B1B" stroke-width="2"/></svg>Continue with Google</button>
+      <div class="linkish">Prefer <b>phone</b>? Use a number instead</div>
+    </main>
+  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" result="noise"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="noise" scale="2"/></filter></svg>
+  <script>
+  addEventListener('message',function(e){var d=e.data||{},r=document.documentElement;
+    if(d.__vars){for(var k in d.__vars)r.style.setProperty(k,d.__vars[k]);var s=document.getElementById('__acc');if(!s){s=document.createElement('style');s.id='__acc';document.head.appendChild(s);}s.textContent=d.__dark?".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}":"";}
+    if('__sketch' in d){var amt=+d.__sketch||0,disp=document.getElementById('__disp');if(disp)disp.setAttribute('scale',amt);var ph=document.querySelector('.phone');if(ph)ph.style.filter=amt>0?'url(#wobble-soft)':'';}});
+  </script>
+</body>
+</html>

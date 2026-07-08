@@ -1,0 +1,42 @@
+<!-- @dsCard group="Sections" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Posts</title>
+<style>
+  :root{--bg:#f1f1f1;--fg:#111;--muted:#8a8a8a;--r:6px;--maxw:1080px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--fg);background:#fff}
+  section{background:var(--bg);padding:56px 48px}
+  .wrap{max-width:var(--maxw);margin:0 auto}
+  .feature{display:grid;grid-template-columns:1.1fr 1.2fr;gap:26px;align-items:stretch}
+  .big{background:#111;color:#fff;border-radius:var(--r);padding:36px;display:flex;flex-direction:column;justify-content:space-between;min-height:280px}
+  .big .cat{font-size:12px;opacity:.7}
+  .big h2{font-size:34px;line-height:1.15;margin:16px 0}
+  .big a{color:#fff;text-decoration:none;font-size:14px}
+  .stack{display:grid;gap:22px}
+  .post{background:#fff;border-radius:var(--r);padding:22px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .post .cat{font-size:12px;color:var(--muted)}
+  .post h3{font-size:17px;margin:8px 0}
+  .post .auth{font-size:13px;color:var(--muted)}
+  .cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:36px}
+  .c{background:#fff;border-radius:var(--r);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .c .img{background:#111;aspect-ratio:16/9}
+  .c .b{padding:20px}.c h3{margin:0 0 8px;font-size:16px}.c p{margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.6}
+  .c a{color:var(--fg);text-decoration:none;font-size:13px}
+  @media(max-width:760px){.feature{grid-template-columns:1fr}.cards3{grid-template-columns:1fr}}
+</style></head>
+<body>
+  <section><div class="wrap">
+    <div class="feature">
+      <div class="big"><span class="cat">Author name</span><h2>The best way to wireframe a website</h2><a>Read More</a></div>
+      <div class="stack">
+        <article class="post"><div class="cat">Category</div><h3>Keys to writing copy that actually converts and sells users</h3><div class="auth">Author name</div></article>
+        <article class="post"><div class="cat">Category</div><h3>Keys to writing copy that actually converts and sells users</h3><div class="auth">Author name</div></article>
+      </div>
+    </div>
+    <div class="cards3">
+      <article class="c"><div class="img"></div><div class="b"><h3>Keys to writing copy that converts</h3><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p><a>Read More</a></div></article>
+      <article class="c"><div class="img"></div><div class="b"><h3>Keys to writing copy that converts</h3><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p><a>Read More</a></div></article>
+      <article class="c"><div class="img"></div><div class="b"><h3>Keys to writing copy that converts</h3><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p><a>Read More</a></div></article>
+    </div>
+  </div></section>
+</body></html>

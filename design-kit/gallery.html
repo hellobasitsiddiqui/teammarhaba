@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design kit — gallery</title>
+  <style>
+    :root { --fg:#111; --muted:#666; --border:#ddd; --bg:#fafafa; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+           color:var(--fg); background:var(--bg); }
+    header { padding:28px 32px; border-bottom:1px solid var(--border); background:#fff; }
+    header h1 { margin:0 0 4px; font-size:22px; }
+    header p { margin:0; color:var(--muted); font-size:14px; }
+    .grid { padding:24px 32px; display:grid; gap:28px; }
+    .card { background:#fff; border:1px solid var(--border); border-radius:10px; overflow:hidden;
+            box-shadow:0 1px 3px rgba(0,0,0,.05); }
+    .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+                 padding:12px 16px; border-bottom:1px solid var(--border); }
+    .card-head .name { font-weight:600; font-size:15px; }
+    .card-head .tag { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);
+                      border:1px solid var(--border); border-radius:999px; padding:3px 10px; }
+    .card-head a { font-size:12px; color:var(--muted); text-decoration:none; }
+    .card-head a:hover { color:var(--fg); text-decoration:underline; }
+    .frame-wrap { position:relative; }
+    iframe { width:100%; border:0; display:block; background:#fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Design kit — 10 elements</h1>
+    <p>Monochrome "TRADE" SaaS wireframe kit. Each block below is a self-contained HTML file (no build, no deps).
+       The tag is the group it buckets into in Claude Design.</p>
+  </header>
+  <div class="grid" id="grid"></div>
+  <script>
+    // Each element: file path, display name, group tag, and a sensible render height.
+    const items = [
+      ["components/navigation/index.html",   "Navigation",    "Navigation",  240],
+      ["components/hero/index.html",          "Hero",          "Sections",    520],
+      ["components/social-proof/index.html",  "Social proof",  "Sections",    360],
+      ["components/features/index.html",      "Features",      "Sections",    520],
+      ["components/pricing/index.html",       "Pricing",       "Sections",    560],
+      ["components/posts/index.html",         "Posts / blog",  "Sections",    640],
+      ["components/cta/index.html",           "CTA variants",  "Sections",    720],
+      ["components/buttons-cards/index.html", "Buttons + cards","Foundations",520],
+      ["components/footer/index.html",        "Footer",        "Navigation",  620],
+      ["pages/landing/index.html",            "Landing page",  "Pages",      1400],
+      ["pages/app-home/index.html",           "Home + bottom nav", "App screens", 860],
+      ["pages/app-notifications/index.html",  "Notifications",     "App screens", 860],
+      ["pages/app-chat-list/index.html",      "Chat list",         "App screens", 860],
+      ["pages/app-chat-thread/index.html",    "Chat thread",       "App screens", 860],
+      ["pages/app-membership/index.html",     "Membership tiers",  "App screens", 860],
+      ["pages/app-checkout/index.html",       "Dummy checkout",    "App screens", 860],
+      ["pages/app-gps-attendance/index.html", "GPS attendance",    "App screens", 860],
+      ["pages/app-events-list/index.html",    "Events list",       "App screens", 860],
+      ["pages/app-event-detail/index.html",   "Event detail",      "App screens", 860],
+      ["pages/app-profile/index.html",        "Profile",           "App screens", 860],
+      ["pages/app-admin-notify/index.html",   "Admin: send notification", "App screens", 860],
+      ["pages/paper-home/index.html",           "Home + nav",        "App screens · paper", 860],
+      ["pages/paper-events-list/index.html",    "Events list",       "App screens · paper", 860],
+      ["pages/paper-event-detail/index.html",   "Event detail",      "App screens · paper", 860],
+      ["pages/paper-notifications/index.html",  "Notifications",     "App screens · paper", 860],
+      ["pages/paper-chat-list/index.html",      "Chat list",         "App screens · paper", 860],
+      ["pages/paper-chat-thread/index.html",    "Chat thread",       "App screens · paper", 860],
+      ["pages/paper-membership/index.html",     "Membership tiers",  "App screens · paper", 860],
+      ["pages/paper-checkout/index.html",       "Dummy checkout",    "App screens · paper", 860],
+      ["pages/paper-gps-attendance/index.html", "GPS attendance",    "App screens · paper", 860],
+      ["pages/paper-profile/index.html",        "Profile",           "App screens · paper", 860],
+      ["pages/paper-admin-notify/index.html",   "Admin: send notification", "App screens · paper", 860],
+      ["pages/paper-signin/index.html",            "Sign in",            "App screens · paper", 860],
+      ["pages/paper-verify/index.html",            "Verify code",        "App screens · paper", 860],
+      ["pages/paper-complete-profile/index.html",  "Complete profile",   "App screens · paper", 860],
+      ["pages/paper-pick-interests/index.html",    "Pick interests",     "App screens · paper", 860],
+      ["pages/paper-empty-home/index.html",        "Empty home",         "App screens · paper", 860],
+      ["pages/paper-create-event/index.html",      "Create event",       "App screens · paper", 860],
+      ["pages/paper-search/index.html",            "Search",             "App screens · paper", 860],
+      ["pages/paper-map/index.html",               "Map view",           "App screens · paper", 860],
+      ["pages/paper-suggest-venue/index.html",     "Suggest venue",      "App screens · paper", 860],
+      ["pages/paper-event-cancelled/index.html",   "Cancelled event",    "App screens · paper", 860],
+      ["pages/paper-my-events/index.html",         "My events",          "App screens · paper", 860],
+      ["pages/paper-claim-spot/index.html",        "Claim a spot",       "App screens · paper", 860],
+      ["pages/paper-rsvp-confirmed/index.html",    "RSVP confirmed",     "App screens · paper", 860],
+      ["pages/paper-attendance-result/index.html", "Attendance result",  "App screens · paper", 860],
+      ["pages/paper-reaction-picker/index.html",   "Reaction picker",    "App screens · paper", 860],
+      ["pages/paper-chat-empty/index.html",        "Chat empty",         "App screens · paper", 860],
+      ["pages/paper-payment-methods/index.html",   "Payment methods",    "App screens · paper", 860],
+      ["pages/paper-credits/index.html",           "Credits & vouchers", "App screens · paper", 860],
+      ["pages/paper-payment-result/index.html",    "Payment result",     "App screens · paper", 860],
+      ["pages/paper-settings/index.html",          "Settings",           "App screens · paper", 860],
+      ["pages/paper-edit-profile/index.html",      "Edit profile",       "App screens · paper", 860],
+      ["pages/paper-privacy-data/index.html",      "Privacy & my data",  "App screens · paper", 860],
+      ["pages/paper-public-profile/index.html",    "Public profile",     "App screens · paper", 860],
+      ["pages/paper-invite/index.html",            "Invite / referral",  "App screens · paper", 860],
+      ["pages/paper-admin-dashboard/index.html",   "Admin dashboard",    "App screens · paper", 860],
+      ["pages/paper-admin-events/index.html",      "Manage events",      "App screens · paper", 860],
+      ["pages/paper-merge-events/index.html",      "Merge events",       "App screens · paper", 860],
+      ["pages/paper-admin-users/index.html",       "Manage users",       "App screens · paper", 860],
+      ["pages/paper-loading/index.html",           "Loading / skeleton", "App screens · paper", 860],
+      ["pages/paper-error/index.html",             "Error / offline",    "App screens · paper", 860],
+      ["pages/paper-report/index.html",            "Report / block",     "App screens · paper", 860],
+    ];
+    const grid = document.getElementById("grid");
+    for (const [path, name, tag, h] of items) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span class="name">' + name + '</span>' +
+          '<span style="flex:1"></span>' +
+          '<span class="tag">' + tag + '</span>' +
+          '<a href="' + path + '" target="_blank" rel="noopener">open ↗</a>' +
+        '</div>' +
+        '<div class="frame-wrap"><iframe src="' + path + '" style="height:' + h + 'px" loading="lazy"></iframe></div>';
+      grid.appendChild(card);
+    }
+  </script>
+</body>
+</html>

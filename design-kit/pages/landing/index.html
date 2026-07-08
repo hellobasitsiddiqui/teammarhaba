@@ -1,0 +1,64 @@
+<!-- @dsCard group="Pages" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Landing page</title>
+<style>
+  :root{--bg:#f1f1f1;--fg:#111;--muted:#8a8a8a;--border:#c9c9c9;--r:8px;--maxw:1080px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--fg);background:#fff}
+  .wrap{max-width:var(--maxw);margin:0 auto}
+  .btn{display:inline-block;padding:14px 28px;border-radius:var(--r);background:var(--fg);color:#fff;font-weight:600;font-size:15px;text-decoration:none;border:1.5px solid var(--fg)}
+  .btn--sec{background:transparent;color:var(--fg)}
+  nav{display:flex;align-items:center;gap:32px;padding:20px 40px}
+  .logo{font-weight:800;font-size:22px}.grow{flex:1}
+  nav .links{display:flex;gap:30px}.links a{color:var(--fg);text-decoration:none;font-size:15px}
+  section{padding:72px 40px}.alt{background:var(--bg)}
+  .hero{display:grid;grid-template-columns:1fr 1fr;gap:52px;align-items:center}
+  h1{font-size:44px;line-height:1.1;margin:0 0 22px}
+  .lead{font-size:17px;line-height:1.6;margin:0 0 28px}
+  .browser{background:#fff;border:1.5px solid var(--fg);border-radius:6px;aspect-ratio:4/3;padding:16px}
+  .dots{display:flex;gap:10px}.dots i{width:12px;height:12px;border:1.5px solid var(--fg);border-radius:50%;display:block}
+  .proof{text-align:center}.proof h3{font-size:20px;margin:0 0 28px}
+  .logos{display:flex;justify-content:center;gap:36px}.logos i{width:80px;height:80px;border-radius:50%;background:#111;display:block}
+  .feat{display:grid;grid-template-columns:1fr 1fr;gap:52px;align-items:center}
+  .img-solid{background:#111;aspect-ratio:4/3;border-radius:2px}
+  .price{text-align:center}.price h2{font-size:30px;margin:0 0 40px}
+  .pg{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;text-align:center}
+  .pc{background:#fff;border:1.5px solid var(--border);border-radius:var(--r);padding:28px}
+  .pc .a{width:60px;height:60px;border-radius:50%;background:#111;margin:0 auto 12px}.pc ul{list-style:none;padding:0;color:var(--muted);font-size:14px;line-height:2.2;margin:14px 0 22px}
+  .cta{text-align:center}.cta h2{font-size:28px;margin:0 0 16px}.cta p{max-width:46ch;margin:0 auto 24px;line-height:1.6}
+  footer{background:var(--bg);padding:52px 40px}
+  .cols{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:24px}
+  .cols h4{margin:0 0 12px;font-size:15px}.cols a{display:block;color:var(--fg);text-decoration:none;font-size:14px;line-height:2.1}
+  @media(max-width:760px){.hero,.feat{grid-template-columns:1fr}.pg,.cols{grid-template-columns:1fr}h1{font-size:32px}}
+</style></head>
+<body>
+  <nav><div class="logo">TRADE</div><div class="grow"></div><div class="links"><a>Link 1</a><a>Link 2</a><a>Link 3</a><a>Link 4</a></div><div class="grow"></div><a class="btn btn--sec" style="padding:11px 20px">Sign Up</a></nav>
+
+  <section class="alt"><div class="wrap hero">
+    <div><h1>Your Best Value Proposition</h1><p class="lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p><a class="btn">Start free trial</a></div>
+    <div class="browser"><div class="dots"><i></i><i></i><i></i></div></div>
+  </div></section>
+
+  <section class="alt proof"><div class="wrap"><h3>Trusted by the World&rsquo;s Best Companies</h3><div class="logos"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></section>
+
+  <section class="alt"><div class="wrap feat">
+    <div class="img-solid"></div>
+    <div><h3 style="font-size:20px;margin:0 0 16px">Feature that is amazing</h3><p class="lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p><a class="btn btn--sec">Learn More</a></div>
+  </div></section>
+
+  <section class="alt price"><div class="wrap"><h2>Transparent Pricing</h2><div class="pg">
+    <div class="pc"><div class="a"></div><h3>Title</h3><div style="font-size:13px">Subtitle</div><ul><li>Feature 1</li><li>Feature 2</li><li>Feature 3</li></ul><a class="btn btn--sec" style="display:block">Start Now</a></div>
+    <div class="pc"><div class="a"></div><h3>Title</h3><div style="font-size:13px">Subtitle</div><ul><li>Feature 1</li><li>Feature 2</li><li>Feature 3</li></ul><a class="btn btn--sec" style="display:block">Start Now</a></div>
+    <div class="pc"><div class="a"></div><h3>Title</h3><div style="font-size:13px">Subtitle</div><ul><li>Feature 1</li><li>Feature 2</li><li>Feature 3</li></ul><a class="btn btn--sec" style="display:block">Start Now</a></div>
+  </div></div></section>
+
+  <section class="alt cta"><div class="wrap"><h2>Ready to get started?</h2><p class="lead">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p><a class="btn">Start free trial</a></div></section>
+
+  <footer><div class="wrap cols">
+    <div><div class="logo">TRADE</div><div style="color:#666;font-size:13px;margin-top:12px;line-height:1.9">&copy; 2010 &mdash; 2020<br>Privacy &mdash; Terms</div></div>
+    <div><h4>Product</h4><a>Product</a><a>Product</a><a>Product</a></div>
+    <div><h4>Features</h4><a>Feature</a><a>Feature</a><a>Feature</a></div>
+    <div><h4>Resources</h4><a>Resource</a><a>Resource</a><a>Resource</a></div>
+    <div><h4>Company</h4><a>Company</a><a>Company</a><a>Company</a></div>
+  </div></footer>
+</body></html>

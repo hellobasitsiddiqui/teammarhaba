@@ -1,0 +1,141 @@
+<!-- @dsCard group="App screens · paper" name="Home (paper kit style)" -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Home (Paper Wireframe Kit style)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* Tokens pulled from the Paper Wireframe Kit (Figma): grayscale ramp + Crayola accent, Patrick Hand. */
+    :root{
+      --ink:#1B1B1B; --white:#FFFFFF;
+      --g1:#EEEEEE; --g2:#D8D8D8; --g3:#B4B4B4; --g4:#929292; --g5:#696969; --g6:#454545;
+      --accent:#37D4AD; --accent-light:#DAFCF3;   /* Caribbean Green — closest crayon to the app's teal */
+      --radius:12px;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;
+      font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;
+      background:var(--white);border:3px solid var(--ink);border-radius:42px;}
+    .statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",system-ui,sans-serif;font-weight:500;}
+    header.app{display:flex;align-items:center;justify-content:space-between;padding:8px 18px 10px;}
+    .brand{font-size:28px;line-height:1;}
+    .brand .sub{font-family:"Inter",sans-serif;font-weight:500;font-size:11.5px;color:var(--g4);display:block;margin-top:1px;letter-spacing:.02em;}
+    .bell{position:relative;width:40px;height:40px;display:grid;place-items:center;border:2px solid var(--ink);border-radius:50%;background:var(--white);}
+    .bell svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.8;}
+    .bell .dot{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 4px;background:var(--accent);
+      border:1.5px solid var(--ink);color:var(--ink);border-radius:999px;font-size:11px;display:grid;place-items:center;
+      font-family:"Inter",sans-serif;font-weight:700;}
+    main{padding:2px 16px 14px;flex:1;}
+    .htitle{font-size:24px;margin:6px 2px 2px;}
+    .hsince{font-family:"Inter",sans-serif;font-weight:500;color:var(--g4);font-size:13px;margin:0 2px 14px;}
+    .card{background:var(--white);border:2px solid var(--ink);border-radius:16px;padding:14px 16px;margin-bottom:14px;
+      box-shadow:3px 3px 0 var(--g2);}
+    .tag{display:inline-block;font-size:14px;background:var(--g1);border:1.5px solid var(--ink);border-radius:999px;padding:1px 11px;margin-bottom:7px;}
+    .card h3{font-size:21px;font-weight:400;margin:0 0 6px;}
+    .meta{color:var(--g5);font-size:15px;margin:3px 0;display:flex;gap:6px;align-items:center;}
+    .meta .i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;flex:none;}
+    .row{display:flex;align-items:center;justify-content:space-between;margin-top:12px;}
+    .pill{border:1.5px solid var(--ink);border-radius:999px;padding:3px 12px;font-size:14px;background:var(--white);}
+    .pill.full{background:var(--g1);color:var(--g6);}
+    .btn{font-size:16px;border:2px solid var(--ink);border-radius:11px;background:var(--accent);color:var(--ink);padding:7px 20px;
+      box-shadow:2px 2px 0 var(--ink);cursor:pointer;}
+    .btn.ghost{background:var(--white);box-shadow:none;}
+    .btn.done{background:var(--accent-light);}
+    nav.tabbar{display:flex;border-top:2px solid var(--ink);background:var(--white);margin-top:auto;}
+    nav.tabbar a{flex:1;text-decoration:none;color:var(--g4);position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 0 12px;font-size:13px;}
+    nav.tabbar a svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.9;}
+    nav.tabbar a.active{color:var(--ink);}
+    nav.tabbar a.active svg{stroke:var(--ink);}
+    nav.tabbar a.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:40px;height:3px;background:var(--accent);border-radius:2px;}
+    nav.tabbar .nbadge{position:absolute;top:6px;right:calc(50% - 26px);min-width:18px;height:18px;padding:0 3px;background:var(--accent);
+      border:1.4px solid var(--ink);color:var(--ink);border-radius:999px;font-size:10.5px;display:grid;place-items:center;font-family:"Inter",sans-serif;font-weight:700;}
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <header class="app">
+      <div class="brand">Marhaba<span class="sub">FIND YOUR PEOPLE</span></div>
+      <div class="bell"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span class="dot">3</span></div>
+    </header>
+    <main>
+      <div class="htitle">Events near you</div>
+      <div class="hsince">Milton Keynes · this week</div>
+
+      <div class="card">
+        <span class="tag">Dog walks</span>
+        <h3>Sunday Morning Dog Walk</h3>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Sun 12 Jul · 10:00</div>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>Willen Lake (revealed 24h before)</div>
+        <div class="row"><span class="pill">12 going</span><button class="btn done">Going ✓</button></div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Tech &amp; coffee</span>
+        <h3>Coffee &amp; Code Meetup</h3>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Tue 14 Jul · 18:30</div>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>Central Milton Keynes</div>
+        <div class="row"><span class="pill">8 going</span><button class="btn">RSVP</button></div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Bouldering</span>
+        <h3>Thursday Bouldering Social</h3>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Thu 16 Jul · 19:00</div>
+        <div class="meta"><svg class="i" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>Big Rock, Bletchley</div>
+        <div class="row"><span class="pill full">Full · waitlist 2</span><button class="btn ghost">Join waitlist</button></div>
+      </div>
+    </main>
+    <nav class="tabbar">
+      <a class="active" href="#"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Events</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>Chat<span class="nbadge">2</span></a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M6 19c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>Profile</a>
+    </nav>
+  </div>
+  <script>
+  /* showcase.html accent picker: apply an accent posted from the parent to this screen's own :root
+     (postMessage avoids the file:// cross-frame DOM block). */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!d || !d.__accent) return;
+    var r = document.documentElement;
+    r.style.setProperty('--accent', d.__accent);
+    r.style.setProperty('--accent-light', d.__accentLight);
+    var s = document.getElementById('__acc');
+    if(!s){ s = document.createElement('style'); s.id = '__acc'; document.head.appendChild(s); }
+    s.textContent = d.__dark
+      ? ".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}"
+      : "";
+  });
+  </script>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" result="noise"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="noise" scale="2"/></filter></svg>
+  <script>
+  /* sketchiness control from the showcase: __sketch = 0 (crisp) .. ~4 (very wavy) */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!('__sketch' in d)) return;
+    var amt = +d.__sketch || 0;
+    var disp = document.getElementById('__disp');
+    if(disp) disp.setAttribute('scale', amt);
+    var ph = document.querySelector('.phone');
+    if(ph) ph.style.filter = amt > 0 ? 'url(#wobble-soft)' : '';
+  });
+  </script>
+  <script>
+  /* generic theme-token setter from the showcase (sets any CSS vars posted in __vars) */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!d.__vars) return;
+    var r = document.documentElement;
+    for(var k in d.__vars) r.style.setProperty(k, d.__vars[k]);
+    var s = document.getElementById('__acc');
+    if(!s){ s = document.createElement('style'); s.id='__acc'; document.head.appendChild(s); }
+    s.textContent = d.__dark ? ".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}" : "";
+  });
+  </script>
+</body>
+</html>

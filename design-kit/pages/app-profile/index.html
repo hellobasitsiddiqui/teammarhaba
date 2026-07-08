@@ -1,0 +1,94 @@
+<!-- @dsCard group="App screens" name="Profile (interests + completeness)" -->
+<!doctype html>
+<html lang="en" data-theme="sketch">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1a1a2e;--paper:#f7f7f3;--card:#fffef9;--muted:color-mix(in srgb,var(--ink) 52%,transparent);
+      --shadow:2px 2px 0 color-mix(in srgb,var(--ink) 18%,transparent);--shadow-lg:4px 4px 0 color-mix(in srgb,var(--ink) 22%,transparent);}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#e7e7ea;padding:24px;
+      font-family:"Patrick Hand","Bradley Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .wob{filter:url(#wobble-soft);}@media (prefers-reduced-motion:reduce){.wob{filter:none;}}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;
+      background-color:var(--paper);border:2px solid var(--ink);border-radius:30px;box-shadow:var(--shadow-lg);}
+    .statusbar{display:flex;justify-content:space-between;padding:11px 20px 0;font-size:12.5px;color:var(--muted);font-family:system-ui,sans-serif;}
+    .topbar{display:flex;align-items:center;padding:8px 18px 4px;}
+    .topbar h1{font-family:"Gochi Hand",cursive;font-weight:400;font-size:24px;margin:0;flex:1;}
+    .gear{width:32px;height:32px;display:grid;place-items:center;border:1.5px solid var(--ink);border-radius:50%;background:var(--card);}
+    .gear svg{width:17px;height:17px;stroke:var(--ink);fill:none;stroke-width:1.7;}
+    main{padding:6px 16px 14px;flex:1;overflow:auto;}
+    .id{display:flex;gap:13px;align-items:center;margin:4px 2px 12px;}
+    .avatar{width:64px;height:64px;border:2px solid var(--ink);border-radius:50%;background:var(--card);display:grid;place-items:center;
+      font-family:"Gochi Hand",cursive;font-size:26px;}
+    .id .nm{font-family:"Gochi Hand",cursive;font-size:22px;}
+    .id .sub{color:var(--muted);font-size:14px;}
+    .card{background:var(--card);border:1.5px solid var(--ink);border-radius:15px;box-shadow:var(--shadow);padding:13px 15px;margin-bottom:13px;}
+    .ctitle{font-family:"Gochi Hand",cursive;font-size:16px;margin:0 0 8px;}
+    .bar{height:12px;border:1.5px solid var(--ink);border-radius:999px;background:var(--paper);overflow:hidden;}
+    .bar i{display:block;height:100%;width:70%;background:var(--ink);}
+    .barlbl{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px;}
+    .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px;}
+    .chip{border:1.5px solid var(--ink);border-radius:999px;padding:3px 11px;font-size:13.5px;background:var(--paper);}
+    .chip.pri{background:var(--ink);color:var(--paper);font-family:"Gochi Hand",cursive;}
+    .chip.add{border-style:dashed;color:var(--muted);}
+    .memb{display:flex;justify-content:space-between;align-items:center;}
+    .memb .go{font-family:"Gochi Hand",cursive;font-size:14px;color:var(--muted);}
+    .menu a{display:flex;justify-content:space-between;align-items:center;padding:11px 2px;border-bottom:1.5px solid color-mix(in srgb,var(--ink) 12%,transparent);
+      text-decoration:none;color:var(--ink);font-size:15.5px;}
+    .menu a:last-child{border:0;color:var(--muted);}
+    .menu .chev{color:var(--muted);}
+    nav.tabbar{display:flex;border-top:2px solid var(--ink);background:var(--card);margin-top:auto;}
+    nav.tabbar a{flex:1;text-decoration:none;color:var(--muted);position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 11px;font-size:12.5px;}
+    nav.tabbar a svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.8;}
+    nav.tabbar a.active{color:var(--ink);font-family:"Gochi Hand",cursive;font-size:13.5px;}
+    nav.tabbar a.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:36px;height:3px;background:var(--ink);border-radius:2px;}
+    nav.tabbar .nbadge{position:absolute;top:5px;right:calc(50% - 24px);min-width:17px;height:17px;padding:0 3px;background:var(--ink);color:var(--paper);border-radius:999px;font-size:10.5px;display:grid;place-items:center;font-family:"Gochi Hand",cursive;}
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" /></filter></svg>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <div class="topbar"><h1>Profile</h1><span class="gear wob"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/></svg></span></div>
+    <main>
+      <div class="id"><span class="avatar wob">B</span><div><div class="nm">Basit S.</div><div class="sub">Milton Keynes · 29</div></div></div>
+
+      <div class="card wob">
+        <div class="ctitle">Profile strength</div>
+        <div class="bar wob"><i></i></div>
+        <div class="barlbl"><span>70% complete</span><span>Add a photo + bio →</span></div>
+      </div>
+
+      <div class="card wob">
+        <div class="ctitle">Interests</div>
+        <div class="chips">
+          <span class="chip pri">Hiking</span><span class="chip pri">Coffee</span><span class="chip pri">Coding</span>
+          <span class="chip">Bouldering</span><span class="chip">Dogs</span><span class="chip add">+ add</span>
+        </div>
+      </div>
+
+      <div class="card wob memb">
+        <div><div class="ctitle" style="margin:0 0 2px">Membership</div><div style="color:var(--muted);font-size:14px">Pay as you go · first event free</div></div>
+        <span class="go">Manage →</span>
+      </div>
+
+      <div class="card wob menu">
+        <a href="#">My events <span class="chev">›</span></a>
+        <a href="#">Notifications <span class="chev">›</span></a>
+        <a href="#">Privacy &amp; my data <span class="chev">›</span></a>
+        <a href="#">Sign out</a>
+      </div>
+    </main>
+    <nav class="tabbar">
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Events</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>Chat<span class="nbadge">2</span></a>
+      <a class="active" href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M6 19c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>Profile</a>
+    </nav>
+  </div>
+</body>
+</html>

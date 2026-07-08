@@ -1,0 +1,70 @@
+<!-- @dsCard group="App screens" name="Admin: send notification" -->
+<!doctype html>
+<html lang="en" data-theme="sketch">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Send notification</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1a1a2e;--paper:#f7f7f3;--card:#fffef9;--muted:color-mix(in srgb,var(--ink) 52%,transparent);
+      --shadow:2px 2px 0 color-mix(in srgb,var(--ink) 18%,transparent);--shadow-lg:4px 4px 0 color-mix(in srgb,var(--ink) 22%,transparent);}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#e7e7ea;padding:24px;
+      font-family:"Patrick Hand","Bradley Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .wob{filter:url(#wobble-soft);}@media (prefers-reduced-motion:reduce){.wob{filter:none;}}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;
+      background-color:var(--paper);border:2px solid var(--ink);border-radius:30px;box-shadow:var(--shadow-lg);}
+    .statusbar{display:flex;justify-content:space-between;padding:11px 20px 0;font-size:12.5px;color:var(--muted);font-family:system-ui,sans-serif;}
+    .topbar{display:flex;align-items:center;gap:10px;padding:8px 16px 6px;}
+    .topbar .back{width:34px;height:34px;display:grid;place-items:center;border:1.5px solid var(--ink);border-radius:50%;background:var(--card);}
+    .topbar .back svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:2;}
+    .topbar h1{font-family:"Gochi Hand",cursive;font-weight:400;font-size:22px;margin:0;flex:1;}
+    .admin{font-family:"Gochi Hand",cursive;font-size:11px;border:1.3px solid var(--ink);border-radius:999px;padding:2px 9px;}
+    main{padding:6px 16px 14px;flex:1;overflow:auto;}
+    label{display:block;font-size:13.5px;color:var(--muted);margin:12px 0 5px;}
+    .seg{display:flex;gap:0;border:1.5px solid var(--ink);border-radius:11px;overflow:hidden;}
+    .seg span{flex:1;text-align:center;padding:8px 0;font-size:13.5px;}
+    .seg span.on{background:var(--ink);color:var(--paper);font-family:"Gochi Hand",cursive;}
+    .inp,.ta{border:1.5px solid var(--ink);border-radius:11px;padding:10px 12px;font-family:inherit;font-size:15px;color:var(--muted);background:var(--paper);width:100%;}
+    .ta{min-height:76px;}
+    .preview{margin-top:16px;border:1.5px dashed var(--ink);border-radius:13px;padding:11px 13px;background:var(--card);box-shadow:var(--shadow);}
+    .preview .p-t{font-family:"Gochi Hand",cursive;font-size:12px;color:var(--muted);margin-bottom:6px;}
+    .push{display:flex;gap:10px;align-items:flex-start;}
+    .push .ic{width:30px;height:30px;flex:none;border:1.4px solid var(--ink);border-radius:8px;display:grid;place-items:center;font-family:"Gochi Hand",cursive;}
+    .push .txt .h{font-weight:700;font-size:14px;}
+    .push .txt .b{font-size:13.5px;color:var(--muted);}
+    .btn{font-family:"Gochi Hand",cursive;font-size:17px;border:1.5px solid var(--ink);border-radius:12px;background:var(--ink);color:var(--paper);padding:11px 18px;width:100%;margin-top:16px;}
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" /></filter></svg>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <div class="topbar">
+      <span class="back wob"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+      <h1>Send notification</h1><span class="admin wob">Admin</span>
+    </div>
+    <main>
+      <label>Audience</label>
+      <div class="seg wob"><span class="on">All users</span><span>Event attendees</span></div>
+
+      <label>Title</label>
+      <div class="inp wob">New events this weekend 🎉</div>
+
+      <label>Message</label>
+      <div class="ta wob">3 fresh meetups just dropped near you — dog walks, coffee &amp; code and a 5-a-side. Tap to RSVP before they fill up.</div>
+
+      <label>Opens (deep link)</label>
+      <div class="inp wob">/events</div>
+
+      <div class="preview wob">
+        <div class="p-t">PREVIEW · push</div>
+        <div class="push"><span class="ic">M</span><div class="txt"><div class="h">New events this weekend 🎉</div><div class="b">3 fresh meetups just dropped near you…</div></div></div>
+      </div>
+
+      <button class="btn wob">Send to 1,240 people</button>
+    </main>
+  </div>
+</body>
+</html>
