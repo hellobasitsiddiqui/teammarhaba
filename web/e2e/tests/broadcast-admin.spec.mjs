@@ -100,6 +100,7 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   // Signed in: the admin nav appears (ROLE_ADMIN only) and the signed-out panel is gone.
+  await openNav(page); // phone: the admin nav lives behind the hamburger — open it before asserting
   await expect(page.locator("#nav-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
