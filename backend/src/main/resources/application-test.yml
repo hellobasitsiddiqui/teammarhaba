@@ -22,3 +22,12 @@ app:
   # regardless of any future change to the shipped prod default.
   event-listing:
     default-duration-hours: 3
+
+# OpenAPI docs (TM-76, TM-520): the live springdoc endpoints are disabled by default on every runtime
+# profile (application.yml); the test profile re-enables them so OpenApiDocsTest + OpenApiDriftTest can
+# read /v3/api-docs and /swagger-ui. This is an internal test surface, not a deployed one.
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

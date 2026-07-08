@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TeamMarhaba API — Reference</title>
+    <meta name="description" content="Read-only reference for the TeamMarhaba Backend API (v1)." />
+    <!--
+      Static, read-only public API docs (TM-520). Renders the committed OpenAPI spec via Redoc.
+
+      Public + browseable, but with NO live "try it out" against a real environment: the interactive
+      springdoc UI (/swagger-ui, /v3/api-docs) is DISABLED on every deployed profile (see
+      backend application.yml). Redoc is read-only by design, so it exposes the API's documented
+      shape without pointing at a running backend.
+
+      openapi.json in this directory is a copy of backend/openapi.json (the drift-guarded source of
+      truth). web/tools/api-docs-spec-drift.test.mjs keeps the two byte-identical, and the deploy's
+      `cp -r web/src/. web/dist/` publishes this whole directory as-is (it lives outside /assets, so
+      the fingerprinter leaves the ./openapi.json reference untouched).
+    -->
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <redoc spec-url="./openapi.json"></redoc>
+    <!-- Redoc standalone, pinned (supply-chain: no floating "latest" tag). -->
+    <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+  </body>
+</html>
