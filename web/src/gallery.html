@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="sketch">
+<html lang="en" data-sketchy="on">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -15,7 +15,7 @@
     />
     <link rel="stylesheet" href="/assets/styles.css" />
 
-    <!-- The "wobble" SVG filter the sketch/doodle themes reference via filter:url(#wobble-soft).
+    <!-- The "wobble" SVG filter the sketchy Paper skin references via filter:url(#wobble-soft).
          Copied verbatim from index.html so the gallery shows the same hand-drawn edge. -->
     <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
       <filter id="wobble-soft">
@@ -102,26 +102,20 @@
     <header class="g-head">
       <h1>Component gallery</h1>
       <p class="g-sub">
-        The shared UI component library (TM-511) — every component from the approved paper wireframe
-        kit, built from the reconciled design tokens (TM-510). Flip the theme or the accent below and
-        watch every tile restyle from tokens alone.
+        The shared UI component library (TM-511) — every component from the approved Paper wireframe
+        kit, built from the reconciled design tokens (TM-510). Toggle the wavy/sketchy style or pick an
+        accent swatch below (the same two per-user Paper controls, TM-529) and watch every tile restyle
+        from tokens alone.
       </p>
     </header>
 
-    <div class="g-controls" role="group" aria-label="Theme controls">
-      <strong>Theme</strong>
-      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="clean" aria-pressed="false">
-        Clean
-      </button>
-      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="doodle" aria-pressed="false">
-        Doodle
-      </button>
-      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" data-theme-btn="sketch" aria-pressed="true">
-        Sketch
+    <div class="g-controls" role="group" aria-label="Appearance controls">
+      <strong>Style</strong>
+      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" id="g-sketchy" aria-pressed="true">
+        Wavy / sketchy: on
       </button>
       <strong>Accent</strong>
-      <input type="color" id="g-accent" value="#37d4ad" aria-label="Override the accent token" />
-      <button class="tm-c-btn tm-c-btn--ghost tm-wobble-soft" type="button" id="g-accent-reset">Reset accent</button>
+      <div id="g-accent-swatches" class="tm-swatches" role="group" aria-label="Accent colour"></div>
     </div>
 
     <main id="gallery" class="g-grid" aria-label="Components"></main>

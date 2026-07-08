@@ -8,16 +8,16 @@
 // Design contract (so they restyle with the theme and stay safe):
 //   • Themeable — every stroke is `stroke="currentColor"` and fills are `fill="none"` (or
 //     `currentColor` where a solid dot/glyph is wanted). NO hardcoded colours, so a doodle inks with
-//     the TM-210/TM-211 tokens: it picks up `var(--fg)` (ink) wherever it's placed, and flips with
-//     the doodle dark variant automatically.
-//   • Hand-drawn — rough, slightly wobbly paths (round caps/joins) to match TM-213's ink-on-paper
-//     skin and the wobble filter. They carry the `tm-doodle` class so styles.css can size them under
-//     `[data-theme="doodle"]`; opt into the SVG wobble with `tm-wobble-soft` if wanted.
+//     the Paper tokens: it picks up `var(--fg)` (ink) wherever it's placed, and flips with dark mode
+//     automatically.
+//   • Hand-drawn — rough, slightly wobbly paths (round caps/joins) to match Paper's ink-on-paper skin
+//     and the wobble filter. They carry the `tm-doodle` class so styles.css can size them under
+//     `[data-sketchy="on"]`; opt into the SVG wobble with `tm-wobble-soft` if wanted.
 //   • XSS-safe — built structurally from a namespaced element factory that only ever sets attributes
 //     (and on the divider, a static `<text>` via `textContent`). There is no innerHTML seam and no
 //     user data ever flows in; every doodle is static inline SVG.
-//   • Doodle-theme-only — meant to render under `[data-theme="doodle"]`. The pack adds no chrome to
-//     `clean`; pages should only mount these on the doodle skin (TM-215's job).
+//   • Sketchy-only — meant to render under `[data-sketchy="on"]` (the wavy/sketchy Paper look). The
+//     pack adds no chrome to clean Paper; pages mount these decorations, CSS hides them when off.
 //
 // Usage (framework-free SPA, mirrors the el() kit in ui.js):
 //

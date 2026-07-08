@@ -2,14 +2,15 @@
 //
 // A standalone review page (gallery.html) that mounts one tile per shared component from the
 // COMPONENTS catalogue, each reproducing its design-kit/showcase-paper.html "Design elements · paper"
-// tile. It also wires a live theme switcher (clean / doodle / sketch) + accent override so a reviewer
-// can watch the WHOLE set restyle from tokens alone (the "restyle automatically when the theme flips"
-// AC) — nothing here hard-codes a colour; flipping `data-theme` on <html> or the `--accent` token
-// re-skins every tile. Framework-free: built from the same ui.js `el()` + the component factories the
-// real screens will import.
+// tile. It also wires the two live Paper controls (TM-529) — the wavy/sketchy toggle + the curated
+// accent swatches — so a reviewer can watch the WHOLE set restyle from tokens alone. Nothing here
+// hard-codes a colour; flipping `data-sketchy` on <html> or re-pointing the `--accent` token re-skins
+// every tile. Framework-free: built from the same ui.js `el()` + the component factories the real
+// screens import, and the same appearance-core palette the app uses.
 
 import { el, clear } from "./ui.js";
 import { COMPONENTS } from "./components-core.js";
+import { PAPER_PALETTE, applyAppearance, accentById } from "./appearance-core.js";
 import {
   button,
   tag,
@@ -108,24 +109,48 @@ export function renderGallery(root) {
   }
 }
 
-/** Wire the theme + accent controls so the reviewer can watch the tokens re-skin every tile. */
+/** Wire the sketchy toggle + curated accent swatches so the reviewer can watch the tokens re-skin. */
 function wireControls() {
   const htmlEl = document.documentElement;
-  document.querySelectorAll("[data-theme-btn]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const theme = btn.getAttribute("data-theme-btn");
-      htmlEl.setAttribute("data-theme", theme);
-      document.querySelectorAll("[data-theme-btn]").forEach((b) =>
-        b.setAttribute("aria-pressed", b === btn ? "true" : "false"),
-      );
+
+  // Wavy/sketchy toggle: flips [data-sketchy] between on/off (the whole hand-drawn skin).
+  const sketchyBtn = document.getElementById("g-sketchy");
+  if (sketchyBtn) {
+    sketchyBtn.addEventListener("click", () => {
+      const on = htmlEl.getAttribute("data-sketchy") !== "on";
+      htmlEl.setAttribute("data-sketchy", on ? "on" : "off");
+      sketchyBtn.setAttribute("aria-pressed", String(on));
+      sketchyBtn.textContent = `Wavy / sketchy: ${on ? "on" : "off"}`;
     });
-  });
-  const accent = document.getElementById("g-accent");
-  if (accent) {
-    accent.addEventListener("input", () => htmlEl.style.setProperty("--accent", accent.value));
   }
-  const reset = document.getElementById("g-accent-reset");
-  if (reset) reset.addEventListener("click", () => htmlEl.style.removeProperty("--accent"));
+
+  // Curated accent swatches (the fixed palette) — picking one re-points --accent/--on-accent.
+  const swatches = document.getElementById("g-accent-swatches");
+  if (swatches) {
+    clear(swatches);
+    for (const swatch of PAPER_PALETTE) {
+      const btn = el("button", {
+        type: "button",
+        class: "tm-swatch",
+        "data-accent": swatch.id,
+        style: `--tm-swatch: ${swatch.hex}`,
+        "aria-label": swatch.label,
+        title: swatch.label,
+      });
+      btn.addEventListener("click", () => {
+        const applied = accentById(swatch.id);
+        htmlEl.style.setProperty("--accent", applied.hex);
+        htmlEl.style.setProperty("--on-accent", applied.onAccent);
+        swatches
+          .querySelectorAll("[data-accent]")
+          .forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+      });
+      swatches.append(btn);
+    }
+  }
+
+  // Start from the app's default appearance so the gallery matches a fresh user.
+  applyAppearance(document, {});
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -623,6 +623,12 @@
           "termsAcceptedVersion" : {
             "type" : "string"
           },
+          "themeAccent" : {
+            "type" : "string"
+          },
+          "themeSketchy" : {
+            "type" : "boolean"
+          },
           "timezone" : {
             "type" : "string"
           },
@@ -965,6 +971,13 @@
             "minLength" : 0,
             "pattern" : "^$|^\\+?[0-9 ()./-]{3,32}$",
             "type" : "string"
+          },
+          "themeAccent" : {
+            "pattern" : "^(teal|indigo|coral|amber|plum|ink)$",
+            "type" : "string"
+          },
+          "themeSketchy" : {
+            "type" : "boolean"
           },
           "timezone" : {
             "maxLength" : 64,

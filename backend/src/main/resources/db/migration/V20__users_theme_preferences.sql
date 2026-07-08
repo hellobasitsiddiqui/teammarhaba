@@ -1,0 +1,22 @@
+-- V20__users_theme_preferences — per-user Paper appearance prefs (TM-529)
+--
+-- The multi-theme system (clean/doodle/sketch) is retired: Paper is the single app theme. The two
+-- things a user can still personalise move here, persisted per account (so they survive reload and
+-- follow the user across devices, not just localStorage):
+--
+--   theme_accent   Which curated accent swatch re-tints the Paper theme. A small fixed palette id
+--                  (teal|indigo|coral|amber|plum|ink), NOT a free hex — every swatch is guaranteed
+--                  legible against Paper surfaces. Stored as VARCHAR (same convention as role /
+--                  notification_pref) so swatches can be added without a DB type change. Defaults to
+--                  'teal' — the existing Paper accent (the TM-510 --accent token), i.e. the first/
+--                  selected swatch for a new account.
+--   theme_sketchy  Whether the hand-drawn "wavy/sketchy" wobble is on. Product decision (TM-529):
+--                  a brand-new account defaults to sketchy ON (the app's character); clean Paper is
+--                  the opt-out. BOOLEAN NOT NULL DEFAULT TRUE.
+--
+-- SCOPE — new rows get the Java-side defaults on the User entity (Hibernate always writes both
+-- columns on insert); these column defaults keep raw SQL inserts in step. Existing rows backfill to
+-- the defaults (teal + sketchy on), which is exactly the look they render today (the shipped default
+-- theme was the sketch/paper wireframe), so no visible change for anyone already signed up.
+ALTER TABLE users ADD COLUMN theme_accent  VARCHAR(32) NOT NULL DEFAULT 'teal';
+ALTER TABLE users ADD COLUMN theme_sketchy BOOLEAN     NOT NULL DEFAULT TRUE;

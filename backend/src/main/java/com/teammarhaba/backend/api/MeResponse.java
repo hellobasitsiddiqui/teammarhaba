@@ -41,6 +41,10 @@ import java.time.Instant;
  *                             un-RSVPs made inside an event's cancellation window. Exposed so the
  *                             client (and later TM-409 / admin) can build on it; {@code 0} until the
  *                             first late cancel. No consequence is enforced on it yet.
+ * @param themeAccent          the chosen Paper accent swatch id (TM-529) — one of the curated palette
+ *                             ids; {@code teal} (the default swatch) for a brand-new account
+ * @param themeSketchy         whether the hand-drawn wavy/sketchy wobble is on (TM-529); {@code true}
+ *                             (wobble) for a brand-new account, {@code false} = clean Paper
  */
 public record MeResponse(
         String uid,
@@ -62,4 +66,6 @@ public record MeResponse(
         boolean ageVerified,
         AccountState accountState,
         Instant lastActiveAt,
-        int lateCancelCount) {}
+        int lateCancelCount,
+        String themeAccent,
+        boolean themeSketchy) {}

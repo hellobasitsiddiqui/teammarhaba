@@ -15,23 +15,24 @@ login + admin flow against the full stack, with Firebase Auth replaced by the lo
 toast + status badge flips to *Disabled*) → the change **persists in Postgres** (`users.enabled = false`)
 → **sign out**.
 
-`tests/theme-visual.spec.mjs` (TM-216): guards the **theme system** so a theme can't silently break a
-page. Proves the app **boots in the configured theme** (the default is `sketch` since TM-323, and an
-unknown override is ignored), then walks the **key pages** — **login, home, profile, admin** — under
-**every registered family (`clean`, `doodle`, `sketch`)**, asserting `<html data-theme>` is right and
-each page's **primary control** is visible and **not covered or clipped** (a cheap "no layout break"
-invariant — no pixel snapshots, so no font/SVG-filter flake). It flips themes with the **`?theme=` dev
-override** (see below), against the single served bundle.
+`tests/theme-visual.spec.mjs` (TM-216 origin; rewritten for TM-529): guards the **Paper appearance**
+so a look can't silently break a page. Proves the app **boots to Paper** (the single theme; no
+`data-theme` family switch, `<html data-sketchy>` defaults to `on`), walks the **key pages** —
+**login, home, profile, admin** — asserting each page's **primary control** is visible and **not
+covered or clipped** (a cheap "no layout break" invariant — no pixel snapshots, so no font/SVG-filter
+flake), and then exercises the **two per-user controls** in profile settings — the **curated accent
+swatches** and the **wavy/sketchy toggle** — proving each **applies live and PERSISTS SERVER-SIDE**: a
+reload re-reads the choice from `GET /api/v1/me` (not localStorage) and re-applies it.
 
-### Theme dev override (`?theme=`)
+### Per-user appearance (accent + wavy/sketchy)
 
-`theme.js` honours a dev/test override at boot, layered over `window.TEAMMARHABA_CONFIG.theme`: a
-`?theme=clean|doodle|sketch` **URL query param** (the app hash-routes, so the query sits *before* the
-hash — `/?theme=clean#/login`) or a `tm-theme` **localStorage key** (query wins). Only `clean`/`doodle`/
-`sketch` are honoured; any other value is ignored and the configured/default theme is used. It's a
-**client-side visual toggle only** — no behaviour change, no data — so it's harmless in prod and lets you
-(and this suite) exercise every theme without a redeploy. The override survives hash navigation, so the spec
-loads it once via the initial URL then moves between views without reloading.
+There is no theme-family override any more. The look is personalised per user from profile settings and
+persisted server-side (`PATCH /api/v1/me` → `users.theme_accent` / `users.theme_sketchy`). At boot,
+`appearance.js` paints a fast, no-flash guess from a `tm-appearance` **localStorage hint**, then
+`appearance-sync.js` reconciles it with the server on auth-resolve — so the chosen accent + toggle apply
+on **every** page and follow the user **across devices**. The accent is a **fixed curated palette** (six
+`--accent-paper-*` swatches, kept in step between CSS and `appearance-core.js`), never a free colour
+picker, so no non-Paper look is selectable.
 
 ## How it fits together
 

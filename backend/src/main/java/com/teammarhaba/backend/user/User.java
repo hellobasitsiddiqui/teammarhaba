@@ -91,6 +91,28 @@ public class User {
     @Column(name = "locale")
     private String locale;
 
+    /**
+     * The chosen Paper accent swatch (TM-529). The multi-theme system is retired — Paper is the only
+     * theme, and its accent is re-tinted per user by picking one of a small curated palette
+     * ({@code teal|indigo|coral|amber|plum|ink}). Stored as the swatch id (not a hex), validated at
+     * the web boundary against that fixed set, so it can only ever be a known-good, paper-legible
+     * swatch. New accounts default to {@code teal} — the existing Paper {@code --accent} (TM-510) —
+     * which is the first/selected swatch; the DB column default is kept in step by
+     * {@code V20__users_theme_preferences}.
+     */
+    @Column(name = "theme_accent", nullable = false)
+    private String themeAccent = "teal";
+
+    /**
+     * Whether the hand-drawn "wavy/sketchy" wobble is on (TM-529). {@code true} = the hand-drawn
+     * wobble style, {@code false} = clean Paper. Product decision: a brand-new account defaults to
+     * sketchy <strong>on</strong> (the app's character; clean Paper is the opt-out). Hibernate writes
+     * this on insert, so the Java default is what every provisioned account gets; the DB default is
+     * kept in step by {@code V20__users_theme_preferences}.
+     */
+    @Column(name = "theme_sketchy", nullable = false)
+    private boolean themeSketchy = true;
+
     @Column(name = "onboarding_completed", nullable = false)
     private boolean onboardingCompleted = false;
 
@@ -230,6 +252,24 @@ public class User {
 
     public void setLocale(String locale) {
         this.locale = locale;
+    }
+
+    /** The chosen Paper accent swatch id (TM-529); one of the curated palette ids. */
+    public String getThemeAccent() {
+        return themeAccent;
+    }
+
+    public void setThemeAccent(String themeAccent) {
+        this.themeAccent = themeAccent;
+    }
+
+    /** Whether the hand-drawn wavy/sketchy wobble is on (TM-529). {@code true} for a new account. */
+    public boolean isThemeSketchy() {
+        return themeSketchy;
+    }
+
+    public void setThemeSketchy(boolean themeSketchy) {
+        this.themeSketchy = themeSketchy;
     }
 
     public boolean isOnboardingCompleted() {

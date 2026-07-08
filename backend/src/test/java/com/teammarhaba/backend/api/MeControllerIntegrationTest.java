@@ -165,6 +165,55 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void themePrefsDefaultToPaperTealAndSketchyOnForNewAccounts() throws Exception {
+        // TM-529 AC4: a brand-new account defaults to Paper with the default accent ("teal", the
+        // TM-510 --accent) and the default sketchy state (ON — the hand-drawn wobble is the app's
+        // character; clean Paper is the opt-out). Provisioned from the entity defaults on first sight.
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-default-theme", "mila@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.themeAccent").value("teal"))
+                .andExpect(jsonPath("$.themeSketchy").value(true));
+    }
+
+    @Test
+    void patchThenGetRoundTripsThemePrefs() throws Exception {
+        // TM-529 AC2/AC3: the chosen colour swatch + the sketchy flag persist server-side per user and
+        // survive a reload (a fresh GET reads them back from the database, not from localStorage).
+        var who = caller("uid-theme", "leo@example.com");
+
+        String body = """
+                { "themeAccent": "coral", "themeSketchy": false }""";
+
+        mockMvc.perform(patch("/api/v1/me").with(who).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.themeAccent").value("coral"))
+                .andExpect(jsonPath("$.themeSketchy").value(false));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.themeAccent").value("coral"))
+                .andExpect(jsonPath("$.themeSketchy").value(false));
+    }
+
+    @Test
+    void rejectsUnknownThemeAccentWith400() throws Exception {
+        // TM-529 AC6: the colour control is a FIXED curated palette, not a free picker — and no
+        // non-Paper theme is selectable. A retired theme name (or any value outside the palette) is a
+        // uniform 400 at the web boundary, so it can never reach persistence.
+        var who = caller("uid-bad-accent", "nyx@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"themeAccent\":\"sketch\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"themeAccent\":\"#ff0000\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void patchIsPartialAndLeavesOmittedFieldsUnchanged() throws Exception {
         var who = caller("uid-partial", "grace@example.com");
 

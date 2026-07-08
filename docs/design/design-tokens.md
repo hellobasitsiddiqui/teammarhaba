@@ -3,21 +3,27 @@
 The TeamMarhaba UI is driven by one authoritative set of **CSS custom properties** defined in
 [`web/src/assets/styles.css`](../../web/src/assets/styles.css). This is the design system's source of
 truth: every screen and the shared component library read these tokens via `var(--token)` and **never**
-hard-code a colour, spacing or type value. A theme family (`clean`, `doodle`, `sketch`) is therefore a
-pure token swap — no per-component edits — and the `doodle` + `sketch` wireframe families resolve their
-neutrals from the same ramp documented here (see "How the themes resolve" below).
+hard-code a colour, spacing or type value. **Paper is the single theme (TM-529)** — the multi-theme
+family system (`clean`/`doodle`/`sketch`) is retired. The only two things a user personalises are token
+swaps, applied at runtime with no per-component edits:
+
+- **accent** — one colour, from a **fixed curated palette** (the `--accent-paper-*` swatches), re-points
+  `--accent` (and `--on-accent`); and
+- **wavy/sketchy** — an on/off toggle on `<html data-sketchy>` that layers the hand-drawn skin (wobble
+  filter + ruled-paper grid + irregular corners + doodles) over the same palette.
 
 Reconciled (TM-510) against the approved wireframe kit — the TM-377 storyboards in
 [`docs/design/wireflows/`](wireflows/) and `blunt.css` — plus the shipped theme contract
-(TM-210 / TM-211 / TM-236 / TM-323).
+(TM-210 / TM-211 / TM-236 / TM-323), then consolidated to Paper only (TM-529).
 
 ## Two tiers
 
 1. **Primitives** — raw palette / spacing / type values, defined once on `:root`. Not read directly by
    components (except plain white/ink chrome); the semantic tokens alias them.
 2. **Semantic tokens** — meaning-named tokens (`--fg`, `--surface`, `--accent`, …) that components read.
-   `clean` is the base `:root` contract; `doodle` and `sketch` override the semantic tokens in a
-   `[data-theme="…"]` block (and its dark variant), aliasing the primitive ramp where they can.
+   Paper is the base `:root` contract (it aliases the primitive ramp); the wavy/sketchy skin adds a
+   `[data-sketchy="on"]` layer (irregular radii + grid + wobble), and the per-user accent re-points
+   `--accent`/`--on-accent` at runtime. Each has a dark variant under `prefers-color-scheme: dark`.
 
 ---
 
@@ -28,13 +34,13 @@ Reconciled (TM-510) against the approved wireframe kit — the TM-377 storyboard
 | Token | Value | Usage |
 | --- | --- | --- |
 | `--white` | `#ffffff` | Pure white — always-white chrome (toggle thumbs, crisp cards). |
-| `--g1` | `#fafafa` | Off-white paper — the lightest surface (sketch `--page-bg` / `--surface`). |
-| `--g2` | `#f0f0f0` | Faint raised surface / hairline fill (sketch `--surface-2`). |
+| `--g1` | `#fafafa` | Off-white paper — the lightest surface (Paper `--page-bg` / `--surface`). |
+| `--g2` | `#f0f0f0` | Faint raised surface / hairline fill (Paper `--surface-2`). |
 | `--g3` | `#e0e0e0` | Dividers, disabled fills. |
 | `--g4` | `#c4c4c4` | Placeholder ink, faint strokes. |
-| `--g5` | `#6a6a6a` | Muted / secondary text (sketch `--muted`). |
+| `--g5` | `#6a6a6a` | Muted / secondary text (Paper `--muted`). |
 | `--g6` | `#3a3a3a` | Strong secondary ink. |
-| `--ink` | `#2b2b2b` | Graphite pencil ink — the kit's primary "colour" (sketch `--fg` / `--accent`). |
+| `--ink` | `#2b2b2b` | Graphite pencil ink — the kit's primary ink (Paper `--fg`; the coloured `--accent` is per-user). |
 
 ### Spacing scale — 4px-based rhythm
 
@@ -49,59 +55,80 @@ Reconciled (TM-510) against the approved wireframe kit — the TM-377 storyboard
 
 | Token | Value | Usage |
 | --- | --- | --- |
-| `--font-sans` | system stack (Inter/system) | Body face. `doodle`/`sketch` swap in Patrick Hand. |
-| `--font-display` | `= --font-sans` (clean) | Headings + buttons. `doodle`/`sketch` swap in Gochi Hand. |
-| `--font-accent` | `= --font-sans` (clean) | Taglines / script accents. `doodle`/`sketch` swap in Shadows Into Light. |
+| `--font-sans` | Patrick Hand → system | Body face (the Paper hand face; degrades to the system stack). |
+| `--font-display` | Gochi Hand → system | Headings + buttons. |
+| `--font-accent` | Shadows Into Light → Patrick Hand | Taglines / script accents. |
 | `--fs-1` … `--fs-6` | `0.75` / `0.875` / `1` / `1.25` / `1.5` / `2rem` | Size steps: meta → page heading. |
 | `--fs-hero` | `2.5rem` | Landing wordmark (`.app h1`). |
 
 ---
 
-## Semantic tokens (`:root` = `clean`)
+## Semantic tokens (`:root` = Paper)
 
-| Token | Value (clean) | Usage |
+| Token | Value (Paper) | Usage |
 | --- | --- | --- |
-| `--fg` | `#1a1a2e` | Foreground text/icons. |
-| `--accent` | `#0f9d8c` | Primary/brand fills, links, focus rings. |
+| `--fg` | `var(--ink)` | Foreground text/icons (graphite ink). |
+| `--accent` | `var(--accent-paper-teal)` | Primary/brand fills, links, focus rings — the **per-user** colour. |
 | `--accent-light` | `color-mix(--accent 45%, --white)` | Lightened accent for soft fills / hovers. |
-| `--on-accent` | `#fff` | Text/icons on an `--accent` fill. |
-| `--page-bg` | `#f6f7fb` | Page background. |
-| `--surface` | `#ffffff` | Panels / raised surfaces (darkens in dark mode). |
-| `--surface-2` | `#f1f2f8` | Secondary surface. |
-| `--surface-card` | `#fff` | Auth/onboarding card + input chrome. |
-| `--muted` | `rgba(26,26,46,.6)` | Secondary text. |
-| `--border` / `--border-width` | `rgba(26,26,46,.12)` / `1px` | Hairline colour + weight. |
-| `--fg-line*` / `--accent-line` / `--accent-soft` | `color-mix(...)` | Derived border / wash tints that track the theme. |
-| `--danger` / `--success` | `#b00020` / `#0a7d57` | Status colours. |
-| `--radius-sm/-md/-/-lg/-pill` | `6/10/8/12/999px` | Corner scale (themes reshape all at once). |
-| `--shadow-sm/-md/-lg/-menu` | drop-shadow ramp | Elevation. |
+| `--on-accent` | `#fff` | Text/icons on an `--accent` fill (the picker flips it per swatch). |
+| `--page-bg` | `var(--g1)` | Off-white paper page background. |
+| `--surface` | `var(--g1)` | Panels / raised surfaces (darkens in dark mode). |
+| `--surface-2` | `var(--g2)` | Secondary surface. |
+| `--surface-card` | `var(--white)` | Card + input chrome (crisp white so the grid shows through). |
+| `--muted` | `var(--g5)` | Secondary text. |
+| `--border` / `--border-width` | `color-mix(--fg 72%, transparent)` / `2px` | Inky Paper line colour + weight. |
+| `--fg-line*` / `--accent-line` / `--accent-soft` | `color-mix(--fg …)` | Derived inky border / wash tints. |
+| `--danger` / `--success` | `#b00020` / `#0a7d57` | Status colours (Paper keeps hue). |
+| `--radius-sm/-md/-/-lg/-pill` | `6/10/8/12/999px` | Crisp clean-Paper corners (sketchy swaps in irregular). |
+| `--shadow-sm/-md/-lg/-menu` | inky offset ramp (`Npx Npx 0`) | Paper "sketched drop-shadow" elevation. |
 | `--shadow-card` | `0 6px 24px rgba(0,0,0,.06)` | Soft raised-card ambient (onboarding / help / diagnostics cards). |
-| `--overlay` / `--overlay-strong` | `rgba(0,0,0,.45/.55)` | Modal backdrop / tour spotlight dim. |
+| `--overlay` / `--overlay-strong` | `color-mix(--fg 40/50%)` | Modal backdrop / tour spotlight dim. |
 
-The **wobble filter** — `filter: url(#wobble-soft)` — is the shared hand-drawn edge for the wireframe
-themes. Its `feTurbulence` + `feDisplacementMap` def ships in
-[`web/src/index.html`](../../web/src/index.html); it is decorative only and dropped under
-`prefers-reduced-motion`.
+### Curated accent palette (per-user)
+
+The one coloured token, `--accent`, is chosen from a fixed set of swatches (no free colour picker). Each
+is defined as a token and mirrored in [`appearance-core.js`](../../web/src/assets/appearance-core.js):
+
+| Swatch token | Value | Id (default first) |
+| --- | --- | --- |
+| `--accent-paper-teal` | `#0f9d8c` | `teal` — the default (the shipped TM-510 `--accent`) |
+| `--accent-paper-indigo` | `#4f46e5` | `indigo` |
+| `--accent-paper-coral` | `#d1495b` | `coral` |
+| `--accent-paper-amber` | `#b45309` | `amber` |
+| `--accent-paper-plum` | `#7c3aed` | `plum` |
+| `--accent-paper-ink` | `#2b2b2b` | `ink` |
+
+The **wobble filter** — `filter: url(#wobble-soft)` — is the hand-drawn edge for the **wavy/sketchy**
+skin. Its `feTurbulence` + `feDisplacementMap` def ships in
+[`web/src/index.html`](../../web/src/index.html); it is decorative only, applied under
+`[data-sketchy="on"]`, and dropped under `prefers-reduced-motion`.
 
 ---
 
-## How the themes resolve
+## How Paper resolves + the two per-user axes
 
-- **`clean`** — no override block; it *is* the base `:root` contract (coloured teal/navy palette).
-- **`sketch`** (default, TM-323) — a `[data-theme="sketch"]` block re-points the semantic tokens onto the
-  neutral ramp: `--fg: var(--ink)`, `--surface: var(--g1)`, `--surface-2: var(--g2)`,
-  `--surface-card: var(--white)`, `--muted: var(--g5)`, plus hand faces via `--font-display` /
-  `--font-accent`. So the whole app restyles from the single ramp with no per-component edits.
-- **`doodle`** — same mechanism, a warm-paper variant of the wireframe language (its own paper tints;
-  same `--font-display` / `--font-accent` faces).
+- **Base (`:root`)** — Paper: the semantic tokens alias the neutral ramp (`--fg: var(--ink)`,
+  `--surface: var(--g1)`, `--surface-2: var(--g2)`, `--surface-card: var(--white)`, `--muted: var(--g5)`),
+  2px inky borders, offset shadows and the hand faces. This alone renders **clean Paper**.
+- **Accent (per-user)** — `--accent`/`--on-accent` are re-pointed to the chosen curated swatch at runtime
+  (`appearance.js` on boot from a localStorage hint; `appearance-sync.js` from `GET /api/v1/me`, the
+  source of truth). Default = `teal`.
+- **Wavy/sketchy (per-user)** — `[data-sketchy="on"]` (default ON) layers irregular hand-drawn corners, a
+  ruled-paper grid, the doodle decorations, and the wobble filter over the same palette. `off` = clean
+  Paper. Persisted per user (`users.theme_sketchy`).
 
-Each family also defines a dark variant under `@media (prefers-color-scheme: dark)`.
+Both per-user axes persist server-side (`PATCH /api/v1/me` → `users.theme_accent` / `users.theme_sketchy`)
+and the palette + apply logic live in
+[`appearance-core.js`](../../web/src/assets/appearance-core.js).
 
 ## Rules
 
 - Components read **semantic** tokens via `var()` — never a raw hex/px, and not the primitive ramp
-  directly (bar `--white` / `--ink` for genuinely fixed chrome).
-- Add a new theme = add a `[data-theme="<name>"]` block overriding only the tokens it changes + register
-  the name in [`web/src/assets/theme.js`](../../web/src/assets/theme.js). No component edits.
-- Guarded by [`web/tools/theme-tokens.test.mjs`](../../web/tools/theme-tokens.test.mjs) (runs in CI via
+  directly (bar `--white` / `--ink` for genuinely fixed chrome). Never read/apply appearance yourself —
+  inherit `--accent` and `[data-sketchy]`.
+- There is **no** second theme to add. Personalisation is the fixed accent palette + the sketchy toggle;
+  extend the palette by adding a swatch token here **and** in `appearance-core.js` (guarded so they can't
+  drift). Never reintroduce a `data-theme` family.
+- Guarded by [`web/tools/theme-tokens.test.mjs`](../../web/tools/theme-tokens.test.mjs) +
+  [`web/tools/appearance-core.test.mjs`](../../web/tools/appearance-core.test.mjs) (CI via
   `node --test web/tools/*.test.mjs`).

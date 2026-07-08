@@ -1,11 +1,11 @@
-// Inline line icons — theme-agnostic (TM-515).
+// Inline line icons — appearance-agnostic (TM-515).
 //
-// The doodle pack (doodles.js) is deliberately DOODLE-THEME-ONLY — styles.css hides it on every other
-// theme via `:root:not([data-theme="doodle"]) .tm-doodle { display: none }`. So screens that must show
-// a glyph on EVERY theme (the production default is "sketch") can't use doodles for functional icons.
-// These reproduce the approved wireframes' OWN inline SVG glyphs — the paper-notifications per-type
-// icons, the chat composer send arrow, and the chat-empty speech bubble — as small `currentColor`
-// line-art that inks with the active theme's foreground on clean / doodle / sketch alike.
+// The doodle pack (doodles.js) is decorative and hidden in clean Paper — styles.css shows it only
+// when the sketchy toggle is on (`:root:not([data-sketchy="on"]) .tm-doodle { display: none }`). So
+// screens that must show a glyph in BOTH toggle states can't use doodles for functional icons. These
+// reproduce the approved wireframes' OWN inline SVG glyphs — the paper-notifications per-type icons,
+// the chat composer send arrow, and the chat-empty speech bubble — as small `currentColor` line-art
+// that inks with the Paper foreground token whichever way the toggle is set.
 //
 // Import-safe in Node: `ICONS` / `ICON_NAMES` are plain data and the only DOM call (createElementNS)
 // lives inside lineIcon(), so a Node test can import the names to assert coverage without a DOM.

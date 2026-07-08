@@ -35,6 +35,12 @@ import jakarta.validation.constraints.Size;
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
  * @param timezone         IANA timezone id, e.g. {@code Europe/London}
  * @param locale           BCP-47 language tag, e.g. {@code en-GB}
+ * @param themeAccent      the chosen Paper accent swatch id (TM-529). A fixed curated palette:
+ *                         {@code teal|indigo|coral|amber|plum|ink} — anything else is a uniform
+ *                         {@code 400}. This is <strong>not</strong> a free colour picker, so a
+ *                         non-Paper theme can never be selected via this field.
+ * @param themeSketchy     whether the hand-drawn wavy/sketchy wobble is on (TM-529); {@code true} =
+ *                         wobble, {@code false} = clean Paper
  */
 public record UpdateMeRequest(
         @Size(max = 255) String displayName,
@@ -46,4 +52,7 @@ public record UpdateMeRequest(
                 String phone,
         NotificationPref notificationPref,
         @Size(max = 64) String timezone,
-        @Size(max = 35) String locale) {}
+        @Size(max = 35) String locale,
+        @Pattern(regexp = "^(teal|indigo|coral|amber|plum|ink)$", message = "must be a valid accent swatch")
+                String themeAccent,
+        Boolean themeSketchy) {}

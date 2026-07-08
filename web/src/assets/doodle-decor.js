@@ -4,8 +4,8 @@
 //
 // Visual-only: it never reads user data, changes layout flow (doodles are decorative inline SVG),
 // or touches app logic. The doodles are authored with stroke="currentColor" and are sized/spaced by
-// the `[data-theme="doodle"]` rules in styles.css; a companion CSS rule there hides any `.tm-doodle`
-// that isn't under the doodle theme, so this is inert on `clean` even though the nodes are mounted.
+// the `[data-sketchy="on"]` rules in styles.css; a companion CSS rule there hides any `.tm-doodle`
+// in clean Paper, so this is inert (mounted but not shown) when the wavy/sketchy toggle is off.
 // The router/login modules own the panels' visibility — we only prepend decorations, idempotently.
 //
 // XSS-safe: doodles come from the structural builder in doodles.js (attributes + a static <title>

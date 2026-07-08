@@ -13,8 +13,8 @@
 // XSS-safety is inherited from ui.js `el()` (textContent only, no innerHTML seam) — event headings,
 // locations and the city are all untrusted and can never inject markup. Icons are built with a small
 // SVG-namespaced factory (attribute-only, like doodles.js `s()`), and are DELIBERATELY plain inline
-// SVG rather than the theme-gated `doodle()` pack (doodles render only under [data-theme="doodle"], so
-// they'd be invisible on the default "sketch" theme — the Home icons must show on every surface/theme).
+// SVG rather than the sketchy-gated `doodle()` pack (doodles render only when the wavy/sketchy toggle
+// is on, so they'd be invisible in clean Paper — the Home icons must show in both toggle states).
 
 import { listEvents, getMe } from "./api.js";
 import { el, clear } from "./ui.js";
