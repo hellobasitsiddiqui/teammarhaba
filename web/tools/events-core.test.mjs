@@ -37,6 +37,7 @@ import {
   attendanceSummary,
   eventFilters,
   filterCards,
+  browseListModel,
 } from "../src/assets/events-core.js";
 
 const NOON_UTC = Date.parse("2026-07-05T12:00:00Z");
@@ -446,4 +447,37 @@ test("filterCards: filters by status/live; 'all'/unknown returns the list unchan
   assert.deepEqual(filterCards(cards, "live", NOON_UTC).map((c) => c.id), [3]);
   assert.deepEqual(filterCards(cards, "all", NOON_UTC).map((c) => c.id), [1, 2, 3, 4]);
   assert.deepEqual(filterCards(cards, "bogus", NOON_UTC).map((c) => c.id), [1, 2, 3, 4]);
+});
+
+test("browseListModel: the all-finished (unfiltered) listing is the empty state, not a filter dead-end (TM-535)", () => {
+  // The regression case: the API handed us cards, but every one has finished so they all bucket out.
+  // Unfiltered (state.filter === "all") this must be the friendly empty state — NOT "No events match
+  // this filter" (which, with only the All chip on offer, would leave no chip row and no escape).
+  const allFinished = [
+    { id: 1, status: "FINISHED" },
+    { id: 2, startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }, // ended before NOON_UTC
+  ];
+  const finishedModel = browseListModel(allFinished, "all", NOON_UTC);
+  assert.equal(finishedModel.kind, "empty");
+  assert.deepEqual(finishedModel.happeningNow, []);
+  assert.deepEqual(finishedModel.upcoming, []);
+
+  // Truly zero cards → also the empty state, whatever the (stale) filter key.
+  assert.equal(browseListModel([], "all", NOON_UTC).kind, "empty");
+  assert.equal(browseListModel(null, "going", NOON_UTC).kind, "empty");
+
+  // A real, non-"all" filter that matches nothing IS the filter-empty note (the chip row still escapes
+  // to All): here the only GOING card has already ended, so it buckets out under the "going" filter.
+  const goingButEnded = [{ id: 1, myState: "GOING", startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }];
+  assert.equal(browseListModel(goingButEnded, "going", NOON_UTC).kind, "filter-empty");
+
+  // A listing with something to show is the list state, with the happening-now / upcoming split intact.
+  const live = [
+    { id: 1, startAt: "2026-07-05T11:00:00Z", endAt: "2026-07-05T13:00:00Z" }, // live at NOON_UTC
+    { id: 2, startAt: "2026-07-05T18:00:00Z" }, // upcoming
+  ];
+  const listModel = browseListModel(live, "all", NOON_UTC);
+  assert.equal(listModel.kind, "list");
+  assert.deepEqual(listModel.happeningNow.map((c) => c.id), [1]);
+  assert.deepEqual(listModel.upcoming.map((c) => c.id), [2]);
 });
