@@ -45,6 +45,25 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
     List<EventAttendance> findByEventIdAndState(Long eventId, AttendanceState state);
 
     /**
+     * The distinct user ids {@code GOING} to <em>any</em> of {@code eventIds} — the attendee audience
+     * for admin messaging (TM-440), unioned across one or many events in a single query. A snapshot of
+     * current {@code GOING} membership at call time.
+     *
+     * <p>Rows, not people: as everywhere in this repository, an id here may belong to a soft-deleted
+     * account (attendance rows deliberately outlive an attendee's account tombstone — see the class
+     * note), so the caller MUST resolve these ids through {@code UserRepository}
+     * ({@code findActiveIdsByIdIn}) before delivering, which is exactly what {@code RecipientResolver}
+     * does. Covered by {@code idx_event_attendance_event_state}. Pass a non-empty collection.
+     */
+    @Query(
+            """
+            select distinct a.userId from EventAttendance a
+            where a.eventId in :eventIds
+              and a.state = com.teammarhaba.backend.event.AttendanceState.GOING
+            """)
+    List<Long> findGoingUserIds(@Param("eventIds") Collection<Long> eventIds);
+
+    /**
      * Per-state tallies for many events in one query — the listing API's "N going" badges without
      * an N+1. States with no rows simply don't appear.
      */

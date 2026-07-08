@@ -1,6 +1,8 @@
 package com.teammarhaba.backend.user;
 
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -59,4 +61,26 @@ public interface UserRepository extends JpaRepository<User, Long> {
             """)
     Page<User> search(
             @Param("q") String q, @Param("role") Role role, @Param("enabled") Boolean enabled, Pageable pageable);
+
+    /**
+     * The active account ids whose profile city matches {@code city} — the city-wide audience for
+     * admin messaging (TM-440). The match is case-insensitive and trims both sides, so stray casing
+     * or whitespace ({@code "London"} vs {@code " london "}) selects the same people. Returns ids
+     * only (not entities) — the resolver just needs the id set. Active rows only: the entity's
+     * {@code @SQLRestriction} applies to this JPQL query, so soft-deleted accounts never appear, which
+     * is exactly why a city audience can be taken straight from here without further validation.
+     */
+    @Query("select u.id from User u where lower(trim(u.city)) = lower(trim(:city))")
+    List<Long> findActiveIdsByCity(@Param("city") String city);
+
+    /**
+     * The subset of {@code ids} that still map to an <em>active</em> account — the id-only projection
+     * of {@code findAllById} used to validate audience candidates for admin messaging (TM-440). The
+     * entity's {@code @SQLRestriction} filters the query, so a soft-deleted (or unknown) id simply
+     * isn't returned. This is how explicit target user ids and GOING-attendee ids (whose attendance
+     * rows outlive an account tombstone) are gated down to real recipients in one query. Pass a
+     * non-empty collection.
+     */
+    @Query("select u.id from User u where u.id in :ids")
+    List<Long> findActiveIdsByIdIn(@Param("ids") Collection<Long> ids);
 }
