@@ -160,24 +160,38 @@ jobs:
             echo "::warning::no Playwright report/screenshots found — nothing to post."; exit 0
           fi
           # Evidence = the INDIVIDUAL viewable screenshots (never zip-only — a reviewer must not have to
-          # download + unzip to see them) PLUS the full zip bundle (report + traces). Attach BOTH.
+          # download + unzip to see them) PLUS the full zip bundle (report + traces). Attach BOTH, but
+          # in BATCHES: a single multipart request with every file is rejected 413 (Payload Too Large),
+          # so cap each POST at a handful of files.
           ZIP="/tmp/playwright-evidence-${GITHUB_RUN_ID}.zip"
           ( cd web/e2e && zip -qr "$ZIP" playwright-report test-results ) || true
-          mapfile -t SHOTS < <(find web/e2e/test-results web/e2e/playwright-report -type f -name '*.png' 2>/dev/null | sort)
-          FILES=()
-          [ -f "$ZIP" ] && FILES+=(-F "file=@${ZIP}")
-          for s in "${SHOTS[@]}"; do FILES+=(-F "file=@${s}"); done
-          if [ ${#FILES[@]} -eq 0 ]; then echo "::warning::no evidence files — nothing to post."; exit 0; fi
-          # Jira's attachments endpoint accepts multiple files per request (X-Atlassian-Token: no-check).
-          code="$(curl -sS -o /tmp/jira-att.txt -w '%{http_code}' \
-            -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
-            -H "X-Atlassian-Token: no-check" \
-            "${FILES[@]}" \
-            "$JIRA_BASE_URL/rest/api/3/issue/$TICKET/attachments" || echo "000")"
-          case "$code" in
-            200|201) echo "Posted ${#SHOTS[@]} individual screenshot(s) + the evidence zip to $TICKET." ;;
-            *) echo "::warning::could not attach evidence to $TICKET (HTTP $code): $(cat /tmp/jira-att.txt 2>/dev/null)" ;;
-          esac
+          ATT="$JIRA_BASE_URL/rest/api/3/issue/$TICKET/attachments"
+          post() { # POST the given -F args; echo the HTTP code (never throws)
+            curl -sS -o /tmp/jira-att.txt -w '%{http_code}' \
+              -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" "$@" "$ATT" || echo "000"
+          }
+          ok=0; bad=0; batch=(); n=0
+          flush() {
+            [ ${#batch[@]} -eq 0 ] && return 0
+            c="$(post "${batch[@]}")"
+            case "$c" in
+              200|201) ok=$((ok + ${#batch[@]})) ;;
+              *) bad=$((bad + ${#batch[@]})); echo "::warning::screenshot batch failed (HTTP $c): $(head -c 200 /tmp/jira-att.txt 2>/dev/null)" ;;
+            esac
+            batch=()
+          }
+          # 1) individual PNGs, 15 per request to stay under the per-request size cap.
+          while IFS= read -r png; do
+            batch+=(-F "file=@${png}"); n=$((n + 1))
+            [ $(( n % 15 )) -eq 0 ] && flush
+          done < <(find web/e2e/test-results web/e2e/playwright-report -type f -name '*.png' 2>/dev/null | sort)
+          flush
+          # 2) the full zip bundle, on its own request.
+          if [ -f "$ZIP" ]; then
+            c="$(post -F "file=@${ZIP}")"
+            case "$c" in 200|201) : ;; *) echo "::warning::zip attach failed (HTTP $c)" ;; esac
+          fi
+          echo "Posted $ok individual screenshot(s) to $TICKET ($bad failed) + the evidence zip."
           exit 0
 
       - name: Upload service logs (on failure)
