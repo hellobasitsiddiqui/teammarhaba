@@ -146,6 +146,20 @@ async function renderList(view) {
 }
 
 /**
+ * The friendly "no events" empty state (the wireframe's calendar doodle + warm copy). Shared by the two
+ * paths that have genuinely nothing to browse — zero cards, or an unfiltered listing that bucketed out to
+ * nothing (TM-535) — so both surface the same `events-empty` testid the golden-path + events specs look
+ * for, rather than a dead-end filter note.
+ */
+function eventsEmptyState() {
+  return el("div", { class: "tm-empty", "data-testid": "events-empty" }, [
+    doodle("calendar", { class: "tm-doodle-empty", title: "No upcoming events" }),
+    el("p", { class: "tm-empty-title", text: "No upcoming events" }),
+    el("p", { class: "tm-muted", text: "Check back soon — new meetups land here first." }),
+  ]);
+}
+
+/**
  * Paint the browse list from the cached `state.cards` at the current `state.filter` (TM-513) — the
  * wireframe's `Events` header, the filter-chip row, then the cards grouped into Happening now /
  * Upcoming. Split from `renderList` so a chip tap re-paints without a refetch.
@@ -158,30 +172,26 @@ function paintList(view) {
 
   clear(view).append(headerBar("Events"));
 
-  // Truly zero events → the empty state (no chips to show). Uses the same `events-empty` testid the
-  // golden-path + events specs look for.
-  if (!state.cards.length) {
-    view.append(
-      el("div", { class: "tm-empty", "data-testid": "events-empty" }, [
-        doodle("calendar", { class: "tm-doodle-empty", title: "No upcoming events" }),
-        el("p", { class: "tm-empty-title", text: "No upcoming events" }),
-        el("p", { class: "tm-muted", text: "Check back soon — new meetups land here first." }),
-      ]),
-    );
+  // The core decides which of the three list states this is (see events-core `browseListModel`).
+  const { kind, happeningNow, upcoming } = core.browseListModel(state.cards, state.filter, now);
+
+  // Nothing to show for the UNFILTERED listing — no cards at all, or everything bucketed out (e.g. every
+  // event has finished; `listingBuckets` drops finished events defensively). There are no chips to offer,
+  // so this is the friendly empty state, NEVER the dead-end "No events match this filter" note (TM-535).
+  // Uses the same `events-empty` testid the golden-path + events specs look for.
+  if (kind === "empty") {
+    view.append(eventsEmptyState());
     return;
   }
 
   // The filter-chip row — only when there's more than "All" to offer (i.e. some status filter matches).
   if (filters.length > 1) view.append(filterChips(view, filters));
 
-  const filtered = core.filterCards(state.cards, state.filter, now);
-  const { happeningNow, upcoming } = core.listingBuckets(filtered, now);
-
   const list = el("div", { class: "tm-event-list", "data-testid": "events-list" });
-  if (!happeningNow.length && !upcoming.length) {
-    // A non-empty listing filtered down to nothing (edge: e.g. the only GOING event has since ended).
-    // Keep the `events-list` container present (so the browse surface still reads as rendered) with a
-    // muted note + a Show-all escape hatch.
+  if (kind === "filter-empty") {
+    // A non-empty listing filtered down to nothing under a real, non-"all" filter (edge: e.g. the only
+    // GOING event has since ended). Keep the `events-list` container present (so the browse surface still
+    // reads as rendered) with a muted note; the chip row above is the Show-all escape hatch.
     list.append(el("p", { class: "tm-muted tm-event-filter-empty", text: "No events match this filter." }));
   }
   if (happeningNow.length) {

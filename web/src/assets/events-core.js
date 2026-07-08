@@ -619,3 +619,36 @@ export function filterCards(cards, key, nowMs = Date.now()) {
       return list;
   }
 }
+
+/**
+ * The browse-list render model for a set of cards at a given filter (TM-535). paintList (the DOM shell)
+ * has to tell apart THREE "how do I render this list?" outcomes, and getting them apart is exactly the
+ * decision that regressed in TM-513 — so it lives here in the unit-tested core, not the view:
+ *
+ *   • kind "empty"        — nothing to show for the UNFILTERED listing: either no cards at all, or every
+ *                           card bucketed out (e.g. all finished — `listingBuckets` drops finished events
+ *                           defensively even though the API already excludes them). A genuine "no events"
+ *                           state, so the view renders the friendly events-empty block. With only the
+ *                           `All` chip on offer there are no chips to show, so a filter note here would be
+ *                           a dead end with no escape — the TM-535 bug.
+ *   • kind "filter-empty" — a real, non-"all" filter matched nothing (edge: the only GOING event has since
+ *                           ended). The chip row still offers a way back to All, so the view renders the
+ *                           muted "No events match this filter" note inside the list container.
+ *   • kind "list"         — there are cards to render; `happeningNow` / `upcoming` carry the split.
+ *
+ * @returns {{ kind: "empty"|"filter-empty"|"list", happeningNow: object[], upcoming: object[] }}
+ */
+export function browseListModel(cards, filter = "all", nowMs = Date.now()) {
+  const list = Array.isArray(cards) ? cards : [];
+  // Truly zero cards is always the empty state, whatever the (stale) filter key — matches the original
+  // `!state.cards.length` guard.
+  if (!list.length) return { kind: "empty", happeningNow: [], upcoming: [] };
+
+  const { happeningNow, upcoming } = listingBuckets(filterCards(list, filter, nowMs), nowMs);
+  if (happeningNow.length || upcoming.length) return { kind: "list", happeningNow, upcoming };
+
+  // Nothing survived bucketing. Under the unfiltered "all" view that's a genuine empty state (e.g. every
+  // event finished); only an actual status filter that matched nothing is the filter-empty note.
+  const filtered = filter != null && filter !== "all";
+  return { kind: filtered ? "filter-empty" : "empty", happeningNow, upcoming };
+}
