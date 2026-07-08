@@ -296,7 +296,9 @@ function openReactionPicker(row, bubble) {
 /** Set / replace a message's inline reaction pill with the picked emoji (count 1 for a fresh react). */
 function setReaction(row, emoji) {
   row.querySelector(".tm-chat-reaction")?.remove();
-  row.append(reactionPill(row, emoji, 1));
+  // The pick→pill rule (single-select, fresh count 1, replace prior) lives in the unit-tested core.
+  const picked = core.pickReaction(emoji);
+  row.append(reactionPill(row, picked.emoji, picked.count));
 }
 
 // Bridge for the router (which imports this) + ad-hoc use / QA.

@@ -31,6 +31,21 @@
 export const REACTION_EMOJIS = Object.freeze(["👍", "❤️", "😂", "🎉", "🙌"]);
 
 /**
+ * The inline reaction-pill data produced when the picker's emoji is chosen for a message (TM-536).
+ * The picker is single-select: picking an emoji sets a FRESH reaction (count 1) that REPLACES any
+ * prior pill on that message — multi-user aggregation (a growing count, who-reacted) is a later
+ * TM-433 backend concern, not something the local wireframe can know. Extracted from the DOM layer's
+ * `setReaction` (chat.js) so this rule — "a fresh react is `{emoji, count: 1}`" — has a single,
+ * unit-tested source of truth (the same core/renderer split the read-receipt ladder uses above),
+ * closing the gap where a regression in the pick→apply step would have gone undetected.
+ * @param {string} emoji the chosen glyph (one of REACTION_EMOJIS).
+ * @returns {{emoji: string, count: number}} the reaction pill to render on the message.
+ */
+export function pickReaction(emoji) {
+  return { emoji: String(emoji ?? ""), count: 1 };
+}
+
+/**
  * Derive the read-receipt tick state for an out-going message from how many group members have read
  * it. This is the TM-433 delivery ladder made a pure function so it can be unit-tested without a DOM:
  *   readBy <= 0            → "sent"   (✓   — delivered, nobody has read it)

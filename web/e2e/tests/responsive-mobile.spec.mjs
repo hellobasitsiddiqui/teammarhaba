@@ -229,6 +229,61 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expect(thread).toContainText("Running 5 late!");
   });
 
+  test("the reaction picker: open an incoming bubble, pick an emoji, and backdrop/Escape close it (TM-536)", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    // Deep-link straight into a populated thread so the react-able incoming bubbles are mounted.
+    await page.evaluate(() => (window.location.hash = "#/chat/sunday-dog-walk"));
+    const thread = page.locator('[data-testid="chat-thread"]');
+    await expect(thread).toBeVisible();
+
+    // Target Mike's incoming message — it has NO seeded reaction, so a pick is a clean FIRST react
+    // (a fresh pill appearing, not a count replacing an existing one). Incoming bubbles are buttons
+    // (`.tm-chat-bub--react`); outgoing ones are static, so only incoming rows open the picker.
+    const mikeRow = thread.locator(".tm-chat-msg--in", { hasText: "bring treats" });
+    const mikeBubble = mikeRow.locator(".tm-chat-bub--react");
+    await expect(mikeRow.locator(".tm-chat-reaction")).toHaveCount(0);
+
+    // Tap the bubble → the picker opens over its dimmed backdrop and the bubble takes the selection
+    // ring. It offers the five reaction emoji plus the "＋ more" affordance (six controls).
+    await mikeBubble.click();
+    const picker = page.locator(".tm-chat-picker");
+    await expect(picker).toBeVisible();
+    await expect(mikeBubble).toHaveClass(/tm-chat-bub--selected/);
+    await expect(picker.locator(".tm-chat-picker-emoji")).toHaveCount(6);
+
+    // Pick 🎉 → the message gains an inline reaction pill of that emoji (count 1), the picker closes,
+    // and the bubble's selection ring clears. (🎉 has no emoji variation selector, so the text
+    // assertion is exact.)
+    await picker.getByRole("menuitem", { name: "React 🎉" }).click();
+    await expect(page.locator(".tm-chat-picker")).toBeHidden();
+    await expect(mikeBubble).not.toHaveClass(/tm-chat-bub--selected/);
+    const pill = mikeRow.locator(".tm-chat-reaction");
+    await expect(pill).toHaveCount(1);
+    await expect(pill.locator(".tm-c-reaction__emoji")).toHaveText("🎉");
+    await expect(pill).toContainText("1");
+
+    // Reopen → clicking the dimmed backdrop (outside the picker) closes it WITHOUT changing the
+    // reaction. Click the top-left corner, well clear of the centred picker card.
+    await mikeBubble.click();
+    await expect(page.locator(".tm-chat-picker")).toBeVisible();
+    await page.locator(".tm-chat-picker-backdrop").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator(".tm-chat-picker")).toBeHidden();
+    await expect(pill.locator(".tm-c-reaction__emoji")).toHaveText("🎉"); // unchanged
+
+    // Reopen → Escape closes it too (keyboard dismissal).
+    await mikeBubble.click();
+    await expect(page.locator(".tm-chat-picker")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".tm-chat-picker")).toBeHidden();
+
+    // The overlay never left a stray horizontal scroll behind.
+    await expectNoHorizontalPageScroll(page);
+  });
+
   test("the empty conversation shows the first-message prompt (paper-chat-empty, TM-515)", async ({
     page,
   }) => {
