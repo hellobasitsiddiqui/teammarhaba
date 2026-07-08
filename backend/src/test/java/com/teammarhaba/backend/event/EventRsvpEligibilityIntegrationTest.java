@@ -163,6 +163,38 @@ class EventRsvpEligibilityIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void anOpenEndedActiveEventStillBlocksWhileWithinItsRunLength() {
+        // TM-404: an open-ended (no endAt) event stays HAPPENING_NOW until startAt + defaultDuration
+        // (3h under the test profile). Started 1h ago it is still live, so it must still block a second
+        // GOING landing — the old coalesce(endAt, startAt) guard wrongly cleared at startAt for open-ended.
+        Event active = futureEvent("Open jam", Duration.ofDays(2), null, null);
+        Event other = futureEvent("Picnic", Duration.ofDays(3), null, null);
+        VerifiedUser caller = newCaller("busy");
+        rsvps.rsvp(caller, active.getId());
+
+        active.setStartAt(Instant.now().minus(Duration.ofHours(1))); // started 1h ago; endAt stays null
+        events.save(active);
+
+        assertThatThrownBy(() -> rsvps.rsvp(caller, other.getId()))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventRsvpService.activeEventBlock("Open jam"));
+    }
+
+    @Test
+    void anOpenEndedActiveEventNoLongerBlocksPastItsRunLength() {
+        // Once an open-ended event is past startAt + defaultDuration (3h) it is finished and clears.
+        Event active = futureEvent("Open jam", Duration.ofDays(2), null, null);
+        Event other = futureEvent("Picnic", Duration.ofDays(3), null, null);
+        VerifiedUser caller = newCaller("busy");
+        rsvps.rsvp(caller, active.getId());
+
+        active.setStartAt(Instant.now().minus(Duration.ofHours(4))); // started 4h ago (> 3h); endAt null
+        events.save(active);
+
+        assertThat(rsvps.rsvp(caller, other.getId()).state()).isEqualTo(AttendanceState.GOING);
+    }
+
+    @Test
     void aCancelledActiveEventDoesNotBlock() {
         Event active = futureEvent("Rooftop social", Duration.ofDays(2), Duration.ofDays(2).plusHours(3), null);
         Event other = futureEvent("Picnic", Duration.ofDays(3), null, null);
