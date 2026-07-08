@@ -28,6 +28,23 @@ Exact inputs (from the yml — these are the only ones):
 Dispatches of the same `(suite, surface)` pair serialize (concurrency group, no cancel), so two
 identical dispatches queue rather than fight over the emulator.
 
+## Evidence scope — default vs full (TM-402)
+
+**Default = ONE theme (the deployed default) + the Android-mobile surface, named step-shots only.**
+Keep evidence small and reviewable — do NOT attach every surface × every theme. Dumping the whole
+matrix buries the signal in near-duplicates (every full-page shot shares the same app-shell header, so
+hundreds of them read as "all the same screen").
+
+- **Screenshot evidence** (`e2e.yml`, dispatched with `evidence_ticket=`) attaches, by default, only the
+  **mobile-chromium** *named* step-shots (`golden-*`, `events-*`, `waitlist-*`, …) — not the per-test
+  `test-finished-*` auto-captures, not the report's hash-named copies. The full zip (report + traces) is
+  always attached alongside, so nothing is lost.
+- **Full matrix** (every surface + auto-captures) is opt-in: dispatch `e2e.yml` with `full_evidence=true`,
+  or run per-surface `test-suite.yml` dispatches. **All themes** needs one dispatch per theme — only do
+  the full theme × surface sweep when the user explicitly asks for "full end-to-end, all themes, all surfaces".
+- Always **spot-check** that a sample of the attached shots actually render the target states, not just
+  that N files attached.
+
 ---
 
 ## The suite catalog

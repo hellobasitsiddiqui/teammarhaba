@@ -15,6 +15,11 @@ on:
         description: "Jira ticket key to attach screenshot evidence to (e.g. TM-190). Blank = skip."
         required: false
         default: ""
+      full_evidence:
+        description: "Full matrix (every surface + auto-captures). Default false = one theme + Android-mobile, named step-shots only."
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: e2e-${{ github.ref }}
@@ -180,18 +185,30 @@ jobs:
             esac
             batch=()
           }
-          # 1) individual PNGs, 15 per request to stay under the per-request size cap.
+          # Evidence SCOPE (TM-402 convention): by DEFAULT attach only ONE theme (the deployed default)
+          # on the ANDROID-MOBILE surface (mobile-chromium), and only the named step-shots — NOT the
+          # per-test auto-captures (test-finished-*) or the report's hash-named copies, which just bloat
+          # the ticket with near-duplicates. Dispatch full_evidence=true for the whole matrix. ("All
+          # THEMES" needs a per-theme matrix, not wired here — run a per-theme dispatch when asked.)
+          if [ "${{ github.event.inputs.full_evidence }}" = "true" ]; then
+            SCOPE="full matrix (every surface + auto-captures)"
+            FIND_ARGS=(web/e2e/test-results web/e2e/playwright-report -type f -name '*.png')
+          else
+            SCOPE="one theme + Android-mobile, named step-shots"
+            FIND_ARGS=(web/e2e/test-results -type f -path '*mobile-chromium*' -name '*.png' ! -name 'test-finished-*.png')
+          fi
+          # individual PNGs, 15 per request to stay under the per-request size cap.
           while IFS= read -r png; do
             batch+=(-F "file=@${png}"); n=$((n + 1))
             [ $(( n % 15 )) -eq 0 ] && flush
-          done < <(find web/e2e/test-results web/e2e/playwright-report -type f -name '*.png' 2>/dev/null | sort)
+          done < <(find "${FIND_ARGS[@]}" 2>/dev/null | sort)
           flush
           # 2) the full zip bundle, on its own request.
           if [ -f "$ZIP" ]; then
             c="$(post -F "file=@${ZIP}")"
             case "$c" in 200|201) : ;; *) echo "::warning::zip attach failed (HTTP $c)" ;; esac
           fi
-          echo "Posted $ok individual screenshot(s) to $TICKET ($bad failed) + the evidence zip."
+          echo "Posted $ok individual screenshot(s) to $TICKET ($bad failed) + the evidence zip [scope: $SCOPE]."
           exit 0
 
       - name: Upload service logs (on failure)
