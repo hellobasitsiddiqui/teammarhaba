@@ -3620,3 +3620,381 @@ button.tm-notif-item:hover {
     color: var(--muted);
     font-size: 0.9rem;
 }
+
+/* ===== Shared UI component library (TM-511) ===================================================
+   The approved wireframe kit (design-kit/showcase-paper.html "Design elements · paper" tiles) built
+   as reusable `.tm-c-*` components. Every value a theme owns — colour, font, radius, border, shadow,
+   spacing — is read from a reconciled design token (TM-510) via var(); there are NO hard-coded
+   colours in this block, so the whole set restyles when the theme flips (clean / doodle / sketch)
+   with no per-component edits (the AC). Intrinsic control geometry (a 40px avatar, a 22px toggle
+   track) stays in px — that's the component's shape, not a themed value. The hand-drawn edge under
+   sketch/doodle is opted in per-node with the existing `.tm-wobble-soft` / `.tm-wobble` utility
+   (TM-213/236) set by the DOM factory, so it needs no new rules and is inert under clean +
+   prefers-reduced-motion. DOM factories: assets/components.js; pure logic: assets/components-core.js. */
+
+/* Buttons — tile "Buttons": primary (accent fill + offset shadow), ghost, danger, soon (disabled). */
+.tm-c-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    font: inherit;
+    font-weight: 600;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+}
+
+.tm-c-btn--ghost {
+    color: var(--fg);
+    background: var(--surface-card);
+    border-color: var(--fg);
+    box-shadow: none;
+}
+
+.tm-c-btn--danger {
+    color: var(--on-accent);
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+/* "Soon" — a disabled, dashed placeholder (e.g. "Diamond — coming soon"). */
+.tm-c-btn--soon {
+    color: var(--muted);
+    background: var(--surface-2);
+    border-style: dashed;
+    border-color: var(--fg-line);
+    box-shadow: none;
+}
+
+.tm-c-btn:disabled {
+    cursor: not-allowed;
+}
+
+.tm-c-btn:not(:disabled):hover {
+    filter: brightness(0.97);
+}
+
+.tm-c-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Tags & pills — tile "Tags & pills": faint category tag, count pill, muted "full" pill. */
+.tm-c-tag,
+.tm-c-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--fs-2);
+    color: var(--fg);
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-pill);
+}
+
+.tm-c-pill {
+    background: var(--surface-card);
+}
+
+.tm-c-pill--full {
+    color: var(--muted);
+    background: var(--surface-2);
+}
+
+/* Interest chips — tile "Interest chips": selectable, accent-filled when selected. */
+.tm-c-chip {
+    padding: var(--space-1) var(--space-3);
+    font: inherit;
+    font-size: var(--fs-2);
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+
+.tm-c-chip--selected {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.tm-c-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Text input — tile "Input". A labelled field; the label can be visually hidden to match the tile. */
+.tm-c-field {
+    display: inline-flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--fs-2);
+    font-weight: 600;
+}
+
+.tm-c-field-label {
+    color: var(--muted);
+}
+
+.tm-c-input {
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-weight: 400;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-md);
+    min-width: 12rem;
+}
+
+.tm-c-input::placeholder {
+    color: var(--muted);
+}
+
+.tm-c-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.tm-c-input--invalid {
+    border-color: var(--danger);
+}
+
+/* Segmented control — tile "Segmented": N options, active one accent-filled. */
+.tm-c-seg {
+    display: inline-flex;
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.tm-c-seg__opt {
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-size: var(--fs-2);
+    color: var(--fg);
+    background: var(--surface-card);
+    border: none;
+    cursor: pointer;
+}
+
+.tm-c-seg__opt + .tm-c-seg__opt {
+    border-left: var(--border-width) solid var(--fg);
+}
+
+.tm-c-seg__opt--on {
+    color: var(--on-accent);
+    background: var(--accent);
+}
+
+.tm-c-seg__opt:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* Toggle — tile "Toggle": 40×22 track + 16px sliding thumb, accent when on. Geometry is intrinsic. */
+.tm-c-toggle {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    padding: 0;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    vertical-align: middle;
+    flex: 0 0 auto;
+}
+
+.tm-c-toggle__thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 16px;
+    height: 16px;
+    background: var(--fg);
+    border-radius: var(--radius-pill);
+    transition: left 0.15s ease, background 0.15s ease;
+}
+
+.tm-c-toggle--on {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Thumb flips to the on-accent colour when on so it stays high-contrast on the accent track (the
+   grayscale sketch theme would otherwise merge an ink thumb into the graphite accent). */
+.tm-c-toggle--on .tm-c-toggle__thumb {
+    left: auto;
+    right: 1px;
+    background: var(--on-accent);
+}
+
+.tm-c-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tm-c-toggle__thumb {
+        transition: none;
+    }
+}
+
+/* Progress — tile "Progress": track + accent fill. 14px height is intrinsic. */
+.tm-c-progress {
+    height: 14px;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+}
+
+.tm-c-progress__fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+}
+
+/* Badges & dots — tile "Badges & dots": count badge + unread/read status dot. */
+.tm-c-badge {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 var(--space-1);
+    font-size: var(--fs-1);
+    font-weight: 700;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius-pill);
+}
+
+.tm-c-dot {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    background: var(--accent);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+}
+
+.tm-c-dot--read {
+    background: transparent;
+    border-color: var(--muted);
+}
+
+/* Avatar & reaction — tile "Avatar & reaction". */
+.tm-c-avatar {
+    display: inline-grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    font-weight: 600;
+    overflow: hidden;
+}
+
+.tm-c-avatar__glyph {
+    line-height: 1;
+}
+
+.tm-c-reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    font: inherit;
+    font-size: var(--fs-2);
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-pill);
+    cursor: default;
+}
+
+button.tm-c-reaction {
+    cursor: pointer;
+}
+
+/* Read-receipt ticks — tile "Read ticks" + the TM-511 triple-tick whole-group-read state.
+   Accent-coloured; the tick COUNT carries the meaning, so it survives the grayscale sketch theme. */
+.tm-c-ticks {
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: -1px;
+}
+
+/* Overlays — a centred modal card + a bottom sheet, over the shared `.tm-backdrop` dim (TM-133). */
+.tm-c-modal,
+.tm-c-sheet {
+    background: var(--surface-card);
+    color: var(--fg);
+    border: var(--border-width) solid var(--fg);
+    box-shadow: var(--shadow-lg);
+}
+
+.tm-c-modal {
+    width: min(22rem, 92vw);
+    padding: var(--space-5) var(--space-4);
+    border-radius: var(--radius-lg);
+    text-align: center;
+}
+
+/* The bottom-sheet variant re-anchors the shared backdrop to the bottom edge and drops its padding
+   so the sheet sits flush; specificity equals `.tm-backdrop`, and this rule is later in source. */
+.tm-c-sheet-backdrop {
+    place-items: end stretch;
+    padding: 0;
+}
+
+.tm-c-sheet {
+    width: 100%;
+    padding: var(--space-4) var(--space-5) var(--space-6);
+    border-right: none;
+    border-bottom: none;
+    border-left: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.tm-c-sheet__handle {
+    display: block;
+    width: 40px;
+    height: 4px;
+    margin: 0 auto var(--space-3);
+    background: var(--fg-line);
+    border-radius: var(--radius-pill);
+}
+
+.tm-c-overlay-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.tm-c-modal .tm-c-overlay-head {
+    justify-content: center;
+}
+
+.tm-c-overlay-title {
+    margin: 0;
+    font-size: var(--fs-4);
+}
+
+.tm-c-overlay-body {
+    margin-top: var(--space-3);
+    text-align: left;
+}
+/* ===== end component library (TM-511) ======================================================== */
