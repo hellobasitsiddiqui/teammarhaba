@@ -57,6 +57,11 @@
                 <!-- Events entry point (TM-396): shown by router.js for any signed-in, onboarded user.
                      Sits alongside Profile (the bottom-nav idea TM-386 stays parked). -->
                 <a id="nav-events" href="#/events" hidden>Events</a>
+                <!-- Notifications feed (TM-515): the grouped #/notifications screen (paper-notifications
+                     wireframe). Shown by router.js for any signed-in, onboarded user — the entry point
+                     for the feed the bottom nav (4 locked tabs) has no room for; the wireframe shows it
+                     as a pushed screen with a back-to-home button. -->
+                <a id="nav-notifications" href="#/notifications" hidden>Notifications</a>
                 <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
                 <a id="nav-profile" href="#/profile" hidden>Profile</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
@@ -275,11 +280,18 @@
              routing (the detail is the push deep-link landing target). -->
         <section id="events-view" class="events-view" aria-label="Events" hidden></section>
 
-        <!-- Chat placeholder (TM-434): the #/chat "coming soon" stub reached from the new bottom-tab
-             Chat tab. chat.js (imported by router.js) builds the stub into this container; router.js
-             owns its visibility + the protected-route gate. The real Event group chat (TM-433) swaps
-             in by rewriting chat.js + this section's content — the tab bar and router need no rework. -->
+        <!-- Chat (TM-515 / TM-433): the #/chat list + #/chat/{id} thread, refreshed to the paper
+             wireframes (chat-list / chat-thread / chat-empty / reaction-picker) and built from the
+             shared component library. chat.js (imported by router.js) builds the list/thread into this
+             container; router.js owns visibility + the #/chat and #/chat/{id} routing, the same
+             list↔detail pattern as the events area. Replaces the TM-434 "coming soon" placeholder. -->
         <section id="chat-view" class="chat-view" aria-label="Chat" hidden></section>
+
+        <!-- Notifications feed (TM-515): the grouped #/notifications screen (paper-notifications
+             wireframe) — event-grouped activity with a "Mark all read" action. notifications.js
+             (imported by router.js) builds the feed into this container; router.js owns its
+             visibility. Distinct from the foreground-push bell/inbox (notification-center.js). -->
+        <section id="notifications-view" class="notifications-view" aria-label="Notifications" hidden></section>
 
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->

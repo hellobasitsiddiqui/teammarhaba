@@ -3711,46 +3711,297 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Chat placeholder view (TM-434) — the #/chat "coming soon" stub. Themed via tokens; swapped for the
- * real Event group chat (TM-433) with no style change needed here.
+ * Chat (TM-515 / TM-433) + Notifications feed (TM-515) — the #/chat list + #/chat/{id} thread (+ empty
+ * state + reaction picker) and the grouped #/notifications feed, refreshed to the paper wireframes
+ * (paper-chat-list / -thread / -empty / -reaction-picker / paper-notifications). Every colour, border,
+ * radius, shadow + spacing reads from a reconciled design token (TM-510) via var(), so the whole
+ * section restyles with the theme (clean / doodle / sketch) with no per-rule edits; the shared
+ * component library (avatar / badge / readReceipt / reaction / unreadDot) carries the reusable bits.
+ * Replaces the old TM-434 "coming soon" placeholder styles.
  * ---------------------------------------------------------------------------------------------- */
-.chat-view {
+.chat-view,
+.notifications-view {
     margin: 1.5rem auto 0;
     max-width: 32rem;
+    width: 100%;
+    /* The app shell (.app) centres text; these screens are left-aligned like the wireframes. The
+       empty state re-centres itself below. */
+    text-align: left;
 }
-.chat-view-card {
+
+/* ── Chat list (paper-chat-list) ────────────────────────────────────────────────────────────── */
+.tm-chat-head { padding: 0 var(--space-1) var(--space-2); }
+.tm-chat-title { margin: 0; font-size: var(--fs-6); }
+
+.tm-chat-list { display: flex; flex-direction: column; }
+
+.tm-chat-row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-2);
+    border-bottom: var(--border-width) solid var(--fg-line);
+    color: inherit;
+    text-decoration: none;
+}
+.tm-chat-row:hover { background: var(--accent-soft); }
+.tm-chat-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The list avatar is a touch larger than the library's default 40px, matching the 46px wireframe. */
+.tm-chat-row .tm-c-avatar { width: 46px; height: 46px; font-size: var(--fs-4); flex: 0 0 auto; }
+
+.tm-chat-row-mid { flex: 1; min-width: 0; }
+.tm-chat-row-name { font-size: var(--fs-4); line-height: 1.2; }
+.tm-chat-row-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    font-size: var(--fs-2);
+    color: var(--muted);
+}
+.tm-chat-row-preview-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tm-chat-row-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-1);
+    flex: 0 0 auto;
+}
+.tm-chat-row-time { font-size: var(--fs-1); color: var(--muted); }
+
+/* ── Chat thread (paper-chat-thread) + Notifications top bar (shared back-button head) ──────────── */
+.tm-chat-thread-head,
+.tm-notifs-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-1) var(--space-3);
+    margin-bottom: var(--space-3);
+    border-bottom: var(--border-width) solid var(--fg);
+}
+.tm-chat-back {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    color: inherit;
+    text-decoration: none;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+}
+.tm-chat-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tm-chat-back-glyph { font-size: var(--fs-4); line-height: 1; }
+.tm-chat-thread-heading { flex: 1; min-width: 0; }
+.tm-chat-thread-title { margin: 0; font-size: var(--fs-5); line-height: 1.1; }
+.tm-chat-thread-sub { margin: 0; font-size: var(--fs-1); color: var(--muted); }
+
+.tm-chat-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: var(--space-3) var(--space-2);
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+}
+.tm-chat-day {
+    align-self: center;
+    margin-bottom: var(--space-2);
+    font-size: var(--fs-1);
+    color: var(--muted);
+}
+
+.tm-chat-msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 78%;
+    margin-bottom: var(--space-2);
+}
+.tm-chat-msg--in { align-self: flex-start; align-items: flex-start; }
+.tm-chat-msg--out { align-self: flex-end; align-items: flex-end; }
+
+.tm-chat-who {
+    margin: 0 0 2px var(--space-2);
+    font-size: var(--fs-1);
+    font-weight: 600;
+    color: var(--muted);
+}
+.tm-chat-bub {
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-size: var(--fs-3);
+    line-height: 1.3;
+    text-align: left;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-md);
+}
+/* An out-going bubble carries a faint accent wash so "mine" reads at a glance (still token-derived, so
+   it degrades to a grey wash under the grayscale sketch theme — the right alignment + ticks also cue
+   it, so the meaning never depends on colour). */
+.tm-chat-msg--out .tm-chat-bub { background: color-mix(in srgb, var(--accent) 14%, var(--surface-card)); }
+button.tm-chat-bub { cursor: pointer; }
+.tm-chat-bub--react:hover { background: var(--accent-soft); }
+.tm-chat-bub--selected { box-shadow: 0 0 0 3px var(--accent); }
+.tm-chat-bub:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.tm-chat-stamp {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 2px;
+    font-size: var(--fs-1);
+    color: var(--muted);
+}
+.tm-chat-reaction { margin: var(--space-1) 0 0 var(--space-2); }
+
+/* ── Chat empty state (paper-chat-empty) ────────────────────────────────────────────────────── */
+.tm-chat-empty {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    min-height: 40vh;
+    padding: var(--space-6) var(--space-5);
     text-align: center;
-    gap: 0.5rem;
-    padding: 2rem 1.25rem;
 }
-.chat-coming-icon {
-    color: var(--accent);
-    opacity: 0.85;
-    margin-bottom: 0.25rem;
+.tm-chat-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 96px;
+    height: 96px;
+    margin-bottom: var(--space-3);
+    color: var(--muted);
+    background: var(--surface-card);
+    border: 2.5px dashed var(--fg);
+    border-radius: var(--radius-lg);
 }
-.chat-coming-badge {
-    align-self: center;
-    margin: 0;
-    padding: 0.2rem 0.7rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--accent);
-    background: var(--accent-soft);
-    border: var(--border-width) solid var(--accent-line);
+.tm-chat-empty-title { margin: 0; font-size: var(--fs-5); }
+.tm-chat-empty-lead { margin: 0; font-size: var(--fs-2); color: var(--muted); }
+
+/* ── Composer (paper-chat-thread / -empty) ──────────────────────────────────────────────────── */
+.tm-chat-composer {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+}
+.tm-chat-input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2) var(--space-4);
+    font: inherit;
+    font-size: var(--fs-3);
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
     border-radius: var(--radius-pill);
 }
-.chat-coming-lead {
-    margin: 0.4rem 0 0;
-    color: var(--fg);
+.tm-chat-input::placeholder { color: var(--muted); }
+.tm-chat-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tm-chat-send {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
 }
-.chat-coming-hint {
-    margin: 0;
+.tm-chat-send:hover { filter: brightness(0.97); }
+.tm-chat-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tm-chat-send-glyph { display: grid; place-items: center; color: var(--on-accent); }
+
+/* ── Reaction picker (paper-reaction-picker) — a floating pill over the shared dim backdrop ────── */
+.tm-chat-picker {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-lg);
+}
+.tm-chat-picker-emoji {
+    display: grid;
+    place-items: center;
+    padding: var(--space-1);
+    font: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    background: none;
+    border: none;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+.tm-chat-picker-emoji:hover { background: var(--accent-soft); }
+.tm-chat-picker-emoji:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tm-chat-picker-more { font-size: var(--fs-4); color: var(--muted); }
+
+/* ── Notifications feed (paper-notifications) ───────────────────────────────────────────────── */
+.tm-notifs-title { flex: 1; margin: 0; font-size: var(--fs-5); }
+.tm-notifs-markall {
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: var(--fs-2);
+    font-weight: 600;
     color: var(--muted);
-    font-size: 0.9rem;
+    background: none;
+    border: none;
+    cursor: pointer;
 }
+.tm-notifs-markall:disabled { opacity: 0.5; cursor: default; }
+.tm-notifs-markall:not(:disabled):hover { color: var(--fg); }
+.tm-notifs-markall:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.tm-notifs-group {
+    margin: var(--space-4) var(--space-1) var(--space-2);
+    font-size: var(--fs-3);
+    font-weight: 600;
+    color: var(--muted);
+}
+.tm-notifs-note {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-start;
+    padding: var(--space-3);
+    margin-bottom: var(--space-2);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+/* Unread rows carry a stronger accent wash than a hover (matching the wireframe's accent-light row),
+   still derived from --accent so it greys out cleanly under the sketch theme. */
+.tm-notifs-note--unread { background: color-mix(in srgb, var(--accent) 16%, var(--surface-card)); }
+.tm-notifs-note .tm-c-dot { margin-top: 6px; flex: 0 0 auto; }
+.tm-notifs-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-pill);
+}
+.tm-notifs-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.tm-notifs-text-body { font-size: var(--fs-3); line-height: 1.25; }
+.tm-notifs-time { margin-top: 3px; font-size: var(--fs-1); color: var(--muted); }
 
 /* ===== Shared UI component library (TM-511) ===================================================
    The approved wireframe kit (design-kit/showcase-paper.html "Design elements · paper" tiles) built
