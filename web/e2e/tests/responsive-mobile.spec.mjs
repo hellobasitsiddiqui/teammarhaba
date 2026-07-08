@@ -103,7 +103,7 @@ test.describe("@responsive login at a phone viewport", () => {
 });
 
 test.describe("@responsive the account nav collapses behind a hamburger", () => {
-  test("opens to reveal nav items and closes after navigating", async ({ page }) => {
+  test("opens to reveal the utility menu and closes after navigating", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
@@ -113,22 +113,100 @@ test.describe("@responsive the account nav collapses behind a hamburger", () => 
 
     const nav = page.locator(".app-nav");
     const toggle = page.locator("#nav-toggle");
-    const profileLink = page.locator("#nav-profile");
+    // Post-TM-434 the hamburger is the UTILITY menu on mobile — the primary destinations moved to the
+    // bottom tab bar. The Help page link is a utility item that stays in it, so assert against that.
+    const helpLink = page.locator("#nav-help-link");
 
-    // Collapsed by default: the menu group is not displayed, so the Profile link isn't visible.
-    await expect(profileLink).toBeHidden();
+    // Collapsed by default: the menu group is not displayed, so the Help link isn't visible.
+    await expect(helpLink).toBeHidden();
     await expect(nav).toHaveAttribute("data-nav-open", "false");
 
-    // Open the menu → items become visible + aria-expanded reflects state.
+    // Open the menu → utility items become visible + aria-expanded reflects state.
     await toggle.click();
     await expect(nav).toHaveAttribute("data-nav-open", "true");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expectControlUsable(page, profileLink);
+    await expectControlUsable(page, helpLink);
 
-    // Clicking a nav item navigates AND closes the menu (TM-229 nav-toggle.js behaviour).
-    await profileLink.click();
+    // Exactly one primary nav on mobile (TM-434): the primary Events/Profile destinations now live in
+    // the bottom tab bar and are NOT duplicated inside the hamburger, so they stay hidden even when the
+    // menu is open.
+    await expect(page.locator(".app-nav-items > #nav-profile")).toBeHidden();
+    await expect(page.locator(".app-nav-items > #nav-events")).toBeHidden();
+
+    // Clicking a utility item navigates AND closes the menu (TM-229 nav-toggle.js behaviour).
+    await helpLink.click();
     await expect(nav).toHaveAttribute("data-nav-open", "false");
+    await expect(page.locator("#help-view")).toBeVisible();
+  });
+});
+
+test.describe("@responsive bottom tab bar (TM-434)", () => {
+  test("shows the four locked-order tabs, reflects the active route, and navigates each", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    await page.evaluate(() => (window.location.hash = "#/home"));
+    await expect(page.locator("#auth-signed-in")).toBeVisible();
+
+    const tabbar = page.locator("#app-tabbar");
+    await expect(tabbar).toBeVisible();
+
+    // Four tabs in the LOCKED order: Home · Events · Chat · Profile.
+    await expect(tabbar.locator(".app-tab")).toHaveCount(4);
+    await expect(tabbar.locator(".app-tab-label")).toHaveText(["Home", "Events", "Chat", "Profile"]);
+
+    // Each tab is a real ≥44px tap target.
+    for (const id of ["#tab-home", "#tab-events", "#tab-chat", "#tab-profile"]) {
+      const box = await page.locator(id).boundingBox();
+      expect(box.height, `${id} tap target`).toBeGreaterThanOrEqual(44);
+    }
+
+    // On #/home the Home tab is the selected one (clear active-tab state).
+    await expect(page.locator("#tab-home")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("#tab-profile")).not.toHaveAttribute("aria-current", /.*/);
+
+    // Tap Profile → the profile view + Profile becomes the active tab.
+    await page.locator("#tab-profile").click();
     await expect(page.locator("#profile-view")).toBeVisible();
+    await expect(page.locator("#tab-profile")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("#tab-home")).not.toHaveAttribute("aria-current", /.*/);
+
+    // Tap Events → the events view + Events active.
+    await page.locator("#tab-events").click();
+    await expect(page.locator("#events-view")).toBeVisible();
+    await expect(page.locator("#tab-events")).toHaveAttribute("aria-current", "page");
+
+    // Tap Chat → the "coming soon" placeholder stub + Chat active (TM-434 placeholder; TM-433 later).
+    await page.locator("#tab-chat").click();
+    await expect(page.locator("#chat-view")).toBeVisible();
+    await expect(page.locator("#chat-view")).toContainText("Coming soon");
+    await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
+
+    // Tap Home → back to the home view + Home active.
+    await page.locator("#tab-home").click();
+    await expect(page.locator("#auth-signed-in")).toBeVisible();
+    await expect(page.locator("#tab-home")).toHaveAttribute("aria-current", "page");
+
+    // The fixed bar never forces the page to scroll sideways.
+    await expectNoHorizontalPageScroll(page);
+  });
+
+  test("a #/chat deep link lands with the Chat tab active", async ({ page }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    await page.evaluate(() => (window.location.hash = "#/chat"));
+    await expect(page.locator("#chat-view")).toBeVisible();
+    await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("the tab bar is hidden on the signed-out auth gate", async ({ page }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    // Signed out → the router keeps the bar's `hidden` attribute set (no app sections to tab between).
+    await expect(page.locator("#app-tabbar")).toBeHidden();
   });
 });
 

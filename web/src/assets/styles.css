@@ -3420,3 +3420,203 @@ button.tm-notif-item:hover {
     .tm-event-thumb { width: 100%; height: 120px; }
     .tm-event-actions .tm-btn { align-self: stretch; width: 100%; }
 }
+
+/* ================================================================================================
+ * Bottom navigation bar (TM-434) — the PRIMARY mobile navigation: Home · Events · Chat · Profile.
+ *
+ * A fixed, full-width strip in the bottom thumb-zone, shown only on narrow / mobile + native
+ * (WebView) viewports for a signed-in, un-gated user. DESKTOP / wide viewports never show it (base
+ * `display:none`) and keep the top `.app-nav`, so there is exactly ONE primary nav per width. Styled
+ * purely with theme tokens (var(--token)) so it renders across clean / doodle / sketch + dark, and
+ * folds in env(safe-area-inset-bottom) so it clears the iPhone home indicator / Android gesture nav.
+ * ============================================================================================== */
+.app-tabbar {
+    /* Hidden by default (desktop + signed-out). The router removes the `hidden` attribute when the
+       session is eligible; the mobile media query below then reveals a non-hidden bar. Keeping the
+       base as display:none means the UA [hidden]{display:none!important} rule and this rule agree. */
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Below the toasts (1000), modal/dialog backdrops (1100) and the top-nav dropdown (1500) so a
+       dialog/menu always sits over the bar; above ordinary page content. */
+    z-index: 900;
+    grid-template-columns: repeat(4, 1fr);
+    align-items: stretch;
+    background: var(--surface);
+    border-top: var(--border-width) solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.10);
+    /* Pad the bar's own bottom by the home-indicator / gesture-nav inset (0 on non-notched devices). */
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Each tab: an equal column, hand-drawn glyph over a text label, a ≥44px tap target, centred. */
+.app-tab {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 3.25rem;                 /* ≥44px incl. padding */
+    padding: 0.4rem 0.25rem;
+    color: var(--muted);                 /* inactive = muted ink */
+    text-decoration: none;
+    font-weight: 600;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.app-tab-icon {
+    width: 24px;
+    height: 24px;
+    display: block;
+}
+
+.app-tab-label {
+    font-size: 0.68rem;
+    line-height: 1;
+    letter-spacing: 0.1px;
+}
+
+.app-tab:hover {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+/* Active tab: accent ink + a short top indicator, mirrored to aria-current for assistive tech. */
+.app-tab.is-active,
+.app-tab[aria-current="page"] {
+    color: var(--accent);
+}
+.app-tab.is-active::before,
+.app-tab[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2.2rem;
+    height: 3px;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: var(--accent);
+}
+
+/* Keyboard focus ring — the bar is a keyboard-navigable nav landmark (links are natively tabbable). */
+.app-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -3px;
+    border-radius: var(--radius-sm);
+}
+
+/* Chat unread badge (TM-434 seam; TM-439 fills it) — a small pill over the Chat glyph's top-right.
+   Stays [hidden] until TM-439 reveals it + writes the count (capped at '9+', decided on the ticket). */
+.app-tab-badge {
+    position: absolute;
+    top: 0.3rem;
+    left: 56%;
+    min-width: 1rem;
+    height: 1rem;
+    box-sizing: border-box;
+    padding: 0 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--on-accent);
+    background: var(--danger);
+    border-radius: var(--radius-pill);
+}
+
+/*
+ * Reveal on mobile only (mirrors the .app-nav-toggle breakpoint: ≤ 33rem ≈ 528px). Shown as a 4-col
+ * grid only when the router has un-hidden the bar (session eligible); desktop keeps display:none.
+ */
+@media (max-width: 33rem) {
+    .app-tabbar:not([hidden]) {
+        display: grid;
+    }
+
+    /* Reconcile with the top-nav hamburger — AC: exactly ONE primary nav on mobile. The tab bar now
+       owns the primary destinations, so hide the DUPLICATE Events/Profile links inside the collapsed
+       hamburger while the bar is shown, leaving the hamburger as a small UTILITY menu (Help, Admin,
+       Sign out, avatar). The ids stay in the DOM (router still owns their gating `hidden`); this only
+       drops the on-screen duplication. Home + Chat were never top-nav links, so nothing to hide. */
+    body.tm-has-tabbar .app-nav-items > #nav-events,
+    body.tm-has-tabbar .app-nav-items > #nav-profile {
+        display: none;
+    }
+
+    /* Keep page content clear of the fixed bar: add its height (+ safe-area inset) to the app's
+       bottom padding, but ONLY while the bar is shown so signed-out / desktop layouts are unchanged.
+       ~4.75rem covers the 3.25rem tap rows + label + top indicator with a little breathing room. */
+    body.tm-has-tabbar .app {
+        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    }
+
+    /* No layout jump when the on-screen keyboard opens: tabbar.js sets this while a text field is
+       focused, so the fixed bar is dropped and can't overlap the input or force a reflow. */
+    body.tm-tabbar-kbd-open .app-tabbar {
+        display: none;
+    }
+}
+
+/* Hand-drawn edge under the sketch (default) + doodle themes — the same #wobble-soft skin the nav /
+   cards use; dropped under reduced-motion since it's purely decorative. The label keeps the body face:
+   the design-token contract (TM-510) owns the hand-lettered faces via --font-display / --font-accent
+   on the heading + tagline rules only, so the bar's sketch character comes from the wobble edge here
+   rather than a per-rule font stack (which the token guard forbids). */
+[data-theme="sketch"] .app-tabbar,
+[data-theme="doodle"] .app-tabbar {
+    filter: url("#wobble-soft");
+}
+@media (prefers-reduced-motion: reduce) {
+    [data-theme="sketch"] .app-tabbar,
+    [data-theme="doodle"] .app-tabbar {
+        filter: none;
+    }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Chat placeholder view (TM-434) — the #/chat "coming soon" stub. Themed via tokens; swapped for the
+ * real Event group chat (TM-433) with no style change needed here.
+ * ---------------------------------------------------------------------------------------------- */
+.chat-view {
+    margin: 1.5rem auto 0;
+    max-width: 32rem;
+}
+.chat-view-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.5rem;
+    padding: 2rem 1.25rem;
+}
+.chat-coming-icon {
+    color: var(--accent);
+    opacity: 0.85;
+    margin-bottom: 0.25rem;
+}
+.chat-coming-badge {
+    align-self: center;
+    margin: 0;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius-pill);
+}
+.chat-coming-lead {
+    margin: 0.4rem 0 0;
+    color: var(--fg);
+}
+.chat-coming-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}

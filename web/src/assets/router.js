@@ -21,6 +21,7 @@ import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
 import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
+import { enterChat } from "./chat.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
@@ -29,6 +30,7 @@ import { enterDiagnostics } from "./diagnostics.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
+import { updateTabbar } from "./tabbar.js";
 
 const LOGIN = "#/login";
 const HOME = "#/home";
@@ -63,7 +65,12 @@ const DIAGNOSTICS = "#/diagnostics";
 // it can't live in the exact-match PROTECTED set, so events routes are matched by prefix instead
 // (see isEventsRoute / isProtected below).
 const EVENTS = "#/events";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, ONBOARDING, TERMS, DIAGNOSTICS]);
+// Chat (TM-434) — protected, available to any signed-in, onboarded user. A PLACEHOLDER route today:
+// it renders the "Chat — coming soon" stub (#chat-view, built by chat.js) reached from the new bottom
+// tab bar's Chat tab. When the real Event group chat lands (TM-433) it's swapped in by rewriting
+// chat.js — this route + the tab bar stay exactly as-is (no nav rework).
+const CHAT = "#/chat";
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, CHAT, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -105,6 +112,9 @@ let adminEventsActive = false;
 let adminEventFormEntered = null;
 // Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
 let profileActive = false;
+// Same lifecycle for the chat placeholder view (TM-434): mount the "coming soon" stub once on entry,
+// reset on leaving. TM-433 swaps enterChat()'s body for the real chat with no change here.
+let chatActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
 let onboardingActive = false;
 // Same lifecycle for the terms gate view (TM-170): mount once, (re)load on entry.
@@ -127,7 +137,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === CHAT || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
@@ -161,6 +171,7 @@ function render() {
   const helpView = $("help-view");
   const diagnosticsView = $("diagnostics-view");
   const eventsView = $("events-view");
+  const chatView = $("chat-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
@@ -174,6 +185,8 @@ function render() {
   if (diagnosticsView) diagnosticsView.hidden = route !== DIAGNOSTICS;
   // Events UI (TM-396) — shown for the list and any event detail.
   if (eventsView) eventsView.hidden = !isEventsRoute(route);
+  // Chat placeholder (TM-434) — the "coming soon" stub, shown for the exact #/chat route.
+  if (chatView) chatView.hidden = route !== CHAT;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
   // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
@@ -204,6 +217,13 @@ function render() {
   if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
   const homeAdminLink = $("home-admin-link");
   if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
+
+  // Bottom tab bar (TM-434): reflect the same signed-in / gated / route state onto the primary mobile
+  // nav — show it only for a signed-in, un-gated user (the CSS breakpoint restricts it to mobile), and
+  // light the tab matching the current route. Driven from here so the tab bar shares router's single
+  // source of truth (no second hashchange/auth listener). Hidden while EITHER first-run gate is up, so
+  // a gated user can't side-step the gate via a tab.
+  updateTabbar({ signedIn, gated, route });
 }
 
 /**
@@ -332,6 +352,16 @@ function guard() {
     }
   } else {
     profileActive = false;
+  }
+  // Chat placeholder (TM-434): mount the "coming soon" stub once on entry (idempotent — no per-visit
+  // data), reset on leaving. When TM-433 lands, enterChat() becomes the real chat with no change here.
+  if (route === CHAT) {
+    if (!chatActive) {
+      chatActive = true;
+      enterChat();
+    }
+  } else {
+    chatActive = false;
   }
   // First-login gate view (TM-250): mount on entry, passing the `done` callback the gate invokes
   // after a successful submit. `done` flips our local onboarded flag (the server now reports it) and

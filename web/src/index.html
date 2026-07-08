@@ -245,6 +245,12 @@
              routing (the detail is the push deep-link landing target). -->
         <section id="events-view" class="events-view" aria-label="Events" hidden></section>
 
+        <!-- Chat placeholder (TM-434): the #/chat "coming soon" stub reached from the new bottom-tab
+             Chat tab. chat.js (imported by router.js) builds the stub into this container; router.js
+             owns its visibility + the protected-route gate. The real Event group chat (TM-433) swaps
+             in by rewriting chat.js + this section's content — the tab bar and router need no rework. -->
+        <section id="chat-view" class="chat-view" aria-label="Chat" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
@@ -312,6 +318,69 @@
             </p>
         </footer>
     </main>
+
+    <!-- Bottom navigation bar (TM-434): the PRIMARY mobile navigation — Home · Events · Chat · Profile
+         in this LOCKED order (Home first, Profile last). Shown only on narrow / mobile + native
+         (WebView) viewports for a signed-in, onboarded user; DESKTOP keeps the top .app-nav via a CSS
+         breakpoint (mirrors .app-nav-toggle). router.js drives visibility + the active-tab state via
+         tabbar.js (which uses the unit-tested tabbar-core.js rules). Placed OUTSIDE <main class="app">
+         so it's a top-level fixed element in the thumb zone, not constrained by the centred column;
+         styles.css pins it with env(safe-area-inset-bottom) so it clears the iPhone home indicator /
+         Android gesture nav. Each tab is a plain hash-link with a hand-drawn glyph (inline SVG,
+         stroke=currentColor → themes across clean / doodle / sketch, picks up the sketch wobble edge)
+         + a visible text label that NAMES the link for a11y (the SVG is decorative → aria-hidden). The
+         bar is a keyboard-navigable <nav> landmark (links are natively tabbable). It starts `hidden`
+         (signed-out); the router removes that once the session is signed-in + un-gated. -->
+    <nav id="app-tabbar" class="app-tabbar" aria-label="Primary" hidden>
+        <a id="tab-home" class="app-tab" href="#/home">
+            <svg class="app-tab-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+                 stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a little hand-drawn house -->
+                <path d="M4 11.5 12 4.5l8 7" />
+                <path d="M6 10.5V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8.5" />
+                <path d="M10 20v-5h4v5" />
+            </svg>
+            <span class="app-tab-label">Home</span>
+        </a>
+        <a id="tab-events" class="app-tab" href="#/events">
+            <svg class="app-tab-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+                 stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a calendar / date — the event's "when" -->
+                <path d="M5 6.5q0-1.5 2-1.5h10q2 0 2 1.5v11q0 1.5-2 1.5H7q-2 0-2-1.5z" />
+                <path d="M5 9.5h14" />
+                <path d="M9 3.5v3M15 3.5v3" />
+                <path d="M8.5 13l1.4 1.4L13 11.5" />
+            </svg>
+            <span class="app-tab-label">Events</span>
+        </a>
+        <a id="tab-chat" class="app-tab" href="#/chat">
+            <svg class="app-tab-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+                 stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a speech bubble — conversation -->
+                <path d="M4 7q0-2 2.5-2h11Q20 5 20 7v6q0 2-2.5 2H10l-4 3 .7-3Q4 15 4 13z" />
+                <path d="M8.5 10h.01M12 10h.01M15.5 10h.01" />
+            </svg>
+            <span class="app-tab-label">Chat</span>
+            <!-- Chat unread badge seam (TM-439): stays hidden until TM-439 wires the count; the count
+                 module reveals it + writes the value (capped at '9+', decided on the ticket) with NO
+                 nav rework. Empty + aria-hidden until then so it announces nothing. -->
+            <span id="tab-chat-badge" class="app-tab-badge" hidden aria-hidden="true"></span>
+        </a>
+        <a id="tab-profile" class="app-tab" href="#/profile">
+            <svg class="app-tab-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+                 stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a single person — head + shoulders -->
+                <circle cx="12" cy="8.5" r="3.4" />
+                <path d="M5.5 19.5q0-4.5 6.5-4.5t6.5 4.5" />
+            </svg>
+            <span class="app-tab-label">Profile</span>
+        </a>
+    </nav>
+
     <script src="/assets/config.js"></script>
     <!-- Theme system core (TM-210). Classic script, runs right after config.js + before paint:
          reads window.TEAMMARHABA_CONFIG.theme and sets data-theme on <html> (default/fallback

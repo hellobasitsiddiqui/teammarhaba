@@ -64,8 +64,22 @@ async function openNav(page) {
   }
 }
 
-/** Click a nav link/button by id, opening the hamburger first when needed. Works under both projects. */
+// Primary destinations that moved to the bottom tab bar on mobile (TM-434): on a phone the tab bar is
+// the primary nav (its Events/Profile links are hidden inside the hamburger), so navigate via the tab;
+// on desktop the tab bar is display:none and the top-nav link is used as before.
+const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
+
+/** Click a nav destination by its top-nav id. Mobile → bottom tab (TM-434) for a tab-bar destination,
+ *  else the hamburger; desktop → the top-nav link directly. Works under both Playwright projects. */
 async function clickNav(page, selector) {
+  const onMobile = await page.locator("#nav-toggle").isVisible();
+  const tabSelector = NAV_TO_TAB[selector];
+  if (onMobile && tabSelector) {
+    const tab = page.locator(tabSelector);
+    await expect(tab).toBeVisible();
+    await tab.click();
+    return;
+  }
   await openNav(page);
   const item = page.locator(selector);
   await expect(item).toBeVisible();
