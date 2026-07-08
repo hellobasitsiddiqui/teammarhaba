@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<!--
+  TM-377 wireflow — Journey 3: events / meetup core (browse → detail → RSVP).
+  Renders with the app's SHIPPED Sketch theme:
+    • data-theme="sketch" activates web/src/assets/styles.css lines 762–921 (real token block);
+    • the linked stylesheet IS the app's stylesheet, unmodified;
+    • #wobble-soft copied verbatim from web/src/index.html lines 25–30;
+    • font loads mirror web/src/index.html line 16.
+  wireflow.css adds storyboard LAYOUT only. Re-render: see index.md (render.sh).
+-->
+<html lang="en" data-theme="sketch">
+<head>
+    <meta charset="UTF-8" />
+    <title>TeamMarhaba wireflow — Events &amp; meetups</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="blunt.css" />
+    <link rel="stylesheet" href="wireflow.css" />
+</head>
+<body>
+    <!-- #wobble-soft — verbatim from web/src/index.html:25–30. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <filter id="wobble-soft">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+        </filter>
+    </svg>
+
+    <header class="wf-title">
+        <h2>Journey 3 — Events &amp; meetups (browse → detail → RSVP)</h2>
+        <p class="tagline">TM-377 wireflow · drawn in the canonical storyboard style (blunt ink wireframe, per the owner reference) · arrow label = the tap that advances · sticky = edge note</p>
+    </header>
+
+    <main class="wf-strip">
+
+        <!-- ════════ 1 · Home ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">1</span>Home (signed in)</h3>
+            <div class="wf-phone">
+                <div class="app">
+                    <h1>TeamMarhaba</h1>
+                    <nav class="app-nav">
+                        <a href="#">Chats</a>
+                        <span class="wf-ring"><a href="#">Events</a></span>
+                        <a href="#">Profile</a>
+                        <span class="wf-avatar wf-avatar-sm">S</span>
+                    </nav>
+                    <hr class="wf-textline w-85" style="margin:1.3rem auto" />
+                    <hr class="wf-textline w-70" style="margin:1.3rem auto" />
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap "Events"</p>
+        </div>
+
+        <!-- ════════ 2 · Browse events ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">2</span>Browse events</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <h2>Events</h2>
+                        <button type="button" class="tm-btn tm-btn-sm">+ New</button>
+                    </div>
+                    <span class="wf-ring" style="display:block">
+                        <div class="wf-card">
+                            <h4>Coffee &amp; Code ☕</h4>
+                            <p class="wf-card-meta">Sat 12 Jul · 10:00</p>
+                            <p class="wf-card-meta">Half Million, Olaya</p>
+                            <div class="wf-card-foot">
+                                <span class="tm-badge">12 going</span>
+                                <span class="wf-time">hosted by Omar</span>
+                            </div>
+                        </div>
+                    </span>
+                    <div class="wf-card">
+                        <h4>Padel night 🎾</h4>
+                        <p class="wf-card-meta">Thu 17 Jul · 20:00</p>
+                        <p class="wf-card-meta">U Padel, Al Malqa</p>
+                        <div class="wf-card-foot">
+                            <span class="tm-badge">8 going</span>
+                            <span class="wf-time">hosted by Layla</span>
+                        </div>
+                    </div>
+                    <div class="wf-card">
+                        <h4>Board-games evening 🎲</h4>
+                        <p class="wf-card-meta">Fri 25 Jul · 19:00</p>
+                        <p class="wf-card-meta">The Warehouse, Diriyah</p>
+                    </div>
+                </div>
+            </div>
+            <p class="wf-sticky tagline">soonest first · a card answers the 3 questions: what, when, where.</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 16 C 30 24, 66 10, 96 19" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 10 L 98 19 L 84 27" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap the event</p>
+        </div>
+
+        <!-- ════════ 3 · Event detail ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">3</span>Event detail</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <h2>Coffee &amp; Code ☕</h2>
+                    </div>
+                    <div class="wf-card">
+                        <p class="wf-card-meta">📅 Sat 12 Jul · 10:00</p>
+                        <p class="wf-card-meta">📍 Half Million, Olaya</p>
+                        <p class="wf-card-meta">Host: Omar</p>
+                    </div>
+                    <hr class="wf-textline w-95" />
+                    <hr class="wf-textline w-85" />
+                    <hr class="wf-textline w-55" />
+                    <p style="margin:0.2rem 0 0; font-weight:600; font-size:0.9rem">Going (12)</p>
+                    <div style="display:flex; gap:0.3rem; align-items:center">
+                        <span class="wf-avatar wf-avatar-sm">O</span>
+                        <span class="wf-avatar wf-avatar-sm">L</span>
+                        <span class="wf-avatar wf-avatar-sm">H</span>
+                        <span class="wf-avatar wf-avatar-sm">M</span>
+                        <span class="wf-time">+8 more</span>
+                    </div>
+                    <div style="margin-top:auto; display:grid">
+                        <span class="wf-ring" style="display:grid"><button type="button" class="tm-btn tm-btn-primary">RSVP — I'm going</button></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 18 C 26 26, 70 8, 96 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 9 L 98 18 L 84 26" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap "RSVP — I'm going"</p>
+        </div>
+
+        <!-- ════════ 4 · Confirm RSVP ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">4</span>Confirm RSVP</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body" style="opacity:0.9">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <h2>Coffee &amp; Code ☕</h2>
+                    </div>
+                    <div class="wf-card">
+                        <p class="wf-card-meta">📅 Sat 12 Jul · 10:00</p>
+                        <p class="wf-card-meta">📍 Half Million, Olaya</p>
+                    </div>
+                    <hr class="wf-textline w-95" />
+                    <hr class="wf-textline w-85" />
+                </div>
+                <div class="wf-overlay">
+                    <div class="tm-dialog tm-modal">
+                        <h3 class="tm-dialog-title">You're going! 🎉</h3>
+                        <p class="tm-dialog-msg">Coffee &amp; Code · Sat 12 Jul, 10:00. We'll remind you the day before.</p>
+                        <div class="tm-dialog-actions">
+                            <button type="button" class="tm-btn">Cancel</button>
+                            <button type="button" class="tm-btn tm-btn-primary">Confirm</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 21 C 32 13, 60 25, 96 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 7 L 98 16 L 84 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">"Confirm"</p>
+        </div>
+
+        <!-- ════════ 5 · Detail — going ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">5</span>Event detail — going</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <h2>Coffee &amp; Code ☕</h2>
+                        <span class="tm-badge tm-badge-ok">✓ Going</span>
+                    </div>
+                    <div class="wf-card">
+                        <p class="wf-card-meta">📅 Sat 12 Jul · 10:00</p>
+                        <p class="wf-card-meta">📍 Half Million, Olaya</p>
+                        <p class="wf-card-meta">Host: Omar</p>
+                    </div>
+                    <p style="margin:0.2rem 0 0; font-weight:600; font-size:0.9rem">Going (13)</p>
+                    <div style="display:flex; gap:0.3rem; align-items:center">
+                        <span class="wf-ring"><span class="wf-avatar wf-avatar-sm">S</span></span>
+                        <span class="wf-avatar wf-avatar-sm">O</span>
+                        <span class="wf-avatar wf-avatar-sm">L</span>
+                        <span class="wf-avatar wf-avatar-sm">H</span>
+                        <span class="wf-time">+9 more</span>
+                    </div>
+                    <div style="margin-top:auto; display:grid">
+                        <button type="button" class="tm-btn">Going ✓ — tap to un-RSVP</button>
+                    </div>
+                </div>
+            </div>
+            <p class="wf-sticky tagline">changed plans? the same button un-RSVPs (no dead end).</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 17 C 28 25, 64 9, 96 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 11 L 98 20 L 84 28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">back ("‹ Events")</p>
+        </div>
+
+        <!-- ════════ 6 · Browse — with RSVP ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">6</span>Browse — you're on the list</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <h2>Events</h2>
+                        <button type="button" class="tm-btn tm-btn-sm">+ New</button>
+                    </div>
+                    <div class="wf-card">
+                        <h4>Coffee &amp; Code ☕</h4>
+                        <p class="wf-card-meta">Sat 12 Jul · 10:00</p>
+                        <p class="wf-card-meta">Half Million, Olaya</p>
+                        <div class="wf-card-foot">
+                            <span class="tm-badge tm-badge-ok">✓ Going</span>
+                            <span class="wf-time">13 going</span>
+                        </div>
+                    </div>
+                    <div class="wf-card">
+                        <h4>Padel night 🎾</h4>
+                        <p class="wf-card-meta">Thu 17 Jul · 20:00</p>
+                        <p class="wf-card-meta">U Padel, Al Malqa</p>
+                        <div class="wf-card-foot">
+                            <span class="tm-badge">8 going</span>
+                            <span class="wf-time">hosted by Layla</span>
+                        </div>
+                    </div>
+                    <div style="text-align:center; margin-top:auto"><span class="wf-end">✓ RSVP'd — meetup planned</span></div>
+                </div>
+            </div>
+            <p class="wf-sticky wf-sticky-alt tagline">the product loop: meet people → chat 1:1 → plan the next meetup.</p>
+        </section>
+
+    </main>
+</body>
+</html>

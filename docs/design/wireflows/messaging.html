@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+  TM-377 wireflow — Journey 2: 1:1 messaging, aligned with TM-376's WhatsApp-style concept
+  (chats list → chat screen → search user → new chat → send with ✓/✓✓ → push notification).
+  Renders with the app's SHIPPED Sketch theme:
+    • data-theme="sketch" activates web/src/assets/styles.css lines 762–921 (real token block);
+    • the linked stylesheet IS the app's stylesheet, unmodified;
+    • #wobble-soft copied verbatim from web/src/index.html lines 25–30;
+    • font loads mirror web/src/index.html line 16.
+  wireflow.css adds storyboard LAYOUT only. Re-render: see index.md (render.sh).
+-->
+<html lang="en" data-theme="sketch">
+<head>
+    <meta charset="UTF-8" />
+    <title>TeamMarhaba wireflow — 1:1 messaging</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="blunt.css" />
+    <link rel="stylesheet" href="wireflow.css" />
+</head>
+<body>
+    <!-- #wobble-soft — verbatim from web/src/index.html:25–30. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <filter id="wobble-soft">
+            <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" />
+        </filter>
+    </svg>
+
+    <header class="wf-title">
+        <h2>Journey 2 — 1:1 messaging (happy path, per TM-376)</h2>
+        <p class="tagline">TM-377 wireflow · drawn in the canonical storyboard style (blunt ink wireframe, per the owner reference) · arrow label = the tap that advances · sticky = edge note</p>
+    </header>
+
+    <main class="wf-strip">
+
+        <!-- ════════ 1 · Home ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">1</span>Home (signed in)</h3>
+            <div class="wf-phone">
+                <div class="app">
+                    <nav class="app-nav">
+                        <span class="wf-ring"><a href="#">Chats</a></span>
+                        <a href="#">Events</a>
+                        <a href="#">Profile</a>
+                        <span class="wf-avatar wf-avatar-sm">S</span>
+                    </nav>
+                    <hr class="wf-textline w-85" style="margin:1.3rem auto" />
+                    <hr class="wf-textline w-70" style="margin:1.3rem auto" />
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 20 C 28 12, 62 26, 96 17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 8 L 98 17 L 84 25" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap "Chats"</p>
+        </div>
+
+        <!-- ════════ 2 · Chats list ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">2</span>Chats list</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <h2>Chats</h2>
+                        <span class="wf-ring"><button type="button" class="tm-btn tm-btn-sm">New chat</button></span>
+                    </div>
+                    <label class="field">
+                        <input placeholder="Search chats" readonly />
+                    </label>
+                    <div class="wf-row">
+                        <span class="wf-avatar">O</span>
+                        <span class="wf-row-main">
+                            <span class="wf-row-title"><span>Omar</span><span class="wf-time">09:12</span></span>
+                            <span class="wf-row-sub"><span>See you at the meetup!</span><span class="wf-unread">2</span></span>
+                        </span>
+                    </div>
+                    <div class="wf-row">
+                        <span class="wf-avatar">L</span>
+                        <span class="wf-row-main">
+                            <span class="wf-row-title"><span>Layla</span><span class="wf-time">Tue</span></span>
+                            <span class="wf-row-sub"><span>That padel place was great</span></span>
+                        </span>
+                    </div>
+                    <div class="wf-row">
+                        <span class="wf-avatar">H</span>
+                        <span class="wf-row-main">
+                            <span class="wf-row-title"><span>Hamza</span><span class="wf-time">Mon</span></span>
+                            <span class="wf-row-sub"><span>Salam! Good to meet you</span></span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <p class="wf-sticky tagline">newest first · name + last message + time + unread count (TM-376 AC 1).</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 16 C 30 24, 66 10, 96 19" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 10 L 98 19 L 84 27" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap "New chat"</p>
+        </div>
+
+        <!-- ════════ 3 · Search user ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">3</span>Search user</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <h2>New chat</h2>
+                    </div>
+                    <label class="field">
+                        <span>Search by name or phone</span>
+                        <input value="oma" readonly />
+                    </label>
+                    <span class="wf-ring" style="display:block">
+                        <div class="wf-row">
+                            <span class="wf-avatar">O</span>
+                            <span class="wf-row-main">
+                                <span class="wf-row-title"><span>Omar</span></span>
+                                <span class="wf-row-sub"><span>+966 50 123 4567</span></span>
+                            </span>
+                        </div>
+                    </span>
+                    <div class="wf-row">
+                        <span class="wf-avatar">O</span>
+                        <span class="wf-row-main">
+                            <span class="wf-row-title"><span>Omar A.</span></span>
+                            <span class="wf-row-sub"><span>+966 55 987 1122</span></span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <p class="wf-sticky wf-sticky-alt tagline">already chatted before? tapping opens the EXISTING thread — never a duplicate (TM-376 AC 2).</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 18 C 26 26, 70 8, 96 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 9 L 98 18 L 84 26" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">tap "Omar"</p>
+        </div>
+
+        <!-- ════════ 4 · New conversation ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">4</span>New conversation</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <span class="wf-avatar wf-avatar-sm">O</span>
+                        <h2>Omar</h2>
+                    </div>
+                    <div style="flex:1; display:grid; place-items:center">
+                        <p class="tagline" style="margin:0; text-align:center">No messages yet —<br />say salam 👋</p>
+                    </div>
+                </div>
+                <div class="wf-composer">
+                    <label class="field" style="flex:1">
+                        <input value="Salam! Coming to the coffee meetup?" readonly />
+                    </label>
+                    <span class="wf-ring"><button type="button" class="tm-btn tm-btn-primary">Send</button></span>
+                </div>
+            </div>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 21 C 32 13, 60 25, 96 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 7 L 98 16 L 84 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">type → "Send"</p>
+        </div>
+
+        <!-- ════════ 5 · Sent (✓ → ✓✓) ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">5</span>Chat — sent</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <span class="wf-avatar wf-avatar-sm">O</span>
+                        <h2>Omar</h2>
+                    </div>
+                    <div style="text-align:center"><span class="tm-badge">Today</span></div>
+                    <div class="wf-bubble wf-bubble-sent">
+                        Salam! Coming to the coffee meetup?
+                        <span class="wf-meta">09:14 ✓✓</span>
+                    </div>
+                </div>
+                <div class="wf-composer">
+                    <label class="field" style="flex:1">
+                        <input placeholder="Message" readonly />
+                    </label>
+                    <button type="button" class="tm-btn tm-btn-primary">Send</button>
+                </div>
+            </div>
+            <p class="wf-sticky tagline">appears instantly · ✓ sent → ✓✓ delivered → read (TM-376 AC 3).</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 17 C 28 25, 64 9, 96 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 11 L 98 20 L 84 28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">Omar replies —<br />streams in live, no refresh</p>
+        </div>
+
+        <!-- ════════ 6 · Reply received ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">6</span>Chat — reply received</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <div class="wf-topbar">
+                        <span>‹</span>
+                        <span class="wf-avatar wf-avatar-sm">O</span>
+                        <h2>Omar</h2>
+                    </div>
+                    <div style="text-align:center"><span class="tm-badge">Today</span></div>
+                    <div class="wf-bubble wf-bubble-sent">
+                        Salam! Coming to the coffee meetup?
+                        <span class="wf-meta">09:14 ✓✓</span>
+                    </div>
+                    <div class="wf-bubble wf-bubble-recv">
+                        Yes! Bringing the board games 😄
+                        <span class="wf-meta">09:15</span>
+                    </div>
+                    <div class="wf-bubble wf-bubble-sent">
+                        Perfect — see you at 10 ☕
+                        <span class="wf-meta">09:15 ✓</span>
+                    </div>
+                    <div style="text-align:center; margin-top:auto"><span class="wf-end">✓ chatting in real time</span></div>
+                </div>
+                <div class="wf-composer">
+                    <label class="field" style="flex:1">
+                        <input placeholder="Message" readonly />
+                    </label>
+                    <button type="button" class="tm-btn tm-btn-primary">Send</button>
+                </div>
+            </div>
+            <p class="wf-sticky wf-sticky-alt tagline">newest at bottom · live stream, no refresh (TM-376 AC 5).</p>
+        </section>
+
+        <div class="wf-arrow" aria-hidden="true">
+            <svg viewBox="0 0 104 36">
+                <path d="M4 19 C 30 11, 64 27, 96 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                <path d="M85 9 L 98 18 L 84 26" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="tagline">meanwhile — how Omar<br />got pulled in ↩</p>
+        </div>
+
+        <!-- ════════ 7 · Push on the recipient's phone ════════ -->
+        <section class="wf-step">
+            <h3><span class="wf-num">7</span>Omar's phone (app in background)</h3>
+            <div class="wf-phone">
+                <div class="wf-screen-body">
+                    <h2 style="margin:0.6rem 0 0.9rem; text-align:center; font-size:2rem">09:14</h2>
+                    <span class="wf-ring" style="display:block">
+                        <div class="wf-row">
+                            <span class="wf-avatar">S</span>
+                            <span class="wf-row-main">
+                                <span class="wf-row-title"><span>TeamMarhaba</span><span class="wf-time">now</span></span>
+                                <span class="wf-row-sub"><span>Sara: Salam! Coming to the coffee meetup?</span></span>
+                            </span>
+                        </div>
+                    </span>
+                    <hr class="wf-textline w-55" style="margin:1.6rem auto 0.6rem" />
+                    <hr class="wf-textline w-40" style="margin:0.6rem auto" />
+                </div>
+            </div>
+            <p class="wf-sticky tagline">tap → deep-links straight into THIS chat (TM-376 AC 4) — Omar lands on frame 5, his side. App in foreground? no push, the message just streams in.</p>
+        </section>
+
+    </main>
+</body>
+</html>

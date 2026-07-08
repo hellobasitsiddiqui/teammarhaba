@@ -1,0 +1,128 @@
+/* TM-377 — the CANONICAL storyboard skin ("blunt ink wireframe"), per the owner's reference
+ * image on the ticket (image-20260703-071910.png). Self-contained: this file + wireflow.css are
+ * the ONLY style sources for storyboards. The app's live themes are deliberately NOT used here
+ * (owner rule: storyboards stay stable while the app's look evolves — never re-couple them).
+ *
+ * Style contract (from the reference):
+ *   • fine wobbly single-weight ink strokes (~1.5px, near-black) on plain near-white paper
+ *   • NO paper grid, no colour accents — strict monochrome ink
+ *   • ONE neat hand-print face everywhere: Patrick Hand
+ *   • buttons = light-grey fill + ink border (never solid black)
+ *   • overlays/dialogs = white cards with thin ink borders, no heavy shadows
+ */
+
+/* ---- tokens the storyboard structure (wireflow.css) consumes ---------------------------- */
+:root {
+  --fg: #2b2b2b;
+  --fg-line: #2b2b2b;
+  --fg-line-strong: #222222;
+  --fg-line-stronger: #1a1a1a;
+  --muted: #8a8a8a;
+  --accent: #2b2b2b;            /* monochrome: "accent" IS ink here */
+  --on-accent: #ffffff;
+  --page-bg: #fbfaf7;           /* near-white paper */
+  --surface: #ffffff;
+  --surface-2: #f4f2ee;
+  --surface-alt: #f4f2ee;
+  --overlay: rgba(250, 250, 247, 0.92);
+  --grid: transparent;          /* the app's paper-grid is OFF in storyboards */
+  --grid-line: transparent;
+  --grid-line-minor: transparent;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow-sm: none;
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --border-width: 1.5px;
+}
+
+html, body { background: var(--page-bg); color: var(--fg); }
+
+/* ---- ONE face everywhere (reference uses a single neat hand-print) ----------------------- */
+body, h1, h2, h3, h4, p, span, div, a, button, input, label, small {
+  font-family: 'Patrick Hand', cursive !important;
+  letter-spacing: 0.1px;
+}
+
+/* ---- minimal blunt versions of the app-markup classes the frames reuse ------------------- */
+.auth-card { background: var(--surface); border: 1.5px solid var(--fg-line); border-radius: 12px; padding: 12px; }
+.auth-step { margin: 8px 0; }
+.auth-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.auth-disclosure { margin-top: 8px; text-align: center; }
+
+.field { display: block; width: 100%; box-sizing: border-box; border: 1.5px solid var(--fg-line); border-radius: 8px; background: #fff; padding: 7px 9px; font-size: 15px; color: var(--fg); }
+
+.tm-btn { display: block; width: 100%; box-sizing: border-box; padding: 7px 12px; border: 1.5px solid var(--fg-line); border-radius: 10px; background: #eceae6; color: var(--fg); font-size: 15px; text-align: center; }
+.tm-btn-primary { background: #e6e4df; font-weight: 600; }   /* reference: grey fill + ink text, never solid black */
+.tm-btn-sm { display: inline-block; width: auto; padding: 3px 12px; font-size: 13px; }
+
+.linkish { text-decoration: underline; color: var(--fg); background: none; border: none; }
+.secondary { color: var(--muted); }
+.status { font-size: 12px; color: var(--muted); }
+.tagline { color: var(--muted); font-size: 13.5px; }
+
+.tm-badge { display: inline-block; border: 1px solid var(--fg-line); border-radius: var(--radius-pill); padding: 1px 9px; font-size: 12px; background: #fff; }
+.tm-badge-ok { background: var(--surface-2); }
+
+.tm-modal { position: absolute; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; padding: 14px; border-radius: inherit; }
+.tm-dialog { background: #fff; border: 1.5px solid var(--fg-line); border-radius: 12px; padding: 12px; width: 100%; }
+.tm-dialog-title { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+.tm-dialog-msg { font-size: 14px; }
+.tm-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
+.app-nav { display: flex; align-items: center; gap: 10px; }
+.app-footer, .build-info { font-size: 9.5px; color: var(--muted); text-align: center; line-height: 1.5; }
+
+.app-store-badges { margin-top: 6px; }
+.app-store-badges-label { font-size: 11px; color: var(--muted); }
+.app-store-badges-row { display: flex; gap: 6px; justify-content: center; margin-top: 3px; }
+.store-badge { display: inline-block; border: 1.2px solid var(--fg-line); border-radius: 7px; padding: 3px 8px; background: #fff; text-align: left; }
+.store-badge-disabled { opacity: 0.45; }
+.store-badge-line1 { display: block; font-size: 8px; }
+.store-badge-line2 { display: block; font-size: 11px; font-weight: 600; }
+.store-badge-text { display: inline-block; }
+
+/* width utils used by placeholder text lines */
+.w-40 { width: 40%; } .w-55 { width: 55%; } .w-70 { width: 70%; } .w-85 { width: 85%; } .w-95 { width: 95%; }
+
+/* links: ink, never browser-default blue */
+a, a:visited { color: var(--fg); text-decoration-color: var(--fg); }
+
+/* ---- v4: SIZE + composition per the owner reference (bigger frames, 4-up wrap, status bar) ---- */
+.wf-strip { flex-wrap: wrap; row-gap: 72px; }
+.wf-phone {
+  width: 340px; height: 700px;
+  border-width: 2px; border-radius: 26px;
+  padding: 46px 16px 16px;
+  background-color: #fefdfb;      /* frame paper slightly brighter than the page */
+  font-size: 15px;
+}
+.wf-step h3 { font-size: 21px; }
+.wf-phone::after {                 /* status bar: time left, doodle glyphs right */
+  content: "12:30";
+  position: absolute; top: 10px; left: 16px;
+  font-size: 12.5px; color: var(--fg); letter-spacing: .4px;
+}
+.wf-phone .wf-status-right { position: absolute; top: 10px; right: 16px; font-size: 11px; letter-spacing: 1px; }
+.tm-btn-primary { text-transform: uppercase; letter-spacing: 1.2px; font-size: 14px; }
+.wf-strip { max-width: 1840px; }   /* forces the 4-per-row wrap like the reference */
+.tm-btn-sm { white-space: nowrap; }   /* tour Skip/Next must never collapse into vertical slivers */
+/* bubbles: reference keeps ALL bubbles light with ink outlines — never solid-ink fills */
+.wf-bubble-sent { background: #e9e7e2 !important; color: var(--fg) !important; border: 1.4px solid var(--fg-line) !important; }
+.wf-bubble-sent * { color: var(--fg) !important; }
+
+/* ---- journey-4 (phone-chat) additions: OTP boxes, fab, lock screen, centered frames ---- */
+.wf-center { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; height:100%; padding:0 10px; }
+.wf-center-h { font-size:22px; margin:0; }
+.wf-doodle { font-size:44px; filter:grayscale(1); opacity:.85; }
+.wf-back { align-self:flex-start; font-size:20px; margin:0; }
+.wf-otp { display:flex; gap:7px; justify-content:center; }
+.wf-otp span { width:32px; height:44px; border:1.6px solid var(--fg-line); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:20px; background:#fff; }
+.wf-fab { position:absolute; right:18px; bottom:18px; width:44px; height:44px; border:1.8px solid var(--fg-line); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:26px; background:var(--surface-2); }
+.wf-glyph { font-size:18px; filter:grayscale(1); }
+.wf-lockicon { font-size:26px; filter:grayscale(1); }
+.wf-clock { font-size:46px; letter-spacing:2px; line-height:1; }
+.wf-notif { border:1.5px solid var(--fg-line); border-radius:12px; background:#fff; padding:10px 12px; display:flex; flex-direction:column; gap:3px; text-align:left; width:100%; font-size:14px; }
+.wf-thread-empty { flex:1; }
+.wf-thread { flex: 1; }
