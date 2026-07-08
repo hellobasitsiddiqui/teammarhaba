@@ -20,3 +20,13 @@ app:
     allowed-origins:
       - http://127.0.0.1:8081
       - http://localhost:8081
+
+# OpenAPI docs (TM-520 / TM-526): the base config disables springdoc on every runtime profile; DEV
+# (non-prod) re-enables the interactive Swagger UI + /v3/api-docs so developers get a working
+# "Try it out" against a non-prod backend. Prod stays disabled (application-prod.yml); the PUBLIC docs
+# there are the static, read-only Swagger UI page (web/src/api-docs/).
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
