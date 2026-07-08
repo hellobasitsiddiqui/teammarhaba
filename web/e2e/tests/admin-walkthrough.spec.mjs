@@ -34,7 +34,9 @@ test("@admin admin signs in, disables a user via the console, and the change per
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
   await expect(targetRow).toBeVisible();
-  await expect(targetRow.locator(".tm-badge-ok")).toHaveText("Enabled");
+  // Scope to the account-state badge by text: the push-eligibility badge (TM-427) shares the
+  // .tm-badge-ok/.tm-badge-off classes, so an unscoped selector is ambiguous ("Enabled" + "Push").
+  await expect(targetRow.locator(".tm-badge-ok", { hasText: "Enabled" })).toHaveText("Enabled");
 
   // The ID column (the row's only muted cell) carries the DB id — used for the DB assertion.
   const targetId = Number((await targetRow.locator("td.tm-muted").first().innerText()).trim());
@@ -48,7 +50,8 @@ test("@admin admin signs in, disables a user via the console, and the change per
 
   // 6. The UI reflects it: success toast + the row's status flips to Disabled.
   await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Account disabled");
-  await expect(targetRow.locator(".tm-badge-off")).toHaveText("Disabled");
+  // Scope by text — a disabled + no-push row has two .tm-badge-off spans ("Disabled" + "No push").
+  await expect(targetRow.locator(".tm-badge-off", { hasText: "Disabled" })).toHaveText("Disabled");
 
   // 7. It persisted: the users row is now disabled in the database.
   const client = new pg.Client(dbConfig);

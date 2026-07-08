@@ -84,10 +84,11 @@ export async function apiRsvp(headers, id) {
   return res.json();
 }
 
-/** Cancel an RSVP / leave the waitlist as the given account (DELETE /events/{id}/rsvp → 204). */
+/** Cancel an RSVP / leave the waitlist as the given account (DELETE /events/{id}/rsvp → 200 with a
+ *  CancelResult body — TM-414 made leaving return the late-cancellation outcome, not 204 No Content). */
 export async function apiCancelRsvp(headers, id) {
   const res = await fetch(`${API_BASE_URL}/api/v1/events/${id}/rsvp`, { method: "DELETE", headers });
-  if (res.status !== 204) {
+  if (res.status !== 200) {
     throw new Error(`api cancel rsvp failed for event ${id}: ${res.status} ${await res.text()}`);
   }
 }
