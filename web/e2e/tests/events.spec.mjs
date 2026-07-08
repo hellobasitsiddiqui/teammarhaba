@@ -245,7 +245,8 @@ test("@events browse an event, RSVP to it (going), then un-RSVP", async ({ page 
   await expect(leaveDialog).toBeVisible();
   await expect(leaveDialog).toContainText("Cancel your RSVP?");
   await leaveDialog.getByRole("button", { name: "Cancel RSVP" }).click();
-  expect((await cancelResponse).status()).toBe(204);
+  // Leaving returns 200 with the CancelResult body (TM-414's late-cancel outcome), not 204 No Content.
+  expect((await cancelResponse).status()).toBe(200);
 
   // No chip, the primary is a fresh RSVP again, and the info toast confirms removal.
   await expect(page.locator('[data-testid="event-mystate"]')).toHaveCount(0);

@@ -181,4 +181,10 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
 - **If the fix lives in a side-effectful module, extract the pure logic to test it.** The TM-307 login dead-end fix (`settleOrFallback`, bounding an un-timed `await`) shipped untested because it was buried in `router.js` (imports Firebase/DOM, so not import-safe in a Node test). The backfill extracted it to a pure `async-util.js` and tested that — the same pattern as `events-core.js`. Reach for extraction, not a heavyweight mock, when a pure rule is trapped in a side-effectful entry module.
 - **Audit for the gap with `git log` + a test-touch check.** To find fixes that shipped without a test: list the fix commits and flag any whose diff touched **no** `*test*`/`*spec*` file. Most turn out to be infra/CI/docs (not unit-testable); the testable-but-untested logic bugs (e.g. TM-307) are the backfill targets.
 
+### 2026-07-08 — Evidence must be viewable; un-draft on green (TM-402)
+
+- **Automated-test evidence = the INDIVIDUAL viewable screenshots, never zip-only.** A reviewer must not have to download + unzip to see the shots. The e2e evidence lane (`e2e.yml`, dispatched with `evidence_ticket=`) now attaches **both** the individual PNGs **and** the full zip bundle to the Jira ticket by default. Any new evidence lane must do the same — and **verify it actually harvested every shot**, don't assume.
+- **Raise agent PRs as `draft`; flip to "Ready for review" the moment CI is green.** Draft = unverified (fresh from an agent); ready = verified (checks pass), handed to a human. Marking ready is **not** merging — merge stays a maintainer's call (the never-merge rule holds). Don't leave a green, verified PR sitting in draft; don't flip a red one to ready.
+- **The MCP Jira connector can't upload attachments** — only the CI lane (which holds the `JIRA_*` secrets) can attach files. To (re)attach evidence, enhance and re-dispatch the lane; never try to curl it from a local agent (no token there, and secrets must never pass through the agent).
+
 _Living document — append a dated lesson whenever the fleet teaches you one._

@@ -95,6 +95,7 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
+  await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
   await expect(page.locator("#nav-admin-events")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 

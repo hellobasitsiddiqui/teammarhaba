@@ -49,7 +49,9 @@ kept deliberately simple and machine-checkable. The same rules apply to everyone
    why, how it was verified, and the Jira link.
 4. Keep PRs scoped to a single ticket; small PRs review faster.
 5. **CI must be green** before review — the backend build/test job, plus the security
-   and supply-chain checks. Don't request review on a red PR.
+   and supply-chain checks. Don't request review on a red PR. **Agent-authored PRs open as
+   `draft`; the moment their checks go green, flip them to "Ready for review"** (draft =
+   unverified, ready = verified). Marking ready is *not* merging — the merge stays a maintainer's call.
 6. **CODEOWNERS** are requested automatically; at least one owner approval is required.
 7. Address review comments by pushing follow-up commits (don't force-push away history
    mid-review unless asked).
