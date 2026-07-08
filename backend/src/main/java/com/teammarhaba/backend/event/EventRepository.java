@@ -103,12 +103,16 @@ public interface EventRepository extends JpaRepository<Event, Long> {
               and a.state = com.teammarhaba.backend.event.AttendanceState.GOING
               and e.id <> :excludeEventId
               and e.status = com.teammarhaba.backend.event.EventStatus.PUBLISHED
-              and coalesce(e.endAt, e.startAt) > :now
+              and (
+                (e.endAt is not null and e.endAt > :now)
+                or (e.endAt is null and e.startAt > :openEndedStartFloor)
+              )
             order by e.startAt asc, e.id asc
             """)
     List<Event> findActiveGoingForUser(
             @Param("userId") Long userId,
             @Param("excludeEventId") Long excludeEventId,
             @Param("now") Instant now,
+            @Param("openEndedStartFloor") Instant openEndedStartFloor,
             Pageable pageable);
 }

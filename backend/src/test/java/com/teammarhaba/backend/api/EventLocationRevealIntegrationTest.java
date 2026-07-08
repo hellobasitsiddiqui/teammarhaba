@@ -73,7 +73,10 @@ class EventLocationRevealIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.city").value("London"))
                 // non-location content is unaffected
                 .andExpect(jsonPath("$.description").value("Come along!"))
-                .andExpect(jsonPath("$.heading").exists());
+                .andExpect(jsonPath("$.heading").exists())
+                // TM-404: the resolved booking cutoff is now exposed so the client uses the real value
+                // (startAt − cutoffHours) instead of assuming a fixed 60-minute window.
+                .andExpect(jsonPath("$.bookingClosesAt").exists());
     }
 
     @Test

@@ -91,6 +91,7 @@ public class EventRsvpService {
     private final AgeEligibilityPolicy ageGate;
     private final ApplicationEventPublisher publisher;
     private final BookingCutoffPolicy bookingCutoff;
+    private final EventPhasePolicy phasePolicy;
 
     public EventRsvpService(
             EventRepository events,
@@ -99,7 +100,8 @@ public class EventRsvpService {
             CancellationPolicy cancellationPolicy,
             AgeEligibilityPolicy ageGate,
             ApplicationEventPublisher publisher,
-            BookingCutoffPolicy bookingCutoff) {
+            BookingCutoffPolicy bookingCutoff,
+            EventPhasePolicy phasePolicy) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -107,6 +109,7 @@ public class EventRsvpService {
         this.ageGate = ageGate;
         this.publisher = publisher;
         this.bookingCutoff = bookingCutoff;
+        this.phasePolicy = phasePolicy;
     }
 
     /**
@@ -278,7 +281,12 @@ public class EventRsvpService {
      * user's GOING-landings serialise and the second sees the first's committed GOING.
      */
     private void guardOneActiveEvent(Long userId, Long currentEventId, Instant now) {
-        events.findActiveGoingForUser(userId, currentEventId, now, PageRequest.of(0, 1)).stream()
+        // Open-ended events (no endAt) stay HAPPENING_NOW until startAt + defaultDuration, so the guard
+        // uses that effective end — mirror the listing's openEndedStartFloor rather than clearing at
+        // startAt, which would let a user double-book while their open-ended event is still live (TM-404).
+        Instant openEndedStartFloor = phasePolicy.openEndedStartFloor(now);
+        events.findActiveGoingForUser(userId, currentEventId, now, openEndedStartFloor, PageRequest.of(0, 1))
+                .stream()
                 .findFirst()
                 .ifPresent(blocking -> {
                     throw new ConflictException(activeEventBlock(blocking.getHeading()));

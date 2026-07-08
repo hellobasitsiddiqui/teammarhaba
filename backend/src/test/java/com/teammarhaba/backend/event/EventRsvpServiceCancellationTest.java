@@ -49,12 +49,15 @@ class EventRsvpServiceCancellationTest {
     /** TM-415's age-group guard — a collaborator of the service but never exercised on the cancel path. */
     @Mock private AgeEligibilityPolicy ageGate;
 
+    /** TM-404's one-active-event guard uses this for open-ended events — not exercised on the cancel path. */
+    @Mock private EventPhasePolicy phasePolicy;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
 
     private EventRsvpService service() {
-        return new EventRsvpService(events, attendance, users, policy, ageGate, publisher, bookingCutoff);
+        return new EventRsvpService(events, attendance, users, policy, ageGate, publisher, bookingCutoff, phasePolicy);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)
