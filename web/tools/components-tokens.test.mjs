@@ -110,6 +110,27 @@ test("the accent fill is paired with on-accent text (contrast survives every the
   assert.match(BLOCK, /\.tm-c-badge\s*\{[^}]*color:\s*var\(--on-accent\)/s);
 });
 
+test("the bottom sheet folds the bottom safe-area inset into its own padding (TM-533)", () => {
+  // The `.tm-c-sheet-backdrop` override zeroes `.tm-backdrop`'s inset-aware padding so the full-width
+  // sheet sits flush to the bottom edge — which also strips the `env(safe-area-inset-bottom)` that keeps
+  // a centred `.tm-c-modal` clear of the home indicator. So the bottom-anchored sheet must carry the
+  // inset in its OWN bottom padding, or its action buttons (e.g. "Block this person") render under the
+  // home indicator under the shell's `viewport-fit=cover` (the TM-295 convention).
+  const backdrop = BLOCK.match(/\.tm-c-sheet-backdrop\s*\{([^}]*)\}/);
+  assert.ok(backdrop, "the sheet backdrop rule must be present");
+  assert.match(backdrop[1], /padding:\s*0\b/, "the sheet backdrop still zeroes the shared inset padding");
+
+  // Grab the standalone `.tm-c-sheet` rule — the one that declares padding, not the shared group rule
+  // (`.tm-c-modal, .tm-c-sheet`) nor the `__handle` / `-backdrop` selectors.
+  const sheet = BLOCK.match(/\.tm-c-sheet\s*\{([^}]*padding[^}]*)\}/);
+  assert.ok(sheet, "the standalone .tm-c-sheet rule (with padding) must be present");
+  assert.match(
+    sheet[1],
+    /padding:[^;]*env\(safe-area-inset-bottom\)/,
+    "the sheet's bottom padding must fold in env(safe-area-inset-bottom) so it clears the home indicator",
+  );
+});
+
 test("the gallery renders every catalogued component (AC3)", () => {
   // gallery.js keys its render builders by component id; assert one exists for each catalogue entry
   // so a component can never be added without a visible-review tile.

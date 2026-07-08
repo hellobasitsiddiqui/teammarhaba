@@ -4188,7 +4188,12 @@ button.tm-c-reaction {
 
 .tm-c-sheet {
     width: 100%;
-    padding: var(--space-4) var(--space-5) var(--space-6);
+    /* Fold the bottom safe-area inset into the sheet's own bottom padding (TM-533): the
+       `.tm-c-sheet-backdrop` override zeroes `.tm-backdrop`'s inset-aware padding so the sheet sits
+       flush to the bottom edge, so — unlike the centred `.tm-c-modal`, which keeps `.tm-backdrop`'s
+       `env(safe-area-inset-bottom)` — this bottom-anchored sheet must carry the inset itself, or its
+       action buttons render under the home indicator under `viewport-fit=cover` (TM-295 convention). */
+    padding: var(--space-4) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom));
     border-right: none;
     border-bottom: none;
     border-left: none;
