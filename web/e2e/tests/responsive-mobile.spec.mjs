@@ -178,10 +178,12 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expect(page.locator("#events-view")).toBeVisible();
     await expect(page.locator("#tab-events")).toHaveAttribute("aria-current", "page");
 
-    // Tap Chat → the "coming soon" placeholder stub + Chat active (TM-434 placeholder; TM-433 later).
+    // Tap Chat → the refreshed chat LIST (TM-515) + Chat active. The list shows the "Chats" heading and
+    // the seed conversations from the paper-chat-list wireframe.
     await page.locator("#tab-chat").click();
     await expect(page.locator("#chat-view")).toBeVisible();
-    await expect(page.locator("#chat-view")).toContainText("Coming soon");
+    await expect(page.locator("#chat-view")).toContainText("Chats");
+    await expect(page.locator('[data-testid="chat-row"]').first()).toContainText("Sunday Dog Walk");
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
 
     // Tap Home → back to the home view + Home active.
@@ -199,7 +201,60 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await signInAsAdmin(page);
     await page.evaluate(() => (window.location.hash = "#/chat"));
     await expect(page.locator("#chat-view")).toBeVisible();
+    await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("opening a chat row shows the thread, read-receipt ticks and a working composer (TM-515)", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    await page.evaluate(() => (window.location.hash = "#/chat"));
+    // Open the first conversation → the thread deep-link, still lighting the Chat tab.
+    await page.locator('[data-testid="chat-row"]').first().click();
+    await expect(page).toHaveURL(/#\/chat\/sunday-dog-walk$/);
+    const thread = page.locator('[data-testid="chat-thread"]');
+    await expect(thread).toBeVisible();
+    await expect(thread).toContainText("See you all at 10!");
+    // The full read-receipt ladder renders (TM-511 component): single, double AND triple tick.
+    await expect(thread.locator(".tm-c-ticks--sent")).toHaveCount(1);
+    await expect(thread.locator(".tm-c-ticks--read")).toHaveCount(1);
+    await expect(thread.locator(".tm-c-ticks--group")).toHaveCount(1);
+    await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
+    // The composer echoes a sent message locally (no backend yet, TM-433).
+    await page.locator('[data-testid="chat-composer-input"]').fill("Running 5 late!");
+    await page.locator('[data-testid="chat-composer"] .tm-chat-send').click();
+    await expect(thread).toContainText("Running 5 late!");
+  });
+
+  test("the empty conversation shows the first-message prompt (paper-chat-empty, TM-515)", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    await page.evaluate(() => (window.location.hash = "#/chat/park-picnic"));
+    await expect(page.locator('[data-testid="chat-empty"]')).toBeVisible();
+    await expect(page.locator('[data-testid="chat-empty"]')).toContainText("No messages yet");
+  });
+
+  test("the notifications feed renders and Mark all read clears the unread rows (TM-515)", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+    await page.evaluate(() => (window.location.hash = "#/notifications"));
+    await expect(page.locator("#notifications-view")).toBeVisible();
+    const feed = page.locator('[data-testid="notifications"]');
+    await expect(feed).toContainText("Sunday Morning Dog Walk");
+    await expect(feed).toContainText("A spot opened up — claim it before it's gone");
+    // Three unread rows to start; Mark all read clears them.
+    await expect(page.locator('[data-testid="notification"][data-read="false"]')).toHaveCount(3);
+    await page.locator('[data-testid="notifs-mark-all"]').click();
+    await expect(page.locator('[data-testid="notification"][data-read="false"]')).toHaveCount(0);
   });
 
   test("the tab bar is hidden on the signed-out auth gate", async ({ page }) => {

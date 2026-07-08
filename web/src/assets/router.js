@@ -23,6 +23,7 @@ import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
 import { enterHome } from "./home.js";
 import { enterChat } from "./chat.js";
+import { enterNotifications } from "./notifications.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
@@ -70,12 +71,18 @@ const DIAGNOSTICS = "#/diagnostics";
 // it can't live in the exact-match PROTECTED set, so events routes are matched by prefix instead
 // (see isEventsRoute / isProtected below).
 const EVENTS = "#/events";
-// Chat (TM-434) — protected, available to any signed-in, onboarded user. A PLACEHOLDER route today:
-// it renders the "Chat — coming soon" stub (#chat-view, built by chat.js) reached from the new bottom
-// tab bar's Chat tab. When the real Event group chat lands (TM-433) it's swapped in by rewriting
-// chat.js — this route + the tab bar stay exactly as-is (no nav rework).
+// Chat (TM-515 / TM-433) — protected, available to any signed-in, onboarded user. The chat LIST is
+// `#/chat`; a THREAD is `#/chat/{id}` (chat.js renders both into #chat-view). Because the thread
+// carries a dynamic id it can't live in the exact-match PROTECTED set, so — like the events area —
+// chat routes are matched by prefix (isChatRoute / chatThreadId below). Refreshed from the TM-434
+// "coming soon" placeholder to the real wireframes here in TM-515.
 const CHAT = "#/chat";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, CHAT, ONBOARDING, TERMS, DIAGNOSTICS]);
+// Notifications feed (TM-515) — protected, any signed-in, onboarded user. The grouped
+// paper-notifications screen; notifications.js mounts into #notifications-view. Reached from the top
+// nav "Notifications" link (the bottom nav's four tabs have no room; the wireframe shows it as a
+// pushed screen with a back-to-home button).
+const NOTIFICATIONS = "#/notifications";
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -91,10 +98,26 @@ function eventDetailId(hash) {
 function isProfileRoute(hash) {
   return hash === PROFILE || hash === PROFILE_PUBLIC;
 }
-/** A route requires sign-in when it's in the exact protected set, the events area, a profile route, or
- *  the admin event form (ADMIN-only, so protected too). */
+/** True for the chat list (`#/chat`) or any chat thread (`#/chat/{id}`). */
+function isChatRoute(hash) {
+  return hash === CHAT || hash.startsWith(`${CHAT}/`);
+}
+/** The thread id from `#/chat/{id}`, or null for the list route / a non-chat hash. */
+function chatThreadId(hash) {
+  if (!hash.startsWith(`${CHAT}/`)) return null;
+  const rest = hash.slice(CHAT.length + 1);
+  return rest ? decodeURIComponent(rest) : null;
+}
+/** A route requires sign-in when it's in the exact protected set, a profile route, the events or chat
+ *  area, or the admin event form (ADMIN-only, so protected too) — union of TM-514 + TM-515. */
 function isProtected(route) {
-  return PROTECTED.has(route) || isProfileRoute(route) || isEventsRoute(route) || isAdminEventFormRoute(route);
+  return (
+    PROTECTED.has(route) ||
+    isProfileRoute(route) ||
+    isEventsRoute(route) ||
+    isChatRoute(route) ||
+    isAdminEventFormRoute(route)
+  );
 }
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
@@ -121,11 +144,17 @@ let adminEventsActive = false;
 let adminEventFormEntered = null;
 // Profile view (TM-167; TM-514): the last profile sub-route we entered (`#/profile` hub or
 // `#/profile/public` preview), so a repeated guard() for the SAME route doesn't rebuild/refetch, while
-// switching hub↔preview re-enters. Reset to null when leaving the profile area.
+// switching hub↔preview re-enters. Reset to null when leaving the profile area. (This route-entered
+// lifecycle from TM-514 replaces the old single `profileActive` flag.)
 let profileRouteEntered = null;
-// Same lifecycle for the chat placeholder view (TM-434): mount the "coming soon" stub once on entry,
-// reset on leaving. TM-433 swaps enterChat()'s body for the real chat with no change here.
-let chatActive = false;
+// Chat (TM-515): the last chat route we entered (`#/chat` or `#/chat/{id}`), so repeated guard() calls
+// for the SAME route don't re-render, while a list↔thread↔another-thread change re-enters (mirrors
+// eventsRouteEntered). Reset to null when leaving the chat area. Replaces the TM-434 `chatActive`
+// "coming soon" stub, which the real TM-515 chat view no longer needs.
+let chatRouteEntered = null;
+// Same lifecycle as the edit-profile view for the notifications feed (TM-515): mount + rebuild on
+// entry, reset on leaving so a future entry re-enters with a fresh feed.
+let notificationsActive = false;
 // Home feed (TM-512): mount the "Events near you" feed / empty-home into #auth-signed-in on entry,
 // reset on leaving so returning to Home re-fetches (fresh counts / RSVP state after acting elsewhere).
 let homeActive = false;
@@ -151,9 +180,11 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
+  // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
+  if (isChatRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
   if (isAdminEventFormRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
@@ -186,6 +217,7 @@ function render() {
   const diagnosticsView = $("diagnostics-view");
   const eventsView = $("events-view");
   const chatView = $("chat-view");
+  const notificationsView = $("notifications-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
   if (adminView) adminView.hidden = route !== ADMIN;
@@ -199,8 +231,10 @@ function render() {
   if (diagnosticsView) diagnosticsView.hidden = route !== DIAGNOSTICS;
   // Events UI (TM-396) — shown for the list and any event detail.
   if (eventsView) eventsView.hidden = !isEventsRoute(route);
-  // Chat placeholder (TM-434) — the "coming soon" stub, shown for the exact #/chat route.
-  if (chatView) chatView.hidden = route !== CHAT;
+  // Chat (TM-515) — shown for the list and any thread (#/chat or #/chat/{id}).
+  if (chatView) chatView.hidden = !isChatRoute(route);
+  // Notifications feed (TM-515) — shown for the exact #/notifications route.
+  if (notificationsView) notificationsView.hidden = route !== NOTIFICATIONS;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
   // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
@@ -223,6 +257,9 @@ function render() {
   // The Events link (TM-396) shows for any signed-in, onboarded user (hidden while gated).
   const navEvents = $("nav-events");
   if (navEvents) navEvents.hidden = !signedIn || gated;
+  // The Notifications link (TM-515) follows the same rule — any signed-in, onboarded user.
+  const navNotifications = $("nav-notifications");
+  if (navNotifications) navNotifications.hidden = !signedIn || gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
@@ -369,15 +406,27 @@ function guard() {
   } else {
     profileRouteEntered = null;
   }
-  // Chat placeholder (TM-434): mount the "coming soon" stub once on entry (idempotent — no per-visit
-  // data), reset on leaving. When TM-433 lands, enterChat() becomes the real chat with no change here.
-  if (route === CHAT) {
-    if (!chatActive) {
-      chatActive = true;
-      enterChat();
+  // Chat (TM-515): (re)enter whenever the chat route CHANGES (list vs a specific thread id) so
+  // list↔thread↔another-thread navigation always repaints, without re-rendering on the repeated
+  // guard() calls for the same route (mirrors the events list↔detail re-entry). enterChat(null) is the
+  // list; enterChat(id) is a thread. Reset on leaving so re-entry re-renders.
+  if (isChatRoute(route)) {
+    if (route !== chatRouteEntered) {
+      chatRouteEntered = route;
+      enterChat(chatThreadId(route));
     }
   } else {
-    chatActive = false;
+    chatRouteEntered = null;
+  }
+  // Notifications feed (TM-515): mount + rebuild the feed on entry, reset on leaving so a future entry
+  // re-enters (mirrors the edit-profile view lifecycle).
+  if (route === NOTIFICATIONS) {
+    if (!notificationsActive) {
+      notificationsActive = true;
+      enterNotifications();
+    }
+  } else {
+    notificationsActive = false;
   }
   // Home feed (TM-512): mount the "Events near you" feed / empty-home on entry into #/home, reset on
   // leaving so re-entering (e.g. tapping the Home tab after RSVPing elsewhere) re-fetches. Repeated
