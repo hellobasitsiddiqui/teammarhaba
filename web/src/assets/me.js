@@ -24,7 +24,10 @@ onAuthChanged(async (user) => {
   render("verifying your profile…");
   try {
     const me = await getMe();
-    render(`API /me: ${me.email || me.displayName || me.uid} · role ${me.role}`);
+    // Friendly, product-quality identity line for the refreshed Home footer (TM-512) — the
+    // backend-verified caller, no dev jargon. #me stays the element me.js owns (and the TM-135 tour /
+    // TM-255 help spotlight); the raw role is surfaced elsewhere (the ADMIN link / admin console).
+    render(`Signed in as ${me.email || me.displayName || me.uid}`);
   } catch (err) {
     // A 401 will already have redirected to login (api.js); anything else we surface quietly.
     render("could not load profile");
