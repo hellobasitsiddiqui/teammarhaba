@@ -31,6 +31,12 @@ import {
   activeGoingConflict,
   rsvpControlModel,
   commandErrorMessage,
+  isFull,
+  listCountPill,
+  listCtaState,
+  attendanceSummary,
+  eventFilters,
+  filterCards,
 } from "../src/assets/events-core.js";
 
 const NOON_UTC = Date.parse("2026-07-05T12:00:00Z");
@@ -381,4 +387,63 @@ test("commandErrorMessage: prefers the backend's own 409 detail, falls back clea
   );
   assert.equal(commandErrorMessage({}, "fallback copy"), "fallback copy");
   assert.equal(commandErrorMessage(null, "fallback copy"), "fallback copy");
+});
+
+// ------------------------------------------------------------------ wireframe affordances (TM-513)
+
+test("isFull: at/over capacity is full; unlimited capacity is never full", () => {
+  assert.equal(isFull({ capacity: 10, goingCount: 10 }), true);
+  assert.equal(isFull({ capacity: 10, goingCount: 11 }), true);
+  assert.equal(isFull({ capacity: 10, goingCount: 8 }), false);
+  assert.equal(isFull({ capacity: null, goingCount: 999 }), false); // unlimited
+  assert.equal(isFull({ goingCount: 5 }), false); // no capacity → unlimited
+});
+
+test("listCountPill: 'N going' normally, 'Full' when full and not already GOING", () => {
+  assert.deepEqual(listCountPill({ goingCount: 8, capacity: 12 }), { label: "8 going", full: false });
+  assert.deepEqual(listCountPill({ goingCount: 12, capacity: 12, myState: "NONE" }), { label: "Full", full: true });
+  // A full event I'm already GOING to still shows my "N going" count, not "Full".
+  assert.deepEqual(listCountPill({ goingCount: 12, capacity: 12, myState: "GOING" }), { label: "12 going", full: false });
+  assert.deepEqual(listCountPill({ goingCount: 0, capacity: 5 }), { label: "Be the first to go", full: false });
+});
+
+test("listCtaState: mirrors the wireframe button states", () => {
+  assert.deepEqual(listCtaState({ myState: "GOING" }), { label: "Going ✓", variant: "done" });
+  assert.deepEqual(listCtaState({ myState: "WAITLISTED" }), { label: "Waitlisted", variant: "done" });
+  assert.deepEqual(listCtaState({ myState: "NONE", capacity: 4, goingCount: 4 }), { label: "Waitlist", variant: "ghost" });
+  assert.deepEqual(listCtaState({ myState: "NONE", capacity: 12, goingCount: 8 }), { label: "RSVP", variant: "primary" });
+  assert.deepEqual(listCtaState({}), { label: "RSVP", variant: "primary" }); // default: joinable
+});
+
+test("attendanceSummary: leads with the going badge; '· spots' only for finite capacity", () => {
+  assert.deepEqual(attendanceSummary({ goingCount: 8, capacity: 12 }), { going: "8 going", spots: "12 spots" });
+  assert.deepEqual(attendanceSummary({ goingCount: 3, capacity: null }), { going: "3 going", spots: "" });
+  assert.deepEqual(attendanceSummary({ goingCount: 0, capacity: 5 }), { going: "Be the first to go", spots: "5 spots" });
+});
+
+test("eventFilters: always offers All, plus data-backed status chips only when ≥1 matches", () => {
+  // No status matches → just All (so the chip row stays hidden).
+  assert.deepEqual(eventFilters([{ myState: "NONE" }], NOON_UTC), [{ key: "all", label: "All" }]);
+  // A GOING + a WAITLISTED + a live event → all four chips, in a stable order.
+  const cards = [
+    { myState: "GOING" },
+    { myState: "WAITLISTED" },
+    { myState: "NONE", isHappeningNow: true },
+  ];
+  assert.deepEqual(eventFilters(cards, NOON_UTC).map((c) => c.key), ["all", "going", "waitlisted", "live"]);
+  assert.deepEqual(eventFilters([], NOON_UTC), [{ key: "all", label: "All" }]);
+});
+
+test("filterCards: filters by status/live; 'all'/unknown returns the list unchanged", () => {
+  const cards = [
+    { id: 1, myState: "GOING" },
+    { id: 2, myState: "WAITLISTED" },
+    { id: 3, myState: "NONE", isHappeningNow: true },
+    { id: 4, myState: "NONE" },
+  ];
+  assert.deepEqual(filterCards(cards, "going", NOON_UTC).map((c) => c.id), [1]);
+  assert.deepEqual(filterCards(cards, "waitlisted", NOON_UTC).map((c) => c.id), [2]);
+  assert.deepEqual(filterCards(cards, "live", NOON_UTC).map((c) => c.id), [3]);
+  assert.deepEqual(filterCards(cards, "all", NOON_UTC).map((c) => c.id), [1, 2, 3, 4]);
+  assert.deepEqual(filterCards(cards, "bogus", NOON_UTC).map((c) => c.id), [1, 2, 3, 4]);
 });

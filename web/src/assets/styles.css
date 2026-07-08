@@ -3073,13 +3073,56 @@ button.tm-notif-item:hover {
     align-items: center;
 }
 
-/* Browse list */
+/* ── Browse list (TM-513 refresh to paper-events-list) ──────────────────────────────────────────
+ * The wireframe's filter-chip row + a flat column of text cards (tag / title / meta / pill + CTA
+ * button). Everything reads theme tokens (--accent / --surface-card / --border / --radius* / --muted),
+ * so the wireframe's Caribbean-green accent renders as the production default (sketch) theme's ink —
+ * the STRUCTURE matches the wireframe; the palette is the active theme's. */
+
+/* Filter-chip row (the wireframe's rounded pill chips; // reconcile with TM-511 chip component). */
+.tm-event-chips {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0.25rem 0 0.5rem;
+    margin: 0.25rem 0 0.35rem;
+    scrollbar-width: none;
+}
+.tm-event-chips::-webkit-scrollbar { display: none; }
+
+.tm-event-chip-filter {
+    flex: 0 0 auto;
+    padding: 0.25rem 0.85rem;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--fg);
+    white-space: nowrap;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+.tm-event-chip-filter.is-on {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.tm-event-chip-filter:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .tm-event-list {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
+    /* The app shell (`.app`) centres text; the wireframe left-aligns the browse cards. Empty/error
+       states stay their own centred `.tm-empty` (they aren't inside `.tm-event-list`). */
+    text-align: left;
 }
+
+.tm-event-filter-empty { margin: 0.5rem 0; }
 
 .tm-event-section {
     display: flex;
@@ -3109,15 +3152,15 @@ button.tm-notif-item:hover {
     .tm-event-live-dot { animation: none; }
 }
 
-/* A browse card is a link — the whole card is the tap target. */
+/* A browse card is a link — the whole card is the tap target (the wireframe's bordered card w/ a hard
+   offset shadow; --shadow-md is the sketch/doodle theme's `Npx Npx 0` offset, clean's soft drop). */
 .tm-event-card {
-    display: flex;
-    gap: 0.9rem;
-    padding: 0.75rem;
-    background: var(--surface-card, #fff);
-    border: var(--border-width) solid var(--border, rgba(0, 0, 0, 0.12));
+    display: block;
+    padding: 0.8rem 1rem;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-md);
     text-decoration: none;
     color: inherit;
     transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
@@ -3125,7 +3168,6 @@ button.tm-notif-item:hover {
 
 .tm-event-card:hover {
     transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
     border-color: var(--accent-line);
 }
 
@@ -3138,82 +3180,88 @@ button.tm-notif-item:hover {
     border-color: color-mix(in srgb, var(--danger, #d64545) 45%, var(--border, #ccc));
 }
 
-.tm-event-thumb {
-    flex: 0 0 auto;
-    width: 72px;
-    height: 72px;
-    border-radius: var(--radius-md);
-    object-fit: cover;
-    display: grid;
-    place-items: center;
-    background: var(--accent-soft);
-    color: var(--accent);
-    overflow: hidden;
+/* Category-slot tag (the wireframe's `.tag`). No category field yet → used only for the live state. */
+.tm-event-tag {
+    display: inline-block;
+    margin-bottom: 0.4rem;
+    padding: 0.05rem 0.6rem;
+    font-size: 0.8rem;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
 }
-
-.tm-event-thumb-placeholder svg {
-    width: 40px;
-    height: 40px;
-}
-
-.tm-event-hero {
-    width: 100%;
-    height: clamp(140px, 34vw, 220px);
-    border-radius: var(--radius-lg);
-    object-fit: cover;
-    display: grid;
-    place-items: center;
-    background: var(--accent-soft);
-    color: var(--accent);
-    margin: 0.5rem 0 0.75rem;
-    overflow: hidden;
-}
-
-.tm-event-hero svg { width: 72px; height: 72px; }
-
-.tm-event-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;
-}
-
-.tm-event-card-top {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    flex-wrap: wrap;
+.tm-event-tag-live {
+    color: var(--on-accent);
+    background: var(--accent);
+    border-color: var(--accent);
 }
 
 .tm-event-card-title {
-    margin: 0.1rem 0;
-    font-size: 1.05rem;
+    margin: 0.1rem 0 0.25rem;
+    font-size: 1.2rem;
+    font-weight: 600;
     line-height: 1.2;
 }
 
-.tm-event-when {
+.tm-event-meta {
     margin: 0;
-    font-size: 0.9rem;
+    color: var(--muted);
+    font-size: 0.95rem;
 }
 
-.tm-event-rel { font-size: 0.85rem; }
-
-.tm-event-where {
-    margin: 0.1rem 0 0;
-    font-size: 0.9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.tm-event-card-badges {
+.tm-event-card-row {
     display: flex;
-    gap: 0.4rem;
-    margin-top: 0.35rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.7rem;
+    /* Wrap the pill + CTA onto a second line on very narrow cards rather than letting the CTA slide
+       off the edge — keeps the RSVP/Waitlist affordance visible on mobile-web. */
     flex-wrap: wrap;
 }
 
-/* Chips + live/going badges (reuse .tm-badge shape via their own colours) */
+/* Left pill: the "N going" count, or "Full" (the wireframe's `12 going` / `Full · waitlist N`). */
+.tm-event-pill {
+    display: inline-block;
+    padding: 0.15rem 0.7rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
+}
+.tm-event-pill-full {
+    color: var(--muted);
+    background: var(--surface-2);
+}
+
+/* Right CTA: a state LABEL styled like the wireframe's button (the card link owns the tap).
+   // reconcile with TM-511 component library (button). */
+.tm-event-cta {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+}
+.tm-event-cta-done {
+    color: var(--fg);
+    background: var(--accent-light);
+    box-shadow: none;
+}
+.tm-event-cta-ghost {
+    color: var(--fg);
+    background: var(--surface-card);
+    box-shadow: none;
+}
+
+/* My-state chip on the detail action area (✓ Going / Waitlisted) — .tm-badge shape via own colours. */
 .tm-event-chip {
     display: inline-block;
     padding: 0.1rem 0.5rem;
@@ -3233,44 +3281,98 @@ button.tm-notif-item:hover {
     background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
-.tm-event-badge-live {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--on-accent);
-    background: var(--danger, #d64545);
-    border-radius: var(--radius-pill);
-}
-
 .tm-event-going { color: var(--accent); border-color: var(--accent-line); }
 .tm-event-waitlist { color: var(--muted); }
 
-/* Detail */
+/* ── Detail (TM-513 refresh to paper-event-detail) ──────────────────────────────────────────── */
 .tm-event-detail {
     display: block;
+    /* Left-align the detail content (the app shell centres text; the wireframe is left-aligned). */
+    text-align: left;
+}
+
+/* Hero: the wireframe's bordered banner box with the back button top-left + a state tag top-right;
+   the event image (when present) fills it. Empty = the plain bordered box the wireframe shows. */
+.tm-event-hero {
+    position: relative;
+    width: 100%;
+    height: clamp(120px, 30vw, 180px);
+    margin: 0.25rem 0 0.85rem;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+}
+
+.tm-event-hero-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tm-event-hero-back {
+    position: absolute;
+    top: 0.6rem;
+    left: 0.6rem;
+    z-index: 1;
+    width: 2.25rem;
+    height: 2.25rem;
+    display: grid;
+    place-items: center;
+    color: var(--fg);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: 50%;
+    text-decoration: none;
+}
+.tm-event-hero-back:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tm-event-hero-tag {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    z-index: 1;
+    padding: 0.1rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
 }
 
 .tm-event-title {
     margin: 0.25rem 0 0.5rem;
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     line-height: 1.15;
 }
 
-.tm-event-when-block { margin: 0.25rem 0 0.75rem; }
-.tm-event-when-date { margin: 0; font-weight: 600; }
-.tm-event-when-time { margin: 0.1rem 0 0; font-size: 1.05rem; }
-.tm-event-when-local { margin: 0.1rem 0 0; font-size: 0.85rem; }
+/* Meta rows — a leading line-icon + text (the wireframe's clock/pin `.meta` lines). */
+.tm-event-when-block { margin: 0.25rem 0 0.5rem; }
 
-.tm-event-subhead {
-    margin: 0.75rem 0 0.25rem;
-    font-size: 0.95rem;
+.tm-event-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.25rem 0;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-size: 0.98rem;
 }
+
+.tm-event-icon {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    color: var(--muted);
+}
+
+.tm-event-when-local { margin: 0.1rem 0 0 1.6rem; font-size: 0.85rem; }
 
 .tm-event-ageband {
     display: inline-block;
@@ -3339,21 +3441,32 @@ button.tm-notif-item:hover {
     .tm-event-calendar-menu .tm-btn { width: 100%; }
 }
 
-.tm-event-location { margin: 0.5rem 0; }
+.tm-event-location { margin: 0.35rem 0 0.5rem; }
 
-.tm-event-location-primary {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin: 0.1rem 0;
-    font-weight: 500;
-}
-
-.tm-event-pin { width: 20px; height: 20px; flex: 0 0 auto; color: var(--accent); }
-
-.tm-event-reveal-note { margin: 0.15rem 0 0.5rem; font-size: 0.88rem; }
+/* Reveal-aware note (the wireframe's "Exact venue reveals 24h before the event"). */
+.tm-event-reveal { margin: 0.05rem 0 0.35rem 1.6rem; font-size: 0.85rem; }
 
 .tm-event-location .tm-btn { margin: 0.35rem 0.4rem 0 0; }
+
+/* Map tile (the wireframe's "Map — tap to open in Maps"). Bordered offset-shadow box; an <a> when a
+   map URL is available, else a static placeholder while the venue is still hidden. */
+.tm-event-map {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 96px;
+    margin: 0.5rem 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+    text-align: center;
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    text-decoration: none;
+}
+a.tm-event-map:hover { border-color: var(--accent); color: var(--fg); }
+a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .tm-event-description {
     margin: 0.75rem 0;
@@ -3363,38 +3476,51 @@ button.tm-notif-item:hover {
 
 .tm-event-attendees { margin: 0.75rem 0; }
 
-.tm-event-counts {
+/* Attendees row (the wireframe's overlapped avatars beside "8 going · 12 spots"). */
+.tm-event-att-head {
     display: flex;
-    gap: 0.4rem;
+    align-items: center;
+    gap: 0.6rem;
     flex-wrap: wrap;
-    margin-bottom: 0.5rem;
 }
 
+.tm-event-att-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+    flex-wrap: wrap;
+}
+
+.tm-event-spots { font-size: 0.92rem; }
+
+/* Overlapped avatars (the wireframe's -9px overlap). */
 .tm-event-avatars {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
 }
 
 .tm-event-avatar {
-    width: 2rem;
-    height: 2rem;
+    width: 2.1rem;
+    height: 2.1rem;
+    margin-left: -0.55rem;
     border-radius: 50%;
     display: grid;
     place-items: center;
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-weight: 700;
     color: var(--on-accent);
     background: var(--accent);
-    border: 2px solid var(--surface-card, #fff);
+    border: 2px solid var(--surface-card);
 }
+.tm-event-avatar:first-child { margin-left: 0; }
 
 .tm-event-avatar-more {
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
-/* Action area */
+/* Action CTA (the wireframe's bottom `.cta`: a top-bordered block with a full-width primary button +
+   a centred sub-line). Not fixed-position — a fixed bar would fight the bottom-nav shell (TM-434). */
 .tm-event-actions {
     display: flex;
     flex-direction: column;
@@ -3404,21 +3530,26 @@ button.tm-notif-item:hover {
     border-top: var(--border-width) solid var(--fg-line);
 }
 
-.tm-event-actions .tm-btn { align-self: flex-start; min-width: 12rem; }
+.tm-event-actions .tm-btn {
+    width: 100%;
+    padding: 0.65rem 1rem;
+    font-size: 1.05rem;
+}
 
 .tm-event-mystate { align-self: flex-start; margin: 0; }
 
-.tm-event-reason, .tm-event-remind { margin: 0; font-size: 0.9rem; }
+/* The sub-line under the CTA — the wireframe's centred "Then £5 per event …" note (here the tested
+   reminder / honest disabled reason). */
+.tm-event-reason, .tm-event-remind { margin: 0; font-size: 0.9rem; text-align: center; }
 
 .tm-event-reason-link { color: var(--accent); font-weight: 600; }
 
 .tm-empty-title { font-weight: 700; font-size: 1.1rem; margin: 0.35rem 0 0.15rem; }
 
-/* Narrow screens: stack the card thumb above the body for a bigger tap target. */
+/* Narrow screens: the card row keeps the pill + CTA side-by-side; nothing to stack now the thumb is
+   gone, but keep the CTA full-width (already the default). */
 @media (max-width: 520px) {
-    .tm-event-card { flex-direction: column; }
-    .tm-event-thumb { width: 100%; height: 120px; }
-    .tm-event-actions .tm-btn { align-self: stretch; width: 100%; }
+    .tm-event-actions .tm-btn { width: 100%; }
 }
 
 /* ================================================================================================

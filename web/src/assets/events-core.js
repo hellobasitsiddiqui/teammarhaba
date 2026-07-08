@@ -530,3 +530,92 @@ export function commandErrorMessage(err, fallback = "Something went wrong. Pleas
   const msg = err && typeof err.message === "string" ? err.message.trim() : "";
   return msg || fallback;
 }
+
+// ------------------------------------------------------------------ wireframe affordances (TM-513)
+//
+// Pure helpers backing the TM-513 visual refresh of the browse list + detail to the approved paper
+// wireframes (design-kit/pages/paper-events-list, paper-event-detail). They only shape COPY/STATE
+// off the same EventCard/EventDetail projection the tested model above reads — no new command paths,
+// so the RSVP/waitlist/claim behaviour (and its e2e coverage) is unchanged. Kept here (pure) so the
+// wireframe's pill / CTA / summary / chip states are unit-testable without a DOM.
+
+/**
+ * Is the event at (or over) capacity for a fresh joiner? Unlimited capacity (no `capacity`) is never
+ * full. Mirrors `wouldLandGoing`'s capacity check but ignores the waitlist (a full event with a free
+ * spot to CLAIM is still "full" for a brand-new RSVP).
+ */
+export function isFull(item) {
+  const cap = firstNumber(item?.capacity);
+  if (cap == null) return false;
+  const going = firstNumber(item?.goingCount) ?? 0;
+  return going >= cap;
+}
+
+/**
+ * The left-hand pill on a browse card (the wireframe's `12 going` / `Full · waitlist N`). The EventCard
+ * projection carries no waitlist count (only the detail does), so a full event the viewer isn't already
+ * GOING to surfaces the bare `Full` — the "N going" count otherwise.
+ * @returns {{label: string, full: boolean}}
+ */
+export function listCountPill(item) {
+  if (isFull(item) && item?.myState !== "GOING") return { label: "Full", full: true };
+  return { label: goingBadge(item?.goingCount), full: false };
+}
+
+/**
+ * The right-hand action affordance on a browse card. The list is a BROWSE surface — the real
+ * RSVP/waitlist/claim commands (with their confirm dialogs + the tested `rsvpControlModel`) live on the
+ * DETAIL — so this is a state LABEL styled like the wireframe's button; tapping the card opens the
+ * detail to act. Mirrors the wireframe states: `Going ✓` (done) · `Waitlisted` (done) · `Waitlist`
+ * (ghost, when full) · `RSVP` (primary).
+ * @returns {{label: string, variant: "primary"|"done"|"ghost"}}
+ */
+export function listCtaState(item) {
+  if (item?.myState === "GOING") return { label: "Going ✓", variant: "done" };
+  if (item?.myState === "WAITLISTED") return { label: "Waitlisted", variant: "done" };
+  if (isFull(item)) return { label: "Waitlist", variant: "ghost" };
+  return { label: "RSVP", variant: "primary" };
+}
+
+/**
+ * The detail attendees summary — the wireframe's `8 going · 12 spots`. Always leads with the same
+ * `goingBadge` copy the `event-going-count` badge already shows (so its tested text is unchanged);
+ * `spots` is populated only when the event has a finite capacity ("" for unlimited/unknown).
+ * @returns {{going: string, spots: string}}
+ */
+export function attendanceSummary(detail) {
+  const cap = firstNumber(detail?.capacity);
+  return { going: goingBadge(detail?.goingCount), spots: cap == null ? "" : `${cap} spots` };
+}
+
+/**
+ * The browse filter chips (the wireframe's `All · Dog walks · Coffee · Sport · Nearby` row). The event
+ * model has NO category field yet (see the EventCard projection: no `type`/`category`), so rather than
+ * fabricate categories we surface DATA-BACKED status filters: `All`, plus `Going` / `Waitlisted` /
+ * `Happening now` — each shown ONLY when ≥1 card matches, so the row never offers an empty filter.
+ * (Reconcile with real categories + the shared chip component when a category field / TM-511 lands.)
+ * @returns {{key: string, label: string}[]}  always begins with { key: "all", label: "All" }
+ */
+export function eventFilters(cards, nowMs = Date.now()) {
+  const list = Array.isArray(cards) ? cards : [];
+  const chips = [{ key: "all", label: "All" }];
+  if (list.some((c) => c?.myState === "GOING")) chips.push({ key: "going", label: "Going" });
+  if (list.some((c) => c?.myState === "WAITLISTED")) chips.push({ key: "waitlisted", label: "Waitlisted" });
+  if (list.some((c) => isHappeningNow(c, nowMs))) chips.push({ key: "live", label: "Happening now" });
+  return chips;
+}
+
+/** Apply a browse filter key to the card list. Unknown / "all" → the list unchanged. */
+export function filterCards(cards, key, nowMs = Date.now()) {
+  const list = Array.isArray(cards) ? cards : [];
+  switch (key) {
+    case "going":
+      return list.filter((c) => c?.myState === "GOING");
+    case "waitlisted":
+      return list.filter((c) => c?.myState === "WAITLISTED");
+    case "live":
+      return list.filter((c) => isHappeningNow(c, nowMs));
+    default:
+      return list;
+  }
+}
