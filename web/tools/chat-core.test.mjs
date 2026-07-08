@@ -10,6 +10,7 @@ import { test } from "node:test";
 
 import {
   REACTION_EMOJIS,
+  pickReaction,
   receiptState,
   listConversations,
   getConversation,
@@ -101,6 +102,19 @@ test("the chat list matches the wireframe: order, avatars, unread badges and sel
 
 test("the reaction picker offers the wireframe's five emoji", () => {
   assert.deepEqual([...REACTION_EMOJIS], ["👍", "❤️", "😂", "🎉", "🙌"]);
+});
+
+test("pickReaction turns a picked emoji into a fresh single-select pill (TM-536)", () => {
+  // Every offered emoji becomes an inline pill of exactly that glyph, count 1 (a brand-new react).
+  for (const emoji of REACTION_EMOJIS) {
+    assert.deepEqual(pickReaction(emoji), { emoji, count: 1 });
+  }
+  // The count is always 1 — the picker never emits a 0 (would hide the pill) or aggregates a prior
+  // reaction locally; the regression the ticket guards against is exactly a broken/empty pick result.
+  assert.equal(pickReaction("🎉").count, 1);
+  // Defensive: a missing/nullish emoji coerces to an empty string rather than "undefined"/throwing.
+  assert.deepEqual(pickReaction(undefined), { emoji: "", count: 1 });
+  assert.deepEqual(pickReaction(null), { emoji: "", count: 1 });
 });
 
 test("totalUnread sums the per-conversation unread counts", () => {
