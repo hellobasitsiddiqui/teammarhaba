@@ -95,10 +95,25 @@ async function openNav(page) {
   }
 }
 
-/** Click a nav link/button by id, opening the hamburger first when needed. Works under both projects:
- *  clicking a nav item closes the mobile menu automatically (nav-toggle.js) and is a plain click on
- *  desktop. Waits for the target to be visible after opening so the click can't race the CSS reveal. */
+// Primary destinations that moved to the bottom tab bar on mobile (TM-434): on a phone the tab bar is
+// the primary nav and its duplicate Events/Profile links are hidden inside the hamburger, so navigate
+// via the tab there; on desktop the tab bar is display:none and the top-nav link is used as before.
+const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
+
+/** Click a nav destination by its top-nav id. Project-agnostic:
+ *  - Mobile (the hamburger toggle is visible): for a tab-bar destination, click the bottom tab
+ *    (TM-434); otherwise open the hamburger and click the link.
+ *  - Desktop (toggle hidden): the tab bar is display:none, so click the top-nav link directly.
+ *  Waits for the target to be visible so the click can't race the CSS reveal / router paint. */
 async function clickNav(page, selector) {
+  const onMobile = await page.locator("#nav-toggle").isVisible();
+  const tabSelector = NAV_TO_TAB[selector];
+  if (onMobile && tabSelector) {
+    const tab = page.locator(tabSelector);
+    await expect(tab).toBeVisible();
+    await tab.click();
+    return;
+  }
   await openNav(page);
   const item = page.locator(selector);
   await expect(item).toBeVisible();
