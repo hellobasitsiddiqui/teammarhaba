@@ -43,8 +43,12 @@ const ADMIN_EVENTS = "#/admin/events";
 // (create) and #/admin/events/{id}/edit (edit). The edit route carries a dynamic id, so — like the
 // events detail — these are matched by pattern (admin-event-route.js) rather than the exact-match set,
 // and admin-events.js mounts them into #admin-event-form-view.
-// Self-service edit-profile view (TM-167) — protected, available to any signed-in user.
+// Self-service Profile view (TM-167; refreshed to the paper wireframes in TM-514) — protected,
+// available to any signed-in user. `#/profile` is the Profile hub + inline edit form; `#/profile/public`
+// (TM-514) is the additive "how others see you" public-profile preview. Both mount into #profile-view
+// and both light the bottom-nav Profile tab (tabbar-core treats any `#/profile/...` as the Profile tab).
 const PROFILE = "#/profile";
+const PROFILE_PUBLIC = "#/profile/public";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
 // here and can't reach any other app view until they complete it.
 const ONBOARDING = "#/onboarding";
@@ -82,10 +86,14 @@ function eventDetailId(hash) {
   const rest = hash.slice(EVENTS.length + 1);
   return rest ? decodeURIComponent(rest) : null;
 }
-/** A route requires sign-in when it's in the exact protected set, the events area, or the admin event
- *  form (ADMIN-only, so protected too). */
+/** True for the Profile hub (`#/profile`) or the public-profile preview (`#/profile/public`, TM-514). */
+function isProfileRoute(hash) {
+  return hash === PROFILE || hash === PROFILE_PUBLIC;
+}
+/** A route requires sign-in when it's in the exact protected set, the events area, a profile route, or
+ *  the admin event form (ADMIN-only, so protected too). */
 function isProtected(route) {
-  return PROTECTED.has(route) || isEventsRoute(route) || isAdminEventFormRoute(route);
+  return PROTECTED.has(route) || isProfileRoute(route) || isEventsRoute(route) || isAdminEventFormRoute(route);
 }
 
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
@@ -110,8 +118,10 @@ let adminEventsActive = false;
 // repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does.
 // Reset to null when leaving the form (mirrors eventsRouteEntered).
 let adminEventFormEntered = null;
-// Same idea for the edit-profile view (TM-167): (re)load it only on entry, reset on leaving.
-let profileActive = false;
+// Profile view (TM-167; TM-514): the last profile sub-route we entered (`#/profile` hub or
+// `#/profile/public` preview), so a repeated guard() for the SAME route doesn't rebuild/refetch, while
+// switching hub↔preview re-enters. Reset to null when leaving the profile area.
+let profileRouteEntered = null;
 // Same lifecycle for the chat placeholder view (TM-434): mount the "coming soon" stub once on entry,
 // reset on leaving. TM-433 swaps enterChat()'s body for the real chat with no change here.
 let chatActive = false;
@@ -137,7 +147,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === CHAT || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
@@ -178,7 +188,7 @@ function render() {
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   // Admin event form (TM-426) — shown for the create route and any {id} edit route.
   if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
-  if (profileView) profileView.hidden = route !== PROFILE;
+  if (profileView) profileView.hidden = !isProfileRoute(route);
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
   if (helpView) helpView.hidden = route !== HELP;
@@ -344,14 +354,16 @@ function guard() {
   } else {
     adminEventFormEntered = null;
   }
-  // Same lifecycle for the edit-profile view (TM-167): mount + reload its values on entry.
-  if (route === PROFILE) {
-    if (!profileActive) {
-      profileActive = true;
-      enterProfile();
+  // Profile view (TM-167; TM-514): mount + (re)load on entry, and re-enter when the profile sub-route
+  // CHANGES (hub ↔ public preview) so the right layout renders, without refetching on the repeated
+  // guard() calls for the same route (mirrors the events list↔detail re-entry).
+  if (isProfileRoute(route)) {
+    if (route !== profileRouteEntered) {
+      profileRouteEntered = route;
+      enterProfile(route);
     }
   } else {
-    profileActive = false;
+    profileRouteEntered = null;
   }
   // Chat placeholder (TM-434): mount the "coming soon" stub once on entry (idempotent — no per-visit
   // data), reset on leaving. When TM-433 lands, enterChat() becomes the real chat with no change here.

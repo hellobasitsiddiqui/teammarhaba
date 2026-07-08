@@ -1,0 +1,142 @@
+// Tests for the Profile screen pure logic (TM-514). Framework-free — Node's built-in test runner,
+// the same harness as account-badges.test.mjs / tabbar-core.test.mjs, picked up by the CI glob
+// `node --test web/tools/*.test.mjs`.
+//
+// These guard the PURE core the refreshed Profile / Edit-profile / Public-profile screens read: the
+// identity summary, the completeness ("profile strength") model + nudge, the public-profile preview
+// model, and the route→mode mapping. The DOM renderer (profile.js) is a thin map over these, so
+// testing them here covers the behaviour without needing a browser.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  PROFILE_ROUTE,
+  PROFILE_PUBLIC_ROUTE,
+  profileMode,
+  identitySummary,
+  profileStrength,
+  publicSummary,
+  formatJoined,
+} from "../src/assets/profile-core.js";
+
+// A realistic /me payload (MeResponse shape): firstName/lastName/city/age/phone at the top level,
+// createdAt nested under accountState.
+function me(overrides = {}) {
+  return {
+    uid: "abc",
+    email: "basit@example.com",
+    firstName: "Basit",
+    lastName: "Siddiqui",
+    displayName: "Basit Siddiqui",
+    city: "Milton Keynes",
+    age: 29,
+    phone: "+44 7700 900123",
+    accountState: { createdAt: "2026-06-14T10:00:00Z", photoURL: null },
+    ...overrides,
+  };
+}
+
+// ---- profileMode ------------------------------------------------------------------------------
+
+test("profileMode maps the public route to 'public' and everything else to 'view'", () => {
+  assert.equal(profileMode(PROFILE_PUBLIC_ROUTE), "public");
+  assert.equal(profileMode(PROFILE_ROUTE), "view");
+  assert.equal(profileMode("#/profile"), "view");
+  assert.equal(profileMode("#/anything-else"), "view");
+});
+
+// ---- identitySummary --------------------------------------------------------------------------
+
+test("identitySummary builds the full name, the compact 'First L.' and the City · age meta line", () => {
+  const id = identitySummary(me());
+  assert.equal(id.full, "Basit Siddiqui");
+  assert.equal(id.short, "Basit S.");
+  assert.equal(id.initial, "B");
+  assert.equal(id.metaLine, "Milton Keynes · 29");
+  assert.equal(id.city, "Milton Keynes");
+  assert.equal(id.age, 29);
+});
+
+test("identitySummary falls back to displayName, then email local-part, then 'Your profile'", () => {
+  assert.equal(identitySummary({ displayName: "Sam Doe" }).full, "Sam Doe");
+  assert.equal(identitySummary({ email: "jules@x.com" }).full, "jules");
+  assert.equal(identitySummary({}).full, "Your profile");
+  assert.equal(identitySummary(null).full, "Your profile");
+});
+
+test("identitySummary uses the emoji glyph and an empty meta line when nothing is known", () => {
+  const id = identitySummary({});
+  assert.equal(id.initial, "🙂");
+  assert.equal(id.metaLine, "");
+  assert.equal(id.age, null);
+});
+
+test("identitySummary omits a missing city or age from the meta line", () => {
+  assert.equal(identitySummary({ firstName: "A", city: "Bath" }).metaLine, "Bath");
+  assert.equal(identitySummary({ firstName: "A", age: 40 }).metaLine, "40");
+});
+
+// ---- profileStrength --------------------------------------------------------------------------
+
+test("profileStrength is 100% with a nudge of 'all set' when every field + a photo are present", () => {
+  const s = profileStrength(me(), { hasPhoto: true });
+  assert.equal(s.percent, 100);
+  assert.equal(s.filled, 5);
+  assert.equal(s.total, 5);
+  assert.deepEqual(s.missing, []);
+  assert.equal(s.complete, true);
+  assert.equal(s.nudge, "Your profile is all set");
+});
+
+test("profileStrength counts the missing photo (no photoURL) as one gap", () => {
+  const s = profileStrength(me(), { hasPhoto: false });
+  assert.equal(s.percent, 80);
+  assert.equal(s.filled, 4);
+  assert.deepEqual(s.missing, ["a photo"]);
+  assert.equal(s.complete, false);
+  assert.equal(s.nudge, "Add a photo");
+});
+
+test("profileStrength lists gaps in field order and names at most the first two in the nudge", () => {
+  const s = profileStrength({ firstName: "A" }, { hasPhoto: false });
+  // name present; city, age, phone, photo all missing → 1/5 = 20%.
+  assert.equal(s.percent, 20);
+  assert.deepEqual(s.missing, ["your city", "your age", "a phone", "a photo"]);
+  assert.equal(s.nudge, "Add your city + your age");
+});
+
+test("profileStrength treats a blank/zero field as unfilled", () => {
+  const s = profileStrength({ firstName: "", city: "  ", age: 0, phone: "" }, { hasPhoto: false });
+  assert.equal(s.filled, 0);
+  assert.equal(s.percent, 0);
+});
+
+test("profileStrength tolerates null input", () => {
+  const s = profileStrength(null);
+  assert.equal(s.percent, 0);
+  assert.equal(s.complete, false);
+});
+
+// ---- publicSummary + formatJoined -------------------------------------------------------------
+
+test("publicSummary builds the 'City · joined Mon YYYY' meta line from accountState.createdAt", () => {
+  const p = publicSummary(me());
+  assert.equal(p.short, "Basit S.");
+  assert.equal(p.joined, "Jun 2026");
+  assert.equal(p.metaLine, "Milton Keynes · joined Jun 2026");
+});
+
+test("publicSummary omits the joined part when there is no created date", () => {
+  const p = publicSummary(me({ accountState: { createdAt: null } }));
+  assert.equal(p.joined, "");
+  assert.equal(p.metaLine, "Milton Keynes");
+});
+
+test("formatJoined returns '' for missing, invalid and future dates", () => {
+  const now = new Date("2026-07-08T00:00:00Z");
+  assert.equal(formatJoined(null, now), "");
+  assert.equal(formatJoined("not-a-date", now), "");
+  assert.equal(formatJoined("2027-01-01T00:00:00Z", now), "");
+  assert.equal(formatJoined("2026-01-15T00:00:00Z", now), "Jan 2026");
+});
