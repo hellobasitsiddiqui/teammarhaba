@@ -3,31 +3,54 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TeamMarhaba API — Reference</title>
-    <meta name="description" content="Read-only reference for the TeamMarhaba Backend API (v1)." />
+    <title>TeamMarhaba API — reference</title>
+    <meta name="description" content="Swagger UI reference for the TeamMarhaba Backend API (v1)." />
     <!--
-      Static, read-only public API docs (TM-520). Renders the committed OpenAPI spec via Redoc.
+      Public API reference (TM-520 / TM-526). Swagger UI rendering the committed OpenAPI spec.
 
-      Public + browseable, but with NO live "try it out" against a real environment: the interactive
-      springdoc UI (/swagger-ui, /v3/api-docs) is DISABLED on every deployed profile (see
-      backend application.yml). Redoc is read-only by design, so it exposes the API's documented
-      shape without pointing at a running backend.
+      READ-ONLY here — "Try it out" is disabled (supportedSubmitMethods: []): this static page has no
+      backend to call, and the live prod API surface is deliberately kept private. The interactive
+      Swagger UI with a working "Try it out" runs on the NON-PROD backend at /swagger-ui (springdoc is
+      enabled on the dev profile, disabled on prod — see backend application-dev.yml / application-prod.yml).
 
-      openapi.json in this directory is a copy of backend/openapi.json (the drift-guarded source of
-      truth). web/tools/api-docs-spec-drift.test.mjs keeps the two byte-identical, and the deploy's
-      `cp -r web/src/. web/dist/` publishes this whole directory as-is (it lives outside /assets, so
-      the fingerprinter leaves the ./openapi.json reference untouched).
+      openapi.json in this directory is a copy of backend/openapi.json (the drift-guarded source of truth);
+      web/tools/api-docs-spec-drift.test.mjs keeps the two byte-identical. The deploy's
+      `cp -r web/src/. web/dist/` publishes this directory as-is (outside /assets, so the fingerprinter
+      leaves the ./openapi.json reference untouched).
     -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css" />
     <style>
-      body {
-        margin: 0;
-        padding: 0;
+      body { margin: 0; }
+      .tm-doc-note {
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #f2f7ff; border-bottom: 1px solid #d5e2f7; color: #1a2a3a; padding: 12px 20px;
       }
+      .tm-doc-note b { color: #0b1f33; }
+      .tm-doc-note code { background: #e6eefb; padding: 1px 5px; border-radius: 4px; }
+      .tm-doc-note a { color: #1558d6; }
     </style>
   </head>
   <body>
-    <redoc spec-url="./openapi.json"></redoc>
-    <!-- Redoc standalone, pinned (supply-chain: no floating "latest" tag). -->
-    <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+    <div class="tm-doc-note">
+      <b>TeamMarhaba Backend API</b> — reference for the <code>/api/v1</code> surface. This public page is
+      <b>read-only</b> (no “Try it out”). For an interactive Swagger UI with a working <b>“Try it out”</b>,
+      run the backend in a non-prod environment and open <code>/swagger-ui</code> there — auth is a Firebase
+      ID token sent as a <code>Bearer</code> header. The live production API is deliberately kept off this
+      page. Raw spec: <a href="./openapi.json">openapi.json</a>.
+    </div>
+    <div id="swagger-ui"></div>
+    <!-- Swagger UI, pinned (supply-chain: no floating tag). -->
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: "./openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        // Read-only public page: hide "Try it out" (there's no backend to call from here).
+        supportedSubmitMethods: [],
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout",
+      });
+    </script>
   </body>
 </html>
