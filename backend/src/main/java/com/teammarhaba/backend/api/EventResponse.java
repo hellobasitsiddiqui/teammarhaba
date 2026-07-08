@@ -39,6 +39,8 @@ import java.time.Instant;
  * @param ageMin                       lower edge of the target age band ({@code null} = no lower bound)
  * @param ageMax                       upper edge of the target age band ({@code null} = no upper bound;
  *     both {@code null} = open to all ages) — TM-415
+ * @param pricePence                   ticket price in pence (minor units, GBP); {@code 0} = free — TM-475
+ * @param premium                      whether the event is gated as premium — TM-475
  * @param status                       {@code PUBLISHED} or {@code CANCELLED}
  * @param createdBy                    {@code users.id} of the creating admin
  * @param createdAt                    DB-authoritative creation instant
@@ -67,6 +69,8 @@ public record EventResponse(
         Instant locationRevealsAt,
         Integer ageMin,
         Integer ageMax,
+        int pricePence,
+        boolean premium,
         String status,
         Long createdBy,
         Instant createdAt,
@@ -110,6 +114,8 @@ public record EventResponse(
                 reveal.revealsAt(event),
                 event.getAgeMin(),
                 event.getAgeMax(),
+                event.getPricePence(),
+                event.isPremium(),
                 event.getStatus().name(),
                 event.getCreatedBy(),
                 event.getCreatedAt(),

@@ -26,6 +26,8 @@ import java.time.Instant;
  * @param endAt             optional end instant; {@code null} = open-ended
  * @param capacity          max GOING attendees; {@code null} = unlimited
  * @param imagePath         optional storage path of the event image; {@code null} = themed placeholder
+ * @param pricePence        ticket price in pence (minor units, GBP); {@code 0} = free (TM-475)
+ * @param premium           whether the event is gated as premium (TM-475)
  * @param goingCount        number of attendees currently holding a GOING spot
  * @param myState           the caller's own state on this event
  * @param locationRevealed  whether the exact location is public yet
@@ -45,6 +47,8 @@ public record EventCard(
         Instant endAt,
         Integer capacity,
         String imagePath,
+        int pricePence,
+        boolean premium,
         long goingCount,
         MyState myState,
         boolean locationRevealed,

@@ -42,7 +42,9 @@ public record UpdateEventRequest(
                 String imagePath,
         @Min(1) @Max(8760) Integer locationRevealHours,
         @Min(13) @Max(120) Integer ageMin,
-        @Min(13) @Max(120) Integer ageMax) {
+        @Min(13) @Max(120) Integer ageMax,
+        @Min(0) Integer pricePence,
+        Boolean premium) {
 
     @JsonIgnore
     @AssertTrue(message = "heading must not be blank")
@@ -111,6 +113,8 @@ public record UpdateEventRequest(
                 imagePath,
                 locationRevealHours,
                 ageMin,
-                ageMax);
+                ageMax,
+                pricePence,
+                premium);
     }
 }

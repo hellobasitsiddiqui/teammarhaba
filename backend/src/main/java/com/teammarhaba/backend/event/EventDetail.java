@@ -39,6 +39,8 @@ import java.util.List;
  * @param endAt                optional end instant; {@code null} = open-ended
  * @param capacity             max GOING attendees; {@code null} = unlimited
  * @param imagePath            optional storage path of the event image
+ * @param pricePence           ticket price in pence (minor units, GBP); {@code 0} = free (TM-475)
+ * @param premium              whether the event is gated as premium (TM-475)
  * @param goingCount           attendees currently holding a GOING spot
  * @param waitlistedCount      attendees queued on the FIFO waitlist
  * @param attendees            the first N GOING attendees in join order (the avatar strip)
@@ -71,6 +73,8 @@ public record EventDetail(
         Instant endAt,
         Integer capacity,
         String imagePath,
+        int pricePence,
+        boolean premium,
         long goingCount,
         long waitlistedCount,
         List<AttendeeAvatar> attendees,

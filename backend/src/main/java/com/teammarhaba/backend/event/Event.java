@@ -40,6 +40,13 @@ import org.hibernate.annotations.SQLRestriction;
 @SQLRestriction("deleted_at is null") // soft-deleted rows are hidden from all normal queries
 public class Event {
 
+    /**
+     * Default ticket price when an admin creates an event without naming one: £5.00, i.e. 500 pence
+     * (TM-475). Mirrored by the {@code price_pence} column's {@code DEFAULT 500} in migration V21, so
+     * a create that omits the price and a legacy backfilled row land on the same value.
+     */
+    public static final int DEFAULT_PRICE_PENCE = 500;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -134,6 +141,25 @@ public class Event {
     /** Inclusive upper edge of the target age band (TM-415); {@code null} = no upper bound. */
     @Column(name = "age_max")
     private Integer ageMax;
+
+    /**
+     * Ticket price in minor units — pence — of a single implied currency, GBP (TM-475, migration
+     * V21). Stored as an integer of pence, not a decimal of pounds: exact (no binary-float
+     * rounding), it sums cleanly and maps 1:1 onto what the feed checkout charges. Always set: the
+     * admin form supplies it, and an omitted value falls back to {@link #DEFAULT_PRICE_PENCE} (£5) —
+     * so this is never {@code null} and never negative (admin-layer {@code price >= 0} validation,
+     * with a DB {@code CHECK} backstop). {@code 0} means a free event.
+     */
+    @Column(name = "price_pence", nullable = false)
+    private int pricePence = DEFAULT_PRICE_PENCE;
+
+    /**
+     * Whether the event is gated as premium (TM-475, migration V21) — the flag the membership
+     * entitlement reads to decide gating. Admin-set on create/edit; defaults to {@code false} (a
+     * normal, un-gated event) both on a fresh entity and via the column's {@code DEFAULT false}.
+     */
+    @Column(name = "is_premium", nullable = false)
+    private boolean premium = false;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -345,6 +371,24 @@ public class Event {
     /** {@code true} when this event targets an age group (at least one band edge is set). */
     public boolean hasAgeRestriction() {
         return ageMin != null || ageMax != null;
+    }
+
+    /** Ticket price in pence (minor units, GBP); {@code 0} = free. Never negative (TM-475). */
+    public int getPricePence() {
+        return pricePence;
+    }
+
+    public void setPricePence(int pricePence) {
+        this.pricePence = pricePence;
+    }
+
+    /** {@code true} when this event is gated as premium (TM-475). */
+    public boolean isPremium() {
+        return premium;
+    }
+
+    public void setPremium(boolean premium) {
+        this.premium = premium;
     }
 
     /**

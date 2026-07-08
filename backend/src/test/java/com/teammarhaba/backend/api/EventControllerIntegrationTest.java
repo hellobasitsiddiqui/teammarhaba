@@ -146,6 +146,29 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void detailAndListingExposePriceAndPremium() throws Exception {
+        // TM-475: the price + premium flag must ride the public projections the checkout + display
+        // read — the detail view and the list card. Seed a premium, £15 (1500p) event so both fields
+        // are visibly non-default.
+        Event event = saveEvent("Priced " + UUID.randomUUID(), creatorId(), e -> {
+            e.setPricePence(1500);
+            e.setPremium(true);
+        });
+        RequestPostProcessor me = caller("uid-price-" + UUID.randomUUID());
+
+        // Detail carries both.
+        mockMvc.perform(get("/api/v1/events/" + event.getId()).with(me))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pricePence").value(1500))
+                .andExpect(jsonPath("$.premium").value(true));
+
+        // The list card carries both too.
+        JsonNode card = myCard(event, me);
+        assertThat(card.get("pricePence").asInt()).isEqualTo(1500);
+        assertThat(card.get("premium").asBoolean()).isTrue();
+    }
+
+    @Test
     void detailIs404ForCancelledHiddenAndMissingEvents() throws Exception {
         Long creator = creatorId();
         Instant now = Instant.now();

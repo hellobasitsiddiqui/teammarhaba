@@ -166,6 +166,15 @@ public class EventAdminService {
         event.setLocationRevealHours(draft.locationRevealHours());
         event.setAgeMin(draft.ageMin());
         event.setAgeMax(draft.ageMax());
+        // Price + premium (TM-475): an omitted value leaves the entity defaults (£5 / not premium) —
+        // the same values the V21 column defaults would apply — so we only override when the admin
+        // actually supplied one. `price >= 0` was already enforced at the request edge.
+        if (draft.pricePence() != null) {
+            event.setPricePence(draft.pricePence());
+        }
+        if (draft.premium() != null) {
+            event.setPremium(draft.premium());
+        }
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);
 
@@ -226,6 +235,10 @@ public class EventAdminService {
                 changed);
         applyIfChanged(patch.ageMin(), event.getAgeMin(), event::setAgeMin, "ageMin", changed);
         applyIfChanged(patch.ageMax(), event.getAgeMax(), event::setAgeMax, "ageMax", changed);
+        // Price + premium (TM-475): boxed current values so applyIfChanged's null-means-unchanged and
+        // equals-means-no-op semantics work; the primitives unbox back through the setters.
+        applyIfChanged(patch.pricePence(), event.getPricePence(), event::setPricePence, "pricePence", changed);
+        applyIfChanged(patch.premium(), event.isPremium(), event::setPremium, "premium", changed);
 
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);

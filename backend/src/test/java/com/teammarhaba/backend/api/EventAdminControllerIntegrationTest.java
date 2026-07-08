@@ -225,6 +225,90 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(lifecycleSignals(id, EventLifecycleEvent.Kind.CREATED)).hasSize(1);
     }
 
+    // --- Price + premium (TM-475) ---
+
+    @Test
+    void createDefaultsPriceToFivePoundsAndNotPremium() throws Exception {
+        // VALID_BODY names neither price nor premium: the create must fall back to the £5 (500p)
+        // default and non-premium — the value the V21 column default also backfills.
+        String body = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-price-default"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pricePence").value(500))
+                .andExpect(jsonPath("$.premium").value(false))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(body).<Number>read("$.id").longValue();
+
+        Event saved = events.findById(id).orElseThrow();
+        assertThat(saved.getPricePence()).isEqualTo(500);
+        assertThat(saved.isPremium()).isFalse();
+    }
+
+    @Test
+    void createAcceptsExplicitPriceAndPremium() throws Exception {
+        String body = VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"pricePence\": 1500, \"premium\": true");
+        String response = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-price-set"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pricePence").value(1500))
+                .andExpect(jsonPath("$.premium").value(true))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(response).<Number>read("$.id").longValue();
+
+        Event saved = events.findById(id).orElseThrow();
+        assertThat(saved.getPricePence()).isEqualTo(1500);
+        assertThat(saved.isPremium()).isTrue();
+    }
+
+    @Test
+    void createAcceptsZeroPriceAsFree() throws Exception {
+        // price >= 0, so 0 (a free event) is valid — the boundary just below the negative reject.
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-price-free"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"pricePence\": 0")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.pricePence").value(0));
+    }
+
+    @Test
+    void createRejectsNegativePrice() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-price-neg"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"pricePence\": -1")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'pricePence')]").exists());
+    }
+
+    @Test
+    void patchUpdatesPriceAndPremium() throws Exception {
+        Event seeded = seedEvent("Reprice", Instant.parse("2030-01-01T00:00:00Z"), Instant.parse("2030-02-01T00:00:00Z"));
+        long id = seeded.getId();
+
+        mockMvc.perform(patch("/api/v1/admin/events/{id}", id)
+                        .with(admin("events-admin-reprice"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pricePence\":2500,\"premium\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pricePence").value(2500))
+                .andExpect(jsonPath("$.premium").value(true));
+
+        Event reloaded = events.findById(id).orElseThrow();
+        assertThat(reloaded.getPricePence()).isEqualTo(2500);
+        assertThat(reloaded.isPremium()).isTrue();
+        assertThat(auditActionsFor(id)).contains(AuditAction.EVENT_UPDATED);
+    }
+
     // --- Validation (bean validation at the edge, RFC-7807 body) ---
 
     @Test
