@@ -117,10 +117,13 @@ test.describe("@theme the accent swatch + wavy/sketchy toggle persist per user",
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
 
-    // Open profile; wait for /me so the controls reflect the stored choice.
+    // Open profile. The controls reflect the stored choice from the GET /me that appearance-sync
+    // already fired on auth-resolve (during signInAsAdmin, BEFORE this navigation) — so don't wait for
+    // another GET here: it won't re-fire on the #/profile nav, and arming waitForResponse after the
+    // fetch has happened just hangs (the reload section below is what actually re-exercises GET /me).
+    // expectControlUsable() below gates on the control being ready.
     await page.evaluate(() => (window.location.hash = "#/profile"));
     await expect(page.locator("#profile-form")).toBeVisible();
-    await page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "GET");
 
     const appearance = page.locator("#appearance-settings");
     await expectControlUsable(page, appearance);
