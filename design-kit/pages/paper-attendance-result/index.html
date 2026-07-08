@@ -1,0 +1,28 @@
+<!-- @dsCard group="App screens · paper" name="Attendance result (paper)" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Attendance result (paper)</title><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--ink:#1B1B1B;--white:#fff;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink)}
+.phone{width:384px;min-height:788px;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px}
+.statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 30px}
+.pin{width:88px;height:88px;border:3px solid var(--ink);border-radius:50%;display:grid;place-items:center;background:var(--accent);margin-bottom:16px}.pin svg{width:44px;height:44px;stroke:var(--ink);fill:none;stroke-width:2.2}
+h1{font-size:30px;margin:0 0 6px}.sub{font-family:"Inter",sans-serif;font-weight:500;color:var(--g5);font-size:15px;line-height:1.4;margin:0 0 20px}.sub b{color:var(--ink)}
+.chip{border:2px solid var(--ink);border-radius:999px;padding:6px 16px;font-size:14px;background:var(--accent-light);margin-bottom:22px}
+.btn{font-size:16px;border:2px solid var(--ink);border-radius:12px;background:var(--white);color:var(--ink);padding:11px 20px;box-shadow:none}
+</style></head><body>
+<div class="phone">
+<div class="statusbar"><span>16:04</span><span>wifi · 84%</span></div>
+<main>
+<div class="pin"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><path d="M9 10l2 2 4-4"/></svg></div>
+<h1>You're marked present</h1>
+<div class="sub">Confirmed by location at<br/><b>Coffee &amp; Code Meetup</b> · 4:04 PM</div>
+<div class="chip">✓ Attendance counted</div>
+<button class="btn">Back to event</button>
+</main>
+</div>
+<svg width="0" height="0" style="position:absolute"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" result="n"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="n" scale="2"/></filter></svg>
+<script>addEventListener('message',function(e){var d=e.data||{},r=document.documentElement;if(d.__vars){for(var k in d.__vars)r.style.setProperty(k,d.__vars[k]);var s=document.getElementById('__acc');if(!s){s=document.createElement('style');s.id='__acc';document.head.appendChild(s)}s.textContent=d.__dark?".pin{color:#fff}.pin svg{stroke:#fff!important}":""}if('__sketch' in d){var a=+d.__sketch||0,p=document.getElementById('__disp');if(p)p.setAttribute('scale',a);var ph=document.querySelector('.phone');if(ph)ph.style.filter=a>0?'url(#wobble-soft)':''}});</script>
+</body></html>

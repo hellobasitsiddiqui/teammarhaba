@@ -1,0 +1,58 @@
+<!-- @dsCard group="App screens · paper" name="Empty home (first run, paper)" -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Empty home (paper)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1B1B1B;--white:#FFFFFF;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3;}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .phone{width:384px;min-height:788px;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px;}
+    .statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500;}
+    header.app{display:flex;align-items:center;justify-content:space-between;padding:8px 18px 10px;}
+    .brand{font-size:28px;}
+    .bell{width:40px;height:40px;display:grid;place-items:center;border:2px solid var(--ink);border-radius:50%;background:var(--white);}
+    .bell svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.8;}
+    main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 34px;}
+    .empty{width:130px;height:130px;border:2.5px dashed var(--ink);border-radius:22px;display:grid;place-items:center;margin-bottom:20px;background:var(--g1);}
+    .empty svg{width:66px;height:66px;stroke:var(--g4);fill:none;stroke-width:1.6;}
+    h2{font-size:26px;margin:0 0 6px;}
+    p{font-family:"Inter",sans-serif;font-weight:500;color:var(--g5);font-size:14.5px;line-height:1.4;margin:0 0 22px;}
+    .btn{font-size:17px;border:2px solid var(--ink);border-radius:12px;background:var(--accent);color:var(--ink);padding:12px 24px;box-shadow:2px 2px 0 var(--ink);}
+    nav.tabbar{display:flex;border-top:2px solid var(--ink);background:var(--white);margin-top:auto;}
+    nav.tabbar a{flex:1;text-decoration:none;color:var(--g4);position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 0 12px;font-size:13px;}
+    nav.tabbar a svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.9;}
+    nav.tabbar a.active{color:var(--ink);}
+    nav.tabbar a.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:40px;height:3px;background:var(--accent);border-radius:2px;}
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <header class="app"><div class="brand">Marhaba</div>
+      <div class="bell"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></div>
+    </header>
+    <main>
+      <div class="empty"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></div>
+      <h2>No events yet</h2>
+      <p>You haven't joined anything. Find a meetup near you — your first event is free.</p>
+      <button class="btn">Find events near you</button>
+    </main>
+    <nav class="tabbar">
+      <a class="active" href="#"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Events</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>Chat</a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M6 19c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>Profile</a>
+    </nav>
+  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" result="noise"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="noise" scale="2"/></filter></svg>
+  <script>
+  addEventListener('message',function(e){var d=e.data||{},r=document.documentElement;
+    if(d.__vars){for(var k in d.__vars)r.style.setProperty(k,d.__vars[k]);var s=document.getElementById('__acc');if(!s){s=document.createElement('style');s.id='__acc';document.head.appendChild(s);}s.textContent=d.__dark?".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}":"";}
+    if('__sketch' in d){var amt=+d.__sketch||0,disp=document.getElementById('__disp');if(disp)disp.setAttribute('scale',amt);var ph=document.querySelector('.phone');if(ph)ph.style.filter=amt>0?'url(#wobble-soft)':'';}});
+  </script>
+</body>
+</html>

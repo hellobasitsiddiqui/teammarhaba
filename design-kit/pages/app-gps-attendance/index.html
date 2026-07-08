@@ -1,0 +1,76 @@
+<!-- @dsCard group="App screens" name="GPS attendance pop-up" -->
+<!doctype html>
+<html lang="en" data-theme="sketch">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Confirm attendance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1a1a2e;--paper:#f7f7f3;--card:#fffef9;--muted:color-mix(in srgb,var(--ink) 52%,transparent);
+      --shadow:2px 2px 0 color-mix(in srgb,var(--ink) 18%,transparent);--shadow-lg:4px 4px 0 color-mix(in srgb,var(--ink) 22%,transparent);
+      --overlay:color-mix(in srgb,var(--ink) 45%,transparent);}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#e7e7ea;padding:24px;
+      font-family:"Patrick Hand","Bradley Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .wob{filter:url(#wobble-soft);}@media (prefers-reduced-motion:reduce){.wob{filter:none;}}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;
+      background-color:var(--paper);border:2px solid var(--ink);border-radius:30px;box-shadow:var(--shadow-lg);}
+    .statusbar{display:flex;justify-content:space-between;padding:11px 20px 0;font-size:12.5px;color:var(--muted);font-family:system-ui,sans-serif;}
+    /* dimmed backdrop screen */
+    .dim{position:absolute;inset:0;background:var(--overlay);z-index:2;}
+    .bg{padding:14px 18px;filter:blur(0.4px);opacity:.55;}
+    .bg h2{font-family:"Gochi Hand",cursive;font-weight:400;font-size:22px;margin:20px 4px 10px;}
+    .bg .card{background:var(--card);border:1.5px solid var(--ink);border-radius:15px;padding:16px;margin-bottom:14px;height:90px;}
+    /* modal */
+    .modal{position:absolute;z-index:3;left:20px;right:20px;top:50%;transform:translateY(-50%);
+      background:var(--card);border:2px solid var(--ink);border-radius:20px;box-shadow:var(--shadow-lg);padding:20px 18px;text-align:center;}
+    .pin{width:56px;height:56px;margin:0 auto 8px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;background:var(--paper);}
+    .pin svg{width:28px;height:28px;stroke:var(--ink);fill:none;stroke-width:1.8;}
+    .modal h2{font-family:"Gochi Hand",cursive;font-weight:400;font-size:23px;margin:2px 0 4px;}
+    .modal p{font-size:14.5px;color:var(--muted);margin:0 0 14px;line-height:1.3;}
+    .modal p b{color:var(--ink);}
+    .btn{font-family:"Gochi Hand",cursive;font-size:17px;border:1.5px solid var(--ink);border-radius:12px;background:var(--ink);color:var(--paper);padding:11px 18px;cursor:pointer;width:100%;}
+    .or{font-family:"Shadows Into Light",cursive;color:var(--muted);font-size:14px;margin:12px 0 8px;}
+    .code{display:flex;gap:8px;justify-content:center;}
+    .code span{width:38px;height:46px;border:1.5px solid var(--ink);border-radius:9px;display:grid;place-items:center;
+      font-family:"Gochi Hand",cursive;font-size:22px;background:var(--paper);}
+    .code span.empty{color:var(--muted);}
+    nav.tabbar{display:flex;border-top:2px solid var(--ink);background:var(--card);margin-top:auto;opacity:.55;}
+    nav.tabbar a{flex:1;text-decoration:none;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 11px;font-size:12.5px;}
+    nav.tabbar a svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.8;}
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" /></filter></svg>
+  <div class="phone">
+    <div class="statusbar"><span>16:00</span><span>wifi · 84%</span></div>
+    <!-- dimmed event screen behind -->
+    <div class="bg">
+      <h2>Coffee &amp; Code Meetup</h2>
+      <div class="card wob"></div>
+      <div class="card wob"></div>
+    </div>
+    <div class="dim"></div>
+
+    <!-- the mid-event attendance modal -->
+    <div class="modal wob">
+      <div class="pin wob"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></div>
+      <h2>You're here?</h2>
+      <p><b>Coffee &amp; Code</b> is happening now.<br/>Confirm your attendance.</p>
+      <button class="btn wob">Confirm with location</button>
+      <div class="or">— or enter the host's code —</div>
+      <div class="code">
+        <span>4</span><span>7</span><span class="empty">_</span><span class="empty">_</span>
+      </div>
+    </div>
+
+    <nav class="tabbar">
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Events</a>
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>Chat</a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M6 19c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>Profile</a>
+    </nav>
+  </div>
+</body>
+</html>

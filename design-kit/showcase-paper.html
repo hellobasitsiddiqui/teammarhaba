@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — App design · Paper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1B1B1B;--white:#FFFFFF;--g1:#EEEEEE;--g2:#D8D8D8;--g3:#B4B4B4;--g4:#929292;--g5:#696969;--g6:#454545;
+      --accent:#37D4AD;--accent-light:#DAFCF3;}
+    *{box-sizing:border-box;}
+    body{margin:0;background:#ececea;color:var(--ink);
+      font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 30px 60px;}
+    h1.title{font-weight:400;font-size:40px;margin:0 0 2px;}
+    .tag-line{font-family:"Inter",sans-serif;font-weight:500;font-size:15px;color:var(--g5);margin:0 0 10px;}
+    .switch{font-size:16px;display:inline-block;border:2px solid var(--ink);border-radius:10px;padding:5px 13px;
+      text-decoration:none;color:var(--ink);background:var(--white);box-shadow:2px 2px 0 var(--g2);margin:0 0 20px;}
+    h2.sec{font-weight:400;font-size:26px;margin:30px 0 14px;border-bottom:2px solid var(--ink);padding-bottom:6px;}
+
+    /* ---- colour picker ---- */
+    .picker{position:sticky;top:0;z-index:50;display:flex;align-items:center;flex-wrap:wrap;gap:12px;
+      background:var(--white);border:2px solid var(--ink);border-radius:14px;padding:10px 14px;margin:0 0 22px;box-shadow:3px 3px 0 var(--g2);}
+    .picker .plabel{font-size:17px;}
+    .picker .swatches{display:flex;gap:6px;flex-wrap:wrap;}
+    .picker .sw2{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--ink);cursor:pointer;padding:0;}
+    .picker input[type=color]{width:34px;height:34px;border:2px solid var(--ink);border-radius:8px;background:none;cursor:pointer;padding:2px;}
+    .picker .hex{font-family:ui-monospace,monospace;font-size:13px;min-width:76px;}
+    .picker button.act{font-size:15px;border:2px solid var(--ink);border-radius:9px;background:var(--white);padding:5px 12px;cursor:pointer;}
+    .picker .note{font-family:"Inter",sans-serif;font-weight:500;font-size:12.5px;color:var(--g4);}
+    .picker #toggleBtn{font-weight:700;}
+    /* Collapsed: shrink the sticky bar to just the toggle pill so it stops covering the screens. */
+    .picker.collapsed{padding:6px 12px;gap:0;width:max-content;}
+    .picker.collapsed > :not(#toggleBtn){display:none;}
+
+    /* ---- foundations (paper) ---- */
+    .foundations{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;}
+    .tile{border:2px solid var(--ink);border-radius:16px;background:var(--white);box-shadow:3px 3px 0 var(--g2);padding:15px 17px;filter:var(--pf,none);}
+    .tile .lbl{font-size:16px;color:var(--g5);margin-bottom:12px;}
+    .sw{display:flex;gap:9px;flex-wrap:wrap;}
+    .sw .c{width:54px;text-align:center;font-family:"Inter",sans-serif;font-weight:500;font-size:10px;color:var(--g5);cursor:pointer;}
+    .sw .c input[type=color]{display:block;width:100%;height:34px;border:1.5px solid var(--ink);border-radius:8px;padding:0;background:none;cursor:pointer;margin-bottom:4px;}
+    .sw .c span{display:block;}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    .btn{font-size:16px;border:2px solid var(--ink);border-radius:11px;background:var(--accent);color:var(--ink);padding:6px 15px;box-shadow:2px 2px 0 var(--ink);}
+    .btn.ghost{background:var(--white);box-shadow:none;}
+    .btn.soon{background:var(--g1);color:var(--g4);border-style:dashed;box-shadow:none;}
+    .pill{border:1.5px solid var(--ink);border-radius:999px;padding:3px 11px;font-size:13.5px;background:var(--white);}
+    .pill.full{background:var(--g1);color:var(--g6);}
+    .tag{font-size:13px;border:1.5px solid var(--ink);border-radius:999px;padding:1px 10px;background:var(--g1);}
+    .chip{border:2px solid var(--ink);border-radius:999px;padding:3px 12px;font-size:14px;background:var(--white);}
+    .chip.pri{background:var(--accent);}
+    .inp{border:2px solid var(--ink);border-radius:10px;padding:8px 12px;font-family:"Inter",sans-serif;font-size:14px;color:var(--g5);background:var(--white);min-width:150px;}
+    .tick{color:var(--accent);font-weight:700;letter-spacing:-1px;}
+    .badge{min-width:20px;height:20px;padding:0 5px;background:var(--accent);border:1.5px solid var(--ink);color:var(--ink);border-radius:999px;font-family:"Inter",sans-serif;font-weight:700;font-size:11.5px;display:inline-grid;place-items:center;}
+    .avatar{width:40px;height:40px;border:2px solid var(--ink);border-radius:50%;background:var(--g1);display:grid;place-items:center;}
+    .react{display:inline-flex;gap:4px;align-items:center;border:1.5px solid var(--ink);border-radius:999px;background:var(--white);padding:2px 9px;font-size:13px;}
+    .udot{width:11px;height:11px;border-radius:50%;background:var(--accent);border:1.4px solid var(--ink);display:inline-block;}
+    .udot.read{background:transparent;border-color:var(--g4);}
+    .type-p{font-size:22px;}
+    .type-i{font-family:"Inter",sans-serif;font-weight:700;font-size:18px;}
+    .type-im{font-family:"Inter",sans-serif;font-weight:500;font-size:15px;color:var(--g5);}
+    /* dark-accent auto-contrast for the panel's filled bits */
+    :root.dark-accent .btn:not(.ghost):not(.soon){color:#fff;}
+    :root.dark-accent .badge,:root.dark-accent .chip.pri,:root.dark-accent .seg2 span.on{color:#fff;}
+    .seg2{display:inline-flex;border:2px solid var(--ink);border-radius:10px;overflow:hidden;}
+    .seg2 span{padding:5px 12px;font-size:13px;}
+    .seg2 span.on{background:var(--accent);}
+    .tgl{width:40px;height:22px;border:2px solid var(--ink);border-radius:999px;background:var(--white);display:inline-block;position:relative;vertical-align:middle;}
+    .tgl::after{content:"";position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:var(--ink);}
+    .tgl.on{background:var(--accent);}
+    .tgl.on::after{left:auto;right:1px;}
+    .bar2{height:14px;border:2px solid var(--ink);border-radius:999px;background:var(--white);overflow:hidden;}
+    .bar2 i{display:block;height:100%;width:62%;background:var(--accent);}
+
+    .screens{display:grid;grid-template-columns:repeat(auto-fill,384px);gap:18px 20px;justify-content:center;}
+    .cell{display:flex;flex-direction:column;align-items:center;}
+    .cap{font-size:16px;margin:2px 0 7px;color:var(--ink);}
+    iframe{width:384px;height:840px;border:0;display:block;background:transparent;}
+    /* Mobile (TM-522): show exactly one screen at a time — single column, with each 384px phone
+       scaled to fit the viewport width so there's no horizontal overflow and no half-cut screens.
+       `zoom` (unlike `transform`) shrinks the layout box too, so the column genuinely fits. The
+       theme-editor toolbar wraps rather than pushing the page wider. */
+    /* Breakpoint is generous (820px, not 480) because some mobile browsers report a wider CSS
+       viewport than the device width — at ~768px `repeat(auto-fill,384px)` still fits 2 columns. */
+    @media (max-width:820px){
+      .screens{grid-template-columns:1fr !important;gap:16px 0;justify-content:stretch;}
+      .cell{width:100%;overflow:hidden;}
+      iframe{zoom:.84;}
+      .picker{flex-wrap:wrap;}
+    }
+    @media (max-width:400px){ iframe{zoom:.74;} }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-p"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" result="n"/><feDisplacementMap id="__disp2" in="SourceGraphic" in2="n" scale="0"/></filter></svg>
+  <h1 class="title">TeamMarhaba — App design · Paper</h1>
+  <p class="tag-line">Paper Wireframe Kit style · crisp edges, Patrick Hand, one crayon accent</p>
+  <a class="switch" href="showcase.html">← View the Sketch version</a>
+
+  <div class="picker" id="picker">
+    <button class="act" id="toggleBtn" aria-expanded="true" aria-controls="picker" title="Collapse / expand the theme controls">Hide ▾</button>
+    <span class="plabel">Accent</span>
+    <input type="color" id="colorInput" value="#37D4AD" aria-label="Pick accent colour" />
+    <span class="hex" id="hexOut">#37D4AD</span>
+    <div class="swatches" id="swatches"></div>
+    <button class="act" id="resetBtn">Reset</button>
+    <button class="act" id="copyBtn">Copy token</button>
+    <span class="plabel" style="font-size:15px">✏️ Sketch</span>
+    <input type="range" id="sketchRange" min="0" max="6" step="0.5" value="0" style="width:130px;accent-color:#1B1B1B" />
+    <span class="hex" id="sketchOut">0.0</span>
+    <span class="note" id="noteOut">live · updates elements + screens</span>
+  </div>
+
+  <h2 class="sec">Design elements · paper</h2>
+  <div class="foundations">
+    <div class="tile" style="grid-column:span 2"><div class="lbl">Colour — every swatch is editable, click to change</div>
+      <div class="sw">
+        <label class="c"><input type="color" data-var="--ink" value="#1B1B1B" /><span>Ink</span></label>
+        <label class="c"><input type="color" data-var="--white" value="#FFFFFF" /><span>White</span></label>
+        <label class="c"><input type="color" data-var="--g1" value="#EEEEEE" /><span>Gray 1</span></label>
+        <label class="c"><input type="color" data-var="--g2" value="#D8D8D8" /><span>Gray 2</span></label>
+        <label class="c"><input type="color" data-var="--g3" value="#B4B4B4" /><span>Gray 3</span></label>
+        <label class="c"><input type="color" data-var="--g4" value="#929292" /><span>Gray 4</span></label>
+        <label class="c"><input type="color" data-var="--g5" value="#696969" /><span>Gray 5</span></label>
+        <label class="c"><input type="color" data-var="--g6" value="#454545" /><span>Gray 6</span></label>
+        <label class="c"><input type="color" data-var="--accent" value="#37D4AD" /><span>Accent</span></label>
+      </div>
+    </div>
+    <div class="tile"><div class="lbl">Type</div>
+      <div class="type-p">Patrick Hand — headings + body</div>
+      <div class="type-i">Inter Bold — emphasis</div>
+      <div class="type-im">Inter Medium — labels &amp; meta</div>
+    </div>
+    <div class="tile"><div class="lbl">Buttons</div>
+      <div class="row"><span class="btn">Primary</span><span class="btn ghost">Ghost</span><span class="btn soon">Soon</span></div>
+    </div>
+    <div class="tile"><div class="lbl">Tags &amp; pills</div>
+      <div class="row"><span class="tag">Dog walks</span><span class="pill">12 going</span><span class="pill full">Full · waitlist 2</span></div>
+    </div>
+    <div class="tile"><div class="lbl">Interest chips</div>
+      <div class="row"><span class="chip pri">Coffee</span><span class="chip pri">Hiking</span><span class="chip">Dogs</span><span class="chip">Sport</span></div>
+    </div>
+    <div class="tile"><div class="lbl">Input</div>
+      <div class="row"><span class="inp">you@example.com</span></div>
+    </div>
+    <div class="tile"><div class="lbl">Read ticks</div>
+      <div class="row" style="font-size:20px"><span class="tick">✓</span> sent &nbsp; <span class="tick">✓✓</span> read</div>
+    </div>
+    <div class="tile"><div class="lbl">Badges &amp; dots</div>
+      <div class="row"><span class="badge">2</span><span class="badge">5</span><span class="udot"></span>unread<span class="udot read"></span>read</div>
+    </div>
+    <div class="tile"><div class="lbl">Avatar &amp; reaction</div>
+      <div class="row"><span class="avatar">B</span><span class="avatar">🐕</span><span class="react">👍 3</span><span class="react">❤️ 2</span></div>
+    </div>
+    <div class="tile"><div class="lbl">Segmented</div>
+      <div class="row"><div class="seg2"><span class="on">Going</span><span>Waitlist</span></div></div>
+    </div>
+    <div class="tile"><div class="lbl">Toggle</div>
+      <div class="row"><span class="tgl on"></span> on &nbsp; <span class="tgl"></span> off</div>
+    </div>
+    <div class="tile"><div class="lbl">Progress</div>
+      <div class="bar2"><i></i></div>
+    </div>
+  </div>
+
+  <h2 class="sec">App screens · paper — 42</h2>
+  <div class="screens">
+    <div class="cell"><div class="cap">1 · Home + nav</div><iframe scrolling="no" src="pages/paper-home/index.html"></iframe></div>
+    <div class="cell"><div class="cap">2 · Events list</div><iframe scrolling="no" src="pages/paper-events-list/index.html"></iframe></div>
+    <div class="cell"><div class="cap">3 · Event detail</div><iframe scrolling="no" src="pages/paper-event-detail/index.html"></iframe></div>
+    <div class="cell"><div class="cap">4 · Notifications</div><iframe scrolling="no" src="pages/paper-notifications/index.html"></iframe></div>
+    <div class="cell"><div class="cap">5 · Chat list</div><iframe scrolling="no" src="pages/paper-chat-list/index.html"></iframe></div>
+    <div class="cell"><div class="cap">6 · Chat thread</div><iframe scrolling="no" src="pages/paper-chat-thread/index.html"></iframe></div>
+    <div class="cell"><div class="cap">7 · Membership</div><iframe scrolling="no" src="pages/paper-membership/index.html"></iframe></div>
+    <div class="cell"><div class="cap">8 · Dummy checkout</div><iframe scrolling="no" src="pages/paper-checkout/index.html"></iframe></div>
+    <div class="cell"><div class="cap">9 · GPS attendance</div><iframe scrolling="no" src="pages/paper-gps-attendance/index.html"></iframe></div>
+    <div class="cell"><div class="cap">10 · Profile</div><iframe scrolling="no" src="pages/paper-profile/index.html"></iframe></div>
+    <div class="cell"><div class="cap">11 · Admin: send push</div><iframe scrolling="no" src="pages/paper-admin-notify/index.html"></iframe></div>
+    <div class="cell"><div class="cap">12 · Sign in</div><iframe scrolling="no" src="pages/paper-signin/index.html"></iframe></div>
+    <div class="cell"><div class="cap">13 · Verify code</div><iframe scrolling="no" src="pages/paper-verify/index.html"></iframe></div>
+    <div class="cell"><div class="cap">14 · Complete profile</div><iframe scrolling="no" src="pages/paper-complete-profile/index.html"></iframe></div>
+    <div class="cell"><div class="cap">15 · Pick interests</div><iframe scrolling="no" src="pages/paper-pick-interests/index.html"></iframe></div>
+    <div class="cell"><div class="cap">16 · Empty home</div><iframe scrolling="no" src="pages/paper-empty-home/index.html"></iframe></div>
+    <div class="cell"><div class="cap">17 · Create event</div><iframe scrolling="no" src="pages/paper-create-event/index.html"></iframe></div>
+    <div class="cell"><div class="cap">18 · Search</div><iframe scrolling="no" src="pages/paper-search/index.html"></iframe></div>
+    <div class="cell"><div class="cap">19 · Map view</div><iframe scrolling="no" src="pages/paper-map/index.html"></iframe></div>
+    <div class="cell"><div class="cap">20 · Suggest venue</div><iframe scrolling="no" src="pages/paper-suggest-venue/index.html"></iframe></div>
+    <div class="cell"><div class="cap">21 · Cancelled event</div><iframe scrolling="no" src="pages/paper-event-cancelled/index.html"></iframe></div>
+    <div class="cell"><div class="cap">22 · My events</div><iframe scrolling="no" src="pages/paper-my-events/index.html"></iframe></div>
+    <div class="cell"><div class="cap">23 · Claim a spot</div><iframe scrolling="no" src="pages/paper-claim-spot/index.html"></iframe></div>
+    <div class="cell"><div class="cap">24 · RSVP confirmed</div><iframe scrolling="no" src="pages/paper-rsvp-confirmed/index.html"></iframe></div>
+    <div class="cell"><div class="cap">25 · Attendance result</div><iframe scrolling="no" src="pages/paper-attendance-result/index.html"></iframe></div>
+    <div class="cell"><div class="cap">26 · Reaction picker</div><iframe scrolling="no" src="pages/paper-reaction-picker/index.html"></iframe></div>
+    <div class="cell"><div class="cap">27 · Chat empty</div><iframe scrolling="no" src="pages/paper-chat-empty/index.html"></iframe></div>
+    <div class="cell"><div class="cap">28 · Payment methods</div><iframe scrolling="no" src="pages/paper-payment-methods/index.html"></iframe></div>
+    <div class="cell"><div class="cap">29 · Credits &amp; vouchers</div><iframe scrolling="no" src="pages/paper-credits/index.html"></iframe></div>
+    <div class="cell"><div class="cap">30 · Payment result</div><iframe scrolling="no" src="pages/paper-payment-result/index.html"></iframe></div>
+    <div class="cell"><div class="cap">31 · Settings</div><iframe scrolling="no" src="pages/paper-settings/index.html"></iframe></div>
+    <div class="cell"><div class="cap">32 · Edit profile</div><iframe scrolling="no" src="pages/paper-edit-profile/index.html"></iframe></div>
+    <div class="cell"><div class="cap">33 · Privacy &amp; my data</div><iframe scrolling="no" src="pages/paper-privacy-data/index.html"></iframe></div>
+    <div class="cell"><div class="cap">34 · Public profile</div><iframe scrolling="no" src="pages/paper-public-profile/index.html"></iframe></div>
+    <div class="cell"><div class="cap">35 · Invite / referral</div><iframe scrolling="no" src="pages/paper-invite/index.html"></iframe></div>
+    <div class="cell"><div class="cap">36 · Admin dashboard</div><iframe scrolling="no" src="pages/paper-admin-dashboard/index.html"></iframe></div>
+    <div class="cell"><div class="cap">37 · Manage events</div><iframe scrolling="no" src="pages/paper-admin-events/index.html"></iframe></div>
+    <div class="cell"><div class="cap">38 · Merge events</div><iframe scrolling="no" src="pages/paper-merge-events/index.html"></iframe></div>
+    <div class="cell"><div class="cap">39 · Manage users</div><iframe scrolling="no" src="pages/paper-admin-users/index.html"></iframe></div>
+    <div class="cell"><div class="cap">40 · Loading / skeleton</div><iframe scrolling="no" src="pages/paper-loading/index.html"></iframe></div>
+    <div class="cell"><div class="cap">41 · Error / offline</div><iframe scrolling="no" src="pages/paper-error/index.html"></iframe></div>
+    <div class="cell"><div class="cap">42 · Report / block</div><iframe scrolling="no" src="pages/paper-report/index.html"></iframe></div>
+  </div>
+
+  <script>
+  (function(){
+    // accent quick-pick presets (kit crayons + black)
+    const PRESETS = [
+      ["Caribbean Green","#37D4AD"],["Green","#4DA764"],["Robin's Egg","#44CECE"],["Blue-Green","#2799B2"],
+      ["Blue","#2B71DB"],["Purple","#633DA2"],["Pink Flamingo","#EA82EB"],["Razzmatazz","#E23274"],
+      ["Red","#E12B56"],["Orange","#FA9248"],["Dandelion","#FFDE75"],["Inchworm","#BCE051"],["Black","#1B1B1B"]
+    ];
+    // every editable colour token + its default
+    const DEFAULTS = {"--ink":"#1B1B1B","--white":"#FFFFFF","--g1":"#EEEEEE","--g2":"#D8D8D8","--g3":"#B4B4B4",
+      "--g4":"#929292","--g5":"#696969","--g6":"#454545","--accent":"#37D4AD"};
+    const tokens = Object.assign({}, DEFAULTS);
+    const root = document.documentElement;
+    const colorInput = document.getElementById("colorInput");
+    const hexOut = document.getElementById("hexOut");
+    const swatches = document.getElementById("swatches");
+    const noteOut = document.getElementById("noteOut");
+    let sketchAmount = 0;
+
+    const hexToRgb = h => { h=h.replace('#',''); return [0,2,4].map(i=>parseInt(h.substr(i,2),16)); };
+    const isDark = h => { const [r,g,b]=hexToRgb(h); return (0.2126*r+0.7152*g+0.0722*b) < 140; };
+    const lightTint = h => { const [r,g,b]=hexToRgb(h); const m=c=>Math.round(c*0.14+255*0.86); return `rgb(${m(r)},${m(g)},${m(b)})`; };
+    const paperFrames = () => [...document.querySelectorAll('iframe[src*="/paper-"]')];
+
+    function themeVars(){ const v = Object.assign({}, tokens); v["--accent-light"] = lightTint(tokens["--accent"]); return v; }
+    // paper screens each carry a listener; postMessage avoids the file:// cross-frame DOM block
+    function applyToFrame(f){
+      try { f.contentWindow.postMessage({__vars: themeVars(), __dark: isDark(tokens["--accent"]), __sketch: sketchAmount}, '*'); } catch(e){}
+    }
+    const applyAll = () => paperFrames().forEach(applyToFrame);
+
+    function applyLocal(){
+      const v = themeVars();
+      for(const k in v) root.style.setProperty(k, v[k]);
+      root.classList.toggle('dark-accent', isDark(tokens["--accent"]));
+    }
+    function syncInputs(){
+      document.querySelectorAll('input[data-var]').forEach(i => { i.value = tokens[i.dataset.var]; });
+      colorInput.value = tokens["--accent"]; hexOut.textContent = tokens["--accent"].toUpperCase();
+    }
+    function setToken(name, value){
+      tokens[name] = value;
+      const pin = document.querySelector('input[data-var="'+name+'"]'); if(pin) pin.value = value;
+      if(name === "--accent"){ colorInput.value = value; hexOut.textContent = value.toUpperCase(); }
+      applyLocal(); applyAll();
+    }
+
+    // every colour swatch in the panel is a live editor
+    document.querySelectorAll('input[data-var]').forEach(inp => {
+      inp.addEventListener('input', () => setToken(inp.dataset.var, inp.value));
+    });
+    // accent quick presets
+    PRESETS.forEach(([name,hex]) => {
+      const b = document.createElement("button");
+      b.className = "sw2"; b.style.background = hex; b.title = name+" "+hex;
+      b.addEventListener("click", () => setToken("--accent", hex));
+      swatches.appendChild(b);
+    });
+    colorInput.addEventListener('input', e => setToken("--accent", e.target.value));
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      Object.assign(tokens, DEFAULTS); sketchAmount = 0;
+      const sr = document.getElementById('sketchRange'); if(sr) sr.value = 0;
+      document.getElementById('sketchOut').textContent = '0.0';
+      syncInputs(); applyLocal(); applyAll();
+    });
+    document.getElementById('copyBtn').addEventListener('click', () => {
+      const v = themeVars();
+      const t = Object.keys(v).map(k => `${k}: ${String(v[k]).toUpperCase()};`).join('\n');
+      if(navigator.clipboard) navigator.clipboard.writeText(t);
+      const old = noteOut.textContent; noteOut.textContent = 'copied all tokens'; setTimeout(()=>noteOut.textContent=old, 1700);
+    });
+
+    const sketchRange = document.getElementById('sketchRange');
+    const sketchOut = document.getElementById('sketchOut');
+    sketchRange.addEventListener('input', () => {
+      sketchAmount = parseFloat(sketchRange.value);
+      sketchOut.textContent = sketchAmount.toFixed(1);
+      const disp2 = document.getElementById('__disp2'); if(disp2) disp2.setAttribute('scale', sketchAmount);
+      const fnd = document.querySelector('.foundations'); if(fnd) fnd.style.setProperty('--pf', sketchAmount>0 ? 'url(#wobble-p)' : 'none');
+      applyAll();
+    });
+
+    paperFrames().forEach(f => f.addEventListener('load', () => applyToFrame(f)));
+    setTimeout(() => { applyLocal(); applyAll(); }, 400);
+  })();
+  </script>
+  <script>
+    // Collapse / expand the sticky theme toolbar so it doesn't block the screens.
+    (function () {
+      var picker = document.getElementById('picker');
+      var btn = document.getElementById('toggleBtn');
+      if (!picker || !btn) return;
+      btn.addEventListener('click', function () {
+        var collapsed = picker.classList.toggle('collapsed');
+        btn.textContent = collapsed ? '🎨 Palette ▸' : 'Hide ▾';
+        btn.setAttribute('aria-expanded', String(!collapsed));
+      });
+    })();
+  </script>
+</body>
+</html>

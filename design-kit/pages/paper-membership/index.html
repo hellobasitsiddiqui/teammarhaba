@@ -1,0 +1,90 @@
+<!-- @dsCard group="App screens · paper" name="Membership tiers (paper)" -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Membership (paper)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1B1B1B;--white:#FFFFFF;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3;}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px;}
+    .statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500;}
+    .topbar{display:flex;align-items:center;gap:10px;padding:8px 16px 6px;}
+    .topbar .back{width:36px;height:36px;display:grid;place-items:center;border:2px solid var(--ink);border-radius:50%;background:var(--white);}
+    .topbar .back svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:2.2;}
+    .topbar h1{font-size:24px;margin:0;flex:1;}
+    main{padding:2px 16px 14px;flex:1;}
+    .lede{font-family:"Inter",sans-serif;font-weight:500;color:var(--g5);font-size:14px;margin:2px 4px 14px;}
+    .tier{border:2px solid var(--ink);border-radius:16px;background:var(--white);box-shadow:3px 3px 0 var(--g2);padding:14px 16px;margin-bottom:14px;position:relative;}
+    .tier.on{box-shadow:3px 3px 0 var(--accent);}
+    .tier .flag{position:absolute;top:-12px;right:14px;font-family:"Inter",sans-serif;font-weight:700;font-size:11px;background:var(--accent);color:var(--ink);border:1.5px solid var(--ink);border-radius:999px;padding:2px 10px;}
+    .tier h3{font-size:21px;font-weight:400;margin:0 0 2px;}
+    .price{font-size:18px;margin-bottom:8px;}
+    .price small{font-family:"Inter",sans-serif;font-weight:500;font-size:12.5px;color:var(--g5);}
+    ul{margin:0 0 12px;padding:0;list-style:none;}
+    li{font-family:"Inter",sans-serif;font-weight:500;font-size:14px;color:var(--g5);margin:5px 0;padding-left:20px;position:relative;}
+    li::before{content:"✓";position:absolute;left:0;color:var(--ink);}
+    .btn{font-size:16px;border:2px solid var(--ink);border-radius:11px;background:var(--accent);color:var(--ink);padding:8px 18px;width:100%;box-shadow:2px 2px 0 var(--ink);}
+    .btn.ghost{background:var(--white);box-shadow:none;}
+    .btn.soon{background:var(--g1);color:var(--g4);border-style:dashed;box-shadow:none;}
+    .disc{font-family:"Inter",sans-serif;font-weight:500;color:var(--g4);font-size:12px;text-align:center;margin-top:4px;}
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <div class="topbar"><span class="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span><h1>Membership</h1></div>
+    <main>
+      <div class="lede">Your first event is free. Choose how you pay after that.</div>
+      <div class="tier on"><span class="flag">Current</span><h3>Pay as you go</h3><div class="price">£5 <small>/ event · first event free</small></div><ul><li>Join any standard event</li><li>No commitment</li></ul><button class="btn ghost">You're on this plan</button></div>
+      <div class="tier"><span class="flag">Popular</span><h3>Monthly</h3><div class="price">£19 <small>/ month · unlimited standard events</small></div><ul><li>Unlimited standard meetups</li><li>Cancel anytime</li></ul><button class="btn">Upgrade</button></div>
+      <div class="tier"><h3>Diamond 💎</h3><div class="price"><small>coming soon · includes premium events</small></div><ul><li>Everything in Monthly</li><li>Access to premium events</li></ul><button class="btn soon">Coming soon</button></div>
+      <div class="disc">Dummy layout — no real charges yet.</div>
+    </main>
+  </div>
+  <script>
+  /* showcase.html accent picker: apply an accent posted from the parent to this screen's own :root
+     (postMessage avoids the file:// cross-frame DOM block). */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!d || !d.__accent) return;
+    var r = document.documentElement;
+    r.style.setProperty('--accent', d.__accent);
+    r.style.setProperty('--accent-light', d.__accentLight);
+    var s = document.getElementById('__acc');
+    if(!s){ s = document.createElement('style'); s.id = '__acc'; document.head.appendChild(s); }
+    s.textContent = d.__dark
+      ? ".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}"
+      : "";
+  });
+  </script>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" result="noise"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="noise" scale="2"/></filter></svg>
+  <script>
+  /* sketchiness control from the showcase: __sketch = 0 (crisp) .. ~4 (very wavy) */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!('__sketch' in d)) return;
+    var amt = +d.__sketch || 0;
+    var disp = document.getElementById('__disp');
+    if(disp) disp.setAttribute('scale', amt);
+    var ph = document.querySelector('.phone');
+    if(ph) ph.style.filter = amt > 0 ? 'url(#wobble-soft)' : '';
+  });
+  </script>
+  <script>
+  /* generic theme-token setter from the showcase (sets any CSS vars posted in __vars) */
+  addEventListener('message', function(e){
+    var d = e.data || {};
+    if(!d.__vars) return;
+    var r = document.documentElement;
+    for(var k in d.__vars) r.style.setProperty(k, d.__vars[k]);
+    var s = document.getElementById('__acc');
+    if(!s){ s = document.createElement('style'); s.id='__acc'; document.head.appendChild(s); }
+    s.textContent = d.__dark ? ".btn:not(.ghost):not(.soon):not(.done){color:#fff!important}.cbadge,.nbadge,.dot,.chip.on,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}" : "";
+  });
+  </script>
+</body>
+</html>

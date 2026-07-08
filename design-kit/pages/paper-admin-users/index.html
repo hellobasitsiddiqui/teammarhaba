@@ -1,0 +1,32 @@
+<!-- @dsCard group="App screens · paper" name="Admin: manage users (paper)" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Manage users (paper)</title><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--ink:#1B1B1B;--white:#fff;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink)}
+.phone{width:384px;min-height:788px;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px}
+.statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500}
+.topbar{display:flex;align-items:center;gap:10px;padding:8px 16px}.back{width:36px;height:36px;display:grid;place-items:center;border:2px solid var(--ink);border-radius:50%}.back svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:2.2}.topbar h1{font-size:22px;margin:0}
+.field{display:flex;gap:8px;align-items:center;border:2px solid var(--ink);border-radius:999px;padding:8px 14px;margin:0 16px 6px}.field svg{width:17px;height:17px;stroke:var(--g5);fill:none;stroke-width:2}.field span{font-family:"Inter",sans-serif;font-size:14px;color:var(--g5)}
+main{flex:1;padding:6px 16px 16px;overflow:auto}
+.row{display:flex;align-items:center;gap:11px;padding:11px 2px;border-bottom:1.5px solid var(--g2)}
+.av{width:40px;height:40px;border:2px solid var(--ink);border-radius:50%;background:var(--g1);display:grid;place-items:center;flex:none}
+.mid{flex:1}.mid .n{font-size:16px}.mid .e{font-family:"Inter",sans-serif;font-weight:500;color:var(--g5);font-size:12px}
+.role{font-family:"Inter",sans-serif;font-weight:700;font-size:9.5px;border:1.5px solid var(--ink);border-radius:999px;padding:2px 7px}.role.adm{background:var(--accent-light)}
+.dots{font-size:20px;color:var(--g5)}
+</style></head><body>
+<div class="phone">
+<div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+<div class="topbar"><span class="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span><h1>Users</h1></div>
+<div class="field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span>Search users</span></div>
+<main>
+<div class="row"><span class="av">B</span><div class="mid"><div class="n">Basit S.</div><div class="e">basit@10xai.co.uk</div></div><span class="role adm">ADMIN</span><span class="dots">⋯</span></div>
+<div class="row"><span class="av">S</span><div class="mid"><div class="n">Sarah K.</div><div class="e">sarah@example.com</div></div><span class="role">USER</span><span class="dots">⋯</span></div>
+<div class="row"><span class="av">M</span><div class="mid"><div class="n">Mike T.</div><div class="e">mike@example.com</div></div><span class="role">USER</span><span class="dots">⋯</span></div>
+<div class="row"><span class="av">?</span><div class="mid"><div class="n">Phone user</div><div class="e">+44 7•••• 123</div></div><span class="role">USER</span><span class="dots">⋯</span></div>
+</main>
+</div>
+<svg width="0" height="0" style="position:absolute"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" result="n"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="n" scale="2"/></filter></svg>
+<script>addEventListener('message',function(e){var d=e.data||{},r=document.documentElement;if(d.__vars){for(var k in d.__vars)r.style.setProperty(k,d.__vars[k]);var s=document.getElementById('__acc');if(!s){s=document.createElement('style');s.id='__acc';document.head.appendChild(s)}s.textContent=""}if('__sketch' in d){var a=+d.__sketch||0,p=document.getElementById('__disp');if(p)p.setAttribute('scale',a);var ph=document.querySelector('.phone');if(ph)ph.style.filter=a>0?'url(#wobble-soft)':''}});</script>
+</body></html>

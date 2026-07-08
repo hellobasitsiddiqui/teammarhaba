@@ -1,0 +1,34 @@
+<!-- @dsCard group="App screens · paper" name="Search / discover (paper)" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Search (paper)</title><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--ink:#1B1B1B;--white:#fff;--g1:#EEEEEE;--g2:#D8D8D8;--g4:#929292;--g5:#696969;--accent:#37D4AD;--accent-light:#DAFCF3}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#d6d6d6;padding:24px;font-family:"Patrick Hand",ui-rounded,system-ui,sans-serif;color:var(--ink)}
+.phone{width:384px;min-height:788px;overflow:hidden;display:flex;flex-direction:column;background:var(--white);border:3px solid var(--ink);border-radius:42px}
+.statusbar{display:flex;justify-content:space-between;padding:12px 22px 0;font-size:12.5px;color:var(--g5);font-family:"Inter",sans-serif;font-weight:500}
+.sbar{display:flex;gap:9px;align-items:center;padding:10px 16px}
+.field{flex:1;display:flex;gap:8px;align-items:center;border:2px solid var(--ink);border-radius:999px;padding:9px 14px;background:var(--white)}
+.field svg{width:18px;height:18px;stroke:var(--g5);fill:none;stroke-width:2}.field span{font-family:"Inter",sans-serif;font-size:14px;color:var(--g5)}
+main{flex:1;padding:2px 16px 16px;overflow:auto}
+.lbl{font-family:"Inter",sans-serif;font-weight:600;font-size:12px;color:var(--g4);margin:12px 2px 8px;letter-spacing:.04em}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:6px}.chip{border:2px solid var(--ink);border-radius:999px;padding:4px 12px;font-size:13px;background:var(--white)}.chip.pri{background:var(--accent)}
+.card{background:var(--white);border:2px solid var(--ink);border-radius:15px;box-shadow:3px 3px 0 var(--g2);padding:12px 15px;margin-bottom:12px}
+.tag{display:inline-block;font-size:12.5px;background:var(--g1);border:1.5px solid var(--ink);border-radius:999px;padding:1px 9px;margin-bottom:5px}
+.card h3{font-size:19px;font-weight:400;margin:0 0 3px}.meta{color:var(--g5);font-size:14px;font-family:"Inter",sans-serif;font-weight:500}
+</style></head><body>
+<div class="phone">
+<div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+<div class="sbar"><div class="field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span>dog walk</span></div></div>
+<main>
+<div class="lbl">FILTERS</div><div class="chips"><span class="chip pri">This weekend</span><span class="chip">Nearby</span><span class="chip">Free</span></div>
+<div class="lbl">RESULTS · 2</div>
+<div class="card"><span class="tag">Dog walks</span><h3>Sunday Morning Dog Walk</h3><div class="meta">Sun 12 Jul · Willen Lake · 12 going</div></div>
+<div class="card"><span class="tag">Dog walks</span><h3>Riverside Puppy Meetup</h3><div class="meta">Sat 18 Jul · Ouse Valley · 6 going</div></div>
+<div class="lbl">POPULAR NEAR YOU</div>
+<div class="card"><span class="tag">Tech &amp; coffee</span><h3>Coffee &amp; Code Meetup</h3><div class="meta">Tue 14 Jul · Central MK · 8 going</div></div>
+</main>
+</div>
+<svg width="0" height="0" style="position:absolute"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency=".012" numOctaves="3" result="n"/><feDisplacementMap id="__disp" in="SourceGraphic" in2="n" scale="2"/></filter></svg>
+<script>addEventListener('message',function(e){var d=e.data||{},r=document.documentElement;if(d.__vars){for(var k in d.__vars)r.style.setProperty(k,d.__vars[k]);var s=document.getElementById('__acc');if(!s){s=document.createElement('style');s.id='__acc';document.head.appendChild(s)}s.textContent=d.__dark?".btn:not(.ghost):not(.soon):not(.done),.cbadge,.nbadge,.dot,.chip.pri,.seg span.on,.tier .flag{color:#fff!important}.send svg{stroke:#fff!important}":""}if('__sketch' in d){var a=+d.__sketch||0,p=document.getElementById('__disp');if(p)p.setAttribute('scale',a);var ph=document.querySelector('.phone');if(ph)ph.style.filter=a>0?'url(#wobble-soft)':''}});</script>
+</body></html>

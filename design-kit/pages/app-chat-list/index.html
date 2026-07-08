@@ -1,0 +1,61 @@
+<!-- @dsCard group="App screens" name="Chat list (per event)" -->
+<!doctype html>
+<html lang="en" data-theme="sketch">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeamMarhaba — Chats</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1a1a2e;--paper:#f7f7f3;--card:#fffef9;--muted:color-mix(in srgb,var(--ink) 52%,transparent);
+      --shadow:2px 2px 0 color-mix(in srgb,var(--ink) 18%,transparent);--shadow-lg:4px 4px 0 color-mix(in srgb,var(--ink) 22%,transparent);}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#e7e7ea;padding:24px;
+      font-family:"Patrick Hand","Bradley Hand",ui-rounded,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;}
+    .wob{filter:url(#wobble-soft);}@media (prefers-reduced-motion:reduce){.wob{filter:none;}}
+    .phone{width:384px;min-height:788px;position:relative;overflow:hidden;display:flex;flex-direction:column;
+      background-color:var(--paper);border:2px solid var(--ink);border-radius:30px;box-shadow:var(--shadow-lg);}
+    .statusbar{display:flex;justify-content:space-between;padding:11px 20px 0;font-size:12.5px;color:var(--muted);font-family:system-ui,sans-serif;}
+    .topbar{display:flex;align-items:center;gap:10px;padding:8px 18px 10px;}
+    .topbar h1{font-family:"Gochi Hand",cursive;font-weight:400;font-size:26px;margin:0;flex:1;}
+    main{padding:2px 12px 14px;flex:1;overflow:auto;}
+    .row{display:flex;gap:11px;align-items:center;padding:11px 10px;border-bottom:1.5px solid color-mix(in srgb,var(--ink) 14%,transparent);}
+    .av{width:44px;height:44px;flex:none;border:1.6px solid var(--ink);border-radius:50%;display:grid;place-items:center;
+      font-family:"Gochi Hand",cursive;font-size:18px;background:var(--card);}
+    .mid{flex:1;min-width:0;}
+    .mid .nm{font-family:"Gochi Hand",cursive;font-size:17px;}
+    .mid .pv{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .rt{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none;}
+    .rt .tm{font-size:11.5px;color:var(--muted);}
+    .cbadge{min-width:20px;height:20px;padding:0 5px;background:var(--ink);color:var(--paper);border-radius:999px;
+      font-size:11.5px;display:grid;place-items:center;font-family:"Gochi Hand",cursive;}
+    .tick{font-size:13px;color:var(--muted);}
+    nav.tabbar{display:flex;border-top:2px solid var(--ink);background:var(--card);margin-top:auto;}
+    nav.tabbar a{flex:1;text-decoration:none;color:var(--muted);position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 11px;font-size:12.5px;}
+    nav.tabbar a svg{width:25px;height:25px;stroke:currentColor;fill:none;stroke-width:1.8;}
+    nav.tabbar a.active{color:var(--ink);font-family:"Gochi Hand",cursive;font-size:13.5px;}
+    nav.tabbar a.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:36px;height:3px;background:var(--ink);border-radius:2px;}
+    nav.tabbar .nbadge{position:absolute;top:5px;right:calc(50% - 24px);min-width:17px;height:17px;padding:0 3px;background:var(--ink);color:var(--paper);border-radius:999px;font-size:10.5px;display:grid;place-items:center;font-family:"Gochi Hand",cursive;}
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="wobble-soft"><feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="3" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" /></filter></svg>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>wifi · 84%</span></div>
+    <div class="topbar"><h1>Chats</h1></div>
+    <main>
+      <div class="row"><span class="av wob">🐕</span><div class="mid"><div class="nm">Sunday Dog Walk</div><div class="pv">Sarah: see you at the lake! ☀️</div></div><div class="rt"><span class="tm">9:12</span><span class="cbadge">2</span></div></div>
+      <div class="row"><span class="av wob">C</span><div class="mid"><div class="nm">Coffee &amp; Code</div><div class="pv"><span class="tick">✓✓</span> You: I'll bring the laptop</div></div><div class="rt"><span class="tm">8:40</span></div></div>
+      <div class="row"><span class="av wob">B</span><div class="mid"><div class="nm">Bouldering Social</div><div class="pv">Mike: who's driving on Thursday?</div></div><div class="rt"><span class="tm">Yesterday</span><span class="cbadge">5</span></div></div>
+      <div class="row"><span class="av wob">M</span><div class="mid"><div class="nm">Marhaba Team</div><div class="pv"><span class="tick">✓</span> Announcement: new features live</div></div><div class="rt"><span class="tm">Mon</span></div></div>
+      <div class="row"><span class="av wob">P</span><div class="mid"><div class="nm">Park Picnic</div><div class="pv">You joined the event — say hi 👋</div></div><div class="rt"><span class="tm">Sun</span></div></div>
+    </main>
+    <nav class="tabbar">
+      <a href="#"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+      <a href="#"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 9h16M9 3v4M15 3v4"/></svg>Events</a>
+      <a class="active" href="#"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4z"/></svg>Chat</a>
+      <a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M6 19c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>Profile</a>
+    </nav>
+  </div>
+</body>
+</html>
