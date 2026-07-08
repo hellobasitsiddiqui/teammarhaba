@@ -81,11 +81,17 @@ management:
       export:
         enabled: false
 
-# OpenAPI docs (TM-76). Spec at /v3/api-docs, Swagger UI at /swagger-ui. Enabled here
-# (dev/test); prod disables both (application-prod.yml) to keep the API shape off the
-# public surface. When auth tightens (TM-79), these paths must stay permit-listed in non-prod.
+# OpenAPI docs (TM-76, TM-520). The live springdoc endpoints (/v3/api-docs, /swagger-ui) are
+# DISABLED by default on every runtime profile — dev/pre-prod AND prod — to keep the running API's
+# shape (and any "try it out") off the public surface. Public API docs are instead served as a
+# static, read-only Redoc page from the web surface (web/src/api-docs/), which renders the committed
+# backend/openapi.json — no live calls against a real environment. Only the `test` profile re-enables
+# these endpoints (application-test.yml) so the OpenApiDocsTest / OpenApiDriftTest guards can read them.
 springdoc:
+  api-docs:
+    enabled: false
   swagger-ui:
+    enabled: false
     path: /swagger-ui
 
 # Passwordless email-code login (TM-234). Safe defaults shared by every profile; these are

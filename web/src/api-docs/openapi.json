@@ -1,0 +1,1944 @@
+{
+  "components" : {
+    "schemas" : {
+      "AcceptTermsRequest" : {
+        "properties" : {
+          "version" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "version" ],
+        "type" : "object"
+      },
+      "AccountState" : {
+        "properties" : {
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "lastLoginAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "mfaEnabled" : {
+            "type" : "boolean"
+          },
+          "phoneVerified" : {
+            "type" : "boolean"
+          },
+          "photoURL" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "AttendeeAvatar" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "AuditEventResponse" : {
+        "properties" : {
+          "action" : {
+            "type" : "string"
+          },
+          "actorUid" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "metadata" : {
+            "additionalProperties" : { },
+            "type" : "object"
+          },
+          "targetId" : {
+            "type" : "string"
+          },
+          "targetType" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "BroadcastPushRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "route" : {
+            "type" : "string"
+          },
+          "title" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "userIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "maxItems" : 500,
+            "minItems" : 0,
+            "type" : "array"
+          }
+        },
+        "required" : [ "body", "title", "userIds" ],
+        "type" : "object"
+      },
+      "BroadcastPushResponse" : {
+        "properties" : {
+          "dedupedTokens" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "delivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pruned" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "recipients" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Recipient"
+            },
+            "type" : "array"
+          },
+          "requested" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedDisabled" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedNotFound" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skippedOptedOut" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "targeted" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "CancelResult" : {
+        "properties" : {
+          "lateCancel" : {
+            "type" : "boolean"
+          },
+          "lateCancelCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "preview" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "CreateEventRequest" : {
+        "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "heading" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "imagePath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "pattern" : "event-images/[A-Za-z0-9._-]+",
+            "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "locationText" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "mapUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "onlineUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "visibilityEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "visibilityStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "description", "heading", "locationText", "startAt", "timezone", "visibilityEnd", "visibilityStart" ],
+        "type" : "object"
+      },
+      "DeviceResponse" : {
+        "properties" : {
+          "platform" : {
+            "enum" : [ "ANDROID", "IOS", "WEB" ],
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "EmailCodeRequest" : {
+        "properties" : {
+          "email" : {
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "email" ],
+        "type" : "object"
+      },
+      "EmailCodeVerifyRequest" : {
+        "properties" : {
+          "code" : {
+            "minLength" : 1,
+            "pattern" : "\\d{4,10}",
+            "type" : "string"
+          },
+          "email" : {
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "code", "email" ],
+        "type" : "object"
+      },
+      "EmailCodeVerifyResponse" : {
+        "properties" : {
+          "customToken" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "EventCard" : {
+        "properties" : {
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "city" : {
+            "type" : "string"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "happeningNow" : {
+            "type" : "boolean"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealed" : {
+            "type" : "boolean"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "locationText" : {
+            "type" : "string"
+          },
+          "myState" : {
+            "enum" : [ "NONE", "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "UPCOMING", "HAPPENING_NOW", "FINISHED" ],
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "EventDetail" : {
+        "properties" : {
+          "ageEligible" : {
+            "type" : "boolean"
+          },
+          "ageMax" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "attendees" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AttendeeAvatar"
+            },
+            "type" : "array"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "city" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "happeningNow" : {
+            "type" : "boolean"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealed" : {
+            "type" : "boolean"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "locationText" : {
+            "type" : "string"
+          },
+          "mapUrl" : {
+            "type" : "string"
+          },
+          "myState" : {
+            "enum" : [ "NONE", "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "onlineUrl" : {
+            "type" : "string"
+          },
+          "spotAvailableToClaim" : {
+            "type" : "boolean"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "UPCOMING", "HAPPENING_NOW", "FINISHED" ],
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "waitlistedCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "EventResponse" : {
+        "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "city" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "createdBy" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "effectiveLocationRevealHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "imagePath" : {
+            "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "locationRevealsAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "locationText" : {
+            "type" : "string"
+          },
+          "mapUrl" : {
+            "type" : "string"
+          },
+          "onlineUrl" : {
+            "type" : "string"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "visibilityEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "visibilityStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "waitlistCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "MeResponse" : {
+        "properties" : {
+          "accountState" : {
+            "$ref" : "#/components/schemas/AccountState"
+          },
+          "age" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "ageVerified" : {
+            "type" : "boolean"
+          },
+          "city" : {
+            "type" : "string"
+          },
+          "currentTermsVersion" : {
+            "type" : "string"
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "firstName" : {
+            "type" : "string"
+          },
+          "lastActiveAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "lastName" : {
+            "type" : "string"
+          },
+          "lateCancelCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "notificationPref" : {
+            "enum" : [ "EMAIL", "PUSH", "BOTH" ],
+            "type" : "string"
+          },
+          "onboardingCompleted" : {
+            "type" : "boolean"
+          },
+          "phone" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "termsAcceptedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "termsAcceptedVersion" : {
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "uid" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "OnboardingRequest" : {
+        "properties" : {
+          "age" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "location" : {
+            "maxLength" : 255,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "name" : {
+            "maxLength" : 255,
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "age", "location", "name" ],
+        "type" : "object"
+      },
+      "PageResponseAuditEventResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AuditEventResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PageResponseEventCard" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventCard"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PageResponseEventResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PagedResponseUserResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/UserResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PushFanoutResponse" : {
+        "properties" : {
+          "delivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "failed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pruned" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "targeted" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Recipient" : {
+        "properties" : {
+          "fanout" : {
+            "$ref" : "#/components/schemas/PushFanoutResponse"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "RegisterDeviceRequest" : {
+        "properties" : {
+          "platform" : {
+            "enum" : [ "ANDROID", "IOS", "WEB" ],
+            "type" : "string"
+          },
+          "token" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "platform", "token" ],
+        "type" : "object"
+      },
+      "RsvpResult" : {
+        "properties" : {
+          "goingCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "state" : {
+            "enum" : [ "GOING", "WAITLISTED" ],
+            "type" : "string"
+          },
+          "waitlistedCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "TestPushRequest" : {
+        "properties" : {
+          "route" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "UpdateEventRequest" : {
+        "properties" : {
+          "ageMax" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "ageMin" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "endAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "heading" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "imagePath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "pattern" : "event-images/[A-Za-z0-9._-]+",
+            "type" : "string"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "locationText" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "mapUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "onlineUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "startAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "visibilityEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "visibilityStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "UpdateMeRequest" : {
+        "properties" : {
+          "age" : {
+            "format" : "int32",
+            "maximum" : 120,
+            "minimum" : 13,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "displayName" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "firstName" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "lastName" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "locale" : {
+            "maxLength" : 35,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "notificationPref" : {
+            "enum" : [ "EMAIL", "PUSH", "BOTH" ],
+            "type" : "string"
+          },
+          "phone" : {
+            "maxLength" : 32,
+            "minLength" : 0,
+            "pattern" : "^$|^\\+?[0-9 ()./-]{3,32}$",
+            "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "UpdateUserRequest" : {
+        "properties" : {
+          "empty" : {
+            "type" : "boolean"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "role" : {
+            "enum" : [ "USER", "ADMIN" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "UserResponse" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "phoneNumber" : {
+            "type" : "string"
+          },
+          "pushEligible" : {
+            "type" : "boolean"
+          },
+          "role" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "description" : "REST API for the TeamMarhaba backend service.",
+    "title" : "TeamMarhaba Backend API",
+    "version" : "v1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/api/v1/admin/events" : {
+      "get" : {
+        "operationId" : "list",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseEventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateEventRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/{id}" : {
+      "get" : {
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      },
+      "patch" : {
+        "operationId" : "update_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateEventRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/{id}/cancel" : {
+      "post" : {
+        "operationId" : "cancel",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/push/broadcast" : {
+      "post" : {
+        "operationId" : "broadcast",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BroadcastPushRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BroadcastPushResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "push-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users" : {
+      "get" : {
+        "operationId" : "list_3",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "default" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "default" : "id,asc",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PagedResponseUserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users/push-routes" : {
+      "get" : {
+        "operationId" : "pushRoutes",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "items" : {
+                      "type" : "string"
+                    },
+                    "type" : "array"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users/{id}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      },
+      "patch" : {
+        "operationId" : "update",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users/{id}/test-push" : {
+      "post" : {
+        "operationId" : "testPush",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TestPushRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PushFanoutResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/audit" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "actorUid",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "targetType",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "targetId",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAuditEventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "audit-controller" ]
+      }
+    },
+    "/api/v1/auth/email-code/request" : {
+      "post" : {
+        "operationId" : "request",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EmailCodeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "email-code-controller" ]
+      }
+    },
+    "/api/v1/auth/email-code/verify" : {
+      "post" : {
+        "operationId" : "verify",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EmailCodeVerifyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EmailCodeVerifyResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "email-code-controller" ]
+      }
+    },
+    "/api/v1/events" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseEventCard"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}" : {
+      "get" : {
+        "operationId" : "detail",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EventDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/claim" : {
+      "post" : {
+        "operationId" : "claim",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RsvpResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/rsvp" : {
+      "delete" : {
+        "operationId" : "cancelRsvp",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "preview",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CancelResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      },
+      "post" : {
+        "operationId" : "rsvp",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RsvpResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/me" : {
+      "get" : {
+        "operationId" : "me",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      },
+      "patch" : {
+        "operationId" : "updateMe",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateMeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/accept-terms" : {
+      "post" : {
+        "operationId" : "acceptTerms",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AcceptTermsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/devices" : {
+      "post" : {
+        "operationId" : "register",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterDeviceRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "device-controller" ]
+      }
+    },
+    "/api/v1/me/devices/{token}" : {
+      "delete" : {
+        "operationId" : "deregister",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "device-controller" ]
+      }
+    },
+    "/api/v1/me/history" : {
+      "get" : {
+        "operationId" : "history",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAuditEventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/onboarding" : {
+      "post" : {
+        "operationId" : "onboarding",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OnboardingRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/onboarding-complete" : {
+      "post" : {
+        "operationId" : "completeOnboarding",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/resend-verification" : {
+      "post" : {
+        "operationId" : "resendVerification",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/meta" : {
+      "get" : {
+        "operationId" : "meta",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "meta-controller" ]
+      }
+    },
+    "/api/v1/ping" : {
+      "get" : {
+        "operationId" : "ping",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "ping-controller" ]
+      }
+    },
+    "/health" : {
+      "get" : {
+        "operationId" : "health",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "health-controller" ]
+      }
+    },
+    "/version" : {
+      "get" : {
+        "operationId" : "version",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "version-controller" ]
+      }
+    }
+  },
+  "servers" : [ {
+    "description" : "Generated server url",
+    "url" : "http://localhost"
+  } ]
+}
