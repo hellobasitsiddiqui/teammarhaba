@@ -21,6 +21,7 @@ import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
 import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
+import { enterHome } from "./home.js";
 import { enterChat } from "./chat.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
@@ -125,6 +126,9 @@ let profileRouteEntered = null;
 // Same lifecycle for the chat placeholder view (TM-434): mount the "coming soon" stub once on entry,
 // reset on leaving. TM-433 swaps enterChat()'s body for the real chat with no change here.
 let chatActive = false;
+// Home feed (TM-512): mount the "Events near you" feed / empty-home into #auth-signed-in on entry,
+// reset on leaving so returning to Home re-fetches (fresh counts / RSVP state after acting elsewhere).
+let homeActive = false;
 // Same lifecycle for the onboarding gate view (TM-250): mount once, (re)load on entry.
 let onboardingActive = false;
 // Same lifecycle for the terms gate view (TM-170): mount once, (re)load on entry.
@@ -374,6 +378,18 @@ function guard() {
     }
   } else {
     chatActive = false;
+  }
+  // Home feed (TM-512): mount the "Events near you" feed / empty-home on entry into #/home, reset on
+  // leaving so re-entering (e.g. tapping the Home tab after RSVPing elsewhere) re-fetches. Repeated
+  // guard() calls for the same route (the 2–3 fired on load / auth-resolve) don't refetch while
+  // homeActive stays true. The render() above already toggles the #auth-signed-in panel's visibility.
+  if (route === HOME) {
+    if (!homeActive) {
+      homeActive = true;
+      enterHome();
+    }
+  } else {
+    homeActive = false;
   }
   // First-login gate view (TM-250): mount on entry, passing the `done` callback the gate invokes
   // after a successful submit. `done` flips our local onboarded flag (the server now reports it) and

@@ -4302,3 +4302,239 @@ button.tm-c-reaction {
     background: var(--surface-card);
     color: var(--muted);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * Home screen (TM-512) — the "Events near you" feed + the paper-empty-home first-run state.
+ *
+ * The #/home landing (the #auth-signed-in panel) refreshed to the approved wireframe (design-kit
+ * `paper-home` / `app-home` + `paper-empty-home`), sitting inside the bottom-nav shell (TM-434).
+ * Built ENTIRELY on the TM-510 design tokens (the neutral/ink ramp + spacing/type/shape scales and
+ * their semantic aliases — --surface-card / --border / --accent / --muted / --space-* / --fs-* /
+ * --radius-*), NO hard-coded colours or px, so it reskins across clean / doodle / sketch (+ dark)
+ * with no per-theme rules of its own — the sketch/doodle hand-drawn borders + wobble come from the
+ * theme blocks that already target cards, inputs and .tm-btn. This is a NEW screen-scoped, additive
+ * section (kept out of the shared/theme blocks) so it doesn't collide with TM-511's shared component
+ * library, which is being built in parallel; the CTA / Retry reuse the shared .tm-btn and are marked
+ * in home.js to reconcile with TM-511's components later.
+ * ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+/* The home panel is a left-aligned feed (the .app column is centered; the feed is not). */
+.tm-home {
+    display: block;
+    text-align: left;
+}
+
+.tm-home-head {
+    margin: 0.25rem 0 var(--space-4);
+}
+
+.tm-home-title {
+    margin: 0 0 0.15rem;
+    font-size: var(--fs-6);
+    line-height: 1.1;
+}
+
+.tm-home-sub {
+    margin: 0;
+    font-size: var(--fs-2);
+    color: var(--muted);
+}
+
+.tm-home-feed {
+    display: block;
+}
+
+.tm-home-loading {
+    margin: var(--space-3) 0;
+}
+
+/* The feed list — a stack of event cards. */
+.tm-home-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+}
+
+/* A feed card — the WHOLE card is the link (the tap target), matching the #/events browse card and
+   the wireframe. */
+.tm-home-card {
+    display: block;
+    padding: var(--space-4);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.tm-home-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--accent-line);
+}
+
+.tm-home-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.tm-home-card-live {
+    border-color: var(--accent);
+}
+
+/* Chip row: a live pill and/or the category tag (tag shown only when the event carries one). */
+.tm-home-card-chips {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: var(--space-2);
+}
+
+.tm-home-tag {
+    display: inline-block;
+    padding: 0.05rem 0.6rem;
+    font-size: var(--fs-2);
+    background: var(--surface-2);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
+}
+
+.tm-home-live {
+    display: inline-block;
+    padding: 0.05rem 0.55rem;
+    font-size: var(--fs-1);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--on-accent);
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+}
+
+.tm-home-card-title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--fs-4);
+    line-height: 1.15;
+}
+
+/* A "when" / "where" meta row with a leading glyph. */
+.tm-home-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0.15rem 0;
+    font-size: var(--fs-2);
+    color: var(--muted);
+}
+
+.tm-home-i {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+}
+
+/* The bottom row: the "N going" pill (left) + the RSVP-state affordance (right). */
+.tm-home-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+}
+
+.tm-home-going {
+    display: inline-block;
+    padding: 0.15rem 0.7rem;
+    font-size: var(--fs-2);
+    color: var(--fg);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
+}
+
+/* The RSVP-state affordance — the three wireframe button variants (RSVP / Going ✓ / Waitlist). It is
+   a styled SPAN (not a nested <button>, invalid inside the card's <a>); the actual, gated RSVP lives
+   on the event detail the card links to. reconcile with TM-511 component library. */
+.tm-home-state {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    font-size: var(--fs-2);
+    font-weight: 600;
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius);
+    white-space: nowrap;
+}
+
+.tm-home-state-rsvp {
+    color: var(--on-accent);
+    background: var(--accent);
+    box-shadow: var(--shadow-sm);
+}
+
+.tm-home-state-going {
+    color: var(--fg);
+    background: var(--accent-soft);
+    border-color: var(--border);
+}
+
+.tm-home-state-waitlist {
+    color: var(--fg);
+    background: var(--surface-card);
+    border-color: var(--border);
+}
+
+/* Empty-home (paper-empty-home) + the load-error state share the centered layout. */
+.tm-home-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-6) var(--space-4);
+    gap: var(--space-2);
+}
+
+.tm-home-empty-art {
+    width: 128px;
+    height: 128px;
+    display: grid;
+    place-items: center;
+    margin-bottom: var(--space-2);
+    background: var(--surface-2);
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    color: var(--muted);
+}
+
+.tm-home-empty-icon {
+    width: 60px;
+    height: 60px;
+}
+
+.tm-home-empty-title {
+    margin: 0;
+    font-size: var(--fs-5);
+}
+
+.tm-home-empty-text {
+    margin: 0 0 var(--space-3);
+    max-width: 34ch;
+    font-size: var(--fs-2);
+    color: var(--muted);
+    line-height: 1.4;
+}
+
+.tm-home-empty-cta {
+    text-decoration: none;
+}
+
+/* Demoted identity footer — quiet + muted so the feed stays the hero (the wireframe keeps brand/bell
+   as global chrome). #me (me.js) is the single "Signed in as …" line; #user-email is hidden. */
+.tm-home-identity {
+    margin: var(--space-5) 0 0;
+    font-size: var(--fs-1);
+    color: var(--muted);
+    line-height: 1.4;
+}

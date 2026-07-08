@@ -186,14 +186,44 @@
                 </div>
             </form>
 
-            <div class="auth-card" id="auth-signed-in" hidden>
-                <h2>Signed in</h2>
-                <p>You are signed in as <strong id="user-email"></strong>.</p>
-                <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client (TM-108). -->
-                <p id="me" class="status"></p>
+            <!-- Home screen (TM-512): the #/home landing, refreshed to the approved wireframe
+                 (design-kit paper-home / app-home + paper-empty-home). Still the panel the router
+                 (TM-109) toggles for #/home, and still #auth-signed-in so the auth/onboarding/terms
+                 e2e gates and login.js keep keying off it — its INNER content is now the product Home:
+                 an "Events near you" section header + a feed of event cards (or the empty-home state),
+                 built by home.js into #tm-home-feed and sitting inside the bottom-nav shell (TM-434).
+                 Token-only styling (styles.css "Home screen" section) so it renders on web, mobile-web
+                 and the Android WebView across the theme families. Built against the design-kit while
+                 TM-511 (shared component library) runs in parallel; shared-component spots (the CTA /
+                 retry buttons) reuse .tm-btn and are marked to reconcile with TM-511 later. -->
+            <section class="tm-home" id="auth-signed-in" hidden aria-label="Home">
+                <!-- Section header (paper-home): the "Events near you" title + the "<city> · this
+                     week" context line (home.js fills the city from /me, best-effort). Kept an <h2> so
+                     the doodle decoration (TM-215) still finds the home heading under the doodle theme. -->
+                <div class="tm-home-head">
+                    <h2 class="tm-home-title">Events near you</h2>
+                    <p class="tm-home-sub" id="tm-home-context">Near you · this week</p>
+                </div>
+
+                <!-- Feed mount: home.js builds the "Events near you" cards, or the paper-empty-home
+                     first-run state, here. -->
+                <div id="tm-home-feed" class="tm-home-feed" data-testid="home-feed"></div>
+
+                <!-- Backend-verified identity (TM-108 demo) — kept, but DEMOTED to a quiet muted footer
+                     so the feed is the hero. #user-email (login.js), #me (me.js + the TM-135 tour /
+                     TM-255 help anchors) and #home-admin-link (router, ADMIN-only) all stay present so
+                     none of those integrations break; the wireframe's brand + bell chrome stays global. -->
+                <p class="tm-home-identity">
+                    <!-- #user-email kept for login.js (which sets its text) but hidden — #me below is
+                         the single, friendly "Signed in as …" identity line (me.js), so the email
+                         isn't shown twice. -->
+                    <span id="user-email" class="tm-home-identity-you" hidden></span>
+                    <!-- Backend-verified identity from GET /api/v1/me via the authenticated API client. -->
+                    <span id="me" class="tm-home-identity-me"></span>
+                </p>
                 <!-- Admins reach the users console here (router shows the link only for ADMINs). -->
                 <p class="home-links"><a href="#/admin" id="home-admin-link" hidden>Open the admin users console →</a></p>
-            </div>
+            </section>
         </section>
 
         <!-- Admin users console (TM-133): ADMIN-only #/admin view. admin.js (imported by router.js)
