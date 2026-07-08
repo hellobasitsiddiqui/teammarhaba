@@ -13,13 +13,52 @@
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
 import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, ApiError } from "./api.js";
-import { el, clear, toast, confirmDialog, relativeTime } from "./ui.js";
+import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
 import * as core from "./events-core.js";
 import * as cal from "./calendar-core.js";
 
 const $ = (id) => document.getElementById(id);
+
+// ── Inline SVG icons (TM-513) ─────────────────────────────────────────────────────────────────
+// The paper wireframes ink a clock / pin beside the meta lines and a chevron in the hero back button.
+// These are ALWAYS-VISIBLE structural icons — unlike the doodle asset pack (assets/doodles.js), which
+// styles.css hides outside `[data-theme="doodle"]` — so at the production default (sketch) theme the
+// wireframe's icons still render. Built via a tiny namespaced factory (createElement can't make SVG),
+// attribute-only like ui.js `el()` / doodles.js — no innerHTML seam, all shapes are static.
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, String(v));
+  for (const c of children) if (c) node.append(c);
+  return node;
+}
+const ICON_SHAPES = {
+  clock: () => [svgEl("circle", { cx: 12, cy: 12, r: 8.5 }), svgEl("path", { d: "M12 7.5V12l3 2" })],
+  pin: () => [svgEl("path", { d: "M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" }), svgEl("circle", { cx: 12, cy: 10, r: 2.4 })],
+  back: () => [svgEl("path", { d: "M15 5l-7 7 7 7" })],
+};
+/** A small decorative line-icon (clock / pin / back), inked with `currentColor` so it follows theme. */
+function icon(name, size = 18) {
+  return svgEl(
+    "svg",
+    {
+      class: "tm-event-icon",
+      viewBox: "0 0 24 24",
+      width: size,
+      height: size,
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": 1.8,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "aria-hidden": "true",
+      focusable: "false",
+    },
+    (ICON_SHAPES[name] || (() => []))(),
+  );
+}
 
 // Viewer formatting context: the browser's timezone + locale, so instants render in the viewer's
 // local time (the AC) and in their number/date format. Both fail soft to sensible defaults.
@@ -31,7 +70,9 @@ const LOCALE = (typeof navigator !== "undefined" && navigator.language) || "en-G
 // gate (the backend 409 is the real guard). NB: the caller's /me (age gate) is deliberately NOT
 // cached — it's fetched fresh per detail render so that adding an age in #/profile is reflected
 // immediately on return, rather than showing a stale "add your age" until a reload.
-const state = { cards: [] };
+// `filter` is the active browse chip (TM-513) — persisted across list re-paints so switching a chip
+// doesn't refetch, and reset to "all" whenever it's no longer one of the offered (data-backed) chips.
+const state = { cards: [], filter: "all" };
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
@@ -101,11 +142,25 @@ async function renderList(view) {
   if (mine !== renderToken) return;
 
   state.cards = Array.isArray(data?.items) ? data.items : [];
-  const { happeningNow, upcoming } = core.listingBuckets(state.cards, Date.now());
+  paintList(view);
+}
+
+/**
+ * Paint the browse list from the cached `state.cards` at the current `state.filter` (TM-513) — the
+ * wireframe's `Events` header, the filter-chip row, then the cards grouped into Happening now /
+ * Upcoming. Split from `renderList` so a chip tap re-paints without a refetch.
+ */
+function paintList(view) {
+  const now = Date.now();
+  const filters = core.eventFilters(state.cards, now);
+  // The active chip might no longer be offered (data changed under it) → fall back to All.
+  if (!filters.some((f) => f.key === state.filter)) state.filter = "all";
 
   clear(view).append(headerBar("Events"));
 
-  if (!happeningNow.length && !upcoming.length) {
+  // Truly zero events → the empty state (no chips to show). Uses the same `events-empty` testid the
+  // golden-path + events specs look for.
+  if (!state.cards.length) {
     view.append(
       el("div", { class: "tm-empty", "data-testid": "events-empty" }, [
         doodle("calendar", { class: "tm-doodle-empty", title: "No upcoming events" }),
@@ -116,7 +171,19 @@ async function renderList(view) {
     return;
   }
 
+  // The filter-chip row — only when there's more than "All" to offer (i.e. some status filter matches).
+  if (filters.length > 1) view.append(filterChips(view, filters));
+
+  const filtered = core.filterCards(state.cards, state.filter, now);
+  const { happeningNow, upcoming } = core.listingBuckets(filtered, now);
+
   const list = el("div", { class: "tm-event-list", "data-testid": "events-list" });
+  if (!happeningNow.length && !upcoming.length) {
+    // A non-empty listing filtered down to nothing (edge: e.g. the only GOING event has since ended).
+    // Keep the `events-list` container present (so the browse surface still reads as rendered) with a
+    // muted note + a Show-all escape hatch.
+    list.append(el("p", { class: "tm-muted tm-event-filter-empty", text: "No events match this filter." }));
+  }
   if (happeningNow.length) {
     list.append(
       el("h3", { class: "tm-event-section", "data-testid": "events-happening-now" }, [
@@ -133,13 +200,51 @@ async function renderList(view) {
   view.append(list);
 }
 
-/** One browse card — a link to the detail answering what / when / where + the two live badges. */
+/**
+ * The browse filter-chip row (the wireframe's pill chips). Data-backed status filters (see
+ * events-core `eventFilters`) — the event model has no category field yet, so these are All / Going /
+ * Waitlisted / Happening now rather than categories. // reconcile with TM-511 component library (chip)
+ * + a real category field when either lands.
+ */
+function filterChips(view, filters) {
+  const row = el("div", { class: "tm-event-chips", role: "tablist", "aria-label": "Filter events" });
+  for (const f of filters) {
+    const on = f.key === state.filter;
+    row.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: `tm-event-chip-filter${on ? " is-on" : ""}`,
+          role: "tab",
+          "aria-selected": on ? "true" : "false",
+          dataset: { filter: f.key },
+          onClick: () => {
+            if (state.filter === f.key) return;
+            state.filter = f.key;
+            paintList(view);
+          },
+        },
+        f.label,
+      ),
+    );
+  }
+  return row;
+}
+
+/**
+ * One browse card (the wireframe's `paper-events-list` card): title, a `date · time · where` meta
+ * line, and a row of the going/full pill + a state affordance styled like the wireframe's button. The
+ * whole card is a LINK to the detail (where the real RSVP command runs), so the CTA is a non-interactive
+ * label — tapping anywhere on the card, including it, opens the detail.
+ */
 function eventCard(card, { live }) {
-  const chip = core.myStateChip(card.myState);
   const when = core.formatWhen(card.startAt, { tz: VIEWER_TZ, locale: LOCALE });
-  const rel = relativeTime(card.startAt);
   // The card's location may be withheld pre-reveal (TM-408) — degrade to a neutral line.
   const where = (card.locationText || card.city || "Location shared before the event").trim();
+  const meta = [when || "Date to be confirmed", where].filter(Boolean).join(" · ");
+  const pill = core.listCountPill(card);
+  const cta = core.listCtaState(card);
 
   return el(
     "a",
@@ -150,36 +255,24 @@ function eventCard(card, { live }) {
       dataset: { eventId: String(card.id) },
     },
     [
-      eventThumb(card, "tm-event-thumb"),
-      el("div", { class: "tm-event-card-body" }, [
-        el("div", { class: "tm-event-card-top" }, [
-          live ? el("span", { class: "tm-event-badge-live", text: "Live now" }) : null,
-          chip ? el("span", { class: `tm-event-chip ${chip.cls}`, text: chip.label }) : null,
-        ]),
-        el("h4", { class: "tm-event-card-title", text: card.heading || "Untitled event" }),
-        el("p", { class: "tm-event-when" }, [
-          el("span", { text: when || "Date to be confirmed" }),
-          when ? el("span", { class: "tm-muted tm-event-rel", text: ` · ${rel.text}` }) : null,
-        ]),
-        el("p", { class: "tm-event-where tm-muted", text: where }),
-        el("div", { class: "tm-event-card-badges" }, [
-          el("span", { class: "tm-badge tm-event-going", "data-testid": "event-going-count", text: core.goingBadge(card.goingCount) }),
-        ]),
+      // The wireframe's category `.tag` slot has no backing field yet — used only to surface the
+      // data-backed "Happening now" state for a live event (else omitted). // reconcile with TM-511
+      // (tag component) + a category field.
+      live ? el("span", { class: "tm-event-tag tm-event-tag-live", text: "Happening now" }) : null,
+      el("h3", { class: "tm-event-card-title", text: card.heading || "Untitled event" }),
+      el("p", { class: "tm-event-meta", text: meta }),
+      el("div", { class: "tm-event-card-row" }, [
+        el("span", {
+          class: `tm-event-pill${pill.full ? " tm-event-pill-full" : ""}`,
+          "data-testid": "event-going-count",
+          text: pill.label,
+        }),
+        // A state LABEL styled like the wireframe button (not itself interactive — the card link owns
+        // the tap). // reconcile with TM-511 component library (button).
+        el("span", { class: `tm-event-cta tm-event-cta-${cta.variant}`, "aria-hidden": "true", text: cta.label }),
       ]),
     ],
   );
-}
-
-/** The event image if it's a resolvable absolute URL, else a themed doodle placeholder (TM-215). */
-function eventThumb(item, cls) {
-  const path = (item?.imagePath || "").trim();
-  if (/^https?:\/\//i.test(path)) {
-    return el("img", { class: cls, src: path, alt: "", loading: "lazy" });
-  }
-  // imagePath is a storage path (not yet a served URL) or absent → warm placeholder motif.
-  return el("div", { class: `${cls} tm-event-thumb-placeholder`, "aria-hidden": "true" }, [
-    doodle("ticket", { title: "" }),
-  ]);
 }
 
 // ------------------------------------------------------------------ detail (#/events/{id})
@@ -229,62 +322,115 @@ function paintDetail(view, detail, me) {
   const now = Date.now();
   const when = core.describeWhen(detail.startAt, detail.endAt, detail.timezone, { viewerTz: VIEWER_TZ, locale: LOCALE });
   const bandLabel = core.ageBandLabel(detail);
+  const live = core.isHappeningNow(detail, now);
 
   clear(view).append(
     el("article", { class: "tm-event-detail", "data-testid": "event-detail", dataset: { eventId: String(detail.id) } }, [
-      headerBar("Event", { back: { href: "#/events", label: "← Events" } }),
-      eventThumb(detail, "tm-event-hero"),
-      el("h3", { class: "tm-event-title", text: detail.heading || "Untitled event" }),
+      // Hero (the wireframe's boxed image with the back button top-left + a state tag top-right).
+      detailHero(detail, { live }),
+      el("h1", { class: "tm-event-title", text: detail.heading || "Untitled event" }),
 
-      // When — viewer-local, with an event-local line when the zones differ.
-      el("section", { class: "tm-event-when-block", "data-testid": "event-when" }, [
-        el("p", { class: "tm-event-when-date", text: when.date || "Date to be confirmed" }),
-        when.time ? el("p", { class: "tm-event-when-time" }, [`${when.time}`, when.tz ? el("span", { class: "tm-muted", text: ` ${when.tz}` }) : null]) : null,
-        when.showEventLocal
-          ? el("p", { class: "tm-muted tm-event-when-local", text: `Event local time: ${when.eventLocalTime} ${when.eventLocalTz} (${when.eventTz})` })
-          : null,
-      ]),
+      // When — clock icon + viewer-local date/time (event-local line when zones differ).
+      whenSection(when),
+
+      // Where — pin icon + reveal-aware location (TM-408).
+      locationSection(detail, now),
 
       // Age band (TM-415) — shown whenever the event has one, independent of eligibility.
       bandLabel ? el("p", { class: "tm-badge tm-event-ageband", "data-testid": "event-age-band", text: bandLabel }) : null,
 
-      // Add to calendar (TM-398) — reveal-aware (never leaks the exact venue pre-reveal); hidden for
-      // cancelled events. Returns null when there's nothing to add.
-      calendarSection(detail, now),
-
-      // Location — reveal-aware (TM-408).
-      locationSection(detail, now),
-
       // Body.
       detail.description ? el("section", { class: "tm-event-description", text: detail.description }) : null,
 
-      // Attendees + counts.
+      // Attendees + counts + the wireframe's "N going · M spots" summary.
       attendeesSection(detail),
 
-      // The action area — RSVP / waitlist / claim / cancel, driven entirely by the tested model.
+      // Map tile (the wireframe's "Map — tap to open in Maps") — reveal-aware.
+      mapSection(detail, now),
+
+      // Add to calendar (TM-398) — reveal-aware (never leaks the exact venue pre-reveal); hidden for
+      // cancelled events. Returns null when there's nothing to add. Not in the wireframe, but a shipped
+      // affordance kept below the body, above the sticky CTA.
+      calendarSection(detail, now),
+
+      // The action CTA — RSVP / waitlist / claim / cancel, driven entirely by the tested model.
       actionSection(view, detail, now, me),
     ]),
   );
 }
 
+/**
+ * The detail hero (the wireframe's boxed banner). A bordered box carrying the event image (when it's a
+ * resolvable http(s) URL) with the circular back button overlaid top-left and, for a live event, a
+ * "Happening now" tag top-right. With no image it's the plain bordered box the wireframe shows (the
+ * doodle placeholder is intentionally dropped — it's `display:none` outside the doodle theme anyway).
+ */
+function detailHero(detail, { live }) {
+  const path = (detail?.imagePath || "").trim();
+  const kids = [];
+  if (/^https?:\/\//i.test(path)) kids.push(el("img", { class: "tm-event-hero-img", src: path, alt: "", loading: "lazy" }));
+  kids.push(
+    el("a", { class: "tm-event-hero-back", href: "#/events", "aria-label": "Back to events" }, [icon("back", 18)]),
+  );
+  if (live) kids.push(el("span", { class: "tm-event-hero-tag", text: "Happening now" }));
+  return el("div", { class: "tm-event-hero", "data-testid": "event-hero" }, kids);
+}
+
+/** The "when" block — a clock-iconed meta row of viewer-local date · time, plus an event-local line
+ *  when the zones differ (TM-396). Keeps the `event-when` testid the e2e suite reads. */
+function whenSection(when) {
+  const line = [when.date || "Date to be confirmed"];
+  if (when.time) line.push(` · ${when.time}`);
+  if (when.tz) line.push(el("span", { class: "tm-muted", text: ` ${when.tz}` }));
+  const kids = [metaRow(icon("clock"), line)];
+  if (when.showEventLocal) {
+    kids.push(
+      el("p", {
+        class: "tm-muted tm-event-when-local",
+        text: `Event local time: ${when.eventLocalTime} ${when.eventLocalTz} (${when.eventTz})`,
+      }),
+    );
+  }
+  return el("section", { class: "tm-event-when-block", "data-testid": "event-when" }, kids);
+}
+
+/** A meta line: a leading line-icon + a text span (the wireframe's icon+text `.meta` rows). */
+function metaRow(iconEl, textParts) {
+  return el("p", { class: "tm-event-meta-row" }, [iconEl, el("span", {}, textParts)]);
+}
+
 function locationSection(detail, now) {
   const loc = core.locationView(detail, now);
-  const children = [
-    el("h4", { class: "tm-event-subhead", text: "Where" }),
-    el("p", { class: "tm-event-location-primary" }, [
-      doodle("pin", { class: "tm-event-pin", title: "" }),
-      el("span", { text: loc.primary }),
-      loc.approximate ? el("span", { class: "tm-muted", text: " (approximate)" }) : null,
-    ]),
-  ];
-  if (loc.note) children.push(el("p", { class: "tm-muted tm-event-reveal-note", text: loc.note }));
-  if (loc.mapUrl) {
-    children.push(el("a", { class: "tm-btn tm-btn-sm", href: loc.mapUrl, target: "_blank", rel: "noopener", "data-testid": "event-map-link" }, "Open map"));
-  }
+  const line = [loc.primary];
+  if (loc.approximate) line.push(el("span", { class: "tm-muted", text: " (approximate)" }));
+  const children = [metaRow(icon("pin"), line)];
+  if (loc.note) children.push(el("p", { class: "tm-muted tm-event-reveal", text: loc.note }));
   if (loc.onlineUrl) {
-    children.push(el("a", { class: "tm-btn tm-btn-sm", href: loc.onlineUrl, target: "_blank", rel: "noopener", "data-testid": "event-online-link" }, "Join online"));
+    children.push(
+      el("a", { class: "tm-btn tm-btn-sm", href: loc.onlineUrl, target: "_blank", rel: "noopener", "data-testid": "event-online-link" }, "Join online"),
+    );
   }
   return el("section", { class: "tm-event-location", "data-testid": "event-location" }, children);
+}
+
+/**
+ * The map tile (the wireframe's "Map — tap to open in Maps"). A real outbound link to the venue map
+ * once the location is revealed and a `mapUrl` exists (TM-408); a non-interactive placeholder while the
+ * venue is still hidden; nothing when there's simply no map to show (revealed but no `mapUrl`).
+ */
+function mapSection(detail, now) {
+  const loc = core.locationView(detail, now);
+  if (loc.mapUrl) {
+    return el(
+      "a",
+      { class: "tm-event-map tm-event-map-link", href: loc.mapUrl, target: "_blank", rel: "noopener", "data-testid": "event-map-link" },
+      "Map — tap to open in Maps",
+    );
+  }
+  if (loc.revealed === false) {
+    return el("div", { class: "tm-event-map", "aria-hidden": "true" }, "Map opens once the venue is revealed");
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ add to calendar (TM-398)
@@ -379,7 +525,7 @@ function downloadIcs(filename, icsText) {
 }
 
 function attendeesSection(detail) {
-  const going = core.goingBadge(detail.goingCount);
+  const summary = core.attendanceSummary(detail); // { going: "8 going", spots: "12 spots" | "" }
   const attendees = Array.isArray(detail.attendees) ? detail.attendees : [];
   const overflow = Math.max(0, (Number(detail.goingCount) || 0) - attendees.length);
   const waitBadge = core.waitlistBadge(detail.waitlistedCount);
@@ -390,12 +536,18 @@ function attendeesSection(detail) {
   }
   if (overflow > 0) strip.append(el("span", { class: "tm-event-avatar tm-event-avatar-more", text: `+${overflow}` }));
 
+  // The wireframe's attendees row: the avatar strip beside "8 going · 12 spots". The going badge keeps
+  // its `event-going-count` testid/copy; "· M spots" is appended when capacity is finite; the waitlist
+  // badge follows when there's a queue.
+  const countLine = el("p", { class: "tm-event-att-summary" }, [
+    el("span", { class: "tm-badge tm-event-going", "data-testid": "event-going-count", text: summary.going }),
+    summary.spots ? el("span", { class: "tm-muted tm-event-spots", text: ` · ${summary.spots}` }) : null,
+    waitBadge ? el("span", { class: "tm-badge tm-event-waitlist", "data-testid": "event-waitlist-count", text: waitBadge }) : null,
+  ]);
+
   return el("section", { class: "tm-event-attendees" }, [
-    el("div", { class: "tm-event-counts" }, [
-      el("span", { class: "tm-badge tm-event-going", "data-testid": "event-going-count", text: going }),
-      waitBadge ? el("span", { class: "tm-badge tm-event-waitlist", "data-testid": "event-waitlist-count", text: waitBadge }) : null,
-    ]),
-    attendees.length ? strip : el("p", { class: "tm-muted", text: "No one's going yet — you could be the first." }),
+    el("div", { class: "tm-event-att-head" }, [attendees.length ? strip : null, countLine]),
+    attendees.length ? null : el("p", { class: "tm-muted", text: "No one's going yet — you could be the first." }),
   ]);
 }
 
