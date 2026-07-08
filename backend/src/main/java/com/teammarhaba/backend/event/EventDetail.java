@@ -54,6 +54,9 @@ import java.util.List;
  *     both {@code null} = open to all ages)
  * @param ageEligible          the caller's eligibility verdict: {@code null} = unrestricted event,
  *     else {@code true}/{@code false} (age unset ⇒ {@code false})
+ * @param bookingClosesAt      the instant new RSVPs stop being accepted ({@code startAt − cutoffHours},
+ *     resolved per-event → city → app default by {@link BookingCutoffPolicy}); lets the client disable
+ *     the RSVP button at the real cutoff instead of assuming a fixed 60-minute window (TM-404)
  */
 public record EventDetail(
         Long id,
@@ -79,4 +82,5 @@ public record EventDetail(
         boolean happeningNow,
         Integer ageMin,
         Integer ageMax,
-        Boolean ageEligible) {}
+        Boolean ageEligible,
+        Instant bookingClosesAt) {}

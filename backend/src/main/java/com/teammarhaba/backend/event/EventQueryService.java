@@ -183,7 +183,8 @@ public class EventQueryService {
                 phaseNow == EventPhase.HAPPENING_NOW,
                 event.getAgeMin(),
                 event.getAgeMax(),
-                ageGate.eligibility(event, caller.map(User::getAge).orElse(null)));
+                ageGate.eligibility(event, caller.map(User::getAge).orElse(null)),
+                bookingCutoff.cutoffAt(event));
     }
 
     /**
