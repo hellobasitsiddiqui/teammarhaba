@@ -316,6 +316,82 @@ export function locationView(detail, nowMs = Date.now()) {
   };
 }
 
+// ------------------------------------------------------------------ open in maps / directions (TM-487)
+
+/**
+ * Platform tokens the directions builder understands — the SAME shape push-env.js `platformFor()`
+ * returns (derived from Capacitor's `getPlatform()`), so the events.js shell can feed that value in
+ * directly. Anything unrecognised (including plain web / mobile-web) falls through to the Google Maps
+ * https link.
+ */
+export const MAPS_PLATFORM = Object.freeze({ IOS: "IOS", ANDROID: "ANDROID", WEB: "WEB" });
+
+/** The visible + accessible label for the "Open in Maps" affordance — one source for both. */
+export const DIRECTIONS_LABEL = "Open in Maps";
+
+/**
+ * Build a platform-correct "open in maps / directions" URL, or null when there's nowhere to point.
+ *
+ * PURE (no DOM, no Capacitor, no browser globals) so the whole per-platform matrix is unit-tested here;
+ * the events.js shell derives the platform (via push-env's `platformFor()`) and opens the result
+ * EXTERNALLY — a `target="_blank"` link, which in the Capacitor shell hands off to the system maps app
+ * / browser rather than navigating inside the WebView (mirrors how the calendar Google/Outlook links
+ * already open out, TM-398).
+ *
+ *  • A curated venue `mapUrl` WINS when present — used verbatim on every platform. It is already a real
+ *    maps link, so we don't second-guess or rewrite it.
+ *  • Otherwise we build a query deep-link from the exact location text. The event model carries no
+ *    lat/lng (only `locationText` / `city`), so the query IS that free text — which every maps app
+ *    resolves as a place search:
+ *      - iOS      → https://maps.apple.com/?q=<query>                        (Apple Maps; opens the app)
+ *      - Android  → geo:0,0?q=<query>                                        (geo intent → Google Maps / chooser)
+ *      - web/else → https://www.google.com/maps/search/?api=1&query=<query>  (Google Maps in the browser)
+ *  • Returns null when there is neither a `mapUrl` nor a non-empty query, so the caller renders nothing.
+ *
+ * @param {{mapUrl?:(string|null), query?:(string|null)}} [loc]
+ * @param {"IOS"|"ANDROID"|"WEB"|string} [platform="WEB"]
+ * @returns {string|null}
+ */
+export function directionsUrl({ mapUrl, query } = {}, platform = MAPS_PLATFORM.WEB) {
+  const curated = typeof mapUrl === "string" ? mapUrl.trim() : "";
+  if (curated) return curated; // the venue's own link — used as-is, on every platform.
+  const q = typeof query === "string" ? query.trim() : "";
+  if (!q) return null; // nothing to search for → no link (caller hides the button).
+  const encoded = encodeURIComponent(q);
+  switch (platform) {
+    case MAPS_PLATFORM.IOS:
+      return `https://maps.apple.com/?q=${encoded}`;
+    case MAPS_PLATFORM.ANDROID:
+      return `geo:0,0?q=${encoded}`;
+    default:
+      return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+  }
+}
+
+/**
+ * The "Open in Maps / Directions" model for the event detail (TM-487).
+ *
+ * The button is shown ONLY once the exact location is revealed — the reveal decision is delegated to
+ * `locationView` so the TM-408 gate stays single-sourced and the venue can never leak before its
+ * boundary — AND only when there is somewhere to send the user. The maps query is the exact
+ * `locationText`, degrading to `city`; the neutral "shared ~24h before" placeholder is never turned
+ * into a query. An online-only event with no venue therefore shows no button.
+ *
+ * @param {object} detail   the event detail (reveal + location fields; all read defensively/optional)
+ * @param {"IOS"|"ANDROID"|"WEB"|string} [platform="WEB"]  device platform (push-env `platformFor()`)
+ * @param {number} [nowMs=Date.now()]
+ * @returns {{show:boolean, href:(string|null), label:string}}
+ */
+export function directionsModel(detail, platform = MAPS_PLATFORM.WEB, nowMs = Date.now()) {
+  const loc = locationView(detail, nowMs);
+  // Hard reveal gate: before the boundary there is no directions button at all (hidden, per the AC).
+  if (!loc.revealed) return { show: false, href: null, label: DIRECTIONS_LABEL };
+  // `loc.mapUrl` is the curated link (populated only post-reveal); the query degrades exact → city.
+  const query = (detail?.locationText || "").trim() || (detail?.city || "").trim();
+  const href = directionsUrl({ mapUrl: loc.mapUrl, query }, platform);
+  return { show: Boolean(href), href, label: DIRECTIONS_LABEL };
+}
+
 // ------------------------------------------------------------------ eligibility gates
 
 /** Normalize the event's age band from any of the plausible field shapes; null when there is none. */

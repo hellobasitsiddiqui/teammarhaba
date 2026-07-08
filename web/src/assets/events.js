@@ -16,6 +16,7 @@ import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, get
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
+import { platformFor } from "./push-env.js";
 import * as core from "./events-core.js";
 import * as cal from "./calendar-core.js";
 
@@ -424,20 +425,32 @@ function locationSection(detail, now) {
 }
 
 /**
- * The map tile (the wireframe's "Map — tap to open in Maps"). A real outbound link to the venue map
- * once the location is revealed and a `mapUrl` exists (TM-408); a non-interactive placeholder while the
- * venue is still hidden; nothing when there's simply no map to show (revealed but no `mapUrl`).
+ * The map tile / "Open in Maps — Directions" affordance (TM-487, building on the wireframe's
+ * "Map — tap to open in Maps"). Once the location is revealed and there is somewhere to point — the
+ * curated venue `mapUrl`, else a query built from the exact location text — it becomes a real,
+ * PLATFORM-CORRECT directions link: Apple Maps on iOS, a `geo:` intent on Android, Google Maps on the
+ * web (all resolved by the pure, unit-tested `directionsModel`). It opens EXTERNALLY — `target="_blank"`
+ * hands off to the system maps app / browser in the Capacitor shell rather than loading inside the
+ * WebView (same external-open path the calendar links use). While the venue is still hidden it stays
+ * the non-interactive "revealed later" placeholder; revealed-but-nowhere-to-go renders nothing.
  */
 function mapSection(detail, now) {
-  const loc = core.locationView(detail, now);
-  if (loc.mapUrl) {
+  const model = core.directionsModel(detail, platformFor(), now);
+  if (model.show) {
     return el(
       "a",
-      { class: "tm-event-map tm-event-map-link", href: loc.mapUrl, target: "_blank", rel: "noopener", "data-testid": "event-map-link" },
-      "Map — tap to open in Maps",
+      {
+        class: "tm-event-map tm-event-map-link",
+        href: model.href,
+        target: "_blank",
+        rel: "noopener",
+        "data-testid": "event-map-link",
+        "aria-label": "Open the event location in your maps app for directions",
+      },
+      [icon("pin"), el("span", { class: "tm-event-map-label", text: `${model.label} — Directions` })],
     );
   }
-  if (loc.revealed === false) {
+  if (core.locationView(detail, now).revealed === false) {
     return el("div", { class: "tm-event-map", "aria-hidden": "true" }, "Map opens once the venue is revealed");
   }
   return null;

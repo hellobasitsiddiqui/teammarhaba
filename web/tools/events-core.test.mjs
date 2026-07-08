@@ -23,6 +23,9 @@ import {
   isFinished,
   listingBuckets,
   locationView,
+  directionsUrl,
+  directionsModel,
+  DIRECTIONS_LABEL,
   ageBand,
   ageBandLabel,
   ageEligibility,
@@ -204,6 +207,74 @@ test("locationView: reveal fields absent (pre-TM-408 API) → treated as reveale
   assert.equal(legacy.primary, "Marhaba Cafe");
   const nothing = locationView({}, NOON_UTC);
   assert.equal(nothing.primary, "Location shared ~24h before the event", "no location at all → placeholder, not blank");
+});
+
+// ------------------------------------------------------------------ open in maps / directions (TM-487)
+
+test("directionsUrl: a curated mapUrl wins verbatim on EVERY platform", () => {
+  const map = "https://maps.example/venue/42";
+  assert.equal(directionsUrl({ mapUrl: map, query: "ignored" }, "IOS"), map);
+  assert.equal(directionsUrl({ mapUrl: map, query: "ignored" }, "ANDROID"), map);
+  assert.equal(directionsUrl({ mapUrl: map, query: "ignored" }, "WEB"), map);
+  // Surrounding whitespace is trimmed, but the link is otherwise untouched.
+  assert.equal(directionsUrl({ mapUrl: `  ${map}  ` }, "WEB"), map);
+});
+
+test("directionsUrl: no mapUrl → a platform-correct query deep-link, URL-encoded", () => {
+  const q = "Marhaba Cafe, 5 High St, London";
+  const enc = encodeURIComponent(q);
+  assert.equal(directionsUrl({ query: q }, "IOS"), `https://maps.apple.com/?q=${enc}`);
+  assert.equal(directionsUrl({ query: q }, "ANDROID"), `geo:0,0?q=${enc}`);
+  assert.equal(directionsUrl({ query: q }, "WEB"), `https://www.google.com/maps/search/?api=1&query=${enc}`);
+  // An unknown / absent platform falls through to the web (Google Maps https) link — the safe default.
+  assert.equal(directionsUrl({ query: q }, "DESKTOP"), `https://www.google.com/maps/search/?api=1&query=${enc}`);
+  assert.equal(directionsUrl({ query: q }), `https://www.google.com/maps/search/?api=1&query=${enc}`);
+  // The encoding is real, not cosmetic: spaces/commas never leak through raw.
+  assert.ok(!directionsUrl({ query: q }, "WEB").includes(" "));
+});
+
+test("directionsUrl: nothing to point at (no mapUrl, blank/absent query) → null", () => {
+  assert.equal(directionsUrl({ query: "   " }, "IOS"), null);
+  assert.equal(directionsUrl({ mapUrl: "  " }, "ANDROID"), null);
+  assert.equal(directionsUrl({}, "WEB"), null);
+  assert.equal(directionsUrl(undefined, "WEB"), null);
+});
+
+test("directionsModel: hidden before reveal (never leaks the venue), even if a link exists", () => {
+  const m = directionsModel(
+    { locationRevealed: false, city: "Shoreditch, London", locationText: "Secret Venue", mapUrl: "https://maps/x" },
+    "IOS",
+    NOON_UTC,
+  );
+  assert.equal(m.show, false);
+  assert.equal(m.href, null);
+  assert.equal(m.label, DIRECTIONS_LABEL);
+});
+
+test("directionsModel: revealed + mapUrl → shows the curated link (platform-agnostic)", () => {
+  const m = directionsModel(
+    { locationRevealed: true, locationText: "Marhaba Cafe", mapUrl: "https://maps/x" },
+    "ANDROID",
+    NOON_UTC,
+  );
+  assert.deepEqual(m, { show: true, href: "https://maps/x", label: DIRECTIONS_LABEL });
+});
+
+test("directionsModel: revealed, no mapUrl → builds a platform-correct link from the location text", () => {
+  const detail = { locationRevealed: true, locationText: "Marhaba Cafe, 5 High St" };
+  const enc = encodeURIComponent("Marhaba Cafe, 5 High St");
+  assert.equal(directionsModel(detail, "IOS", NOON_UTC).href, `https://maps.apple.com/?q=${enc}`);
+  assert.equal(directionsModel(detail, "ANDROID", NOON_UTC).href, `geo:0,0?q=${enc}`);
+  assert.equal(directionsModel(detail, "WEB", NOON_UTC).href, `https://www.google.com/maps/search/?api=1&query=${enc}`);
+});
+
+test("directionsModel: legacy API (no reveal fields) is treated as revealed; city is the fallback query", () => {
+  // Pre-TM-408 event with only a city → still a usable directions link (degrades exact → city).
+  const enc = encodeURIComponent("Shoreditch, London");
+  assert.equal(directionsModel({ city: "Shoreditch, London" }, "WEB", NOON_UTC).href, `https://www.google.com/maps/search/?api=1&query=${enc}`);
+  // Revealed but no venue at all (online-only / placeholder) → no button.
+  assert.equal(directionsModel({ locationRevealed: true }, "WEB", NOON_UTC).show, false);
+  assert.equal(directionsModel({}, "WEB", NOON_UTC).show, false);
 });
 
 // ------------------------------------------------------------------ age band (TM-415)
