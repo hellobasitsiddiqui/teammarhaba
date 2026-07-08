@@ -111,50 +111,73 @@ test.describe("@theme authenticated pages render under Paper", () => {
 // The two per-user Paper controls in profile settings — the heart of TM-529. Proves each applies LIVE
 // and PERSISTS SERVER-SIDE: after changing them we RELOAD, and appearance-sync re-reads the choice
 // from GET /api/v1/me (not localStorage) and re-applies it. This is the server round-trip, end to end.
+//
+// Determinism (TM-516). Two racy patterns were driving the flake; both are removed here:
+//   1. The wavy/sketchy control's <input> is the ACCESSIBLE checkbox behind the styled pill: 1px,
+//      opacity 0, position:absolute (see .tm-switch-input in styles.css). Driving it with
+//      locator.check()/uncheck() is flaky — Playwright has to scroll a click-point for that 1px node
+//      into the viewport near the bottom of a long, still-settling profile page, and intermittently
+//      reports "element is outside of the viewport" until the 60s timeout. We click the VISIBLE label
+//      instead (the control a real user hits): a normally-sized element that scrolls in reliably and
+//      toggles the same checkbox. The 2rem swatch buttons are already normal-sized, so they stay clicks.
+//   2. We never wait on GET /api/v1/me. appearance-sync fires that GET on auth-resolve/session-restore
+//      (not on a navigation or reload we control), so arming waitForResponse for it just races the
+//      already-fired fetch and hangs. Instead we gate on the CONTROL's own reflected state
+//      (toBeChecked / the applied <html> attrs via expect.poll) — the real "controls are populated"
+//      signal. The PATCH waits stay: those fire on the click we control, so arming them first is correct.
 test.describe("@theme the accent swatch + wavy/sketchy toggle persist per user", () => {
   test("changing the accent + toggle applies live and survives a reload", async ({ page }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
 
-    // Open profile. The controls reflect the stored choice from the GET /me that appearance-sync
-    // already fired on auth-resolve (during signInAsAdmin, BEFORE this navigation) — so don't wait for
-    // another GET here: it won't re-fire on the #/profile nav, and arming waitForResponse after the
-    // fetch has happened just hangs (the reload section below is what actually re-exercises GET /me).
-    // expectControlUsable() below gates on the control being ready.
+    // Open profile. The appearance controls build synchronously from the applied <html> state (set by
+    // appearance-sync from GET /me on auth-resolve, during signInAsAdmin) — no GET re-fires on this nav.
     await page.evaluate(() => (window.location.hash = "#/profile"));
     await expect(page.locator("#profile-form")).toBeVisible();
 
     const appearance = page.locator("#appearance-settings");
     await expectControlUsable(page, appearance);
 
+    // The hidden a11y checkbox (read state off it) + the visible label we actually click (see note 1).
+    const sketchy = page.locator("#appearance-sketchy");
+    const sketchyLabel = appearance.locator("label.tm-switch");
+
+    // Readiness + deterministic baseline: the shared admin account's stored default is sketchy ON and
+    // the control reflects it. Waiting on this (auto-retried) IS the "controls are populated from /me"
+    // signal — the load-bearing thing the deleted GET wait used to (racily) stand in for.
+    await expect(sketchy).toBeChecked();
+
     // Turn the wavy/sketchy toggle OFF (→ clean Paper). Arm the PATCH wait before the click.
     let patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
-    await page.locator("#appearance-sketchy").uncheck();
+    await sketchyLabel.click();
     await patched;
+    await expect(sketchy).not.toBeChecked();
     await expect.poll(() => sketchyState(page)).toBe("off"); // applied live, no reload
 
     // Pick the coral accent swatch (→ re-tints --accent live + persists).
     patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
-    await page.locator('.tm-swatch[data-accent="coral"]').click();
+    await appearance.locator('.tm-swatch[data-accent="coral"]').click();
     await patched;
     await expect.poll(() => inlineAccent(page)).toBe("#d1495b");
 
     // RELOAD with no ?theme= trick — the persisted choice must be re-read from the server and applied.
     await page.goto("/#/login");
-    // Warm session restores; appearance-sync fires on auth-resolve and reads GET /me.
-    await page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "GET");
-    await expect.poll(() => sketchyState(page)).toBe("off");
-    await expect.poll(() => inlineAccent(page)).toBe("#d1495b");
+    // Warm session restores; appearance-sync fires GET /me on auth-resolve and applies the stored look.
+    // Gate on the APPLIED state (retried), NOT a GET wait that can fire before it's armed.
+    await expect.poll(() => sketchyState(page), { timeout: 15_000 }).toBe("off");
+    await expect.poll(() => inlineAccent(page), { timeout: 15_000 }).toBe("#d1495b");
 
-    // Restore the defaults so the shared emulator account doesn't leak state into other specs.
+    // Restore the defaults so the shared emulator account doesn't leak state into other specs/retries.
     await page.evaluate(() => (window.location.hash = "#/profile"));
-    await expect(page.locator("#appearance-settings")).toBeVisible();
+    await expect(appearance).toBeVisible();
+    await expect(sketchy).not.toBeChecked(); // reflects the persisted "off" applied above
     patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
-    await page.locator("#appearance-sketchy").check();
+    await sketchyLabel.click(); // → back ON
     await patched;
+    await expect(sketchy).toBeChecked();
     patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");
-    await page.locator('.tm-swatch[data-accent="teal"]').click();
+    await appearance.locator('.tm-swatch[data-accent="teal"]').click(); // → back to teal
     await patched;
   });
 });
