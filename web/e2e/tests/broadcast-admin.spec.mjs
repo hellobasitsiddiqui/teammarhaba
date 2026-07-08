@@ -114,17 +114,25 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await page.getByLabel("Rows per page").selectOption("50");
   await shot("compose");
 
-  // ── STEP 3: MULTI-SELECT the recipients — two push-eligible + one EMAIL-only opt-out. ──────────
-  // Each row's checkbox is labelled "Select <email>" (admin.js). Selecting the opt-out too is the
-  // whole point: it must be reported SKIPPED_OPTED_OUT, not delivered to (TM-364).
-  const recipientEmails = [PUSH_RECIPIENT.email, BOTH_RECIPIENT.email, OPTOUT_RECIPIENT.email];
-  for (const email of recipientEmails) {
+  // ── STEP 3: select the two push-eligible recipients. The EMAIL-only user is opt-out and CANNOT be
+  // selected — TM-427 disables the checkbox for anyone who can't receive push and relabels it, so an
+  // admin can neither pick them nor be misled into thinking they will. That unselectability IS the
+  // opt-out honesty at the UI. (The server-side skip of an opt-out that still reaches the send list —
+  // SKIPPED_OPTED_OUT — is covered by BroadcastServiceTest + PushAdminControllerIntegrationTest, so it
+  // isn't re-proven through the UI here.)
+  const eligibleEmails = [PUSH_RECIPIENT.email, BOTH_RECIPIENT.email];
+  for (const email of eligibleEmails) {
     const box = page.getByRole("checkbox", { name: `Select ${email}` });
     await expect(box).toBeVisible();
     await box.check();
   }
-  // The live "N selected" count reflects all three picks (drives the Send-gate, TM-365).
-  await expect(page.locator("#admin-selected-count")).toHaveText("3 selected");
+  // The opt-out's checkbox is present but DISABLED and relabelled "…can't receive push" (not "Select …").
+  await expect(
+    page.getByRole("checkbox", { name: `${OPTOUT_RECIPIENT.email} can't receive push` }),
+  ).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: `Select ${OPTOUT_RECIPIENT.email}` })).toHaveCount(0);
+  // The live "N selected" count reflects the two eligible picks (drives the Send-gate, TM-365).
+  await expect(page.locator("#admin-selected-count")).toHaveText("2 selected");
   await shot("recipients-selected");
 
   // ── STEP 4: compose the message + pick a deep-link route, and watch the faithful preview update. ─
@@ -155,7 +163,7 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await send.click();
   const dialog = page.locator(".tm-dialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("Send to 3 users?");
+  await expect(dialog).toContainText("Send to 2 users?");
   await shot("confirm");
   await dialog.getByRole("button", { name: "Send now" }).click();
 
@@ -165,10 +173,10 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   const result = await response.json();
 
   // Aggregate: 3 requested, the two opted-in users SENT, the EMAIL-only user SKIPPED as opted-out.
-  expect(result.requested).toBe(3);
+  expect(result.requested).toBe(2);
   expect(result.sent).toBe(2);
-  expect(result.skipped).toBe(1);
-  expect(result.skippedOptedOut).toBe(1);
+  expect(result.skipped).toBe(0);
+  expect(result.skippedOptedOut).toBe(0);
   // Each opted-in recipient owns exactly one distinct token, so two devices were TARGETED (post-dedupe).
   // We do NOT assert delivered > 0: headless CI has no FCM, so nothing is actually delivered (see the
   // header note). `targeted` is decided before the sender runs, so it's the honest fan-out proof.
@@ -176,26 +184,20 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
 
   // Per-recipient: exactly three results, whose outcomes are precisely two SENT + one
   // SKIPPED_OPTED_OUT (nothing else slipped in).
-  expect(result.recipients).toHaveLength(3);
+  expect(result.recipients).toHaveLength(2);
   const outcomes = result.recipients.map((r) => r.outcome).sort();
-  expect(outcomes).toEqual(["SENT", "SENT", "SKIPPED_OPTED_OUT"]);
+  expect(outcomes).toEqual(["SENT", "SENT"]);
   const sentUsers = result.recipients.filter((r) => r.outcome === "SENT");
-  const optedOut = result.recipients.filter((r) => r.outcome === "SKIPPED_OPTED_OUT");
-  // The EMAIL-only user was NEVER targeted (its fan-out is empty) — proving the skip is by
-  // preference, not "no device" (it was seeded WITH a token precisely to make that distinction).
-  expect(optedOut[0].fanout.targeted).toBe(0);
   // Every SENT recipient targeted exactly its one device.
   for (const r of sentUsers) expect(r.fanout.targeted).toBe(1);
 
   // ── STEP 7: the UI reflects it — the honest success toast summary. ──────────────────────────────
-  // summariseBroadcast (broadcast.js) now reports the REAL skip breakdown from the response rails
-  // (TM-365 review M1): here the one skip is the EMAIL-only opt-out, so it reads
-  // "Sent to 2 users · 0 devices delivered · 1 skipped (1 opted out)" — NOT the old "(no device)".
-  // We assert the true parts (sent-count + that the skip is attributed to opt-out, not device);
-  // `delivered` is 0 here by design (no FCM).
+  // summariseBroadcast (broadcast.js) reports the real breakdown from the response rails (TM-365).
+  // Both selected recipients were eligible and SENT, so there is no skip clause — and no opt-out user
+  // could be selected in the first place (TM-427), so the summary reads simply "Sent to 2 users …".
   const successToast = page.locator("#tm-toasts .tm-toast-success");
   await expect(successToast).toContainText("Sent to 2 users");
-  await expect(successToast).toContainText("1 skipped (1 opted out)");
+  await expect(successToast).not.toContainText("opted out");
   await expect(successToast).not.toContainText("no device");
   // The panel reset after a successful send: the selection cleared + the title field emptied (TM-365).
   await expect(page.locator("#admin-selected-count")).toHaveText("0 selected");
@@ -220,13 +222,15 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
     expect(row.title).toBe(TITLE);
     expect(row.body).toBe(BODY);
     expect(row.route).toBe(ROUTE);
-    expect(row.recipient_count).toBe(3);
+    expect(row.recipient_count).toBe(2);
     expect(row.targeted).toBe(2);
     expect(row.delivered).toBe(0); // no FCM in CI — nothing delivered, and the record says so honestly
-    expect(row.skipped).toBe(1);
+    expect(row.skipped).toBe(0);
 
     // The opt-out is genuinely opted out in the DB: notification_pref = EMAIL (assertable in-DB via pg,
-    // as golden-path / profile-edit do). This is what made the send SKIP it (TM-364).
+    // as golden-path / profile-edit do). That is what makes them push-ineligible, so the UI disabled
+    // their recipient checkbox above (TM-427); the server-side skip of an opt-out is covered separately
+    // by BroadcastServiceTest + PushAdminControllerIntegrationTest.
     const { rows: prefs } = await client.query(
       "SELECT notification_pref FROM users WHERE lower(email) = lower($1)",
       [OPTOUT_RECIPIENT.email],
