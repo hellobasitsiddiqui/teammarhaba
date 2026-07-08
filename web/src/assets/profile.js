@@ -17,7 +17,7 @@
 // than hard-failing the page.
 
 import { getMe, updateMe, ApiError } from "./api.js";
-import { currentUser } from "./auth.js";
+import { currentUser, signOut } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
 import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
@@ -26,6 +26,15 @@ import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
 import { buildThemeSettings } from "./theme-settings.js";
+// Pure Profile-screen logic (TM-514) — the identity/strength/public-preview models + route→mode map,
+// unit-tested in web/tools/profile-core.test.mjs.
+import {
+  PROFILE_PUBLIC_ROUTE,
+  profileMode,
+  identitySummary,
+  profileStrength,
+  publicSummary,
+} from "./profile-core.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -185,12 +194,6 @@ function fillForm(profile) {
       input.value = value == null ? "" : String(value);
     }
   }
-  // A read-only summary line so the user can see whose profile this is (email is not editable here).
-  if (shell.summary) {
-    shell.summary.textContent = profile?.email
-      ? `Signed in as ${profile.email}`
-      : "Your profile";
-  }
   // Account-state badges (TM-168): email-verified / age-verified / MFA from the /me state block.
   // `includeUnknown` so the user always sees all three — including any the backend couldn't read —
   // rather than having a badge silently vanish.
@@ -199,6 +202,32 @@ function fillForm(profile) {
     const group = renderAccountBadges(profile, { includeUnknown: true });
     if (group) shell.badges.append(group);
   }
+  // Paint the paper-profile hub summary (identity + completeness) from the same /me payload.
+  paintHub(profile);
+}
+
+/**
+ * Paint the Profile hub summary (paper-profile): the identity header (avatar glyph + name + "City ·
+ * age") and the "Profile strength" completeness bar + nudge — the restyled continuation of the
+ * shipped completeness prompt. Reads the pure models from profile-core.js; no-op when the hub isn't
+ * built (e.g. mid-teardown). The avatar image itself is owned by buildAvatar()/its refresh().
+ */
+function paintHub(profile) {
+  const hub = shell?.hub;
+  if (!hub) return;
+  const id = identitySummary(profile);
+  hub.name.textContent = id.short;
+  hub.meta.textContent = id.metaLine || "Add your city and age";
+  hub.initial.textContent = id.initial;
+
+  // Completeness: the photo counts too, read live off the Firebase user's photoURL (the single source
+  // of truth, same as the avatar control) rather than anything persisted on our side.
+  const hasPhoto = Boolean(currentUser()?.photoURL);
+  const strength = profileStrength(profile, { hasPhoto });
+  hub.bar.style.width = `${strength.percent}%`;
+  hub.barPct.textContent = `${strength.percent}% complete`;
+  // The nudge points at the first gaps; at 100% it reads as a reassurance, and we drop the arrow.
+  hub.barNudge.textContent = strength.complete ? strength.nudge : `${strength.nudge} →`;
 }
 
 /** Build the PATCH body: trimmed values, age coerced to a number; blank fields are omitted. */
@@ -527,6 +556,57 @@ function buildField(field) {
   return { wrapper, input, error };
 }
 
+// A gear icon (paper-profile top bar). Decorative → aria-hidden; the link that wraps it carries the
+// accessible label. Drawn with currentColor so it themes across clean / doodle / sketch.
+function gearIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("class", "tm-pf-gear-icon");
+  svg.innerHTML =
+    '<circle cx="12" cy="12" r="3"/>' +
+    '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/>';
+  return svg;
+}
+
+/** A titled card matching the paper-profile card (border + offset shadow via tokens). */
+function pfCard(title, children, extraClass = "") {
+  return el("section", { class: `tm-pf-card ${extraClass}`.trim() }, [
+    title ? el("h3", { class: "tm-pf-ctitle", text: title }) : null,
+    ...(Array.isArray(children) ? children : [children]),
+  ]);
+}
+
+/** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action. */
+function menuRow(label, { to = null, onClick = null, muted = false } = {}) {
+  const chev = el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" });
+  const cls = `tm-pf-menu-row${muted ? " tm-pf-menu-muted" : ""}`;
+  if (to) return el("a", { class: cls, href: to }, [el("span", { text: label }), chev]);
+  return el("button", { class: cls, type: "button", onClick }, [el("span", { text: label }), chev]);
+}
+
+/** Scroll a same-page element into view and focus it (Notifications / Privacy menu rows). */
+function focusOnPage(id) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  node.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (typeof node.focus === "function") node.focus({ preventScroll: true });
+}
+
+/** Sign the user out (reused by the hub menu's "Sign out" row — same effect as the top-nav control). */
+async function doSignOut() {
+  try {
+    await signOut();
+  } catch (err) {
+    toast(err?.message || "Could not sign out.", { type: "error" });
+  }
+}
+
+// Build the Profile screen (view mode) — the paper-profile hub (identity + strength + interests +
+// membership + menu) with the paper-edit-profile form inline. Kept on the single `#/profile` route
+// (so the shipped self-service edit e2e, which expects #profile-form on #/profile, stays green) and
+// rebuilt on each entry (matching the prior reload-on-entry lifecycle).
 function buildShell(view) {
   const fields = new Map();
   const fieldNodes = FIELDS.map((field) => {
@@ -535,9 +615,8 @@ function buildShell(view) {
     return built.wrapper;
   });
 
-  const summary = el("p", { class: "tm-muted", id: "profile-summary", text: "Your profile" });
-
-  // Account-state badges (TM-168) sit just under the summary; populated by fillForm once /me loads.
+  // Account-state badges (TM-168): preserved, restyled into the hub just under the identity header;
+  // populated by fillForm once /me loads.
   const badges = el("div", { class: "tm-profile-badges", id: "profile-badges" });
   // NB: must NOT be named `save` — that would shadow the module-level `save` submit handler, so the
   // form's `onSubmit: save` would bind this button element instead of the handler and the form would
@@ -559,36 +638,111 @@ function buildShell(view) {
 
   const status = el("div", { id: "profile-status" });
 
-  // Security settings — the TM-282 biometric app-lock toggle. Self-renders + hides itself entirely
-  // when not on a native device with usable biometry, so it's inert on the web build and on devices
-  // with no enrolled biometric / no secure lock screen.
-  const security = buildSecuritySettings();
+  // ── Identity header (paper-profile) ── avatar glyph + name + "City · age". Painted by paintHub().
+  const hubInitial = el("span", { class: "tm-pf-avatar", "aria-hidden": "true", text: "🙂" });
+  const hubName = el("div", { class: "tm-pf-name", text: "Your profile" });
+  const hubMeta = el("div", { class: "tm-pf-sub", text: "" });
+  const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
+    hubInitial,
+    el("div", {}, [hubName, hubMeta]),
+  ]);
 
-  // In-app theme switcher (TM-298) — a self-contained "Appearance" section; lets mobile users change
-  // the theme (clean/doodle/sketch) where the dev `?theme=` URL override is unreachable in the WebView.
-  const appearance = buildThemeSettings();
+  // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
+  const bar = el("i");
+  const barPct = el("span", { text: "0% complete" });
+  const barNudge = el("span", { class: "tm-pf-barnudge", text: "" });
+  const strengthCard = pfCard("Profile strength", [
+    el("div", { class: "tm-pf-bar" }, [bar]),
+    el("div", { class: "tm-pf-barlbl" }, [barPct, barNudge]),
+  ]);
 
-  clear(view).append(
-    el("div", { class: "tm-admin-head" }, [
-      // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
-      el("h2", {}, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Edit profile"]),
-      el("a", { class: "tm-btn tm-btn-sm", href: "#/home" }, "Back to home"),
+  // ── Interests (paper-profile) ── no interests field exists on the backend yet (MeResponse has none),
+  // so this matches the wireframe visually with an empty "add" affordance + an honest hint. Live
+  // interest chips need a backend field — noted as a TM-514 follow-up.
+  // reconcile with TM-511 component library (chip component)
+  const interestsCard = pfCard("Interests", [
+    el("div", { class: "tm-pf-chips" }, [
+      el("span", { class: "tm-pf-chip tm-pf-chip-add", text: "＋ add" }),
     ]),
-    summary,
-    badges,
-    status,
-    form,
+    el("p", { class: "tm-muted tm-pf-hint", text: "Add interests so people find you — coming soon." }),
+  ]);
+
+  // ── Membership (paper-profile) ── informational row; no membership route exists yet, so "Manage" is
+  // muted, non-interactive text (matches the wireframe affordance without a dead link).
+  const membershipCard = pfCard(
+    null,
+    [
+      el("div", { class: "tm-pf-memb-main" }, [
+        el("h3", { class: "tm-pf-ctitle", text: "Membership" }),
+        el("div", { class: "tm-pf-sub", text: "Pay as you go · first event free" }),
+      ]),
+      el("span", { class: "tm-pf-go tm-muted", text: "Manage →" }),
+    ],
+    "tm-pf-memb",
+  );
+
+  // ── Edit profile (paper-edit-profile) ── the shipped self-service form, restyled into a kit card.
+  const editCard = pfCard("Edit profile", [form], "tm-pf-edit");
+
+  // Security + Appearance settings blocks (TM-282 / TM-298) — self-rendering, hide themselves when
+  // inapplicable. Wrapped in a labelled block the "Privacy & my data" menu row scrolls to.
+  const security = buildSecuritySettings();
+  const appearance = buildThemeSettings();
+  const settingsBlock = el("section", { class: "tm-pf-settings", id: "profile-settings" }, [
     appearance,
     security,
-    // QA diagnostics link (TM-297) — an unobtrusive way into the #/diagnostics screen (GPS / FCM token
-    // / native-plugin status) from the settings area, without promoting it in the main nav. Plain hash
-    // link; nothing here touches the form/avatar above.
+    // QA diagnostics link (TM-297) — unobtrusive way into #/diagnostics (GPS / FCM token / plugins).
     el("p", { class: "tm-diag-link" }, [
       el("a", { class: "tm-btn tm-btn-sm", href: "#/diagnostics" }, "Diagnostics"),
     ]),
+  ]);
+
+  // ── Menu (paper-profile) ── the four wireframe rows plus an entry into the public-profile preview.
+  // My events + Sign out are real actions; Notifications / Privacy scroll to the relevant on-page
+  // control (no fabricated routes). Public profile → the additive #/profile/public preview.
+  const menuCard = pfCard(
+    null,
+    [
+      el("nav", { class: "tm-pf-menu", "aria-label": "Profile menu" }, [
+        menuRow("My events", { to: "#/events" }),
+        menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
+        menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
+        menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
+        menuRow("Sign out", { onClick: doSignOut, muted: true }),
+      ]),
+    ],
+    "tm-pf-menu-card",
   );
 
-  shell = { form, fields, save: saveBtn, reset, summary, badges, status, avatar };
+  clear(view).append(
+    el("div", { class: "tm-pf" }, [
+      el("header", { class: "tm-pf-topbar" }, [
+        // A host-badge doodle beside the heading (TM-215) — decorative; CSS gates it to the doodle theme.
+        el("h2", { class: "tm-pf-title" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
+        el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
+      ]),
+      idHeader,
+      badges,
+      strengthCard,
+      interestsCard,
+      membershipCard,
+      status,
+      editCard,
+      menuCard,
+      settingsBlock,
+    ]),
+  );
+
+  shell = {
+    form,
+    fields,
+    save: saveBtn,
+    reset,
+    badges,
+    status,
+    avatar,
+    hub: { name: hubName, meta: hubMeta, initial: hubInitial, bar, barPct, barNudge },
+  };
 }
 
 /** Reflect load/error state: hide the form while loading or on a load error, show a retry. */
@@ -613,14 +767,111 @@ function renderStatus() {
   shell.form.hidden = false;
 }
 
+// ---- public-profile preview (paper-public-profile) ------------------------------------------
+
+// The public-profile preview (#/profile/public) — "how other members see you". A real other-user
+// endpoint (`GET /users/{id}`) doesn't exist yet, so this previews the caller's OWN public profile
+// from /me (noted as a TM-514 follow-up). Its own lightweight shell (no edit form / no badges) mounted
+// into the same #profile-view container; the Message / Block actions are inert in a self-preview.
+let publicShell = null;
+
+function buildPublicShell(view) {
+  const avatar = el("span", { class: "tm-pf-avatar tm-pf-avatar-lg", "aria-hidden": "true", text: "🙂" });
+  const name = el("h2", { class: "tm-pf-pub-name", text: "Your profile" });
+  const meta = el("div", { class: "tm-pf-sub tm-pf-pub-meta", text: "" });
+
+  // Interests placeholder — same backend gap as the hub (no interests field yet).
+  // reconcile with TM-511 component library (chip component)
+  const chips = el("div", { class: "tm-pf-chips tm-pf-pub-chips" }, [
+    el("span", { class: "tm-pf-chip tm-pf-chip-add", text: "＋ interests" }),
+  ]);
+
+  const inCommon = el(
+    "div",
+    { class: "tm-pf-pub-note" },
+    "This is how other members see your public profile.",
+  );
+
+  // Message / Block are disabled in a self-preview (you don't message or report yourself); they
+  // become live once real other-user profiles land (with the users endpoint).
+  const message = el("button", { class: "tm-btn tm-btn-primary tm-pf-pub-btn", type: "button", disabled: true }, "Message");
+  const block = el("button", { class: "tm-btn tm-pf-pub-btn tm-pf-pub-ghost", type: "button", disabled: true }, "Block or report");
+
+  const status = el("div", { id: "profile-status" });
+
+  clear(view).append(
+    el("div", { class: "tm-pf tm-pf-public" }, [
+      el("header", { class: "tm-pf-topbar tm-pf-pub-top" }, [
+        el("a", { class: "tm-pf-gear tm-pf-back", href: PROFILE_ROUTE_HASH, "aria-label": "Back to profile" }, "‹"),
+        el("span", { class: "tm-pf-title tm-muted", text: "Public preview" }),
+      ]),
+      status,
+      el("section", { class: "tm-pf-pub-body" }, [
+        avatar,
+        name,
+        meta,
+        chips,
+        inCommon,
+        message,
+        block,
+      ]),
+    ]),
+  );
+
+  publicShell = { avatar, name, meta, status };
+}
+
+function fillPublic(profile) {
+  if (!publicShell) return;
+  const pub = publicSummary(profile);
+  publicShell.name.textContent = pub.short;
+  publicShell.meta.textContent = pub.metaLine || "Add your city to your profile";
+  publicShell.avatar.textContent = pub.initial;
+}
+
+async function loadPublic() {
+  if (!publicShell) return;
+  clear(publicShell.status);
+  publicShell.status.append(el("p", { class: "tm-muted", text: "Loading your profile…" }));
+  try {
+    const profile = await getMe();
+    state.profile = profile;
+    state.loaded = true;
+    clear(publicShell.status);
+    fillPublic(profile);
+  } catch (err) {
+    clear(publicShell.status);
+    publicShell.status.append(el("div", { class: "tm-error tm-empty" }, [
+      el("p", { text: "Could not load your profile." }),
+      el("button", { class: "tm-btn", type: "button", onClick: loadPublic }, "Retry"),
+    ]));
+    console.warn("[profile] public preview GET /api/v1/me failed:", err?.message ?? err);
+  }
+}
+
 // ---- mount ----------------------------------------------------------------------------------
 
-/** Called by the router when the #/profile view becomes active. Builds the shell once, then loads. */
-export function enterProfile() {
+const PROFILE_ROUTE_HASH = "#/profile";
+
+/**
+ * Called by the router when a Profile route becomes active. Builds the layout for the requested mode
+ * (the hub + edit form for #/profile, or the public-profile preview for #/profile/public) and loads
+ * /me. Rebuilt on each entry (matching the prior reload-on-entry lifecycle); the router only re-enters
+ * when the profile sub-route actually changes, so a repeated guard() for the same route doesn't refetch.
+ *
+ * @param {string} [hash] the active hash route (defaults to the live location hash)
+ */
+export function enterProfile(hash) {
   const view = $("profile-view");
   if (!view) return;
-  if (!shell) buildShell(view);
-  load();
+  const active = typeof hash === "string" ? hash : (typeof window !== "undefined" ? window.location.hash : "");
+  if (profileMode(active) === "public") {
+    buildPublicShell(view);
+    loadPublic();
+  } else {
+    buildShell(view);
+    load();
+  }
 }
 
 // Bridge for the router (which imports this) + ad-hoc use.
