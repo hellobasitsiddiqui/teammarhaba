@@ -92,9 +92,12 @@ test("audienceRefDetail labels the ref per dimension and blanks to a dash", () =
   });
 });
 
-test("statusBadge maps SENT/EMPTY tones and keeps an unknown status visible", () => {
+test("statusBadge maps SENT/EMPTY/RECALLED tones and keeps an unknown status visible", () => {
   assert.deepEqual(statusBadge("SENT"), { label: "Sent", tone: "ok" });
   assert.deepEqual(statusBadge("EMPTY"), { label: "No recipients", tone: "off" });
+  // RECALLED (TM-473/TM-560) is first-classed: friendly "Recalled" copy + muted tone, not the raw token.
+  assert.deepEqual(statusBadge("RECALLED"), { label: "Recalled", tone: "off" });
+  assert.deepEqual(statusBadge("recalled"), { label: "Recalled", tone: "off" }); // case-insensitive
   assert.deepEqual(statusBadge("QUEUED"), { label: "QUEUED", tone: "info" });
   assert.deepEqual(statusBadge(""), { label: "—", tone: "info" });
   assert.deepEqual(statusBadge(null), { label: "—", tone: "info" });

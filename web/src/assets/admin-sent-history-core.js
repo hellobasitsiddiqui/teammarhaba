@@ -22,7 +22,7 @@
 //     audienceType:   string,   // the single audience dimension: USER | CITY | EVENT
 //     audienceRef:    string,   // human-readable "who" descriptor (id CSV / city name(s))
 //     recipientCount: number,   // reach the audience resolved to at send time (durable inbox rows)
-//     status:         string,   // derived delivery status: SENT | EMPTY
+//     status:         string,   // derived delivery status: SENT | EMPTY | RECALLED (TM-473)
 //   }
 //
 // The helpers below turn that raw envelope + rows into the small, display-ready facts the DOM paints:
@@ -120,9 +120,16 @@ export function audienceRefDetail(row = {}) {
  * audience that resolves to nobody is rejected before the header is written (TM-441), so in practice
  * this is always SENT; EMPTY is derived defensively for a hypothetical zero-recipient header.
  *
- *   SENT  → { label: "Sent",          tone: "ok" }
- *   EMPTY → { label: "No recipients", tone: "off" }
- *   other → { label: <raw|"—">,       tone: "info" }
+ * RECALLED (TM-473) is a real, reachable status: recalling a campaign flips its status and the list query
+ * doesn't filter recalled rows, so one reaches this view. It gets a first-class curated badge — the
+ * friendly "Recalled" copy (mirroring RECALLED_LABEL used on the recall button / notification tombstone),
+ * with the muted "off" tone rather than the generic "info" catch-all — so it never renders as the raw
+ * all-caps `RECALLED` token (the bug this fixes, TM-560).
+ *
+ *   SENT     → { label: "Sent",          tone: "ok" }
+ *   EMPTY    → { label: "No recipients", tone: "off" }
+ *   RECALLED → { label: "Recalled",      tone: "off" }
+ *   other    → { label: <raw|"—">,       tone: "info" }
  *
  * @param {unknown} status
  * @returns {{label: string, tone: "ok"|"off"|"info"}}
@@ -131,6 +138,7 @@ export function statusBadge(status) {
   const key = typeof status === "string" ? status.toUpperCase() : "";
   if (key === "SENT") return { label: "Sent", tone: "ok" };
   if (key === "EMPTY") return { label: "No recipients", tone: "off" };
+  if (key === "RECALLED") return { label: "Recalled", tone: "off" };
   return { label: cleanText(status) || "—", tone: "info" };
 }
 
