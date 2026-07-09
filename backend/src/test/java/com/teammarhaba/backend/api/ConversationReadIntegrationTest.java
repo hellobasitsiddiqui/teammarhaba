@@ -148,6 +148,21 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void listWithAHugePageNumberReturnsAnEmptyPageNotA500() throws Exception {
+        // A brand-new user with zero conversations, asked for a wildly out-of-range page. page * size
+        // overflows a 32-bit int to a negative window start, which used to drive subList out of range
+        // and 500 the request (TM-575). The clamped long math now returns an empty page (still 200) —
+        // getJson asserts the 200, so a regression to 500 fails here.
+        String uid = "conv-hugepage-" + UUID.randomUUID();
+        newUser(uid);
+
+        JsonNode body = getJson("/api/v1/me/conversations?page=999999999", caller(uid));
+        assertThat(body.get("items")).isEmpty();
+        assertThat(body.get("page").asInt()).isEqualTo(999999999);
+        assertThat(body.get("totalElements").asLong()).isZero();
+    }
+
+    @Test
     void listExcludesKickedMembershipsAndSilentThreadReadsAsZeroUnread() throws Exception {
         String uid = "conv-removed-" + UUID.randomUUID();
         Long userId = newUser(uid);

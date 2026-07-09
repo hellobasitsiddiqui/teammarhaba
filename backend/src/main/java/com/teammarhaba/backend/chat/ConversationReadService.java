@@ -83,7 +83,7 @@ public class ConversationReadService {
      * same-instant tiebreak), then window to the requested page. Totals span every membership so the
      * client's pager is accurate.
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public PageResponse<ConversationSummaryResponse> list(VerifiedUser caller, Pageable pageable) {
         Long userId = users.provision(caller).getId();
 
@@ -223,8 +223,13 @@ public class ConversationReadService {
         int size = pageable.getPageSize();
         int page = pageable.getPageNumber();
         int total = rows.size();
-        int from = Math.min(page * size, total);
-        int to = Math.min(from + size, total);
+        // Compute the window bounds in long space and clamp into [0, total] before narrowing back to
+        // int. A large page (e.g. ?page=999999999) makes page * size overflow a 32-bit int to a
+        // negative value, which would drive subList(from, ...) out of range and 500 the request; the
+        // long math + clamp instead yields an empty page (from == to == total) — a valid 200 for any
+        // page past the end, including a caller with zero conversations.
+        int from = (int) Math.min((long) page * size, total);
+        int to = (int) Math.min((long) from + size, total);
         int totalPages = (int) Math.ceil((double) total / size);
         return new PageResponse<>(rows.subList(from, to), page, size, total, totalPages);
     }
