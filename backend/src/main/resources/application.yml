@@ -179,7 +179,18 @@ app:
   # exactly like booking-cutoff: event.chatCloseHours override → this per-city map → default-hours.
   # The APP DEFAULT IS "NEVER CLOSE": leave default-hours UNSET (null) — as shipped — and no event's
   # chat ever auto-closes. Set default-hours (or a per-city entry) to opt in. Tunables, not secrets.
+  #
+  # The stamping itself (TM-578) is a fixed-delay @Scheduled sweep (EventChatCloseScheduler) that trues
+  # up conversation.closed_at for threads past their window — the missing caller for the close policy.
+  # `enabled: false` skips creating the sweep bean entirely (the test profile does this so integration
+  # tests drive the service directly with a controlled `now`). Hourly by default: enforcement is already
+  # exact and live, so the sweep only reconciles the stored flag and coarse cadence is fine. Idempotent
+  # + bounded (batch-size), so any number of instances may tick concurrently. Cadence knobs are tunables.
   event-chat-close:
+    enabled: ${EVENT_CHAT_CLOSE_ENABLED:true}
+    scan-interval-ms: ${EVENT_CHAT_CLOSE_SCAN_INTERVAL_MS:3600000}   # gap between sweep passes (hourly)
+    initial-delay-ms: ${EVENT_CHAT_CLOSE_INITIAL_DELAY_MS:30000}     # startup grace before the first sweep
+    batch-size: ${EVENT_CHAT_CLOSE_BATCH_SIZE:200}                   # max threads soft-closed per pass
     # default-hours: ${EVENT_CHAT_CLOSE_DEFAULT_HOURS:}   # UNSET = never close (the app default); set N to auto-close N hours after the event ends
     # Optional per-city defaults (city name → whole hours after the event ends), matched case-insensitively:
     #   city-hours:

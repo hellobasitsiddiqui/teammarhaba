@@ -7,7 +7,10 @@ import com.teammarhaba.backend.chat.ConversationRepository;
 import com.teammarhaba.backend.chat.MemberRole;
 import com.teammarhaba.backend.chat.MuteState;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,14 +67,17 @@ public class EventChatLifecycleService {
     private final ConversationRepository conversations;
     private final ConversationMemberRepository members;
     private final EventChatClosePolicy closePolicy;
+    private final EventRepository events;
 
     public EventChatLifecycleService(
             ConversationRepository conversations,
             ConversationMemberRepository members,
-            EventChatClosePolicy closePolicy) {
+            EventChatClosePolicy closePolicy,
+            EventRepository events) {
         this.conversations = conversations;
         this.members = members;
         this.closePolicy = closePolicy;
+        this.events = events;
     }
 
     /**
@@ -141,6 +147,50 @@ public class EventChatLifecycleService {
             conversation.close(closesAt.get()); // idempotent, first-moment-wins soft-close
             return conversations.save(conversation);
         });
+    }
+
+    /**
+     * Reconcile the stored soft-close flag for every event whose group thread is past its policy close
+     * window (TM-578) — the missing caller for {@link #closeThreadIfDue}. Without a caller the
+     * documented auto-close never fires: posting still recomputes {@link #isThreadReadOnly} live, but
+     * the persisted {@code conversation.closed_at} that other paths key on (reactions, TM-574) stays
+     * null and the thread is never <em>stamped</em> closed. This sweep is that caller.
+     *
+     * <p>It loads a bounded, oldest-first batch of events that still have an <em>open</em> thread and
+     * are due to close ({@link EventRepository#findWithOpenThreadDueForClose} — never-closing events
+     * are filtered out at the query, so they can never fill the batch), then stamps {@code closed_at}
+     * on each via {@link #closeThreadIfDue}. Returns how many threads this pass actually closed.
+     *
+     * <p><b>Idempotent + bounded.</b> A thread already stamped is not re-selected (the query's
+     * {@code closed_at is null}) and {@link #closeThreadIfDue} is itself first-moment-wins, so
+     * re-running the sweep — or overlapping Cloud Run instances (both write the identical policy
+     * instant, so there is no lost-update to lose) — only ever converges. {@code batchLimit} caps each
+     * pass; a backlog simply drains over successive ticks. The whole batch runs in one short
+     * transaction: unlike the reminder / offer-cascade sweeps there is no external I/O here (just tiny
+     * {@code closed_at} updates), so a per-item transaction buys nothing, and being idempotent a
+     * rolled-back-then-retried tick reconverges next time.
+     *
+     * @param now the sweep instant (the scheduler passes {@code Instant.now()}; tests pass a fixed one)
+     * @param batchLimit the maximum number of threads to close in this pass
+     * @return how many threads this pass soft-closed (0 when nothing was due)
+     */
+    @Transactional
+    public int sweepDueThreadCloses(Instant now, int batchLimit) {
+        Collection<String> cities = closePolicy.citiesWithCloseWindow();
+        if (cities.isEmpty()) {
+            // A never-empty IN-list keeps the query portable across drivers. "__NONE__" can never
+            // equal lower(trim(city)) (that expression is always lower-case), so it matches nothing.
+            cities = List.of("__NONE__");
+        }
+        List<Event> due = events.findWithOpenThreadDueForClose(
+                now, closePolicy.appDefaultConfigured(), cities, PageRequest.of(0, batchLimit));
+        int closed = 0;
+        for (Event event : due) {
+            if (closeThreadIfDue(event, now).isPresent()) {
+                closed++;
+            }
+        }
+        return closed;
     }
 
     /**

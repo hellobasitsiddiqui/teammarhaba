@@ -2,6 +2,7 @@ package com.teammarhaba.backend.event;
 
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -80,6 +81,43 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from Event e where e.id = :id")
     Optional<Event> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * The event-chat close sweep's candidate window (TM-578): events that still have an <em>open</em>
+     * group thread ({@code conversation.closed_at is null}) whose effective end — {@code end_at}, or
+     * {@code start_at} for an open-ended event (via {@code coalesce}) — is at or before {@code now},
+     * and which can actually close under the policy. That last clause is the coarse pre-filter that
+     * keeps <em>never-closing</em> events (the shipped default) out of the batch entirely, so they can
+     * never fill it and starve genuinely-due threads: an event qualifies when it carries a per-event
+     * {@code chat_close_hours} override, OR an app-wide default is configured
+     * ({@code appDefaultConfigured}), OR its normalized city has a per-city default
+     * ({@code citiesWithCloseWindow}). The authoritative per-event "is it past its close instant"
+     * decision still lives in {@link EventChatClosePolicy} / {@code closeThreadIfDue} — this query only
+     * bounds the set to scan.
+     *
+     * <p>Ordered oldest-effective-end first (id-tiebroken) so a backlog drains longest-overdue-first,
+     * and paged by the caller to cap the batch. Soft-deleted events are excluded by the
+     * {@code @SQLRestriction}; admin-broadcast threads never match (their {@code event_id} is null, so
+     * the {@code c.eventId = e.id} join drops them).
+     */
+    @Query(
+            """
+            select e from Event e, Conversation c
+            where c.eventId = e.id
+              and c.closedAt is null
+              and coalesce(e.endAt, e.startAt) <= :now
+              and (
+                e.chatCloseHours is not null
+                or :appDefaultConfigured = true
+                or lower(trim(e.city)) in :citiesWithCloseWindow
+              )
+            order by coalesce(e.endAt, e.startAt) asc, e.id asc
+            """)
+    List<Event> findWithOpenThreadDueForClose(
+            @Param("now") Instant now,
+            @Param("appDefaultConfigured") boolean appDefaultConfigured,
+            @Param("citiesWithCloseWindow") Collection<String> citiesWithCloseWindow,
+            Pageable pageable);
 
     /**
      * The caller's live GOING commitments that would block a new join under the "one active event at

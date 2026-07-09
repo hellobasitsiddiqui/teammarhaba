@@ -221,6 +221,64 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         assertThat(lifecycle.isThreadReadOnly(never, farFuture)).isFalse();
     }
 
+    // ── scheduled close sweep (TM-578) ───────────────────────────────────────────────────────────
+
+    @Test
+    void sweepSoftClosesOnlyThreadsThatArePastTheirCloseWindow() {
+        long host = newUser("host");
+
+        // Three already-ended events, each with its own open group thread:
+        //  (1) DUE — closes 1h after end, ended 2h ago → its close instant is an hour in the past.
+        Event due = seedEndedEventWithOpenThread(host, 1, Duration.ofHours(2));
+        //  (2) NOT YET DUE — closes 24h after end, ended 5m ago → close instant is ~a day in the future.
+        Event notYet = seedEndedEventWithOpenThread(host, 24, Duration.ofMinutes(5));
+        //  (3) NEVER CLOSES — no override + app default unset (test profile) → filtered out of the sweep.
+        Event never = seedEndedEventWithOpenThread(host, null, Duration.ofHours(2));
+
+        Instant now = Instant.now();
+        int closed = lifecycle.sweepDueThreadCloses(now, 50);
+
+        // Exactly the one due thread is soft-closed; the not-yet-due and never-close ones stay open.
+        assertThat(closed).isEqualTo(1);
+        assertThat(conversations.findByEventId(due.getId()).orElseThrow().isClosed()).isTrue();
+        assertThat(conversations.findByEventId(notYet.getId()).orElseThrow().isClosed())
+                .as("a thread inside its close window is left open").isFalse();
+        assertThat(conversations.findByEventId(never.getId()).orElseThrow().isClosed())
+                .as("a never-closing thread is never swept").isFalse();
+
+        // The stamped thread reads read-only now — the stored flag reactions/posts (TM-574) key on —
+        // and the stamp is the policy close instant (end + 1h).
+        Conversation stamped = conversations.findByEventId(due.getId()).orElseThrow();
+        assertThat(lifecycle.isThreadReadOnly(due, now)).isTrue();
+        assertThat(stamped.getClosedAt()).isEqualTo(due.getEndAt().plus(Duration.ofHours(1)));
+
+        // Idempotent: a second sweep closes nothing more and never rewrites the original stamp.
+        Instant firstStamp = stamped.getClosedAt();
+        assertThat(lifecycle.sweepDueThreadCloses(now, 50)).isZero();
+        assertThat(conversations.findByEventId(due.getId()).orElseThrow().getClosedAt()).isEqualTo(firstStamp);
+    }
+
+    @Test
+    void sweepIsBoundedByTheBatchLimit() {
+        long host = newUser("host");
+        // Two due threads, but a batch cap of 1 → only one closes this pass; the backlog drains next tick.
+        Event a = seedEndedEventWithOpenThread(host, 1, Duration.ofHours(3));
+        Event b = seedEndedEventWithOpenThread(host, 1, Duration.ofHours(2));
+
+        Instant now = Instant.now();
+        assertThat(lifecycle.sweepDueThreadCloses(now, 1)).isEqualTo(1);
+
+        long closedCount = java.util.stream.Stream.of(a, b)
+                .filter(e -> conversations.findByEventId(e.getId()).orElseThrow().isClosed())
+                .count();
+        assertThat(closedCount).as("only one of the two due threads closed under a batch cap of 1").isEqualTo(1);
+
+        // The next pass (still capped at 1) mops up the remaining one — both are closed after two ticks.
+        assertThat(lifecycle.sweepDueThreadCloses(now, 1)).isEqualTo(1);
+        assertThat(conversations.findByEventId(a.getId()).orElseThrow().isClosed()).isTrue();
+        assertThat(conversations.findByEventId(b.getId()).orElseThrow().isClosed()).isTrue();
+    }
+
     // ── retention / cascade-delete ───────────────────────────────────────────────────────────────
 
     @Test
@@ -281,6 +339,37 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         event.setIncludeWaitlistInChat(includeWaitlistInChat);
         event.setEndAt(endAt);
         return events.saveAndFlush(event);
+    }
+
+    /**
+     * A PUBLISHED event that has already ENDED ({@code endedAgo} before now) with the given
+     * {@code chatCloseHours} override ({@code null} = inherit → never close in the test profile), plus
+     * an OPEN {@code EVENT_GROUP} thread created directly. The thread is seeded straight through the
+     * conversation repository rather than via an RSVP because RSVP's booking-cutoff / finished-event
+     * guards would reject a past event — and the close sweep only needs an event + an open thread.
+     * Instants are millisecond-truncated so the policy close instant round-trips losslessly through
+     * Postgres {@code TIMESTAMPTZ} (TM-419), letting the test assert the exact stamped value.
+     */
+    private Event seedEndedEventWithOpenThread(long hostId, Integer chatCloseHours, Duration endedAgo) {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        Instant endAt = now.minus(endedAgo);
+        Instant startAt = endAt.minus(Duration.ofHours(2));
+        Event event = new Event(
+                "Ended Meetup",
+                "An ended meetup.",
+                "Marhaba Cafe, 12 High St",
+                "Europe/London",
+                startAt,
+                now.minus(Duration.ofDays(2)), // visibility opened in the past
+                now.minus(Duration.ofHours(1)), // visibility already closed — irrelevant to the sweep
+                hostId,
+                now);
+        event.setCapacity(5);
+        event.setEndAt(endAt);
+        event.setChatCloseHours(chatCloseHours);
+        event = events.saveAndFlush(event);
+        conversations.save(Conversation.forEvent(event.getId())); // open thread (closed_at null)
+        return event;
     }
 
     private ConversationMember membership(Conversation thread, long userId) {

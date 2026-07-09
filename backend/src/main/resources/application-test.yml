@@ -18,6 +18,11 @@ app:
   # stamps/pushes a test sets up itself.
   offer-cascade:
     enabled: false
+  # And no background event-chat close sweeps during tests (TM-578): the lifecycle integration test
+  # drives sweepDueThreadCloses directly with a fixed `now`, so a live hourly tick would only add
+  # nondeterminism (it could stamp closed_at on a thread mid-assertion).
+  event-chat-close:
+    enabled: false
   # Pin the open-ended default duration (TM-412) so listing-state integration tests are deterministic
   # regardless of any future change to the shipped prod default.
   event-listing:
