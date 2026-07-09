@@ -123,8 +123,13 @@ test("the hand-lettered faces are the single Paper type contract (on :root, read
   // heading/tagline rules read them via var() rather than re-hard-coding a font stack.
   assert.equal(count('--font-display: "Gochi Hand"'), 1, ":root defines --font-display once");
   assert.equal(count('--font-accent: "Shadows Into Light"'), 1, ":root defines --font-accent once");
-  assert.equal(count("font-family: var(--font-display);"), 1, "the heading rule reads var(--font-display)");
-  assert.equal(count("font-family: var(--font-accent);"), 1, "the tagline rule reads var(--font-accent)");
+  // At least one consumer reads each face via var() (the heading + the tagline rules). This was `=== 1`
+  // but the boot screen (TM-381) legitimately adds a second consumer of BOTH — its wordmark reads the
+  // display face and its launch tagline reads the accent face — so the contract is "read via var(), 1+
+  // consumers", not "exactly one element". The single-definition (above) + no-literal-stack (below)
+  // guards still lock the real contract: no second theme, no re-hard-coded font stack.
+  assert.ok(count("font-family: var(--font-display);") >= 1, "heading/wordmark rules read var(--font-display)");
+  assert.ok(count("font-family: var(--font-accent);") >= 1, "tagline rules read var(--font-accent)");
   // No duplicated literal font stacks in font-family rules.
   assert.equal(count('font-family: "Gochi Hand"'), 0, "no literal Gochi Hand font-family rule remains");
   assert.equal(count('font-family: "Shadows Into Light"'), 0, "no literal Shadows Into Light font-family rule remains");
