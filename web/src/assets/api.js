@@ -331,6 +331,43 @@ export async function deregisterDevice(token) {
 }
 
 /**
+ * GET /api/v1/me/notifications/badge — the caller's notification bell counts (TM-454): `unseen` (the
+ * bell BADGE — what opening the bell clears) and `unread` (per-item, survives a mark-seen). The header
+ * bell (TM-455) shows the `unseen` count, summed with chat-unread once that sibling lands. A 401 will
+ * already have refreshed/redirected via {@link apiFetch}.
+ * @returns {Promise<{unseen: number, unread: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getNotificationBadge() {
+  const response = await apiFetch("/api/v1/me/notifications/badge", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/notifications/badge failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/notifications/seen — opening the bell: mark all of the caller's unseen
+ * notifications seen (clears the badge). Idempotent; returns the refreshed (now zero-unseen) counts
+ * so the caller can repaint the bell straight from the response with no follow-up GET (TM-454 /
+ * TM-455). A 401 will already have refreshed/redirected via {@link apiFetch}.
+ * @returns {Promise<{unseen: number, unread: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function markNotificationsSeen() {
+  const response = await apiFetch("/api/v1/me/notifications/seen", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/notifications/seen failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
  * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
  * (TM-365) populates its dropdown from, so an admin only ever picks a route the send path will accept
@@ -483,6 +520,8 @@ if (typeof window !== "undefined") {
     verifyEmailCode,
     registerDevice,
     deregisterDevice,
+    getNotificationBadge,
+    markNotificationsSeen,
     getPushRoutes,
     adminBroadcastPush,
     listEvents,

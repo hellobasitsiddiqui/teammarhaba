@@ -200,6 +200,13 @@ export function notifyForegroundPush(notification) {
   entries = next;
   persist();
   paintBadge();
+  // Signal the header bell (TM-455) so a push that lands while the app is FOREGROUND bumps its
+  // server-backed badge too — the TM-374 "foreground push missed" fix, now reflected on the primary
+  // header bell, not just this native recovery bell. A plain window event keeps the two modules
+  // decoupled (the bell listens and re-fetches its count) and is a no-op when nothing is listening.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    window.dispatchEvent(new CustomEvent("tm:notification", { detail: { source: "foreground-push" } }));
+  }
   toast(bannerMessage(entry), {
     type: "info",
     timeout: 0, // persistent — the whole point of TM-374; never auto-dismisses.
