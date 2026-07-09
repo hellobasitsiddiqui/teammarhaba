@@ -59,7 +59,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * <h2>Claim — the winner's confirmation</h2>
  *
  * An {@link EventClaimedEvent} sends just the claimant the "You're in ✓" push. It is raised only on a
- * genuine WAITLISTED → GOING promotion, so a double-tap can't double-confirm.
+ * genuine WAITLISTED → GOING promotion, so a double-tap can't double-confirm. The durable inbox row's
+ * {@code sourceRef} is scoped to the claim episode (the claim instant, TM-555) so a legitimate
+ * re-claim — leave → rejoin waitlist → re-offer → re-claim, since a cancel hard-deletes the attendance
+ * row — writes a fresh bell row instead of being suppressed as a duplicate of the first episode.
  *
  * <p>All routes are the allow-listed event-detail deep link ({@link PushRoutes#eventDetail}), so a tap
  * lands on the event where the claim action / cancelled banner lives.
@@ -152,7 +155,10 @@ public class EventLifecycleNotifier {
         PushMessage message = claimedMessage(event.eventId(), event.heading());
         notifier.pushToUser(event.userId(), message);
         writer.writeSystemToUser(
-                NotificationType.RSVP_CONFIRMED, event.userId(), message, "event:" + event.eventId() + ":rsvp");
+                NotificationType.RSVP_CONFIRMED,
+                event.userId(),
+                message,
+                claimedSourceRef(event.eventId(), event.claimedAt()));
     }
 
     /** A material change touches at least one {@link #MATERIAL_FIELDS} entry. */
@@ -186,6 +192,21 @@ public class EventLifecycleNotifier {
      */
     private static String updatedSourceRef(long eventId, Event current) {
         return "event:" + eventId + ":updated:v" + (current != null ? current.getVersion() : "x");
+    }
+
+    /**
+     * The idempotency key for an {@code RSVP_CONFIRMED} inbox row: the event id plus the claim instant,
+     * so each claim <em>episode</em> is its own row (TM-555). A member can legitimately re-claim — a
+     * cancel hard-deletes the attendance row, so leave → rejoin waitlist → re-offer → re-claim is a
+     * fresh promotion that must leave a fresh inbox row, not be suppressed as a duplicate of the first
+     * episode. A static {@code event:<id>:rsvp} key let {@link NotificationWriter} skip the second
+     * write (push fires but no durable bell row — the TM-374 divergence). This mirrors the offer
+     * cascade's per-episode {@code :offer:<offerAtMillis>} key ({@link WaitlistOfferCascadeService}).
+     * The double-tap case stays safe because {@code EventRsvpService.claim} short-circuits an
+     * already-{@code GOING} member <em>before</em> publishing {@link EventClaimedEvent}.
+     */
+    private static String claimedSourceRef(long eventId, java.time.Instant claimedAt) {
+        return "event:" + eventId + ":rsvp:" + claimedAt.toEpochMilli();
     }
 
     private PushMessage updatedMessage(EventLifecycleEvent lifecycle, Event current) {

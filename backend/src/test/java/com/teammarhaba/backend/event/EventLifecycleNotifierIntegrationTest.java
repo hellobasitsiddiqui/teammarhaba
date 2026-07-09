@@ -202,6 +202,42 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         assertThat(inboxTypes(idOf(a))).isEmpty(); // ...and no RSVP_CONFIRMED row is written either
     }
 
+    @Test
+    void reClaimAfterLeavingWritesAFreshConfirmationRow() {
+        // TM-555: a legitimate re-claim must leave a fresh durable inbox row, not be suppressed as a
+        // duplicate of the first episode. cancelRsvp hard-deletes the attendance row, so leave → rejoin
+        // waitlist → re-offer → re-claim is a genuinely new WAITLISTED -> GOING promotion; the second
+        // EventClaimedEvent carries a later claim instant, so the sourceRef differs and NotificationWriter
+        // writes a second RSVP_CONFIRMED row (with the old static event:<id>:rsvp key it would skip it →
+        // push without a durable bell row, the exact divergence TM-374/TM-453 close).
+        Event event = createEvent(1); // capacity 1: a holds the only spot, w1 must waitlist + claim
+        VerifiedUser a = attendee("re-a", NotificationPref.PUSH, "tok-re-a");
+        VerifiedUser w1 = attendee("re-w1", NotificationPref.PUSH, "tok-re-w1");
+
+        // Episode 1: w1 waitlists behind a, a frees the spot, w1 claims.
+        rsvps.rsvp(a, event.getId()); // GOING (fills capacity 1)
+        rsvps.rsvp(w1, event.getId()); // WAITLISTED
+        rsvps.cancelRsvp(a, event.getId()); // frees the spot
+        rsvps.claim(w1, event.getId()); // WAITLISTED -> GOING (episode 1)
+
+        // Leave + rejoin: w1 leaves (hard-deletes their attendance row), a retakes the spot, w1
+        // re-waitlists behind them, a frees it again, w1 re-claims — a genuinely new promotion.
+        rsvps.cancelRsvp(w1, event.getId()); // w1 leaves; its attendance row is hard-deleted
+        rsvps.rsvp(a, event.getId()); // a retakes the only spot
+        rsvps.rsvp(w1, event.getId()); // WAITLISTED again (brand-new attendance row)
+        rsvps.cancelRsvp(a, event.getId()); // frees the spot once more
+        sender.reset();
+
+        rsvps.claim(w1, event.getId()); // WAITLISTED -> GOING (episode 2)
+
+        // The re-claim pushes again...
+        assertThat(pushesTitled("You're in")).extracting(Delivery::token).containsExactly("tok-re-w1");
+        // ...and, crucially, a SECOND RSVP_CONFIRMED row lands in the claimant's durable inbox — the
+        // episode-scoped sourceRef keeps it from being suppressed as a duplicate of episode 1.
+        assertThat(inboxTypes(idOf(w1)))
+                .containsExactly(NotificationType.RSVP_CONFIRMED, NotificationType.RSVP_CONFIRMED);
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     private VerifiedUser admin() {
