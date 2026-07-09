@@ -17,6 +17,37 @@
     <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
+    <!-- Web boot screen (TM-381): a lightweight Paper-themed loading beat shown between the native-splash
+         handoff and the SPA's first paint, greeting each launch with a random playful tagline. It's the
+         FIRST element in <body> and styled (styles.css "Web boot screen") to fill the viewport in the
+         native splash's teal from frame one, so there's no white/unstyled flash while the app's modules
+         load underneath. boot-screen.js fills #boot-tagline (a random pick that avoids an immediate
+         repeat — boot-core.js) and lifts the whole overlay at first app paint (fading to the paper app
+         beneath: teal → paper); it NEVER delays readiness (no artificial wait — if the SPA is
+         cached-instant it just flashes briefly or is skipped). The static wordmark + cup keep it
+         complete-looking even before the tagline fades in. aria-hidden: it's transient loading chrome
+         removed within ~2 frames, so it's kept out of the a11y tree (like a splash screen). The
+         Android/iOS WebView inherits it automatically (same index.html), so one implementation covers
+         web, mobile-web and both native shells. -->
+    <div id="boot-screen" class="boot-screen" aria-hidden="true">
+        <div class="boot-screen-inner">
+            <svg class="boot-mark" viewBox="0 0 48 48" width="52" height="52" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a little hand-drawn cup + saucer with rising steam — nods to the coffee/tea taglines -->
+                <path d="M12 20h20v6a8 8 0 0 1-8 8h-4a8 8 0 0 1-8-8z" />
+                <path d="M32 22h3.5a3.5 3.5 0 0 1 0 7H32" />
+                <path d="M10 38h28" />
+                <path class="boot-steam" d="M19 14c-1.6-1.6-1.6-3.4 0-5" />
+                <path class="boot-steam" d="M25 14c-1.6-1.6-1.6-3.4 0-5" />
+            </svg>
+            <p class="boot-brand">TeamMarhaba</p>
+            <!-- Tagline slot: filled by boot-screen.js from the single configurable list (boot-core.js);
+                 empty in the static HTML and faded in on [data-ready] so the swap never reads as a flash. -->
+            <p id="boot-tagline" class="boot-tagline"></p>
+        </div>
+    </div>
+
     <!-- Hidden inline SVG def for the Paper "wavy/sketchy" wobble skin (TM-529; filter from TM-213).
          This feTurbulence + feDisplacementMap filter makes straight CSS edges look hand-drawn;
          styles.css applies it via filter:url(#wobble-soft) only under [data-sketchy="on"], to
@@ -432,6 +463,10 @@
     <script src="/assets/appearance.js"></script>
     <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
     <script src="/assets/build-info.js"></script>
+    <!-- Web boot screen (TM-381). ES module: writes the random launch tagline into #boot-tagline and
+         lifts the #boot-screen overlay at first app paint. Placed first among the module scripts so the
+         tagline is filled before the heavier app modules run; import-safe/no-op where there's no overlay. -->
+    <script type="module" src="/assets/boot-screen.js"></script>
     <!-- Hide the "Get the app" store badges inside the Android WebView (TM-330): inert in a browser,
          removes the nonsensical in-app "Download for Android" CTA inside the native shell. -->
     <script type="module" src="/assets/app-badges.js"></script>
