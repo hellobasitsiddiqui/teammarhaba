@@ -31,6 +31,12 @@ class UserListIntegrationTest extends AbstractIntegrationTest {
         // Clean slate so totals are deterministic regardless of test ordering on the shared container.
         // Child tables first: events.created_by (and event_attendance.user_id) FK-reference users,
         // so users can only be wiped after their dependents (TM-391 added the events schema).
+        // The chat tables (TM-435) also FK-reference users — message.sender_id has no ON DELETE
+        // action (same convention as events.created_by), so a leftover message would block the user
+        // wipe; clear the chat dependents (message → conversation_member → conversation) first too.
+        jdbc.update("DELETE FROM message");
+        jdbc.update("DELETE FROM conversation_member");
+        jdbc.update("DELETE FROM conversation");
         jdbc.update("DELETE FROM event_attendance");
         jdbc.update("DELETE FROM events");
         jdbc.update("DELETE FROM users");
