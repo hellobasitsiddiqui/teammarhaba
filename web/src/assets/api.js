@@ -519,6 +519,38 @@ export async function sendAdminMessage(payload) {
 }
 
 /**
+ * GET /api/v1/admin/messages — the calling admin's sent-message history (TM-442 endpoint → TM-444
+ * sent-history view). Newest-first, paged, in the shared page envelope
+ * `{ items, page, size, totalElements, totalPages }` (zero-based `page`). Each item is an
+ * AdminSentHistoryResponse header row — `{ id, sentAt, sentByUid, title, deepLink, audienceType,
+ * audienceRef, recipientCount, status }` (deliberately header-only: the endpoint projects the campaign
+ * header, not the message body). ADMIN-gated on the backend; a non-admin gets a 403 (surfaced as a
+ * friendly {@link ApiError}) and a 401 will already have refreshed/redirected via {@link apiFetch}.
+ * `sort` is allow-listed server-side to time/identity, so an unknown property is a clean 400.
+ *
+ * @param {{page?: number, size?: number, sort?: string}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {ApiError}
+ */
+export async function listSentAdminMessages({ page, size, sort } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  if (sort != null) params.set("sort", sort);
+  const query = params.toString();
+  const response = await apiFetch(`/api/v1/admin/messages${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 403) {
+    throw new ApiError(403, "You need an admin role to view sent messages.");
+  }
+  if (!response.ok) {
+    throw await toApiError(response, `Could not load sent messages (${response.status}).`);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/events — the visible-now listing (TM-393), soonest-first, in the shared page envelope
  * `{ items, page, size, totalElements, totalPages }`. Each item is an EventCard
  * (`{ id, heading, locationText, timezone, startAt, endAt, capacity, imagePath, goingCount, myState }`).
@@ -628,6 +660,7 @@ if (typeof window !== "undefined") {
     getPushRoutes,
     adminBroadcastPush,
     sendAdminMessage,
+    listSentAdminMessages,
     listEvents,
     getEvent,
     rsvpToEvent,

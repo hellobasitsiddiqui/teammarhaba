@@ -5389,3 +5389,117 @@ button.tm-c-reaction {
         max-height: 80vh;
     }
 }
+
+/* ============================================================================================
+   Admin sent-history list (TM-444) — the full-page #/admin/messages view listing sent campaigns.
+   Layout only; every colour / border / radius reuses the Paper design tokens so it themes and goes
+   sketchy automatically. Reuses the shared console language (.tm-admin-head, .tm-admin-head-actions,
+   .tm-badge*, .tm-empty, .tm-error, .tm-pager, .tm-detail) — these are the sent-history-only additions.
+   Appended additively so this shared file's earlier rules are untouched.
+   ============================================================================================ */
+
+/* Intro line under the page heading. */
+.tm-sent-intro {
+    margin: 0.25rem 0 0.85rem;
+}
+
+/* The list of sent campaigns — a plain vertical stack of bordered rows. */
+.tm-sent-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* One campaign row: a bordered card that holds a clickable header and (when open) its detail panel. */
+.tm-sent-row {
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    overflow: hidden;
+}
+.tm-sent-row-open {
+    border-color: var(--accent);
+}
+
+/* The clickable row header: message summary on the left, reach / status / time on the right. A full-width
+   reset button so the whole row is the hit target (keyboard-focusable; aria-expanded reflects its state). */
+.tm-sent-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem 1rem;
+    width: 100%;
+    padding: 0.7rem 0.85rem;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+}
+.tm-sent-row-head:hover {
+    background: var(--surface-2);
+}
+
+/* Left column: the title over a muted audience summary. */
+.tm-sent-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0; /* let the title ellipsize instead of overflowing the row */
+}
+.tm-sent-row-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tm-sent-row-audience {
+    font-size: 0.85rem;
+}
+
+/* Right column: recipient-count + status pills and the sent time, kept together, wrapping when narrow. */
+.tm-sent-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.tm-sent-row-time {
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+.tm-sent-row-caret {
+    color: var(--muted);
+}
+
+/* The expanded detail panel beneath the header, separated by a hairline in the border tone. */
+.tm-sent-detail {
+    padding: 0.25rem 0.85rem 0.85rem;
+    border-top: var(--border-width) solid var(--border);
+}
+.tm-sent-detail-title {
+    margin: 0.6rem 0 0.4rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+.tm-sent-detail-note {
+    margin: 0.6rem 0 0;
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+/* Narrow screens: stack the summary and the meta so nothing is squeezed off the row. */
+@media (max-width: 560px) {
+    .tm-sent-row-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .tm-sent-row-meta {
+        justify-content: flex-start;
+    }
+}

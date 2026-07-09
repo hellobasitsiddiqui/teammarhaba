@@ -29,6 +29,8 @@ import { apiFetch, sendAdminMessage, getPushRoutes, ApiError } from "./api.js";
 import { clear, el, confirmDialog, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
+// The sent-history list route (TM-444) — where compose returns to on send / cancel now that the list exists.
+import { ADMIN_MESSAGES_ROUTE } from "./admin-message-route.js";
 // Reused from the broadcast module (all pure, browser-safe): the full-account page walk, the
 // display-identity fallback chain (so a phone-only account is never a blank, unfindable row — TM-372),
 // the search haystack, and the deep-link option normaliser (the single source of truth for the picker).
@@ -46,11 +48,11 @@ import {
   summariseSend,
 } from "./admin-messages-core.js";
 
-// Where compose returns to on success / cancel. TM-444 will add the sent-history LIST at
-// ADMIN_MESSAGES_ROUTE (#/admin/messages) — the AC's "returns to the messages list / sent-history" —
-// at which point THIS becomes that route; until it exists we return to the admin console (a real,
-// router-registered destination) rather than navigate to a dead route.
-const RETURN_ROUTE = "#/admin";
+// Where compose returns to on success / cancel: the sent-history LIST at ADMIN_MESSAGES_ROUTE
+// (#/admin/messages), now that TM-444 has landed it — the AC's "returns to the messages list /
+// sent-history". (Before the list existed, TM-443 returned to the admin console as a stand-in; this is
+// that loose end wired up.) A just-sent campaign shows at the top of the list, which reloads on entry.
+const RETURN_ROUTE = ADMIN_MESSAGES_ROUTE;
 
 const FETCH_SIZE = 100; // page size per request for the account + event walks (matches the admin caps)
 const MAX_EVENT_PAGES = 50; // runaway guard for the event walk (mirrors admin-events.js)
@@ -440,8 +442,8 @@ async function sendMessage() {
   try {
     const result = await sendAdminMessage(buildAdminMessagePayload(d));
     toast(summariseSend(result), { type: "success", timeout: 8000 });
-    // Delivered — return to the admin console (TM-444's sent-history list becomes the target once it
-    // lands). The success toast carries the summary across the navigation.
+    // Delivered — return to the sent-history list (TM-444), where the just-sent campaign shows at the
+    // top (the list reloads from page 0 on entry). The success toast carries the summary across the nav.
     window.location.hash = RETURN_ROUTE;
   } catch (err) {
     // RFC-7807 from the backend: a 400 may carry per-field errors (title/body over cap, off-list
@@ -601,7 +603,7 @@ function buildPage(view) {
   clear(view).append(
     el("div", { class: "tm-admin-head tm-msg-head" }, [
       el("h2", {}, [doodle("chat", { class: "tm-doodle-header" }), "New message"]),
-      el("a", { class: "tm-btn tm-btn-sm", id: "admin-msg-back", href: RETURN_ROUTE }, "← Admin"),
+      el("a", { class: "tm-btn tm-btn-sm", id: "admin-msg-back", href: RETURN_ROUTE }, "← Sent messages"),
     ]),
     form,
   );
