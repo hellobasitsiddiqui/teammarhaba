@@ -1654,6 +1654,102 @@ h3,
 
 /* ===== Broadcast compose panel (TM-365) ===== a card matching .tm-toolbar's visual language:
    the same surface, border, radius tokens as the stats/toolbar so it reads as part of the console. */
+/* Admin Operations panel (TM-183): grouped operational links (App endpoints / Diagnostics / Consoles)
+   at the foot of the #/admin view. Token-only styling, mirroring the broadcast panel's surface card. */
+.tm-ops {
+    margin: 1.25rem 0 0;
+    padding: 1rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.tm-ops-head h2 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.tm-ops-note {
+    margin: 0.35rem 0 0.85rem;
+    font-size: 0.82rem;
+}
+
+.tm-ops-group {
+    margin-top: 1rem;
+}
+
+.tm-ops-group-title {
+    margin: 0 0 0.15rem;
+    font-size: 1rem;
+}
+
+.tm-ops-group-intro {
+    margin: 0 0 0.6rem;
+    font-size: 0.8rem;
+}
+
+.tm-ops-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tm-ops-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.tm-ops-link {
+    font-weight: 600;
+}
+
+.tm-ops-desc {
+    font-size: 0.78rem;
+}
+
+/* A diagnostics endpoint: a collapsible whose expanded body holds a Refresh button + the JSON dump. */
+.tm-ops-diag {
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.65rem;
+    background: var(--surface-2);
+}
+
+.tm-ops-diag-summary {
+    cursor: pointer;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.tm-ops-diag-body {
+    margin-top: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+/* The JSON response block — monospace, scrollable, wraps long lines so it never blows out the layout. */
+.tm-ops-json {
+    width: 100%;
+    max-height: 20rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0.6rem 0.7rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .tm-broadcast {
     margin: 0 0 1rem;
     padding: 1rem;

@@ -112,6 +112,29 @@ jobs:
           sed -i "s/buildVersion: \"dev\"/buildVersion: \"${DESCRIBE}\"/" web/dist/assets/config.js
           grep buildVersion web/dist/assets/config.js
 
+      # Inject the operations-console identifiers into the built config.js — the SAME deploy-time seam as
+      # the API base + build version above (TM-142). The admin Operations panel (TM-183) builds its
+      # external-console links (Cloud Run, Logs Explorer, Firebase Auth, Artifact Registry, GitHub, Jira,
+      # live site) from these, so they resolve to THIS project/repo — never hardcoded in the app, so a
+      # replay into a different project/repo renders correct links. `github.repository` is read live; the
+      # rest mirror the deploy constants (docs/agents/CONSTANTS.md). config.js ships with these as its
+      # worked-example defaults, so a plain `cp` build (or a missing inject) is still valid.
+      - name: Inject ops console config into config.js
+        env:
+          OPS_PROJECT: teammarhaba
+          OPS_REGION: europe-west2
+          OPS_SERVICE: teammarhaba-backend
+          OPS_REPO: ${{ github.repository }}
+          OPS_JIRA_BOARD_URL: https://10xai.atlassian.net/jira/software/projects/TM/boards/1
+        run: |
+          set -euo pipefail
+          sed -i "s#opsProject: \"[^\"]*\"#opsProject: \"${OPS_PROJECT}\"#" web/dist/assets/config.js
+          sed -i "s#opsRegion: \"[^\"]*\"#opsRegion: \"${OPS_REGION}\"#" web/dist/assets/config.js
+          sed -i "s#opsService: \"[^\"]*\"#opsService: \"${OPS_SERVICE}\"#" web/dist/assets/config.js
+          sed -i "s#opsRepo: \"[^\"]*\"#opsRepo: \"${OPS_REPO}\"#" web/dist/assets/config.js
+          sed -i "s#opsJiraBoardUrl: \"[^\"]*\"#opsJiraBoardUrl: \"${OPS_JIRA_BOARD_URL}\"#" web/dist/assets/config.js
+          grep -E "opsProject|opsRegion|opsService|opsRepo|opsJiraBoardUrl" web/dist/assets/config.js
+
       # Content-hash the built assets so each deploy changes their URLs — an automatic cache-bust
       # (TM-144). Runs AFTER the config.js injections above so the hash reflects the final content;
       # it rewrites index.html + the ES-module import specifiers. firebase.json then serves
