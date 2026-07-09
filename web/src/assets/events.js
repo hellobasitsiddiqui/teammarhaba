@@ -445,7 +445,10 @@ function mapSection(detail, now) {
         target: "_blank",
         rel: "noopener",
         "data-testid": "event-map-link",
-        "aria-label": "Open the event location in your maps app for directions",
+        // No aria-label (TM-568): the visible text ("Open in Maps — Directions") is descriptive on its
+        // own, so we let it BE the accessible name. A wordier aria-label that didn't contain the visible
+        // words broke WCAG 2.5.3 Label in Name (Level A) — a speech-input user saying "Open in Maps"
+        // couldn't activate the link. The pin icon is aria-hidden, so the name is exactly the span text.
       },
       [icon("pin"), el("span", { class: "tm-event-map-label", text: `${model.label} — Directions` })],
     );
