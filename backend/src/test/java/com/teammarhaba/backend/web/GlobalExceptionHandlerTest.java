@@ -92,6 +92,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.EventAdminService eventAdminService;
 
+    // AlertController + AlertAdminController (TM-243) need an AlertService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.alert.AlertService alertService;
+
     // EventController (TM-393) needs the event query + RSVP services — supply them so the web
     // slice can load.
     @MockitoBean

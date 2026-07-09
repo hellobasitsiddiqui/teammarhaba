@@ -119,6 +119,68 @@
         },
         "type" : "object"
       },
+      "AlertAdminResponse" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "dismissal" : {
+            "enum" : [ "ACKNOWLEDGE", "DISMISS", "PERSISTENT" ],
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "level" : {
+            "enum" : [ "INFO", "WARNING", "CRITICAL" ],
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          },
+          "startsAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "SCHEDULED", "ACTIVE", "EXPIRED" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "AlertResponse" : {
+        "properties" : {
+          "dismissal" : {
+            "enum" : [ "ACKNOWLEDGE", "DISMISS", "PERSISTENT" ],
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "level" : {
+            "enum" : [ "INFO", "WARNING", "CRITICAL" ],
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "AttendeeAvatar" : {
         "properties" : {
           "displayName" : {
@@ -259,6 +321,33 @@
             "type" : "boolean"
           }
         },
+        "type" : "object"
+      },
+      "CreateAlertRequest" : {
+        "properties" : {
+          "dismissal" : {
+            "enum" : [ "ACKNOWLEDGE", "DISMISS", "PERSISTENT" ],
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "level" : {
+            "enum" : [ "INFO", "WARNING", "CRITICAL" ],
+            "type" : "string"
+          },
+          "message" : {
+            "maxLength" : 500,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "startsAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "dismissal", "expiresAt", "level", "message" ],
         "type" : "object"
       },
       "CreateEventRequest" : {
@@ -1247,6 +1336,80 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/api/v1/admin/alerts" : {
+      "get" : {
+        "operationId" : "history",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/AlertAdminResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "alert-admin-controller" ]
+      },
+      "post" : {
+        "operationId" : "create_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateAlertRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AlertAdminResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "alert-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/alerts/{id}/expire" : {
+      "post" : {
+        "operationId" : "expire",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AlertAdminResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "alert-admin-controller" ]
+      }
+    },
     "/api/v1/admin/events" : {
       "get" : {
         "operationId" : "list",
@@ -1625,6 +1788,27 @@
           }
         },
         "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/alerts/active" : {
+      "get" : {
+        "operationId" : "active",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/AlertResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "alert-controller" ]
       }
     },
     "/api/v1/audit" : {
@@ -2009,7 +2193,7 @@
     },
     "/api/v1/me/history" : {
       "get" : {
-        "operationId" : "history",
+        "operationId" : "history_1",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",

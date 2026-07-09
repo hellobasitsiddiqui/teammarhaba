@@ -122,6 +122,31 @@ export async function resendVerification() {
 }
 
 /**
+ * GET /api/v1/alerts/active — the site-wide alert-banner read (TM-243). PUBLIC by design: a warning
+ * (e.g. a heatwave notice) can show PRE-LOGIN, so this hits the endpoint directly rather than via
+ * {@link apiFetch} — whose 401-refresh/redirect must never fire on the anonymous banner poll. The
+ * backend decides "active" server-side; this just returns the list.
+ *
+ * <p>Best-effort by contract: a non-2xx or a network error resolves to {@code []} (never throws), so
+ * the ~5-minute poll in alerts.js can call it in the app shell without a try/catch and a transient
+ * backend blip simply shows no banner.
+ *
+ * @returns {Promise<Array<{id: number, message: string, level: string, dismissal: string}>>}
+ */
+export async function getActiveAlerts() {
+  try {
+    const response = await fetch(resolveUrl("/api/v1/alerts/active"), {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * POST /api/v1/auth/email-code/request — ask the backend to email a one-time login code to `email`
  * (TM-234, the default passwordless front door). UNauthenticated by design (you have no token before
  * you sign in), so it bypasses {@link apiFetch} (whose 401 handling/redirect doesn't apply here).

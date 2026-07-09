@@ -26,6 +26,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *   <li><b>{@code /api/v1/auth/email-code/request}, {@code .../verify}</b> — passwordless email-code
  *       login (TM-234): you can't hold a token before you sign in, so these are permit-listed and
  *       guarded instead by per-address rate-limiting + code validation in {@code EmailCodeService}.</li>
+ *   <li><b>{@code /api/v1/alerts/active}</b> — the site-wide alert-banner read (TM-243): a public,
+ *       non-sensitive notices feed the web banner polls, allow-listed so a warning can show pre-login.
+ *       Read-only; admin writes stay authenticated + {@code ADMIN}-gated under {@code /api/v1/admin/alerts}.</li>
  * </ul>
  *
  * <p>Everything else — the whole {@code /api/v1} surface and the rest of {@code /actuator/**}
@@ -73,6 +76,13 @@ public class SecurityConfig {
                                 // server-side (EmailCodeService); verify returns a Firebase custom token.
                                 "/api/v1/auth/email-code/request",
                                 "/api/v1/auth/email-code/verify",
+                                // Site-wide alert banner read (TM-243): the active-alerts feed the web
+                                // banner polls. Allow-listed so a warning (e.g. a heatwave notice) can
+                                // show PRE-LOGIN. Read-only + non-sensitive by contract — the response
+                                // carries only the notice (id/message/level/dismissal), never the actor
+                                // or schedule, and the message must never carry sensitive data. Admin
+                                // writes stay under /api/v1/admin/alerts (authenticated + ADMIN-gated).
+                                "/api/v1/alerts/active",
                                 // Emulator-only e2e peek for the code (TM-234). The handler bean only
                                 // exists when FIREBASE_AUTH_EMULATOR_HOST is set (unset in dev/prod), so
                                 // in any real environment this matches nothing and 404s — the permit is
