@@ -123,13 +123,18 @@ public class NewMessageNotifier {
             return NOTHING;
         }
 
-        // Recipients = the active (mute = NONE) members, minus the sender. Querying NONE is the domain's
-        // fan-out recipient set, so REMOVED (the AC's explicit skip) and READ_ONLY (also push-excluded by
-        // the MuteState contract) are both left out here. A null sender (system/admin message) excludes
-        // nobody — userId.equals(null) is false — so every active member receives it.
+        // Recipients = the active (mute = NONE) members who have not self-muted push, minus the sender.
+        // Querying NONE is the domain's fan-out recipient set, so REMOVED (the AC's explicit skip), LEFT
+        // (a self-left member, TM-471) and READ_ONLY (also push-excluded by the MuteState contract) are
+        // all left out here. The self-mute filter (TM-471) then drops an otherwise-active member who has
+        // silenced THIS thread's push — they stay a full member (they still read + post), they just get
+        // no new-message push (the AC's "a self-muted member gets no chat pushes"; the same recipient
+        // rule any @everyone/@here mention fan-out, TM-469, must reuse). A null sender (system/admin
+        // message) excludes nobody — userId.equals(null) is false — so every eligible member receives it.
         Long senderId = message.getSenderId();
         List<Long> recipients = members
                 .findByConversationIdAndMute(message.getConversationId(), MuteState.NONE).stream()
+                .filter(member -> !member.isNotificationsMuted()) // TM-471: skip self-muted members
                 .map(ConversationMember::getUserId)
                 .filter(userId -> !userId.equals(senderId))
                 .toList();

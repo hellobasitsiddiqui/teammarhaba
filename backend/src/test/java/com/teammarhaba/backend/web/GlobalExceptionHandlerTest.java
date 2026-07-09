@@ -135,6 +135,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.ChatStreamService chatStreamService;
 
+    // ConversationController's mute/leave/rejoin (TM-471) needs a ConversationMembershipService — supply
+    // it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.ConversationMembershipService conversationMembershipService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

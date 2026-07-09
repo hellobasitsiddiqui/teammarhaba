@@ -242,10 +242,13 @@ public class MessagePostService {
                 .orElseThrow(() -> new AccessDeniedException("You are not a member of this thread."));
         switch (mute) {
             case NONE -> {
-                /* active member — allowed to post */
+                /* active member — allowed to post. A self-muted member (TM-471) is still NONE and may
+                 * post: self-mute only silences their inbound push, it never gags them. */
             }
             case READ_ONLY -> throw new AccessDeniedException("You are muted in this thread and cannot post.");
-            case REMOVED -> throw new AccessDeniedException("You are not a member of this thread.");
+            // A self-left member (TM-471) has hidden/exited the thread — like a non-member/removed one they
+            // get the uniform "not a member" 403 (they must rejoin before they can post again).
+            case LEFT, REMOVED -> throw new AccessDeniedException("You are not a member of this thread.");
         }
     }
 

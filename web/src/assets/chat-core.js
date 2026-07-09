@@ -147,7 +147,8 @@ function epoch(iso) {
  * @param {Object} summary a ConversationSummaryResponse.
  * @param {Date} [now] reference "now" for the time label.
  * @returns {{id: string, title: string, type: {key: string, label: string}, preview: string,
- *            unread: number, timeLabel: string, sortAt: number, avatar: string}}
+ *            unread: number, timeLabel: string, sortAt: number, avatar: string, muted: boolean,
+ *            left: boolean}}
  */
 export function toConversationRow(summary, now = new Date()) {
   const s = summary || {};
@@ -161,6 +162,30 @@ export function toConversationRow(summary, now = new Date()) {
     timeLabel: formatTimeLabel(at, now),
     sortAt: epoch(at),
     avatar: avatarGlyph(s),
+    // The caller's own self-service membership flags (TM-471): `muted` → show a muted indicator on the
+    // row; `left` → the caller has self-left this thread, so the row is rendered as a de-emphasised
+    // "you left — rejoin" affordance rather than an openable thread.
+    muted: Boolean(s.notificationsMuted),
+    left: Boolean(s.left),
+  };
+}
+
+/**
+ * The self-service controls to offer for a thread, from the caller's own membership flags (TM-471).
+ * Pure so chat.js renders one tested source: which mute action + label to show, and whether the thread
+ * is in the "left" state (rendered as a rejoin affordance rather than an open thread). Defaults are the
+ * cold-deep-link fallback (not muted, not left) — the endpoints are the source of truth and each
+ * returns the fresh state, so a wrong-way default self-corrects on the first action.
+ * @param {{muted?: boolean, left?: boolean}} [membership]
+ * @returns {{muted: boolean, left: boolean, muteAction: ("mute"|"unmute"), muteLabel: string}}
+ */
+export function membershipControls(membership = {}) {
+  const muted = Boolean(membership?.muted);
+  return {
+    muted,
+    left: Boolean(membership?.left),
+    muteAction: muted ? "unmute" : "mute",
+    muteLabel: muted ? "Unmute notifications" : "Mute notifications",
   };
 }
 

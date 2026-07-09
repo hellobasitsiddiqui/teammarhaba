@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.chat.ConversationMembershipService;
 import com.teammarhaba.backend.chat.ConversationReadService;
 import com.teammarhaba.backend.chat.MessagePostService;
 import com.teammarhaba.backend.common.PageRequests;
@@ -40,6 +41,12 @@ import org.springframework.web.bind.annotation.RestController;
  *       message ({@code 201}) and fans a push out to the thread's other active members.</li>
  *   <li>{@code POST /conversations/{id}/read} — advance the caller's read cursor; returns the fresh
  *       cursor + recomputed unread count.</li>
+ *   <li>{@code POST /conversations/{id}/mute} · {@code /unmute} · {@code /leave} · {@code /rejoin} —
+ *       member self-service over the caller's OWN membership (TM-471): silence / restore this thread's
+ *       push, and leave / rejoin the thread — all WITHOUT changing the caller's event RSVP. Each
+ *       returns the caller's fresh membership state ({@code ConversationMembershipResponse}). Distinct
+ *       from admin moderation and from un-RSVPing the event; owner-scoped, so a non-member / kicked
+ *       member / unknown thread is a uniform {@code 403}.</li>
  * </ul>
  */
 @RestController
@@ -55,10 +62,15 @@ public class ConversationController {
 
     private final ConversationReadService conversations;
     private final MessagePostService posts;
+    private final ConversationMembershipService memberships;
 
-    ConversationController(ConversationReadService conversations, MessagePostService posts) {
+    ConversationController(
+            ConversationReadService conversations,
+            MessagePostService posts,
+            ConversationMembershipService memberships) {
         this.conversations = conversations;
         this.posts = posts;
+        this.memberships = memberships;
     }
 
     /** The caller's conversation list, most-recently-active first. Only {@code page}/{@code size} tune it. */
@@ -103,5 +115,40 @@ public class ConversationController {
     @PostMapping("/conversations/{id}/read")
     MarkReadResponse markRead(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
         return conversations.markRead(caller, id);
+    }
+
+    /**
+     * Self-mute this thread's push (TM-471): the caller stays an active, visible member (can read +
+     * post) but the new-message fan-out skips them. Owner-scoped; returns the caller's fresh membership
+     * state. A non-member / kicked member / unknown thread is a {@code 403}.
+     */
+    @PostMapping("/conversations/{id}/mute")
+    ConversationMembershipResponse mute(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return memberships.mute(caller, id);
+    }
+
+    /** Un-mute this thread's push (TM-471) — the inverse of {@link #mute}. Owner-scoped. */
+    @PostMapping("/conversations/{id}/unmute")
+    ConversationMembershipResponse unmute(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return memberships.unmute(caller, id);
+    }
+
+    /**
+     * Self-leave this thread (TM-471): hide/exit it while the caller's event RSVP is unchanged (still
+     * GOING). Owner-scoped; the organiser can't leave their own thread ({@code 409}). Returns the
+     * caller's fresh membership state.
+     */
+    @PostMapping("/conversations/{id}/leave")
+    ConversationMembershipResponse leave(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return memberships.leave(caller, id);
+    }
+
+    /**
+     * Self-rejoin a thread the caller had left (TM-471) — available while they still attend the event
+     * ({@code 409} otherwise). Owner-scoped; returns the caller's fresh membership state.
+     */
+    @PostMapping("/conversations/{id}/rejoin")
+    ConversationMembershipResponse rejoin(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return memberships.rejoin(caller, id);
     }
 }

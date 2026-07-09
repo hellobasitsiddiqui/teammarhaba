@@ -140,6 +140,60 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         assertThat(membership(thread, attendee).isActive()).isTrue();
     }
 
+    // ── self-leave stickiness against the RSVP re-sync (TM-471) ───────────────────────────────────
+
+    @Test
+    void selfLeftMemberIsNotReactivatedByAFreshGoingLanding() {
+        // A member who has SELF-LEFT the chat (TM-471) while still attending must not be silently
+        // dragged back in by the RSVP→membership re-sync. A fresh GOING landing (here driven directly
+        // via the lifecycle hook, the same call EventRsvpService makes) leaves a LEFT member LEFT —
+        // only an explicit rejoin returns them. This is the interaction distinct from a REMOVED member,
+        // whom the same hook DOES reactivate (rejoiningReactivatesTheSameMembershipRow).
+        long host = newUser("host");
+        Event event = seedEvent(host, 5, false, null);
+        long attendee = newUser("attendee");
+
+        rsvps.rsvp(caller(attendee), event.getId()); // GOING → active member
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+
+        // The member self-leaves the chat (their event RSVP is untouched — still GOING).
+        ConversationMember member = membership(thread, attendee);
+        member.leave();
+        members.save(member);
+
+        // A fresh GOING landing / re-sync fires again — must NOT reactivate the self-left member.
+        lifecycle.onGoing(event, attendee);
+
+        assertThat(membership(thread, attendee).getMute())
+                .as("self-leave is sticky: a GOING re-sync does not reactivate a LEFT member")
+                .isEqualTo(MuteState.LEFT);
+        assertThat(attendanceState(event.getId(), attendee))
+                .as("RSVP is unaffected by self-leaving the chat")
+                .isEqualTo(AttendanceState.GOING);
+    }
+
+    @Test
+    void unRsvpDoesNotOverwriteASelfLeaveWithRemoved() {
+        // Un-RSVPing the event after self-leaving the chat must not flip the LEFT row to REMOVED —
+        // otherwise a later re-RSVP (which reactivates REMOVED) would silently re-add them. Keeping the
+        // row LEFT preserves the self-leave across the whole un-RSVP → re-RSVP round-trip.
+        long host = newUser("host");
+        Event event = seedEvent(host, 5, false, null);
+        long attendee = newUser("attendee");
+
+        rsvps.rsvp(caller(attendee), event.getId());
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+        ConversationMember member = membership(thread, attendee);
+        member.leave();
+        members.save(member);
+
+        rsvps.cancelRsvp(caller(attendee), event.getId()); // un-RSVP → onLeave
+
+        assertThat(membership(thread, attendee).getMute())
+                .as("onLeave leaves a self-LEFT row LEFT (never overwrites it with REMOVED)")
+                .isEqualTo(MuteState.LEFT);
+    }
+
     // ── waitlist-in-chat toggle ──────────────────────────────────────────────────────────────────
 
     @Test

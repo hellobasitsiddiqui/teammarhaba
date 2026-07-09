@@ -16,6 +16,7 @@ import {
   avatarGlyph,
   formatTimeLabel,
   toConversationRow,
+  membershipControls,
   sortConversations,
   toConversationRows,
   totalUnread,
@@ -127,6 +128,45 @@ test("toConversationRow is defensive: blank title, clamped unread, empty preview
   assert.equal(row.unread, 0); // negative clamps to 0
   assert.deepEqual(row.type, { key: "admin", label: "Admin" });
   assert.equal(row.avatar, "📣");
+});
+
+test("toConversationRow carries the caller's self-service membership flags (TM-471)", () => {
+  // Muted + left both surface (and default false when the backend omits them).
+  const muted = toConversationRow({ id: 7, type: "EVENT_GROUP", notificationsMuted: true });
+  assert.equal(muted.muted, true);
+  assert.equal(muted.left, false);
+
+  const left = toConversationRow({ id: 8, type: "EVENT_GROUP", left: true });
+  assert.equal(left.left, true);
+  assert.equal(left.muted, false);
+
+  const plain = toConversationRow({ id: 9, type: "EVENT_GROUP" });
+  assert.equal(plain.muted, false);
+  assert.equal(plain.left, false);
+});
+
+test("membershipControls: picks the mute action/label and reflects the left state (TM-471)", () => {
+  // Not muted → offer to mute; muted → offer to unmute.
+  assert.deepEqual(membershipControls({ muted: false, left: false }), {
+    muted: false,
+    left: false,
+    muteAction: "mute",
+    muteLabel: "Mute notifications",
+  });
+  assert.deepEqual(membershipControls({ muted: true, left: false }), {
+    muted: true,
+    left: false,
+    muteAction: "unmute",
+    muteLabel: "Unmute notifications",
+  });
+  // The left flag is carried through, and a missing/empty argument defaults to the cold-deep-link case.
+  assert.equal(membershipControls({ left: true }).left, true);
+  assert.deepEqual(membershipControls(), {
+    muted: false,
+    left: false,
+    muteAction: "mute",
+    muteLabel: "Mute notifications",
+  });
 });
 
 test("toConversationRows unifies event + admin conversations newest-activity first", () => {
