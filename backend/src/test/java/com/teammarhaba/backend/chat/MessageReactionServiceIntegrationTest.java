@@ -6,37 +6,34 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MessageReactionSummary;
-import com.teammarhaba.backend.api.ThreadMessageResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
-import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.Event;
+import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.security.access.AccessDeniedException;
 
 /**
  * Verifies message reactions (TM-461) end-to-end against a real Postgres (Testcontainers) — the
  * toggle on/off, the duplicate guard the {@code UNIQUE (message_id, user_id, emoji)} constraint
- * enforces, the per-emoji counts + caller {@code mine} flag the thread projection carries, the member
- * gate (non-member / removed → 403, read-only allowed), the closed-thread freeze (→ 409), the
- * "like = default emoji" behaviour, and the {@code 404} for an unknown / moderation-removed message.
+ * enforces, the per-emoji counts + caller {@code mine} flag the reaction summary carries, the member
+ * gate (a non-member / removed member is a 404 — indistinguishable from a missing message, TM-576;
+ * a read-only member is allowed), the closed-thread freeze (→ 409, including an event thread past its
+ * close-policy window — TM-574, mirroring the post path), the "like = default emoji" behaviour, and
+ * the {@code 404} for an unknown / moderation-removed message.
  *
  * <p>Deliberately <b>not</b> {@code @Transactional} at class level: each service call runs in its own
  * transaction so every reaction/message row gets its own DB-side {@code now()} — a shared test
  * transaction would stamp one identical instant and defeat the first-reacted chip ordering.
  */
 class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
-
-    /** Newest-first page — enough to hold every message a test posts. */
-    private static final PageRequest FIRST_PAGE =
-            PageRequest.of(0, 50, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
 
     @Autowired
     private MessageReactionService service;
@@ -54,6 +51,9 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
     private MessageRepository messages;
 
     @Autowired
+    private EventRepository events;
+
+    @Autowired
     private UserRepository users;
 
     // ── fixtures ─────────────────────────────────────────────────────────────────────────────────
@@ -64,6 +64,11 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
 
     private VerifiedUser caller(String uid) {
         return new VerifiedUser(uid, uid + "@example.com");
+    }
+
+    /** The provisioned {@code users.id} behind a {@link VerifiedUser} — the key {@code summariesFor} takes. */
+    private Long userIdOf(VerifiedUser caller) {
+        return users.findByFirebaseUid(caller.uid()).orElseThrow().getId();
     }
 
     /** A user provisioned AND joined to the thread with the given mute state — returns their VerifiedUser. */
@@ -83,13 +88,43 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         return messages.save(Message.fromUser(conversationId, senderId, body)).getId();
     }
 
-    /** The reaction summary for one message as seen by a caller, read back through the thread projection. */
-    private List<EmojiReactionCount> reactionsSeenBy(VerifiedUser caller, Long conversationId, Long messageId) {
-        return service.threadMessages(caller, conversationId, FIRST_PAGE).items().stream()
-                .filter(m -> m.id().equals(messageId))
-                .findFirst()
-                .map(ThreadMessageResponse::reactions)
-                .orElseThrow();
+    /** An open-ended, never-close event (chat-close hours unset → app default "never close"); returns its id. */
+    private Long newOpenEvent(String heading) {
+        Instant now = Instant.now();
+        return events.save(new Event(
+                        heading,
+                        "A friendly meetup.",
+                        "Marhaba Cafe, 12 High St",
+                        "Europe/London",
+                        now.plus(Duration.ofDays(7)),
+                        now.minus(Duration.ofHours(1)),
+                        now.plus(Duration.ofDays(30)),
+                        newUser(heading + "-host"),
+                        now))
+                .getId();
+    }
+
+    /** An event that ended {@code endedAgo} ago and auto-closes its chat {@code closeHours} after end. */
+    private Long newEventEndedWithCloseWindow(String heading, Duration endedAgo, int closeHours) {
+        Instant now = Instant.now();
+        Event event = new Event(
+                heading,
+                "A finished meetup.",
+                "Marhaba Cafe, 12 High St",
+                "Europe/London",
+                now.minus(endedAgo).minus(Duration.ofHours(2)), // started before it ended
+                now.minus(Duration.ofDays(1)),
+                now.plus(Duration.ofDays(30)),
+                newUser(heading + "-host"),
+                now);
+        event.setEndAt(now.minus(endedAgo));
+        event.setChatCloseHours(closeHours);
+        return events.save(event).getId();
+    }
+
+    /** The reaction summary for one message as seen by a caller, read back through the shared summariser. */
+    private List<EmojiReactionCount> reactionsSeenBy(VerifiedUser caller, Long messageId) {
+        return service.summariesFor(userIdOf(caller), List.of(messageId)).getOrDefault(messageId, List.of());
     }
 
     // ── toggle on / off + duplicate guard ─────────────────────────────────────────────────────────
@@ -135,10 +170,10 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(2);
     }
 
-    // ── per-emoji counts + caller-reacted flag, via the thread projection ─────────────────────────
+    // ── per-emoji counts + caller-reacted flag, via the shared reaction summariser ────────────────
 
     @Test
-    void threadProjectionCarriesPerEmojiCountsAndCallerReactedFlag() {
+    void reactionSummaryCarriesPerEmojiCountsAndCallerReactedFlag() {
         Conversation thread = openThread();
         VerifiedUser a = member(thread.getId(), "count-a", MuteState.NONE);
         VerifiedUser b = member(thread.getId(), "count-b", MuteState.NONE);
@@ -150,41 +185,36 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         service.react(c, message, "❤️"); // second emoji, one reactor
 
         // Counts are per distinct emoji, in first-reacted order; 👍 has 2, ❤️ has 1.
-        assertThat(reactionsSeenBy(a, thread.getId(), message))
+        assertThat(reactionsSeenBy(a, message))
                 .containsExactly(
                         new EmojiReactionCount("👍", 2, true), // A reacted 👍 → mine=true
                         new EmojiReactionCount("❤️", 1, false)); // A did not react ❤️
 
         // The mine flag is per-caller: from C's view 👍 is not theirs but ❤️ is.
-        assertThat(reactionsSeenBy(c, thread.getId(), message))
+        assertThat(reactionsSeenBy(c, message))
                 .containsExactly(
                         new EmojiReactionCount("👍", 2, false),
                         new EmojiReactionCount("❤️", 1, true));
     }
 
     @Test
-    void threadProjectionExcludesSoftDeletedMessagesButKeepsSystemMessages() {
+    void summariesForBatchesReactionsPerMessageAndOmitsMessagesWithNone() {
         Conversation thread = openThread();
-        VerifiedUser member = member(thread.getId(), "proj-member", MuteState.NONE);
-        Long author = newUser("proj-author");
+        VerifiedUser member = member(thread.getId(), "batch-member", MuteState.NONE);
+        Long author = newUser("batch-author");
 
-        Long kept = postMessage(thread.getId(), author, "keep me");
-        messages.save(Message.fromSystem(thread.getId(), "from TeamMarhaba", "/home"));
-        Message removed = messages.save(Message.fromUser(thread.getId(), author, "remove me"));
-        removed.softDelete(Instant.now());
-        messages.save(removed);
-        service.react(member, kept, "👍");
+        Long reacted = postMessage(thread.getId(), author, "react to me");
+        Long silent = postMessage(thread.getId(), author, "nothing here");
+        service.react(member, reacted, "👍");
 
-        PageResponse<ThreadMessageResponse> page = service.threadMessages(member, thread.getId(), FIRST_PAGE);
-
-        // The moderation-removed message never surfaces; the live user + system messages do.
-        assertThat(page.items()).extracting(ThreadMessageResponse::body)
-                .containsExactlyInAnyOrder("keep me", "from TeamMarhaba");
-        // A system message carries a null sender; a message with no reactions has an empty summary.
-        ThreadMessageResponse system = page.items().stream()
-                .filter(m -> m.body().equals("from TeamMarhaba")).findFirst().orElseThrow();
-        assertThat(system.senderId()).isNull();
-        assertThat(system.reactions()).isEmpty();
+        // One query for the whole batch: the reacted message carries its summary; a message with no
+        // reactions is simply absent from the map (the read projection then defaults it to an empty
+        // list). This is the surviving reaction-summary coverage after the thread-messages read moved
+        // to ConversationReadService (TM-436/447 consolidation, TM-577).
+        Map<Long, List<EmojiReactionCount>> summaries =
+                service.summariesFor(userIdOf(member), List.of(reacted, silent));
+        assertThat(summaries.get(reacted)).containsExactly(new EmojiReactionCount("👍", 1, true));
+        assertThat(summaries).doesNotContainKey(silent);
     }
 
     // ── like = default emoji ──────────────────────────────────────────────────────────────────────
@@ -210,33 +240,36 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(service.unreact(member, message, null).reactions()).isEmpty();
     }
 
-    // ── member gate ───────────────────────────────────────────────────────────────────────────────
+    // ── member gate: non-member / removed collapse to 404 (TM-576) ────────────────────────────────
 
     @Test
-    void reactIsGatedToNonRemovedMembers() {
+    void reactByANonMemberOrRemovedMemberIs404NotForbidden() {
         Conversation thread = openThread();
         Long message = postMessage(thread.getId(), newUser("gate-author"), "hi");
 
-        // A user who was never a member of the thread → 403.
+        // A user who was never a member of the thread → 404, NOT 403. A 403 for a real message vs a
+        // 404 for a missing one would leak message existence over sequential ids; collapsing the
+        // non-member case to the same "message … not found" closes that oracle (TM-576).
         VerifiedUser stranger = caller("gate-stranger");
         newUser("gate-stranger");
         assertThatThrownBy(() -> service.react(stranger, message, "👍"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("not found");
+        assertThatThrownBy(() -> service.unreact(stranger, message, "👍"))
+                .isInstanceOf(ResourceNotFoundException.class);
 
-        // A REMOVED member (kicked) → 403, even though the row still exists.
+        // A REMOVED member (kicked) → also 404 (same reason), even though the membership row still exists.
         VerifiedUser removed = member(thread.getId(), "gate-removed", MuteState.REMOVED);
         assertThatThrownBy(() -> service.react(removed, message, "👍"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(ResourceNotFoundException.class);
 
-        // A READ_ONLY member MAY react (the AC gates on "non-removed", and a reaction is not a post).
+        // A READ_ONLY member MAY react (the gate is "non-removed", and a reaction is not a post).
         VerifiedUser readOnly = member(thread.getId(), "gate-readonly", MuteState.READ_ONLY);
         assertThat(service.react(readOnly, message, "👍").reactions())
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
-
-        // The read projection is member-gated too — a non-member cannot read the thread.
-        assertThatThrownBy(() -> service.threadMessages(stranger, thread.getId(), FIRST_PAGE))
-                .isInstanceOf(AccessDeniedException.class);
     }
+
+    // ── closed-thread freeze (409) ────────────────────────────────────────────────────────────────
 
     @Test
     void reactingOnAClosedThreadIsRejectedButHistoryStaysReadable() {
@@ -255,8 +288,32 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
                 .isInstanceOf(ConflictException.class);
 
         // ...but the closed thread (and its existing reactions) stays readable — soft-close, not delete.
-        assertThat(reactionsSeenBy(member, thread.getId(), message))
+        assertThat(reactionsSeenBy(member, message))
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
+    }
+
+    @Test
+    void reactingOnAnEventThreadPastItsClosePolicyWindowIs409ButAnOpenOneIs200() {
+        // An open-ended, never-close event: its thread accepts reactions (200).
+        Long openEventId = newOpenEvent("react-open");
+        Conversation openThread = conversations.save(Conversation.forEvent(openEventId));
+        VerifiedUser openMember = member(openThread.getId(), "react-open-member", MuteState.NONE);
+        Long openMessage = postMessage(openThread.getId(), newUser("react-open-author"), "hi");
+        assertThat(service.react(openMember, openMessage, "👍").reactions())
+                .containsExactly(new EmojiReactionCount("👍", 1, true));
+
+        // An event that ended an hour ago with a 0-hour close window is read-only BY POLICY (never
+        // manually soft-closed). Reactions must freeze with 409 — the same close-policy gate the post
+        // path uses (TM-574), so a reaction and a post agree on when an event thread is frozen. The
+        // plain isClosed() flag alone (the old behaviour) would have let this through.
+        Long closedEventId = newEventEndedWithCloseWindow("react-closed", Duration.ofHours(1), 0);
+        Conversation closedThread = conversations.save(Conversation.forEvent(closedEventId));
+        VerifiedUser closedMember = member(closedThread.getId(), "react-closed-member", MuteState.NONE);
+        Long closedMessage = postMessage(closedThread.getId(), newUser("react-closed-author"), "hi");
+        assertThatThrownBy(() -> service.react(closedMember, closedMessage, "🎉"))
+                .isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> service.unreact(closedMember, closedMessage, "👍"))
+                .isInstanceOf(ConflictException.class);
     }
 
     // ── unknown / removed targets ─────────────────────────────────────────────────────────────────
@@ -275,10 +332,6 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         removed.softDelete(Instant.now());
         messages.save(removed);
         assertThatThrownBy(() -> service.react(member, removed.getId(), "👍"))
-                .isInstanceOf(ResourceNotFoundException.class);
-
-        // An unknown thread on the read path is a 404.
-        assertThatThrownBy(() -> service.threadMessages(member, 999_999L, FIRST_PAGE))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 }

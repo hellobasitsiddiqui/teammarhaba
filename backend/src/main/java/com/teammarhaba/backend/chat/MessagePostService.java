@@ -20,9 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The event-chat write path (TM-447, epic Event Chat wave-2): an attendee posting a message to their
- * event's group thread. This is the write sibling of the read projection
- * ({@link MessageReactionService#threadMessages}) and the first consumer of the whole chat
- * foundation's write seam:
+ * event's group thread. This is the write sibling of the live thread read
+ * ({@link ConversationReadService#messages}) and the first consumer of the whole chat foundation's
+ * write seam:
  *
  * <ul>
  *   <li>the shared message store (TM-435) — persists a {@link Message};</li>
