@@ -25,7 +25,8 @@ import org.springframework.security.access.AccessDeniedException;
  * Verifies message reactions (TM-461) end-to-end against a real Postgres (Testcontainers) — the
  * toggle on/off, the duplicate guard the {@code UNIQUE (message_id, user_id, emoji)} constraint
  * enforces, the per-emoji counts + caller {@code mine} flag the thread projection carries, the member
- * gate (non-member / removed → 403, read-only allowed), the closed-thread freeze (→ 409), the
+ * gate (non-member / removed → 404, indistinguishable from a missing message — TM-576; read-only
+ * allowed), the closed-thread freeze (→ 409), the
  * "like = default emoji" behaviour, and the {@code 404} for an unknown / moderation-removed message.
  *
  * <p>Deliberately <b>not</b> {@code @Transactional} at class level: each service call runs in its own
@@ -213,27 +214,32 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
     // ── member gate ───────────────────────────────────────────────────────────────────────────────
 
     @Test
-    void reactIsGatedToNonRemovedMembers() {
+    void reactByANonMemberOrRemovedMemberIs404NotForbidden() {
         Conversation thread = openThread();
         Long message = postMessage(thread.getId(), newUser("gate-author"), "hi");
 
-        // A user who was never a member of the thread → 403.
+        // A user who was never a member of the thread → 404, NOT 403. A 403 for a real message vs a
+        // 404 for a missing one would leak message existence over sequential ids; collapsing the
+        // non-member case to the same "message … not found" closes that oracle (TM-576).
         VerifiedUser stranger = caller("gate-stranger");
         newUser("gate-stranger");
         assertThatThrownBy(() -> service.react(stranger, message, "👍"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("not found");
+        assertThatThrownBy(() -> service.unreact(stranger, message, "👍"))
+                .isInstanceOf(ResourceNotFoundException.class);
 
-        // A REMOVED member (kicked) → 403, even though the row still exists.
+        // A REMOVED member (kicked) → also 404 (same reason), even though the membership row still exists.
         VerifiedUser removed = member(thread.getId(), "gate-removed", MuteState.REMOVED);
         assertThatThrownBy(() -> service.react(removed, message, "👍"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(ResourceNotFoundException.class);
 
-        // A READ_ONLY member MAY react (the AC gates on "non-removed", and a reaction is not a post).
+        // A READ_ONLY member MAY react (the gate is "non-removed", and a reaction is not a post).
         VerifiedUser readOnly = member(thread.getId(), "gate-readonly", MuteState.READ_ONLY);
         assertThat(service.react(readOnly, message, "👍").reactions())
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
 
-        // The read projection is member-gated too — a non-member cannot read the thread.
+        // The read projection is member-gated separately — a non-member still cannot read the thread (403).
         assertThatThrownBy(() -> service.threadMessages(stranger, thread.getId(), FIRST_PAGE))
                 .isInstanceOf(AccessDeniedException.class);
     }

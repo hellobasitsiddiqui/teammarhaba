@@ -30,17 +30,21 @@ import org.springframework.transaction.annotation.Transactional;
  * provisioning the rest of the {@code /me} surface uses), never from a client-supplied id — so a
  * caller can only ever react as themselves and only ever see their own {@code mine} flags.
  *
- * <p><b>Member gate (per the AC).</b> To react or un-react, the caller must be a <em>non-removed</em>
- * member of the message's thread and the thread must be <em>open</em>:
+ * <p><b>Member gate (per the AC), unified with the not-found path.</b> To react or un-react, the
+ * caller must be a <em>non-removed</em> member of the message's thread and the thread must be
+ * <em>open</em>:
  * <ul>
- *   <li>not a member, or a {@link MuteState#REMOVED} member → {@code 403} ({@link AccessDeniedException});
+ *   <li>an unknown or moderation-removed message — <em>and equally</em> a caller who is not a
+ *       non-removed member of the message's thread — is the same {@code 404}
+ *       ({@link ResourceNotFoundException}). Collapsing the non-member case onto the not-found case
+ *       (TM-576) closes an existence oracle: over these message-scoped endpoints a caller must not be
+ *       able to tell a real message they simply can't see (once {@code 403}) apart from one that never
+ *       existed ({@code 404}) by walking sequential message ids;
  *   <li>the thread is soft-closed → {@code 409} ({@link ConflictException}) — reactions are frozen with
- *       the rest of the thread, but history (including existing reactions) stays readable;
- *   <li>an unknown or moderation-removed message → {@code 404} ({@link ResourceNotFoundException}), so a
- *       probe can't tell a hidden message from one that never existed.
+ *       the rest of the thread, but history (including existing reactions) stays readable.
  * </ul>
- * A {@link MuteState#READ_ONLY} member <em>may</em> react: the AC gates on "non-removed", and a
- * reaction is a read-side signal, not a posted message.
+ * A {@link MuteState#READ_ONLY} member <em>may</em> react: the gate is "non-removed", and a reaction
+ * is a read-side signal, not a posted message.
  *
  * <p><b>"Like" is not special.</b> When the caller omits the emoji it defaults to {@link #DEFAULT_EMOJI}
  * — so a client double-tap ("like") is a default-emoji react through this exact path, with no separate
@@ -82,8 +86,7 @@ public class MessageReactionService {
     @Transactional
     public MessageReactionSummary react(VerifiedUser caller, Long messageId, String emoji) {
         Long userId = users.provision(caller).getId();
-        Long conversationId = requireLiveMessageThread(messageId);
-        requireNonRemovedMember(conversationId, userId);
+        Long conversationId = requireReactableMessageThread(messageId, userId);
         requireOpenThread(conversationId);
 
         String glyph = normalise(emoji);
@@ -108,8 +111,7 @@ public class MessageReactionService {
     @Transactional
     public MessageReactionSummary unreact(VerifiedUser caller, Long messageId, String emoji) {
         Long userId = users.provision(caller).getId();
-        Long conversationId = requireLiveMessageThread(messageId);
-        requireNonRemovedMember(conversationId, userId);
+        Long conversationId = requireReactableMessageThread(messageId, userId);
         requireOpenThread(conversationId);
 
         reactions.deleteByMessageIdAndUserIdAndEmoji(messageId, userId, normalise(emoji));
@@ -169,7 +171,28 @@ public class MessageReactionService {
                 .orElseThrow(() -> new ResourceNotFoundException("message " + messageId + " not found"));
     }
 
-    /** The AC member gate: the caller must be a member of the thread and not {@link MuteState#REMOVED}. */
+    /**
+     * The member gate for the message-scoped reaction endpoints, folded into the not-found path
+     * (TM-576). Resolve the live message's thread (a {@code 404} for an absent / moderation-removed
+     * message via {@link #requireLiveMessageThread}), then require the caller to be a non-removed
+     * member of that thread — and if they are <em>not</em>, raise the <em>identical</em> {@code 404}
+     * ("message … not found") a missing message returns rather than a {@code 403}. That makes a real
+     * message the caller can't see indistinguishable from one that never existed, so these endpoints
+     * can't be walked as an existence oracle over sequential message ids. A genuine non-removed member
+     * (including {@link MuteState#READ_ONLY}) gets the thread id back.
+     */
+    private Long requireReactableMessageThread(Long messageId, Long userId) {
+        Long conversationId = requireLiveMessageThread(messageId);
+        boolean nonRemovedMember = members.findByConversationIdAndUserId(conversationId, userId)
+                .map(member -> member.getMute() != MuteState.REMOVED)
+                .orElse(false);
+        if (!nonRemovedMember) {
+            throw new ResourceNotFoundException("message " + messageId + " not found");
+        }
+        return conversationId;
+    }
+
+    /** The read-projection member gate: the caller must be a member of the thread and not {@link MuteState#REMOVED}. */
     private void requireNonRemovedMember(Long conversationId, Long userId) {
         MuteState mute = members.findByConversationIdAndUserId(conversationId, userId)
                 .map(ConversationMember::getMute)
