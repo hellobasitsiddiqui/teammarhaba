@@ -42,6 +42,7 @@ import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
 import { updateTabbar } from "./tabbar.js";
+import { updateChatTabBadge } from "./chat-tab-badge.js";
 import { updateNotificationBell } from "./notification-bell.js";
 
 const LOGIN = "#/login";
@@ -313,6 +314,12 @@ function render() {
   // source of truth (no second hashchange/auth listener). Hidden while EITHER first-run gate is up, so
   // a gated user can't side-step the gate via a tab.
   updateTabbar({ signedIn, gated, route });
+
+  // Chat-tab unread badge (TM-439): the unread pill over the bottom-nav Chat tab, gated to the SAME
+  // signed-in, un-gated user as the bar. Driven from here so it shares router's single source of truth
+  // — this gives the "refresh on route change" AC for free (render() runs on every hashchange + auth
+  // change, so navigating INTO a thread, which marks it read, re-reads the read API and the count drops).
+  updateChatTabBadge({ signedIn, gated });
 
   // Notification bell (TM-455): the top-right header bell + unread badge, shown for the SAME
   // signed-in, un-gated user as the tab bar (hidden signed-out and on the onboarding / terms gates).
