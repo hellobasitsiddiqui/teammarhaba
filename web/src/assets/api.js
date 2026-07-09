@@ -578,6 +578,31 @@ export async function recallAdminMessage(id) {
 }
 
 /**
+ * GET /api/v1/admin/messages/{id} — one campaign the admin sent, in full INCLUDING its `body` (TM-562
+ * endpoint → the TM-444 sent-history expanded row). The sent-history LIST (listSentAdminMessages) is
+ * deliberately header-only, so the view calls this by-id detail when a row is expanded, to show the
+ * actual message body that was sent. Returns an AdminMessageDetailResponse — the list row's fields plus
+ * `body`: `{ id, sentAt, sentByUid, title, body, deepLink, audienceType, audienceRef, recipientCount,
+ * status, recalledAt }`. ADMIN-gated + SENDER-SCOPED on the backend: an unknown id or another admin's
+ * message is a uniform 404 (surfaced as an {@link ApiError} with `.status === 404`, never leaking the
+ * body), a non-admin is a 403, and a 401 will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @param {number|string} id the admin_message campaign id to fetch
+ * @returns {Promise<{id: number, sentAt: string, sentByUid: string, title: string, body: string, deepLink: ?string, audienceType: string, audienceRef: string, recipientCount: number, status: string, recalledAt: ?string}>}
+ * @throws {ApiError}
+ */
+export async function getAdminMessage(id) {
+  const response = await apiFetch(`/api/v1/admin/messages/${encodeURIComponent(id)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 403) {
+    throw new ApiError(403, "You need an admin role to view this message.");
+  }
+  if (!response.ok) throw await toApiError(response, `Could not load the message (${response.status}).`);
+  return response.json();
+}
+
+/**
  * GET /api/v1/events — the visible-now listing (TM-393), soonest-first, in the shared page envelope
  * `{ items, page, size, totalElements, totalPages }`. Each item is an EventCard
  * (`{ id, heading, locationText, timezone, startAt, endAt, capacity, imagePath, goingCount, myState }`).
@@ -689,6 +714,7 @@ if (typeof window !== "undefined") {
     sendAdminMessage,
     listSentAdminMessages,
     recallAdminMessage,
+    getAdminMessage,
     listEvents,
     getEvent,
     rsvpToEvent,

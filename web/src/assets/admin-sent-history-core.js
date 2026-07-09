@@ -142,6 +142,33 @@ export function statusBadge(status) {
   return { label: cleanText(status) || "—", tone: "info" };
 }
 
+/**
+ * The display state of the expanded row's MESSAGE BODY (TM-562). The sent-history LIST read is
+ * header-only, so when a row is expanded the view fetches the by-id detail (GET
+ * /api/v1/admin/messages/{id}, api.getAdminMessage) to show the actual body it sent. This turns the
+ * per-row fetch cache entry into the small descriptor the DOM paints, so the async wiring lives in the
+ * DOM module while the (testable) decision of WHAT to show for each state lives here.
+ *
+ * The cache `entry` is `{ loading, error, detail }` (or undefined before a fetch has started):
+ *   - undefined / { loading: true }        → { mode: "loading", text: "Loading message…" }
+ *   - { error: <message> }                 → { mode: "error",   text: <message> }
+ *   - { detail: { body: <non-blank> } }    → { mode: "body",    text: <body verbatim> }
+ *   - loaded but body missing/blank        → { mode: "empty",   text: "(no message body)" }
+ *
+ * The body is returned VERBATIM (not trimmed) in the "body" mode so the DOM can render it faithfully
+ * (whitespace preserved); the other modes carry human copy. `mode` lets the DOM pick styling/emphasis.
+ *
+ * @param {{loading?: boolean, error?: ?string, detail?: ?{body?: unknown}}} [entry] the per-row fetch cache entry.
+ * @returns {{mode: "loading"|"error"|"body"|"empty", text: string}}
+ */
+export function messageBodyState(entry) {
+  if (!entry || entry.loading) return { mode: "loading", text: "Loading message…" };
+  if (entry.error) return { mode: "error", text: cleanText(entry.error) || "Could not load the message body." };
+  const body = entry.detail && typeof entry.detail.body === "string" ? entry.detail.body : "";
+  if (!body.trim()) return { mode: "empty", text: "(no message body)" };
+  return { mode: "body", text: body };
+}
+
 // --- paging math (over the shared PageResponse envelope) --------------------------------------
 
 /** Coerce a value to a finite, non-negative integer, or `fallback` when it isn't one. */

@@ -14,14 +14,16 @@
 // → auth.js) and so can't run under the Node test runner. This file is the wiring: fetch a page, build the
 // rows/pager with el(), toggle a row's detail, and page back/forward.
 //
-// HEADER-ONLY DETAIL (TM-442, no backend change this ticket): the sent-history endpoint projects the
-// campaign HEADER — id, title, audience (type + ref), recipient count, deep-link, sent-at, status — but
-// NOT the message body (the body is persisted in admin_message, but the header-only read doesn't expose
-// it, and this frontend-only ticket adds no API change). So the expanded row surfaces every header fact
-// the endpoint returns, with the title as the message headline and an explicit note that the full body
-// isn't part of the sent-history summary (a by-id detail endpoint would be the follow-up — see the PR).
+// EXPANDED-ROW BODY (TM-562): the sent-history LIST read (GET /api/v1/admin/messages) is header-only —
+// id, title, audience (type + ref), recipient count, deep-link, sent-at, status — and does NOT carry the
+// message body. So when a row is expanded, this view fetches the by-id detail (GET
+// /api/v1/admin/messages/{id}, api.getAdminMessage — added in TM-562, the follow-up TM-442 flagged) to
+// finally show the ACTUAL body that was sent, alongside the header facts. The per-row fetch is cached in
+// state.details (keyed by campaign id), and messageBodyState (core) maps each cache entry — loading /
+// error / body / empty — to what the detail panel paints, so the async wiring stays here while the
+// (unit-tested) "what to show" decision lives in the browser-free core.
 
-import { listSentAdminMessages, ApiError } from "./api.js";
+import { listSentAdminMessages, getAdminMessage, ApiError } from "./api.js";
 import { clear, el, relativeTime } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { adminMessageNewHash } from "./admin-message-route.js";
@@ -33,6 +35,7 @@ import {
   audienceTypeLabel,
   formatRecipientCount,
   statusBadge,
+  messageBodyState,
   hasPrevPage,
   hasNextPage,
   clampPage,
@@ -55,6 +58,10 @@ const state = {
   error: null,
   // The id of the row currently expanded to its full detail, or null when all rows are collapsed.
   expandedId: null,
+  // Per-campaign message-body fetch cache (TM-562), keyed by id → { loading, error, detail }. The list
+  // read is header-only, so expanding a row fetches its body by id (getAdminMessage) into here. Cleared
+  // on each page load so a Refresh re-fetches; a body is immutable, so within a page the cache is stable.
+  details: new Map(),
 };
 
 // Persistent shell references (built once in buildShell), so a re-render only repaints the body + pager.
@@ -72,6 +79,9 @@ async function loadPage(page) {
   state.page = Math.max(0, page);
   state.loading = true;
   state.error = null;
+  // A new page (or a Refresh) drops the previous page's body cache — the ids differ, and a Refresh should
+  // re-fetch rather than serve a stale body.
+  state.details.clear();
   render();
   try {
     const envelope = await listSentAdminMessages({ page: state.page, size: state.size });
@@ -98,6 +108,33 @@ async function loadPage(page) {
   }
 }
 
+/**
+ * Ensure the message body for campaign {@code id} is being (or has been) fetched (TM-562). The list read
+ * is header-only, so the body is loaded lazily on expand via the by-id detail endpoint
+ * (api.getAdminMessage). Fetches once per id: an in-flight or already-loaded entry is left alone, but a
+ * previous ERROR is retried (so collapsing + reopening a failed row tries again). Repaints the list when
+ * the fetch settles, but only if the row is still the expanded one (the admin may have moved on).
+ * @param {number} id the campaign id whose body to load.
+ */
+async function ensureDetail(id) {
+  const existing = state.details.get(id);
+  // Already loading, or already loaded successfully — nothing to do. (An error entry falls through so
+  // reopening the row retries the fetch.)
+  if (existing && (existing.loading || existing.detail)) return;
+
+  const entry = { loading: true, error: null, detail: null };
+  state.details.set(id, entry);
+  try {
+    entry.detail = await getAdminMessage(id);
+  } catch (err) {
+    entry.error = err instanceof ApiError ? err.message : "Could not load the message body.";
+  } finally {
+    entry.loading = false;
+    // Only repaint if this row is still the one open — avoids clobbering a row the admin has since opened.
+    if (state.expandedId === id) renderList();
+  }
+}
+
 // ---- rendering ----------------------------------------------------------------------------
 
 /** A `.tm-badge` in the tone the status descriptor asks for (ok / off / info — all existing tones). */
@@ -106,14 +143,30 @@ function statusPill(status) {
   return el("span", { class: `tm-badge tm-badge-${tone}`, text: label });
 }
 
-/** The expanded detail panel for a row: every header fact the endpoint returns, plus the body caveat. */
+/**
+ * The message-body block for the expanded row (TM-562): the actual body fetched by id, or a
+ * loading/error/empty placeholder while it isn't available. `messageBodyState` (core) decides which of
+ * the four modes to show for the current fetch-cache entry; the DOM just paints it. The body text is set
+ * via `text` (never innerHTML), so it renders as-typed with no markup interpretation.
+ */
+function bodyBlock(rowData) {
+  const { mode, text } = messageBodyState(state.details.get(rowData.id));
+  // The real body reads as plain body text; the placeholders (loading / error / empty) are muted.
+  const textClass = mode === "body" ? "tm-sent-detail-body-text" : "tm-muted tm-sent-detail-body-note";
+  return el("div", { class: `tm-sent-detail-body tm-sent-detail-body-${mode}` }, [
+    el("h5", { class: "tm-sent-detail-body-label", text: "Message" }),
+    el("p", { class: textClass, text }),
+  ]);
+}
+
+/** The expanded detail panel for a row: every header fact the endpoint returns, plus the fetched body. */
 function rowDetail(rowData) {
   const { label: refLabel, value: refValue } = audienceRefDetail(rowData);
   const when = relativeTime(rowData.sentAt);
   const deepLink = typeof rowData.deepLink === "string" && rowData.deepLink.trim() ? rowData.deepLink.trim() : null;
 
   const detail = el("div", { class: "tm-sent-detail", id: `admin-sent-detail-${rowData.id}` }, [
-    // The title as the message headline — the closest "what was said" the header-only read exposes.
+    // The title as the message headline.
     el("h4", { class: "tm-sent-detail-title", text: rowData.title || "(untitled)" }),
     el("dl", { class: "tm-detail tm-sent-detail-facts" }, [
       el("dt", { text: "Audience" }),
@@ -131,8 +184,8 @@ function rowDetail(rowData) {
       el("dt", { text: "Sent by" }),
       el("dd", { text: rowData.sentByUid || "—" }),
     ]),
-    // Honest about the header-only endpoint (TM-442): the full body isn't part of this summary read.
-    el("p", { class: "tm-muted tm-sent-detail-note", text: "The full message body isn't part of the sent-history summary." }),
+    // The actual message body, fetched by id on expand (TM-562) — the "open one to see the body" AC.
+    bodyBlock(rowData),
   ]);
   return detail;
 }
@@ -150,6 +203,10 @@ function renderRow(rowData) {
     onClick: () => {
       // Accordion-ish: clicking the open row closes it, clicking another opens that one.
       state.expandedId = expanded ? null : rowData.id;
+      // Opening a row lazily fetches its body by id (TM-562) — the list read is header-only. Kicks the
+      // fetch off (a no-op if already loaded/in-flight); the panel shows a loading placeholder until it
+      // settles, then ensureDetail repaints. Closing (expandedId=null) fetches nothing.
+      if (state.expandedId === rowData.id) ensureDetail(rowData.id);
       renderList();
     },
   }, [

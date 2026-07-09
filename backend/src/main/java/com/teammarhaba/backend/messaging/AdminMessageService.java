@@ -245,6 +245,32 @@ public class AdminMessageService {
     }
 
     /**
+     * Load one campaign the calling admin sent, by id (TM-562) — the by-id detail behind the sent-history
+     * "open one to see the message body" story. Where {@link #sentHistory} projects header-only list rows,
+     * this returns the whole {@link AdminMessage} header (which the controller maps to
+     * {@link com.teammarhaba.backend.api.AdminMessageDetailResponse}, <em>including</em> its {@code body}),
+     * so the expanded row can finally render the actual text that was sent.
+     *
+     * <p><b>Sender-scoped 404.</b> The campaign is loaded <em>scoped to the caller</em> via
+     * {@link AdminMessageRepository#findByIdAndActorUid} — the SAME rule as recall and the sent-history
+     * list ("messages <em>I</em> sent") — so an unknown id AND another admin's message both resolve to a
+     * uniform {@code 404} ({@link ResourceNotFoundException}), never leaking that a campaign the caller
+     * didn't send exists. Admin-gating (non-admin {@code 403}, anonymous {@code 401}) is the controller's
+     * class {@code @PreAuthorize}. Read-only: the header table is append-only and this path never writes.
+     *
+     * @param actorUid  Firebase UID of the admin whose campaign to load (the verified caller)
+     * @param messageId the campaign id to fetch
+     * @return the campaign header (including its body) for the caller's own send
+     * @throws ResourceNotFoundException if no campaign with that id was sent by this admin
+     */
+    @Transactional(readOnly = true)
+    public AdminMessage detail(String actorUid, long messageId) {
+        return adminMessages
+                .findByIdAndActorUid(messageId, actorUid)
+                .orElseThrow(() -> new ResourceNotFoundException("No message " + messageId + "."));
+    }
+
+    /**
      * Recall (unsend) a message the calling admin previously sent (TM-473). In one transaction:
      *
      * <ol>
