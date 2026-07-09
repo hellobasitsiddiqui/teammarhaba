@@ -728,3 +728,100 @@ export function browseListModel(cards, filter = "all", nowMs = Date.now()) {
   const filtered = filter != null && filter !== "all";
   return { kind: filtered ? "filter-empty" : "empty", happeningNow, upcoming };
 }
+
+// ------------------------------------------------------------------ event chat entry (TM-450)
+
+/** The copy on the event-detail chat affordance. One constant so the view and its tests agree. */
+export const EVENT_CHAT_ENTRY_LABEL = "Open chat";
+
+/**
+ * Is the viewer an admin? Admin is the app's single elevated role (admin.js / router.js both gate on
+ * `role === "ADMIN"`), and it's the "host/admin" half of the TM-450 eligibility rule — this app has no
+ * per-event host distinct from an admin, so admin IS the host case. Read defensively: /me can degrade
+ * to null and the role can arrive in any case.
+ */
+function isAdminRole(me) {
+  return String(me?.role ?? "").toUpperCase() === "ADMIN";
+}
+
+/**
+ * May this viewer take part in THIS event's group chat (TM-450)? True for a GOING attendee, or for an
+ * admin (the host/admin case). WAITLISTED and NONE are NOT members. This is the pure eligibility gate
+ * the entry point renders from — deliberately independent of whether the thread has been provisioned
+ * yet, so the two questions ("who may chat" vs "does the thread exist") stay separately testable.
+ * @param {{myState?: string}} detail  the EventDetail (its `myState` is NONE|GOING|WAITLISTED)
+ * @param {{role?: string}} me         the caller's /me identity
+ */
+export function isEventChatMember(detail, me) {
+  return detail?.myState === "GOING" || isAdminRole(me);
+}
+
+/**
+ * Resolve the event's group-chat thread from the caller's conversation summaries (GET
+ * /api/v1/me/conversations → ConversationSummaryResponse[]). There is no event→conversation endpoint,
+ * so matching on the summary's `eventId` is the documented bridge between the two. The match must be an
+ * EVENT_GROUP (an ADMIN_BROADCAST carries no eventId and is never an event's chat). Ids are compared as
+ * strings because both are int64s the API serialises as JSON numbers — a string/number `===` mismatch
+ * would silently fail to find an otherwise-present thread. Returns the matching summary, or null.
+ * @param {Array<{id:*, eventId:*, type?:string}>} conversations
+ * @param {number|string} eventId  the event's id (EventDetail.id)
+ */
+export function findEventConversation(conversations, eventId) {
+  if (eventId == null) return null;
+  const list = Array.isArray(conversations) ? conversations : [];
+  const wanted = String(eventId);
+  return (
+    list.find(
+      (c) => c && c.type === "EVENT_GROUP" && c.eventId != null && String(c.eventId) === wanted,
+    ) || null
+  );
+}
+
+/**
+ * The "Open chat" entry model for the event detail (TM-450) — the single source of truth the view
+ * renders verbatim, so the whole gating decision is unit-testable without a DOM. Composes the two
+ * gates: eligibility ({@link isEventChatMember}) and thread existence ({@link findEventConversation}).
+ *
+ * Outcomes (every one carries `label` + `eligible`):
+ *   • eligible AND thread found  → { enabled:true,  href:"#/chat/{id}", conversationId } — the live,
+ *                                   tappable deep-link into that event's thread (C3).
+ *   • eligible but NO thread yet → { enabled:false, reason } — a member whose thread isn't provisioned
+ *                                   (just RSVP'd / provisioning lag): disabled with an honest hint.
+ *   • NOT eligible (non-member)  → { enabled:false, reason } — WAITLISTED / NONE / signed-out: disabled
+ *                                   with a hint (the AC's "disabled with a hint for non-members"; the
+ *                                   RSVP CTA that makes them eligible sits right alongside on the detail).
+ *
+ * @param {{detail?:object, me?:object, conversations?:Array}} args
+ * @returns {{label:string, eligible:boolean, enabled:boolean, href?:string, conversationId?:*, reason?:string}}
+ */
+export function eventChatEntryModel({ detail, me, conversations = [] } = {}) {
+  const label = EVENT_CHAT_ENTRY_LABEL;
+  const eligible = isEventChatMember(detail, me);
+
+  if (!eligible) {
+    return {
+      label,
+      eligible: false,
+      enabled: false,
+      reason: "Only people going can open the chat — RSVP to join in.",
+    };
+  }
+
+  const convo = findEventConversation(conversations, detail?.id);
+  if (convo) {
+    return {
+      label,
+      eligible: true,
+      enabled: true,
+      conversationId: convo.id,
+      href: `#/chat/${encodeURIComponent(convo.id)}`,
+    };
+  }
+
+  return {
+    label,
+    eligible: true,
+    enabled: false,
+    reason: "This event's chat isn't ready yet — check back once it gets going.",
+  };
+}
