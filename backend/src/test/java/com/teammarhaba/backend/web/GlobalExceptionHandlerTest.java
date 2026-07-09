@@ -130,6 +130,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.ChatModerationService chatModerationService;
 
+    // ConversationStreamController (TM-464) needs a ChatStreamService (the live SSE hub) — supply it so
+    // the web slice can load. Its other dependency, ConversationReadService, is already mocked above.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.ChatStreamService chatStreamService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

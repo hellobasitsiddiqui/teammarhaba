@@ -41,6 +41,7 @@ import {
   getConversationMessages,
   markConversationRead,
   postConversationMessage,
+  openConversationStream,
 } from "./api.js";
 import * as core from "./chat-core.js";
 
@@ -58,15 +59,32 @@ let renderToken = 0;
 // Near-live refresh cadence for an OPEN thread — gentle enough to be near-free, short enough that a
 // message posted by someone else surfaces without a manual reload. A foreground push (tm:notification)
 // also triggers an immediate poll, so this is the fallback for the no-push path (mirrors the badge poll).
+// It is the belt-and-braces backstop under the TM-464 live stream: when the SSE stream is up, new
+// messages arrive instantly; the poll still runs so a dropped/refused stream self-heals within a tick.
 const THREAD_POLL_MS = 15000;
 
 // The currently-open thread's live state. `messages` is the server-authoritative list (replaced on load
-// + each poll); `pending` holds optimistic bubbles awaiting their POST; `mineIds` remembers the ids we
-// posted this session so they keep rendering as out-going (the read API can't tell us which are "mine",
-// so this is best-effort within the session). `sending` pauses the poll during a send so it can't race
-// the optimistic echo. `bodyEl` is repainted on change; the composer input persists across body repaints.
+// + each poll, folded into by each live SSE frame); `pending` holds optimistic bubbles awaiting their
+// POST; `mineIds` remembers the ids we posted this session so they keep rendering as out-going (the read
+// API can't tell us which are "mine", so this is best-effort within the session). `sending` pauses the
+// poll during a send so it can't race the optimistic echo. `bodyEl` is repainted on change; the composer
+// input persists across body repaints.
 const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sending: false, poll: null, bodyEl: null };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
+
+// The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
+// appear instantly without waiting for the poll; navigating away (or into another thread) closes it.
+// Best-effort and purely additive over the poll: if it never connects, the fetched history + the 15s
+// poll re-sync is the graceful fallback, so nothing is ever delivered ONLY over the socket.
+let liveStream = null;
+
+/** End the live chat stream if one is open — called on every navigation so a left thread stops streaming. */
+function closeLiveStream() {
+  if (liveStream) {
+    liveStream.close();
+    liveStream = null;
+  }
+}
 
 /**
  * Router entry (TM-109). `threadId` is the conversation id parsed from `#/chat/{id}`, or null/empty
@@ -77,6 +95,7 @@ let pushWired = false; // the foreground-push → poll listener is attached exac
 export function enterChat(threadId) {
   const view = $("chat-view");
   if (!view) return;
+  closeLiveStream(); // a fresh navigation ends any prior thread's live stream before repainting
   if (threadId != null && threadId !== "") renderThread(view, String(threadId));
   else renderList(view);
 }
@@ -246,6 +265,42 @@ async function renderThread(view, id) {
   wirePush(); // foreground-push → immediate poll while a thread is open
   startThreadPoll(id);
   markThreadRead(id);
+  openLiveThread(id, mine); // TM-464: live SSE append on top of the poll (best-effort)
+}
+
+/**
+ * Open the live SSE stream (TM-464) for the just-rendered thread, folding each broadcast message into
+ * the thread's authoritative state as it arrives. Best-effort — a stream that never connects simply
+ * leaves the fetched history + the 15s poll in place (graceful fallback), so this never surfaces an
+ * error to the user and nothing is ever delivered ONLY over the socket.
+ *
+ * Integration with TM-448's optimistic-echo + poll model: rather than appending straight to the DOM
+ * with its own "seen" set (which would double-render against the poll's repaint and a confirmed own
+ * send), a live frame is folded into `thread.messages` via {@link core.upsertMessage} — which replaces
+ * any existing copy BY ID — and the body is then repainted from the single source of truth
+ * (`thread.messages` + `thread.pending`). So the poster's own broadcast echo, a reconnect replay, and a
+ * poll that also fetched the message all collapse to one bubble. `repaintBody` preserves scroll + the
+ * persistent composer, so a live append can't yank someone reading history. The renderToken + thread.id
+ * guards drop any frame that arrives after the user has navigated away.
+ *
+ * @param {string} id the open conversation id.
+ * @param {number} token the renderToken snapshot for this render (stale frames are dropped).
+ */
+function openLiveThread(id, token) {
+  liveStream = openConversationStream(id, {
+    onMessage: (raw) => {
+      // Drop late frames: a navigation away (new renderToken) or a switch to another thread.
+      if (token !== renderToken || thread.id !== String(id)) return;
+      const m = core.toThreadMessage(raw);
+      if (!m.id) return; // a frame without an id can't be de-duped safely — skip it
+      // De-dupe by id: upsertMessage replaces any existing copy, so an own-echo, a replay, or a
+      // poll-fetched duplicate never renders twice. Then repaint from the one source of truth.
+      thread.messages = core.upsertMessage(thread.messages, m);
+      repaintBody();
+    },
+    // A dropped/refused stream is non-fatal: the history is already loaded and re-syncs via the poll.
+    onError: (err) => console.warn("[chat] live stream unavailable:", err?.message ?? err),
+  });
 }
 
 /**

@@ -14,6 +14,7 @@
 //   - classic <script>: the same helpers are mirrored on `window.tmApi`.
 
 import { getIdToken } from "./auth.js";
+import { createSseParser } from "./chat-core.js";
 
 // Where to send the user when authentication can't be established. The login view is the
 // `#/login` hash route owned by the guard/router (TM-109); this is the single seam. Kept as
@@ -551,6 +552,85 @@ export async function postConversationMessage(id, body) {
 }
 
 /**
+ * GET /api/v1/conversations/{id}/stream — open the LIVE chat stream for a thread (TM-464). This is the
+ * live-while-online path: while the connection is up, `onMessage` fires with each newly-posted
+ * ConversationMessageResponse (`{ id, senderId, body, deepLink, system, reactions[], createdAt }`) the
+ * instant the server broadcasts it, so an open thread updates without polling.
+ *
+ * <p><b>Why fetch + a stream reader, not the native `EventSource`.</b> `EventSource` cannot set an
+ * `Authorization` header, but the backend authenticates every request with the Firebase bearer token
+ * (there is no cookie/query-token path). So we open the stream with {@link fetch} — which lets us
+ * attach the same `Bearer` token every other call uses — and parse the SSE frames off the response
+ * body with the pure {@link createSseParser} (chat-core.js).
+ *
+ * <p><b>Graceful fallback (an AC).</b> The stream is a pure latency optimisation over
+ * store-and-forward — every message is also persisted, pushed, and re-fetched on open. So this helper
+ * never throws to the caller: a failed connect, a dropped socket, or a parse error just invokes
+ * `onError` (best-effort) and stops. The caller keeps its fetched history and, on the next open /
+ * reconnect, re-syncs via {@link getConversationMessages}. Nothing is delivered ONLY over the socket.
+ *
+ * @param {number|string} id the conversation id to subscribe to.
+ * @param {{onMessage?: (msg: Object) => void, onOpen?: () => void, onError?: (err: Error) => void}} [handlers]
+ * @returns {{close: () => void}} a handle; call `close()` to end the stream (e.g. on leaving the thread).
+ */
+export function openConversationStream(id, { onMessage, onOpen, onError } = {}) {
+  // AbortController lets close() actually tear down the underlying HTTP connection, not just stop reading.
+  const controller = new AbortController();
+  let closed = false;
+
+  (async () => {
+    try {
+      const token = await getIdToken();
+      const headers = new Headers({ Accept: "text/event-stream" });
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+
+      const response = await fetch(
+        resolveUrl(`/api/v1/conversations/${encodeURIComponent(id)}/stream`),
+        { headers, signal: controller.signal, cache: "no-store" },
+      );
+      // A non-2xx (e.g. 403 not-a-member, 401) or a bodyless response → fall back silently to polling.
+      if (!response.ok || !response.body) {
+        onError?.(new Error(`chat stream ${id} failed: ${response.status}`));
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = createSseParser();
+      onOpen?.();
+
+      // Read the byte stream to completion, feeding decoded text through the SSE parser and dispatching
+      // each `message` event's JSON payload. `done` (server closed / timed out) simply ends the loop —
+      // the caller re-syncs on its next open, so a recycled connection loses nothing.
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done || closed) break;
+        for (const event of parser.push(decoder.decode(value, { stream: true }))) {
+          if (event.event !== "message") continue; // ignore `open` / heartbeat frames
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            continue; // a malformed frame is skipped, never fatal
+          }
+          onMessage?.(message);
+        }
+      }
+    } catch (err) {
+      // AbortError is our own close() — not a real failure, so don't surface it.
+      if (!closed && err?.name !== "AbortError") onError?.(err);
+    }
+  })();
+
+  return {
+    close() {
+      closed = true;
+      controller.abort();
+    },
+  };
+}
+
+/**
  * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
  * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
  * (TM-365) populates its dropdown from, so an admin only ever picks a route the send path will accept
@@ -825,6 +905,8 @@ if (typeof window !== "undefined") {
     listMyConversations,
     getConversationMessages,
     markConversationRead,
+    postConversationMessage,
+    openConversationStream,
     getPushRoutes,
     adminBroadcastPush,
     sendAdminMessage,

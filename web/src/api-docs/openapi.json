@@ -1501,6 +1501,15 @@
         },
         "type" : "object"
       },
+      "SseEmitter" : {
+        "properties" : {
+          "timeout" : {
+            "format" : "int64",
+            "type" : [ "integer", "null" ]
+          }
+        },
+        "type" : "object"
+      },
       "TestPushRequest" : {
         "properties" : {
           "route" : {
@@ -2575,6 +2584,33 @@
           }
         },
         "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/stream" : {
+      "get" : {
+        "operationId" : "stream",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SseEmitter"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-stream-controller" ]
       }
     },
     "/api/v1/events" : {

@@ -30,6 +30,8 @@ import {
   pendingMessage,
   upsertMessage,
   threadSignature,
+  createSseParser,
+  parseSseFrame,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -383,4 +385,56 @@ test("threadSignature: changes when a message is appended, stable otherwise", ()
   assert.notEqual(threadSignature(a), threadSignature(grown)); // appended → repaint
   assert.equal(threadSignature([]), "0");
   assert.equal(threadSignature(null), "0");
+});
+
+/* ─────────────────────────────── live transport: SSE frame parser (TM-464) ─────────────────────── */
+
+test("parseSseFrame reads the event name + data, defaulting the type to 'message'", () => {
+  assert.deepEqual(parseSseFrame("event:message\ndata:{\"id\":1}"), {
+    event: "message",
+    data: '{"id":1}',
+    id: undefined,
+  });
+  // No event: field -> the SSE default type "message".
+  assert.deepEqual(parseSseFrame("data:hello"), { event: "message", data: "hello", id: undefined });
+  // A single leading space after the colon is stripped (per spec); an id: is captured.
+  assert.deepEqual(parseSseFrame("event: open\ndata: {}\nid: 7"), { event: "open", data: "{}", id: "7" });
+});
+
+test("parseSseFrame joins multi-line data with newlines and ignores comments", () => {
+  assert.equal(parseSseFrame("data:line one\ndata:line two").data, "line one\nline two");
+  // A comment-only frame (our :keep-alive heartbeat) carries no data -> not a dispatchable event.
+  assert.equal(parseSseFrame(":keep-alive"), null);
+  assert.equal(parseSseFrame(""), null);
+});
+
+test("createSseParser emits complete events and buffers a partial one across chunks", () => {
+  const parser = createSseParser();
+  // One whole event plus the start of a second in the first chunk.
+  let events = parser.push("event:message\ndata:{\"id\":1}\n\nevent:message\ndata:{\"id\":2}");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data, '{"id":1}');
+  // The second event only completes once its blank-line boundary arrives in a later chunk.
+  events = parser.push("\n\n");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data, '{"id":2}');
+});
+
+test("createSseParser tolerates CRLF line endings and filters heartbeat comments", () => {
+  const parser = createSseParser();
+  const events = parser.push(":keep-alive\r\n\r\nevent:message\r\ndata:{\"id\":9}\r\n\r\n");
+  assert.equal(events.length, 1); // the comment frame is dropped, the message frame kept
+  assert.deepEqual(JSON.parse(events[0].data), { id: 9 });
+});
+
+test("createSseParser handles the server's initial open frame then live messages", () => {
+  const parser = createSseParser();
+  const events = parser.push(
+    'event:open\ndata:{"conversationId":42}\n\nevent:message\ndata:{"id":100,"body":"hi"}\n\n',
+  );
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["open", "message"],
+  );
+  assert.equal(JSON.parse(events[1].data).body, "hi");
 });
