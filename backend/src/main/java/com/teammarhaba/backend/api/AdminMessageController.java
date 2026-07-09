@@ -1,13 +1,20 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.common.PageRequests;
+import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.messaging.AdminMessageService;
 import jakarta.validation.Valid;
+import java.util.Set;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,6 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
  * <ul>
  *   <li>{@code POST /admin/messages} — send a {@code title}/{@code body} (+ optional deep-link) to a
  *       resolved audience (one of user / city / event ids) and return the campaign + delivery counts.</li>
+ *   <li>{@code GET /admin/messages} — the calling admin's sent-message history (TM-442): the campaign
+ *       headers they've sent, newest first, paged via the shared list convention. Read-only over the
+ *       append-only header table (no new schema).</li>
  * </ul>
  *
  * <p>Modelled on {@link PushAdminController}: a thin controller that validates the body
@@ -35,6 +45,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/admin/messages")
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminMessageController {
+
+    /**
+     * Sort is limited to time/identity — the sent history is a timeline, not an arbitrary query
+     * surface (mirrors {@link AuditController}). Anything else is a {@code 400} via {@link PageRequests}.
+     */
+    private static final Set<String> SORTABLE = Set.of("createdAt", "id");
+
+    /**
+     * Newest first — the natural way to read a sent history — with {@code id} as a deterministic
+     * same-{@code createdAt} tiebreak, so two campaigns sent in the same instant still page stably.
+     */
+    private static final Sort DEFAULT_SORT = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 
     private final AdminMessageService adminMessageService;
 
@@ -61,5 +83,24 @@ public class AdminMessageController {
                 request.title(),
                 request.body(),
                 request.deepLink()));
+    }
+
+    /**
+     * The calling admin's sent-message history (TM-442): the campaign headers they've sent, newest
+     * first, paged. Identity is the verified {@link VerifiedUser} principal, never a client-supplied
+     * id, so an admin only ever sees their own sends (the story is "messages <em>I've</em> sent"). Only
+     * {@code page}/{@code size}/{@code sort} are tunable; {@code sort} is allow-listed to time/identity
+     * ({@link #SORTABLE}) so an unknown property is a clean {@code 400}, and the default is newest-first.
+     * Admin-gated by the class {@code @PreAuthorize} (non-admin {@code 403}, anonymous {@code 401}).
+     */
+    @GetMapping
+    public PageResponse<AdminSentHistoryResponse> history(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort) {
+        Pageable pageable = PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT);
+        return PageResponse.from(
+                adminMessageService.sentHistory(caller.uid(), pageable), AdminSentHistoryResponse::from);
     }
 }

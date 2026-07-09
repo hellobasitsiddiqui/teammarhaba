@@ -119,6 +119,41 @@
         },
         "type" : "object"
       },
+      "AdminSentHistoryResponse" : {
+        "properties" : {
+          "audienceRef" : {
+            "type" : "string"
+          },
+          "audienceType" : {
+            "type" : "string"
+          },
+          "deepLink" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "recipientCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sentAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "sentByUid" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "AlertAdminResponse" : {
         "properties" : {
           "createdAt" : {
@@ -923,6 +958,33 @@
         "required" : [ "age", "location", "name" ],
         "type" : "object"
       },
+      "PageResponseAdminSentHistoryResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AdminSentHistoryResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PageResponseAuditEventResponse" : {
         "properties" : {
           "items" : {
@@ -1338,7 +1400,7 @@
   "paths" : {
     "/api/v1/admin/alerts" : {
       "get" : {
-        "operationId" : "history",
+        "operationId" : "history_1",
         "responses" : {
           "200" : {
             "content" : {
@@ -1568,6 +1630,46 @@
       }
     },
     "/api/v1/admin/messages" : {
+      "get" : {
+        "operationId" : "history",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAdminSentHistoryResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-message-controller" ]
+      },
       "post" : {
         "operationId" : "send",
         "requestBody" : {
@@ -2193,7 +2295,7 @@
     },
     "/api/v1/me/history" : {
       "get" : {
-        "operationId" : "history_1",
+        "operationId" : "history_2",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
