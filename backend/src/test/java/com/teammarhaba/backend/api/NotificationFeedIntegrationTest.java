@@ -87,6 +87,21 @@ class NotificationFeedIntegrationTest extends AbstractIntegrationTest {
         assertThat(newest.get("read").asBoolean()).isFalse();
     }
 
+    @Test
+    void unknownSortParamIsIgnoredNotRejected() throws Exception {
+        // TM-558: the feed exposes no sort param (list binds only page/size). An unknown query param
+        // such as ?sort= must be silently ignored — the request still 200s with the fixed newest-first
+        // order, never a 400 — which is what the NEWEST_FIRST javadoc now documents.
+        String uid = "notif-sort-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+        Long first = save(userId, NotificationType.ADMIN_MESSAGE, "First");
+        Long second = save(userId, NotificationType.ADMIN_MESSAGE, "Second");
+
+        // An ascending sort request does NOT flip the order: it is ignored, and getJson asserts 200.
+        JsonNode feed = getJson("/api/v1/me/notifications?sort=createdAt,asc", caller(uid));
+        assertThat(ids(feed)).containsExactly(second, first);
+    }
+
     // ------------------------------------------------------------------ badge counts
 
     @Test
