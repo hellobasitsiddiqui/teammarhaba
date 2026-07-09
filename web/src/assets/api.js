@@ -515,33 +515,6 @@ export async function markConversationRead(id) {
 }
 
 /**
- * GET /api/v1/me/conversations — the caller's chat conversations, in the shared page envelope
- * `{ items, page, size, totalElements, totalPages }` (the read API, TM-436). Each item is a
- * ConversationSummaryResponse (`{ id, eventId, type, title, lastMessagePreview, lastMessageAt,
- * lastActiveAt, unreadCount }`). The Chat-tab unread badge (TM-439) reads this and SUMS each
- * thread's `unreadCount` into the caller's total unread (chat-tab-badge-core.js `sumUnread`); it
- * clears as threads are marked read (POST /api/v1/conversations/{id}/read) because the next refresh
- * re-reads the now-lower counts. Only `page`/`size` are tunable (the order is server-fixed). A 401
- * will already have refreshed/redirected via {@link apiFetch}.
- * @param {{page?: number, size?: number}} [opts]
- * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
- * @throws {Error} on a non-2xx response.
- */
-export async function listMyConversations({ page, size } = {}) {
-  const params = new URLSearchParams();
-  if (page != null) params.set("page", String(page));
-  if (size != null) params.set("size", String(size));
-  const query = params.toString();
-  const response = await apiFetch(`/api/v1/me/conversations${query ? `?${query}` : ""}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`GET /api/v1/me/conversations failed: ${response.status}`);
-  }
-  return response.json();
-}
-
-/**
  * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
  * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
  * (TM-365) populates its dropdown from, so an admin only ever picks a route the send path will accept
