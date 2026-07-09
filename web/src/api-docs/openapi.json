@@ -667,6 +667,65 @@
         },
         "type" : "object"
       },
+      "NotificationBadge" : {
+        "properties" : {
+          "unread" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unseen" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "NotificationResponse" : {
+        "properties" : {
+          "body" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deepLink" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "read" : {
+            "type" : "boolean"
+          },
+          "readAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "seen" : {
+            "type" : "boolean"
+          },
+          "seenAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "sourceRef" : {
+            "type" : "string"
+          },
+          "sticky" : {
+            "type" : "boolean"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "type" : {
+            "enum" : [ "ADMIN_MESSAGE", "EVENT_UPDATED", "EVENT_CANCELLED", "WAITLIST_OFFER", "RSVP_CONFIRMED", "EVENT_REMINDER" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "OnboardingRequest" : {
         "properties" : {
           "age" : {
@@ -748,6 +807,33 @@
           "items" : {
             "items" : {
               "$ref" : "#/components/schemas/EventResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "PageResponseNotificationResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/NotificationResponse"
             },
             "type" : "array"
           },
@@ -1262,7 +1348,7 @@
     },
     "/api/v1/admin/users" : {
       "get" : {
-        "operationId" : "list_3",
+        "operationId" : "list_4",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -1429,7 +1515,7 @@
     },
     "/api/v1/audit" : {
       "get" : {
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "in" : "query",
           "name" : "actorUid",
@@ -1541,7 +1627,7 @@
     },
     "/api/v1/events" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "list_2",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -1847,6 +1933,104 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/notifications" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseNotificationResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "notification-controller" ]
+      }
+    },
+    "/api/v1/me/notifications/badge" : {
+      "get" : {
+        "operationId" : "badge",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/NotificationBadge"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "notification-controller" ]
+      }
+    },
+    "/api/v1/me/notifications/seen" : {
+      "post" : {
+        "operationId" : "markSeen",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/NotificationBadge"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "notification-controller" ]
+      }
+    },
+    "/api/v1/me/notifications/{id}/read" : {
+      "post" : {
+        "operationId" : "markRead",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/NotificationResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "notification-controller" ]
       }
     },
     "/api/v1/me/onboarding" : {
