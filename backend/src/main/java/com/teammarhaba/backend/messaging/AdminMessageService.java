@@ -21,6 +21,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -205,6 +207,26 @@ public class AdminMessageService {
                 tally.pruned,
                 tally.failed,
                 tally.skipped);
+    }
+
+    /**
+     * The calling admin's sent-message history (TM-442): their {@link AdminMessage} campaign headers,
+     * in the order the {@code pageable} carries (the controller fixes it newest-first). Scoped by actor
+     * — "what did <em>I</em> send" — so it reuses the by-actor finder and its {@code idx_admin_message_actor}
+     * index, making each history page a single indexed read of the append-only header table (no new
+     * migration; TM-441 owns the schema).
+     *
+     * <p>Read-only: the header table is append-only and this path never writes. Returns the JPA page;
+     * the controller maps each header to its {@link com.teammarhaba.backend.api.AdminSentHistoryResponse}
+     * wire form, so the entity never leaves the service boundary.
+     *
+     * @param actorUid Firebase UID of the admin whose sends to list (the verified caller)
+     * @param pageable page/size/sort (the controller fixes newest-first; size is capped upstream)
+     * @return a page of this admin's campaign headers in the requested order
+     */
+    @Transactional(readOnly = true)
+    public Page<AdminMessage> sentHistory(String actorUid, Pageable pageable) {
+        return adminMessages.findByActorUid(actorUid, pageable);
     }
 
     /**
