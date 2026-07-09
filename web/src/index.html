@@ -516,6 +516,12 @@
     <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
          signed-out users to #/login and returns them after sign-in, drives the nav. -->
     <script type="module" src="/assets/router.js"></script>
+    <!-- Notification panel (TM-456): the bell-opened dropdown listing the caller's notifications from
+         the feed API (TM-454) — chat activity grouped per event thread, admin/system items ungrouped.
+         Self-registers window.tmNotificationPanel, the open-seam TM-455's bell hands off to (it falls
+         back to the #/notifications screen until this loads). All grouping/route-safety logic lives in
+         the node-tested notification-panel-core.js; import-safe/no-op where there's no DOM. -->
+    <script type="module" src="/assets/notification-panel.js"></script>
     <!-- Email-verification banner (TM-169): shows a dismissible "verify your email" banner with a
          Resend action to any signed-in user whose Firebase emailVerified flag (read off GET /me) is
          false; clears itself once the token refreshes post-verification. Calls the resend-verification

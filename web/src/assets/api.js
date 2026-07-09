@@ -393,6 +393,51 @@ export async function markNotificationsSeen() {
 }
 
 /**
+ * GET /api/v1/me/notifications — the caller's notification feed, newest-first, in the shared page
+ * envelope `{ items, page, size, totalElements, totalPages }` (TM-454). Each item is a
+ * NotificationResponse (`{ id, type, title, body, deepLink, sourceRef, sticky, createdAt, seenAt,
+ * readAt, seen, read }`). Read by the bell-opened panel (TM-456), which classifies items into chat
+ * groups vs ungrouped admin/system rows. Only `page`/`size` are tunable (the order is server-fixed).
+ * A 401 will already have refreshed/redirected via {@link apiFetch}.
+ * @param {{page?: number, size?: number}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function listNotifications({ page, size } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  const query = params.toString();
+  const response = await apiFetch(`/api/v1/me/notifications${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/notifications failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/notifications/{id}/read — tapping a notification: one-way mark it read (TM-454).
+ * Idempotent; returns the updated NotificationResponse. A foreign/unknown id is a 404. The panel
+ * (TM-456) fires this on a row/chat-group tap so the item (or the group's messages) clears. A 401 will
+ * already have refreshed/redirected via {@link apiFetch}.
+ * @param {number|string} id the notification's id.
+ * @returns {Promise<Object>} the updated NotificationResponse.
+ * @throws {Error} on a non-2xx response.
+ */
+export async function markNotificationRead(id) {
+  const response = await apiFetch(`/api/v1/me/notifications/${encodeURIComponent(id)}/read`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/notifications/${id}/read failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
  * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
  * (TM-365) populates its dropdown from, so an admin only ever picks a route the send path will accept
@@ -578,6 +623,8 @@ if (typeof window !== "undefined") {
     deregisterDevice,
     getNotificationBadge,
     markNotificationsSeen,
+    listNotifications,
+    markNotificationRead,
     getPushRoutes,
     adminBroadcastPush,
     sendAdminMessage,
