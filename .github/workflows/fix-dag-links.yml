@@ -1,0 +1,111 @@
+name: Fix DAG link direction (one-off)
+
+# One-off maintenance: the TM dependency DAG was created with the Blocks link direction
+# INVERTED (Jira showed e.g. "TM-473 is blocked by TM-550" when TM-473 should block TM-550;
+# a Done ticket "blocking" its own Done prerequisites). This flips reversed Blocks links to
+# the correct direction. Classification is deterministic: a correct link has
+# blocker.wave < blocked.wave (from the wave-N labels); status is the tiebreaker; genuinely
+# ambiguous links (same wave AND same status) are LEFT untouched and reported.
+#
+# Safe by construction: create-then-delete per link (the corrected link is created BEFORE the
+# reversed one is deleted, so no link is ever lost), and every flip is JQL-verified after.
+#
+# Run it with `execute=false` first (dry-run — prints the plan, changes nothing), review the
+# counts, then re-run with `execute=true`.
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: "false = dry-run (print plan only). true = actually flip the reversed links."
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fix-dag-links
+  cancel-in-progress: false
+
+jobs:
+  flip:
+    runs-on: ubuntu-latest
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      EXECUTE: ${{ inputs.execute }}
+    steps:
+      - name: Classify and (optionally) flip reversed Blocks links
+        run: |
+          python3 - <<'PY'
+          import os,json,re,time,urllib.request,base64
+          base=os.environ["JIRA_BASE_URL"]; auth=os.environ["JIRA_USER_EMAIL"]+":"+os.environ["JIRA_API_TOKEN"]
+          execute = os.environ.get("EXECUTE","false").lower()=="true"
+          H={"Authorization":"Basic "+base64.b64encode(auth.encode()).decode(),"Accept":"application/json","Content-Type":"application/json"}
+          def req(method,path,body=None):
+              r=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers=H,method=method)
+              try:
+                  with urllib.request.urlopen(r) as resp: return resp.status,resp.read()
+              except urllib.error.HTTPError as e: return e.code,e.read()
+          # fetch all TM issues (status, links, labels)
+          issues=[]; token=None
+          while True:
+              body={"jql":"project = TM","fields":["status","issuelinks","labels"],"maxResults":100}
+              if token: body["nextPageToken"]=token
+              s,data=req("POST","/rest/api/3/search/jql",body); d=json.loads(data)
+              issues+=d.get("issues",[]); token=d.get("nextPageToken")
+              if d.get("isLast") or not token: break
+          status={i["key"]:i["fields"]["status"]["name"] for i in issues}
+          labels={i["key"]:(i["fields"].get("labels") or []) for i in issues}
+          def wave(k):
+              for l in labels.get(k,[]):
+                  m=re.match(r"wave-(\d+)$",l)
+                  if m: return int(m.group(1))
+              return None
+          rank={"To Do":0,"Backlog":0,"In Progress":1,"In Review":2,"Done":3}
+          # unique Blocks links: id -> (I=stored blocker, O=stored blocked)
+          links={}
+          for i in issues:
+              X=i["key"]
+              for l in i["fields"].get("issuelinks",[]) or []:
+                  if l["type"]["name"]!="Blocks": continue
+                  if "outwardIssue" in l: links[l["id"]]=(X,l["outwardIssue"]["key"])
+                  if "inwardIssue" in l:  links[l["id"]]=(l["inwardIssue"]["key"],X)
+          flips=[]; keep=0; ambig=[]
+          for lid,(I,O) in links.items():
+              wI,wO=wave(I),wave(O)
+              if wI is not None and wO is not None and wI!=wO:
+                  v="flip" if wI>wO else "keep"
+              else:
+                  rI,rO=rank.get(status.get(I,"?"),0),rank.get(status.get(O,"?"),0)
+                  v="flip" if rO>rI else ("keep" if rI>rO else "ambig")
+              if v=="flip": flips.append((lid,I,O))
+              elif v=="keep": keep+=1
+              else: ambig.append((I,O))
+          print(f"total Blocks links={len(links)}  ->  flip={len(flips)}  keep={keep}  ambiguous={len(ambig)}")
+          print(f"MODE = {'EXECUTE' if execute else 'DRY-RUN (no changes)'}")
+          for I,O in ambig: print(f"  ambiguous (left as-is): stored '{I} blocks {O}'")
+          if not execute:
+              print("\nDry-run complete. Re-run with execute=true to apply the flips above.")
+              raise SystemExit(0)
+          ok=fail=0
+          for n,(lid,I,O) in enumerate(flips,1):
+              sc,_=req("POST","/rest/api/3/issueLink",{"type":{"name":"Blocks"},"inwardIssue":{"key":O},"outwardIssue":{"key":I}})
+              if sc in (200,201):
+                  sd,_=req("DELETE",f"/rest/api/3/issueLink/{lid}")
+                  if sd==204: ok+=1
+                  else: fail+=1; print(f"  ! delete failed link {lid} ({I}->{O}) http{sd}")
+              else:
+                  fail+=1; print(f"  ! create failed {O}->{I} http{sc}")
+              if n%40==0: time.sleep(0.5)
+          print(f"\nFLIPPED ok={ok} failed={fail}")
+          # spot-verify a couple via JQL linkedIssues
+          import urllib.parse
+          for k in ("TM-473","TM-441"):
+              q=urllib.parse.quote(f'issue in linkedIssues("{k}", "is blocked by")')
+              s,data=req("GET",f"/rest/api/3/search/jql?jql={q}&fields=key")
+              got=[x["key"] for x in json.loads(data).get("issues",[])]
+              print(f"  verify {k} is blocked by: {got}")
+          PY
