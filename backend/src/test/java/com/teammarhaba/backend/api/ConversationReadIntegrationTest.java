@@ -18,6 +18,7 @@ import com.teammarhaba.backend.chat.MemberRole;
 import com.teammarhaba.backend.chat.Message;
 import com.teammarhaba.backend.chat.MessageRepository;
 import com.teammarhaba.backend.chat.MuteState;
+import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
@@ -475,11 +476,81 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(readerIds(afterKick)).containsExactly(present1);
     }
 
+    // ------------------------------------------------------------------ aggregate unread total (TM-582)
+
+    @Test
+    void unreadTotalSpansEveryThreadNotJustTheFirstPage() throws Exception {
+        String uid = "conv-unread-total-pages-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+
+        // More threads than one default page (size 20), each carrying exactly one unread message. The
+        // TM-439 badge used to sum the FIRST PAGE of the list and so undercounted here (it only ever
+        // saw 20 of these threads); the aggregate must span all of them.
+        int threadCount = PageRequests.DEFAULT_SIZE + 5; // 25
+        for (int i = 0; i < threadCount; i++) {
+            threadWithMessage(userId, "unread " + i);
+        }
+
+        // The bug this ticket fixes, made visible: the first list page under-counts (20, not 25).
+        JsonNode firstPage = getJson("/api/v1/me/conversations", caller(uid));
+        assertThat(firstPage.get("items")).hasSize(PageRequests.DEFAULT_SIZE);
+        assertThat(sumFirstPageUnread(firstPage)).isEqualTo(PageRequests.DEFAULT_SIZE); // 20
+
+        // The server aggregate spans ALL the caller's threads — the true total.
+        assertThat(unreadTotalOf(uid)).isEqualTo(threadCount); // 25
+    }
+
+    @Test
+    void unreadTotalCountsUnreadPerMembershipExcludingReadSilentAndKickedThreads() throws Exception {
+        String uid = "conv-unread-total-mix-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+
+        // A thread with three messages the caller has never read → contributes 3.
+        Long unread = newBroadcastThread();
+        addMember(unread, userId, MemberRole.MEMBER, MuteState.NONE);
+        messages.save(Message.fromSystem(unread, "u1", null));
+        messages.save(Message.fromSystem(unread, "u2", null));
+        messages.save(Message.fromSystem(unread, "u3", null));
+
+        // A thread the caller has fully marked read → contributes 0.
+        Long read = newBroadcastThread();
+        addMember(read, userId, MemberRole.MEMBER, MuteState.NONE);
+        messages.save(Message.fromSystem(read, "r1", null));
+        mockMvc.perform(post("/api/v1/conversations/" + read + "/read").with(caller(uid)))
+                .andExpect(status().isOk());
+
+        // A silent thread the caller is in (no messages) → 0.
+        Long silent = newBroadcastThread();
+        addMember(silent, userId, MemberRole.MEMBER, MuteState.NONE);
+
+        // A thread the caller was KICKED (REMOVED) from, with unread messages → excluded entirely.
+        Long kicked = newBroadcastThread();
+        addMember(kicked, userId, MemberRole.MEMBER, MuteState.REMOVED);
+        messages.save(Message.fromSystem(kicked, "k1", null));
+        messages.save(Message.fromSystem(kicked, "k2", null));
+
+        // A thread the caller is NOT a member of → never counted.
+        Long foreign = newBroadcastThread();
+        addMember(foreign, newUser("conv-unread-total-other-" + UUID.randomUUID()), MemberRole.MEMBER, MuteState.NONE);
+        messages.save(Message.fromSystem(foreign, "f1", null));
+
+        // Only the never-read thread's three messages count.
+        assertThat(unreadTotalOf(uid)).isEqualTo(3);
+    }
+
+    @Test
+    void unreadTotalIsZeroForANewUserWithNoThreads() throws Exception {
+        String uid = "conv-unread-total-empty-" + UUID.randomUUID();
+        newUser(uid);
+        assertThat(unreadTotalOf(uid)).isZero();
+    }
+
     // ------------------------------------------------------------------ default-deny
 
     @Test
     void everyRouteRequiresAuthentication() throws Exception {
         mockMvc.perform(get("/api/v1/me/conversations")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/me/conversations/unread-total")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/conversations/1/messages")).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/conversations/1/read")).andExpect(status().isUnauthorized());
     }
@@ -572,6 +643,22 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         List<Message> ordered = new ArrayList<>(live);
         java.util.Collections.reverse(ordered); // newest-first finder → oldest-first
         return ordered;
+    }
+
+    /** The caller's aggregate unread total across all their threads, via the TM-582 endpoint. */
+    private long unreadTotalOf(String uid) throws Exception {
+        return getJson("/api/v1/me/conversations/unread-total", caller(uid))
+                .get("total")
+                .asLong();
+    }
+
+    /** Sum a conversation-list page's per-thread {@code unreadCount} — the old first-page-only total. */
+    private static long sumFirstPageUnread(JsonNode page) {
+        long total = 0;
+        for (JsonNode item : page.get("items")) {
+            total += item.get("unreadCount").asLong();
+        }
+        return total;
     }
 
     /** The caller's unread count for one thread, read back through the list endpoint. */

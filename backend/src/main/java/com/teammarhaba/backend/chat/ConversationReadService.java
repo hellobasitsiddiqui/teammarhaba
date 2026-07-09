@@ -122,6 +122,32 @@ public class ConversationReadService {
     }
 
     /**
+     * The caller's aggregate unread across <em>every</em> thread they belong to (TM-582) — the single
+     * number the Chat-tab badge (TM-439) paints.
+     *
+     * <p><b>Why a dedicated total, separate from {@link #list}.</b> {@code list} is paged for rendering,
+     * so a client summing its per-thread {@code unreadCount} only ever saw the first page and undercounted
+     * a caller with more than one page of threads. This sums over <em>all</em> the caller's non-removed
+     * memberships, so the badge is accurate no matter how many threads they are in.
+     *
+     * <p>Deliberately far cheaper than {@code list}: it needs neither the thread rows, the event headings,
+     * the last-message previews, nor the activity sort — only each membership's own unread. So it fetches
+     * the same non-removed memberships (a {@link MuteState#REMOVED} / kicked membership contributes nothing,
+     * mirroring the list + access gates) and folds each one's {@link MessageRepository#countUnread} — the
+     * identical per-member count {@link #summary} computes — against that member's {@code lastReadAt}
+     * cursor (a {@code null} cursor = never opened = every live message unread). Per-caller, so the same
+     * threads yield a different total for two people; {@code 0} for a brand-new account with no memberships.
+     */
+    @Transactional(readOnly = true)
+    public long unreadTotal(VerifiedUser caller) {
+        Long userId = users.provision(caller).getId();
+        return members.findByUserIdOrderByJoinedAtDesc(userId).stream()
+                .filter(m -> m.getMute() != MuteState.REMOVED)
+                .mapToLong(m -> messages.countUnread(m.getConversationId(), m.getLastReadAt()))
+                .sum();
+    }
+
+    /**
      * A page of one thread's messages (TM-436), chronological (oldest→newest), members-only, each with
      * its reaction summary (TM-461), a read receipt when it's the caller's OWN message (TM-463), and —
      * for a reply — its quoted-parent snippet (TM-466). The {@code pageable} carries the window and the

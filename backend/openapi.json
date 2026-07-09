@@ -1587,6 +1587,15 @@
         },
         "type" : "object"
       },
+      "UnreadTotalResponse" : {
+        "properties" : {
+          "total" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "UpdateEventRequest" : {
         "properties" : {
           "ageMax" : {
@@ -3037,6 +3046,24 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PageResponseConversationSummaryResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/me/conversations/unread-total" : {
+      "get" : {
+        "operationId" : "unreadTotal",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UnreadTotalResponse"
                 }
               }
             },
