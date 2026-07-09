@@ -32,7 +32,11 @@ import org.springframework.web.bind.annotation.RestController;
  *       resolved audience (one of user / city / event ids) and return the campaign + delivery counts.</li>
  *   <li>{@code GET /admin/messages} — the calling admin's sent-message history (TM-442): the campaign
  *       headers they've sent, newest first, paged via the shared list convention. Read-only over the
- *       append-only header table (no new schema).</li>
+ *       append-only header table (no new schema). Header-only: the list rows deliberately omit the body.</li>
+ *   <li>{@code GET /admin/messages/{id}} — one campaign the caller sent, in full <em>including its
+ *       {@code body}</em> (TM-562): the by-id detail behind the sent-history "open one to see the message
+ *       body" story, which the header-only list can't satisfy. Sender-scoped like recall/history, so an
+ *       unknown id or another admin's message is a uniform {@code 404}. Read-only.</li>
  *   <li>{@code POST /admin/messages/{id}/recall} — recall (unsend) a message the caller sent (TM-473):
  *       mark the campaign recalled and remove the durable in-app copies (inbox/panel + bell). Scoped to
  *       the caller, so an unknown id or another admin's message is a {@code 404}. Recall only — there is
@@ -107,6 +111,22 @@ public class AdminMessageController {
         Pageable pageable = PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT);
         return PageResponse.from(
                 adminMessageService.sentHistory(caller.uid(), pageable), AdminSentHistoryResponse::from);
+    }
+
+    /**
+     * One sent campaign in full, by id (TM-562) — the by-id companion to the header-only sent-history
+     * list, so the sent-history view (TM-444) can finally show the actual message body an admin sent when
+     * they expand a row ("open one to see the message body"). Unlike {@link #history}, the returned
+     * {@link AdminMessageDetailResponse} carries the campaign's {@code body} alongside the header facts.
+     * Identity is the verified {@link VerifiedUser}, and the load is scoped to the caller
+     * ({@code findByIdAndActorUid}), so an unknown id OR another admin's message is a uniform {@code 404}
+     * (never leaking it exists — the same 404-not-403 rule as recall). Admin-gated by the class
+     * {@code @PreAuthorize} (non-admin {@code 403}, anonymous {@code 401}); read-only.
+     */
+    @GetMapping("/{id}")
+    public AdminMessageDetailResponse detail(
+            @PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
+        return AdminMessageDetailResponse.from(adminMessageService.detail(caller.uid(), id));
     }
 
     /**

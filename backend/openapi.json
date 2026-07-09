@@ -33,6 +33,48 @@
         },
         "type" : "object"
       },
+      "AdminMessageDetailResponse" : {
+        "properties" : {
+          "audienceRef" : {
+            "type" : "string"
+          },
+          "audienceType" : {
+            "type" : "string"
+          },
+          "body" : {
+            "type" : "string"
+          },
+          "deepLink" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "recalledAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "recipientCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sentAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "sentByUid" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "AdminMessageRecallResponse" : {
         "properties" : {
           "id" : {
@@ -1723,6 +1765,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/AdminMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-message-controller" ]
+      }
+    },
+    "/api/v1/admin/messages/{id}" : {
+      "get" : {
+        "operationId" : "detail_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdminMessageDetailResponse"
                 }
               }
             },

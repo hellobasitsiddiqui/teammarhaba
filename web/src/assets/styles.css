@@ -5601,8 +5601,27 @@ button.tm-c-reaction {
     font-size: 1rem;
     font-weight: 700;
 }
-.tm-sent-detail-note {
-    margin: 0.6rem 0 0;
+/* The fetched message body (TM-562): a labelled block below the header facts. The body text is fetched
+   by id on expand; the placeholders (loading / error / empty) reuse the muted note styling. */
+.tm-sent-detail-body {
+    margin: 0.7rem 0 0;
+}
+.tm-sent-detail-body-label {
+    margin: 0 0 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+.tm-sent-detail-body-text {
+    margin: 0;
+    /* Render the body exactly as it was typed — preserve newlines/runs of space, wrap long lines. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.tm-sent-detail-body-note {
+    margin: 0;
     font-size: 0.8rem;
     font-style: italic;
 }

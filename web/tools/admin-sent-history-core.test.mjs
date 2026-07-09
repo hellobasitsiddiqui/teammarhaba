@@ -11,6 +11,7 @@ import {
   audienceSummary,
   audienceRefDetail,
   statusBadge,
+  messageBodyState,
   normalisePageResponse,
   hasPrevPage,
   hasNextPage,
@@ -101,6 +102,50 @@ test("statusBadge maps SENT/EMPTY/RECALLED tones and keeps an unknown status vis
   assert.deepEqual(statusBadge("QUEUED"), { label: "QUEUED", tone: "info" });
   assert.deepEqual(statusBadge(""), { label: "—", tone: "info" });
   assert.deepEqual(statusBadge(null), { label: "—", tone: "info" });
+});
+
+test("messageBodyState shows the fetched body once the by-id detail loads", () => {
+  // The point of TM-562: the expanded row shows the ACTUAL body the detail endpoint returned.
+  assert.deepEqual(messageBodyState({ loading: false, error: null, detail: { body: "See you at 7pm." } }), {
+    mode: "body",
+    text: "See you at 7pm.",
+  });
+  // Body is returned verbatim (whitespace preserved), not trimmed, so the DOM can render it faithfully.
+  assert.deepEqual(messageBodyState({ detail: { body: "  line one\n\n  line two  " } }), {
+    mode: "body",
+    text: "  line one\n\n  line two  ",
+  });
+});
+
+test("messageBodyState reports loading before/while the fetch is in flight", () => {
+  assert.deepEqual(messageBodyState(undefined), { mode: "loading", text: "Loading message…" });
+  assert.deepEqual(messageBodyState({ loading: true, error: null, detail: null }), {
+    mode: "loading",
+    text: "Loading message…",
+  });
+});
+
+test("messageBodyState surfaces a fetch error, with a fallback", () => {
+  assert.deepEqual(messageBodyState({ loading: false, error: "Could not load the message (404).", detail: null }), {
+    mode: "error",
+    text: "Could not load the message (404).",
+  });
+  // Blank/absent error string → a sensible default, never an empty panel.
+  assert.deepEqual(messageBodyState({ loading: false, error: "   ", detail: null }), {
+    mode: "error",
+    text: "Could not load the message body.",
+  });
+});
+
+test("messageBodyState handles a loaded-but-blank body defensively", () => {
+  assert.deepEqual(messageBodyState({ loading: false, error: null, detail: { body: "   " } }), {
+    mode: "empty",
+    text: "(no message body)",
+  });
+  assert.deepEqual(messageBodyState({ loading: false, error: null, detail: {} }), {
+    mode: "empty",
+    text: "(no message body)",
+  });
 });
 
 test("normalisePageResponse fills a clean envelope", () => {
