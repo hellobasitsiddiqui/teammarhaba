@@ -52,8 +52,10 @@ import org.springframework.transaction.annotation.Transactional;
  *       "one thread per campaign" record the sent-history API, TM-442, reads back). Its id keys the
  *       per-recipient notifications ({@code source_ref = "admin_message:<id>"}).
  *   <li><b>Deliver durably (the inbox — one-way, push-pref-independent).</b>
- *       {@link NotificationWriter#writeAdminMessage} writes one {@code ADMIN_MESSAGE} row per active
- *       recipient. This is <em>write-only</em>: a recipient can never post <em>into</em> an admin
+ *       {@link NotificationWriter#writeAdminMessageInCurrentTransaction} writes one {@code ADMIN_MESSAGE}
+ *       row per active recipient, <em>joining this transaction</em> so the durable rows share the send's
+ *       atomicity — a later failure rolls them back with the header (TM-554), never stranding an orphan.
+ *       This is <em>write-only</em>: a recipient can never post <em>into</em> an admin
  *       message — the channel is a notification, not a conversation, so one-way is structural, not a
  *       runtime check (and the endpoint itself is admin-gated, so a regular user can't send one
  *       either). The inbox is delivered to <em>every</em> active recipient regardless of push
@@ -164,7 +166,13 @@ public class AdminMessageService {
 
         // 4. Durable inbox (one-way): one ADMIN_MESSAGE row per ACTIVE recipient, pref-independent.
         // The writer narrows to enabled, non-tombstoned accounts and is idempotent on (user, source_ref).
-        int notified = notificationWriter.writeAdminMessage(recipients, title, body, deepLink, sourceRef, false);
+        // Crucially this JOINS the current transaction (writeAdminMessageInCurrentTransaction, REQUIRED),
+        // so the inbox rows commit or roll back together with the header saved above and the audit recorded
+        // below. A later failure — an audit DB error, or a fanOutPush read failing for a recipient — then
+        // rolls the whole send back as one, so it can never strand orphaned notifications referencing a
+        // campaign header that itself rolled back (TM-554).
+        int notified = notificationWriter.writeAdminMessageInCurrentTransaction(
+                recipients, title, body, deepLink, sourceRef, false);
 
         // 5. Best-effort push on top of the durable inbox, respecting the opt-out / skip-disabled rails.
         PushMessage pushMessage = new PushMessage(title, pushPreview(body), deepLink);

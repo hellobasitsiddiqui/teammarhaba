@@ -55,6 +55,17 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code TransactionRequiredException} (the same trap {@code WaitlistOfferCascadeService#killCascade}
  * documents). A fresh transaction gives the insert+purge a live one to run in, whether the caller
  * holds a (committed) transaction or none at all.
+ *
+ * <p>The one exception is {@link #writeAdminMessageInCurrentTransaction}, which runs
+ * {@link Propagation#REQUIRED} so it <em>joins</em> the caller's transaction. Its only caller is the
+ * synchronous admin-send path ({@code AdminMessageService.send}), which is itself {@code @Transactional}
+ * and persists the campaign header + {@code ADMIN_MESSAGE_SENT} audit in that same transaction. That
+ * path is a live caller transaction (never an {@code AFTER_COMMIT} listener), so a fresh
+ * {@code REQUIRES_NEW} write would commit the inbox rows independently — and a later failure in the send
+ * (an audit DB error, or a {@code fanOutPush} read failing for a later recipient) would then roll back
+ * the header but strand those already-committed, un-recallable rows as orphans pointing at a missing
+ * campaign (TM-554). Joining the caller's transaction makes the send's "all in one transaction" contract
+ * actually true.
  */
 @Service
 public class NotificationWriter {
@@ -111,6 +122,41 @@ public class NotificationWriter {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int writeAdminMessage(
+            Collection<Long> userIds,
+            String title,
+            String body,
+            String deepLink,
+            String sourceRef,
+            boolean sticky) {
+        return writeEach(NotificationType.ADMIN_MESSAGE, userIds, title, body, deepLink, sourceRef, sticky);
+    }
+
+    /**
+     * Same durable {@code ADMIN_MESSAGE} write as {@link #writeAdminMessage}, but {@link Propagation#REQUIRED}
+     * so it <em>joins the caller's transaction</em> instead of committing in a fresh {@code REQUIRES_NEW} one.
+     * This is the method the synchronous admin-send path ({@code AdminMessageService.send}, TM-441) calls:
+     * that path is itself {@code @Transactional} and writes the campaign header + {@code ADMIN_MESSAGE_SENT}
+     * audit in the same transaction, so the per-recipient inbox rows must commit or roll back <em>with</em>
+     * them. If this write committed independently (as {@link #writeAdminMessage} does, for callers with no
+     * ambient transaction), a throw later in the send — an audit DB error, or a {@code fanOutPush} read
+     * failing for a later recipient — would roll back the header but leave the inbox rows as orphans
+     * referencing a campaign id that no longer exists, and those rows are un-recallable because recall keys
+     * off the (now-gone) header (TM-554). Joining the caller's transaction keeps the send atomic.
+     *
+     * <p>Identical arguments and idempotent, active-account-only behaviour to {@link #writeAdminMessage};
+     * only the propagation differs. Use this from a path that already holds a transaction whose atomicity
+     * must include the inbox write; use {@link #writeAdminMessage} where the write should stand alone.
+     *
+     * @param userIds   the resolved recipient account ids (e.g. from {@code RecipientResolver})
+     * @param title     the message headline
+     * @param body      the message body
+     * @param deepLink  optional in-app route to open on tap ({@code null} = none)
+     * @param sourceRef the campaign/message key for idempotency + cross-linking
+     * @param sticky    whether to pin the notification (exempt from the retention purge)
+     * @return how many inbox rows were actually written
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    public int writeAdminMessageInCurrentTransaction(
             Collection<Long> userIds,
             String title,
             String body,
