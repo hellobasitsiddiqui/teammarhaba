@@ -22,6 +22,11 @@ app:
   # regardless of any future change to the shipped prod default.
   event-listing:
     default-duration-hours: 3
+  # No API rate limiting during tests by default (TM-158): the suite fires many /api/** requests from
+  # one MockMvc client and would otherwise trip the limit and flake. RateLimitFilterIntegrationTest
+  # re-enables it with a tiny budget via @TestPropertySource to prove the under-/over-limit behaviour.
+  rate-limit:
+    enabled: false
 
 # OpenAPI docs (TM-76, TM-520): the live springdoc endpoints are disabled by default on every runtime
 # profile (application.yml); the test profile re-enables them so OpenApiDocsTest + OpenApiDriftTest can
