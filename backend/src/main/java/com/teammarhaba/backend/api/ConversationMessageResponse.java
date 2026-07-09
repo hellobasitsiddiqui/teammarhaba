@@ -2,6 +2,7 @@ package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.chat.Message;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * One message in a thread's timeline (TM-436) — the wire shape the chat view renders per line. A DTO,
@@ -17,24 +18,37 @@ import java.time.Instant;
  * system} flag so a client can render it without a null-check. A human author is resolved by the
  * client through the people surface, never assumed present in this row.
  *
+ * <p><b>{@code reactions}</b> is the message's reaction summary (TM-461) — one {@link EmojiReactionCount}
+ * per distinct emoji (reactor count + whether the caller reacted), oldest-reacted emoji first, so the
+ * timeline renders reaction chips inline without a second round-trip; empty when nothing has been
+ * reacted. The single thread-read endpoint carries it so reactions ride the same page as the messages.
+ *
  * @param id        the message's surrogate id
  * @param senderId  the author's {@code users.id}; {@code null} = a system / admin message
  * @param system    convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
  * @param body      the message text
  * @param deepLink  optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
  * @param createdAt DB-authoritative post instant — the in-thread (chronological) order
+ * @param reactions the message's reaction summary, oldest-reacted emoji first; empty if none
  */
 public record ConversationMessageResponse(
-        Long id, Long senderId, boolean system, String body, String deepLink, Instant createdAt) {
+        Long id,
+        Long senderId,
+        boolean system,
+        String body,
+        String deepLink,
+        Instant createdAt,
+        List<EmojiReactionCount> reactions) {
 
-    /** Map a persisted {@link Message} to its wire form, deriving {@code system} from a null sender. */
-    public static ConversationMessageResponse from(Message message) {
+    /** Map a persisted {@link Message} plus its reaction summary to its wire form. */
+    public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
         return new ConversationMessageResponse(
                 message.getId(),
                 message.getSenderId(),
                 message.isSystem(),
                 message.getBody(),
                 message.getDeepLink(),
-                message.getCreatedAt());
+                message.getCreatedAt(),
+                reactions);
     }
 }

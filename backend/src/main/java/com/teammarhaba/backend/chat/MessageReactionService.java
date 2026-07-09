@@ -134,11 +134,26 @@ public class MessageReactionService {
         requireNonRemovedMember(conversationId, userId);
 
         Page<Message> page = messages.findByConversationIdAndDeletedAtIsNull(conversationId, pageable);
-        Map<Long, List<MessageReaction>> byMessage = reactionsByMessage(
-                page.getContent().stream().map(Message::getId).toList());
+        Map<Long, List<EmojiReactionCount>> summaries =
+                summariesFor(userId, page.getContent().stream().map(Message::getId).toList());
 
         return PageResponse.from(page, message -> ThreadMessageResponse.from(
-                message, summarise(byMessage.getOrDefault(message.getId(), List.of()), userId)));
+                message, summaries.getOrDefault(message.getId(), List.of())));
+    }
+
+    /**
+     * Reaction summaries for a page of messages, keyed by message id, from {@code callerUserId}'s
+     * perspective (the per-emoji "did the caller react" flag). Loaded in one query for the whole page
+     * (no N+1); a message with no reactions is simply absent from the map. Shared by this service's own
+     * {@link #threadMessages} and the conversation read endpoint (TM-436), so both surface reactions
+     * from one place.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, List<EmojiReactionCount>> summariesFor(Long callerUserId, Collection<Long> messageIds) {
+        Map<Long, List<MessageReaction>> byMessage = reactionsByMessage(messageIds);
+        Map<Long, List<EmojiReactionCount>> out = new LinkedHashMap<>();
+        byMessage.forEach((messageId, rows) -> out.put(messageId, summarise(rows, callerUserId)));
+        return out;
     }
 
     // ── internals ──────────────────────────────────────────────────────────────────────────────────

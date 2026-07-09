@@ -2,6 +2,7 @@ package com.teammarhaba.backend.chat;
 
 import com.teammarhaba.backend.api.ConversationMessageResponse;
 import com.teammarhaba.backend.api.ConversationSummaryResponse;
+import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MarkReadResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
@@ -52,18 +53,21 @@ public class ConversationReadService {
     private final MessageRepository messages;
     private final EventRepository events;
     private final UserService users;
+    private final MessageReactionService reactionSummaries;
 
     public ConversationReadService(
             ConversationRepository conversations,
             ConversationMemberRepository members,
             MessageRepository messages,
             EventRepository events,
-            UserService users) {
+            UserService users,
+            MessageReactionService reactionSummaries) {
         this.conversations = conversations;
         this.members = members;
         this.messages = messages;
         this.events = events;
         this.users = users;
+        this.reactionSummaries = reactionSummaries;
     }
 
     /**
@@ -112,10 +116,12 @@ public class ConversationReadService {
     }
 
     /**
-     * A page of one thread's messages (TM-436), chronological (oldest→newest), members-only. The
-     * {@code pageable} carries the window and the chronological sort the controller fixes; the query
-     * filters {@code deletedAt IS NULL}, so moderation-removed messages never surface. A non-member
-     * (or a removed member, or an unknown thread id) is a {@code 403} — see {@link #requireMember}.
+     * A page of one thread's messages (TM-436), chronological (oldest→newest), members-only, each with
+     * its reaction summary (TM-461). The {@code pageable} carries the window and the chronological sort
+     * the controller fixes; the query filters {@code deletedAt IS NULL}, so moderation-removed messages
+     * never surface. A non-member (or a removed member, or an unknown thread id) is a {@code 403} — see
+     * {@link #requireMember}. This is the single thread-read endpoint: reactions ride the same page as
+     * the messages so the timeline renders chips without a second round-trip.
      */
     @Transactional(readOnly = true)
     public PageResponse<ConversationMessageResponse> messages(
@@ -124,7 +130,12 @@ public class ConversationReadService {
         requireMember(conversationId, userId);
 
         Page<Message> page = messages.findByConversationIdAndDeletedAtIsNull(conversationId, pageable);
-        return PageResponse.from(page, ConversationMessageResponse::from);
+        // Attach each message's reaction summary (TM-461) so the timeline renders chips inline — one
+        // batched query for the page (no N+1), reusing the reaction service's shared summariser.
+        Map<Long, List<EmojiReactionCount>> summaries =
+                reactionSummaries.summariesFor(userId, page.getContent().stream().map(Message::getId).toList());
+        return PageResponse.from(page, message -> ConversationMessageResponse.from(
+                message, summaries.getOrDefault(message.getId(), List.of())));
     }
 
     /**

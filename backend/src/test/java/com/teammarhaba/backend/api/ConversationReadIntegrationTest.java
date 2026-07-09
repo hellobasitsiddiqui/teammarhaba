@@ -196,6 +196,11 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(systemMsg.get("body").asText()).isEqualTo("system from TeamMarhaba");
         assertThat(systemMsg.get("deepLink").asText()).isEqualTo("/home");
 
+        // Each message carries its reaction summary (TM-461) inline — empty here (nothing reacted yet),
+        // but the field is always present so the timeline can render chips without a second call.
+        assertThat(systemMsg.get("reactions").isArray()).isTrue();
+        assertThat(systemMsg.get("reactions")).isEmpty();
+
         JsonNode page1 = getJson("/api/v1/conversations/" + thread + "/messages?size=2&page=1", caller(uid));
         assertThat(ids(page1)).containsExactly(m3);
 

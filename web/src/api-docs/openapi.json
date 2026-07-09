@@ -444,6 +444,12 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "reactions" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EmojiReactionCount"
+            },
+            "type" : "array"
+          },
           "senderId" : {
             "format" : "int64",
             "type" : "integer"
@@ -1332,33 +1338,6 @@
         },
         "type" : "object"
       },
-      "PageResponseThreadMessageResponse" : {
-        "properties" : {
-          "items" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ThreadMessageResponse"
-            },
-            "type" : "array"
-          },
-          "page" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "size" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "totalElements" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "totalPages" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        },
-        "type" : "object"
-      },
       "PagedResponseUserResponse" : {
         "properties" : {
           "items" : {
@@ -1468,35 +1447,6 @@
         "properties" : {
           "route" : {
             "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
-      "ThreadMessageResponse" : {
-        "properties" : {
-          "body" : {
-            "type" : "string"
-          },
-          "createdAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "deepLink" : {
-            "type" : "string"
-          },
-          "id" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "reactions" : {
-            "items" : {
-              "$ref" : "#/components/schemas/EmojiReactionCount"
-            },
-            "type" : "array"
-          },
-          "senderId" : {
-            "format" : "int64",
-            "type" : "integer"
           }
         },
         "type" : "object"
@@ -2382,49 +2332,6 @@
           }
         },
         "tags" : [ "email-code-controller" ]
-      }
-    },
-    "/api/v1/conversations/{conversationId}/messages" : {
-      "get" : {
-        "operationId" : "messages_1",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "conversationId",
-          "required" : true,
-          "schema" : {
-            "format" : "int64",
-            "type" : "integer"
-          }
-        }, {
-          "in" : "query",
-          "name" : "page",
-          "required" : false,
-          "schema" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        }, {
-          "in" : "query",
-          "name" : "size",
-          "required" : false,
-          "schema" : {
-            "format" : "int32",
-            "type" : "integer"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/PageResponseThreadMessageResponse"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [ "conversation-message-controller" ]
       }
     },
     "/api/v1/conversations/{id}/messages" : {

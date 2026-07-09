@@ -112,8 +112,9 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.notify.NotificationFeedService notificationFeedService;
 
-    // MessageReactionController + ConversationMessageController (TM-461) both need a
-    // MessageReactionService — supply it so the web slice can load.
+    // MessageReactionController (TM-461) needs a MessageReactionService — supply it so the web slice
+    // can load. ConversationReadService (TM-436) also depends on it for the thread-messages reaction
+    // summary, but that bean is mocked below, so only the controller's direct dependency matters here.
     @MockitoBean
     private com.teammarhaba.backend.chat.MessageReactionService messageReactionService;
 
