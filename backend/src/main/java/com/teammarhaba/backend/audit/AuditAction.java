@@ -51,6 +51,14 @@ public enum AuditAction {
      */
     BROADCAST_SENT,
 
+    /**
+     * An admin sent an audience-resolved message via {@code POST /api/v1/admin/messages} (TM-441 /
+     * epic TM-432). One summary row per send carrying the target type, recipient count and delivery
+     * counts; the full campaign header (title/body/target/recipient-count) lives in {@code
+     * admin_message}, and the per-recipient inbox rows in {@code notification}.
+     */
+    ADMIN_MESSAGE_SENT,
+
     /** An admin created a meetup event via {@code POST /api/v1/admin/events} (TM-392). */
     EVENT_CREATED,
 

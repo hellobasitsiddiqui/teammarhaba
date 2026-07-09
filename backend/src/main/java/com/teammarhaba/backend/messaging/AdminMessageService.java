@@ -1,0 +1,275 @@
+package com.teammarhaba.backend.messaging;
+
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditService;
+import com.teammarhaba.backend.device.DeviceToken;
+import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.NotificationWriter;
+import com.teammarhaba.backend.notify.PushMessage;
+import com.teammarhaba.backend.notify.PushNotificationService;
+import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
+import com.teammarhaba.backend.notify.PushRoutes;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserRepository;
+import com.teammarhaba.backend.web.BadRequestException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * The admin send (TM-441, epic TM-432): an admin sends one message to a <em>resolved audience</em>
+ * (a user / a city / one-or-more events' GOING attendees), and every recipient gets it durably in
+ * their in-app inbox (bell + panel) plus a best-effort push. This is the first consumer of
+ * {@link RecipientResolver} (TM-440) and wires the already-built {@code ADMIN_MESSAGE}
+ * {@link NotificationWriter#writeAdminMessage writer} (TM-453).
+ *
+ * <p><strong>What one send does, in order (all in one transaction):</strong>
+ *
+ * <ol>
+ *   <li><b>Validate the deep-link.</b> A non-null {@code deepLink} is checked against the stricter
+ *       {@link PushRoutes#isKnown admin allow-list} up-front — an off-list route is a clean
+ *       {@code 400} before anything is persisted or sent (mirrors {@code BroadcastService} /
+ *       {@code UserAdminService.sendTestPush}). Length caps on title/body are the DTO's contract.
+ *   <li><b>Resolve the audience.</b> {@link RecipientResolver#resolve} turns the {@link AudienceSpec}
+ *       into the concrete, de-duplicated set of active account ids <em>as a snapshot now</em>
+ *       (soft-deleted accounts already dropped). An empty resolution is a {@code 400} — a send to
+ *       nobody is rejected here, exactly as the resolver's contract delegates that guard to the sender.
+ *   <li><b>Create the campaign.</b> One immutable {@link AdminMessage} header row is appended (the
+ *       "one thread per campaign" record the sent-history API, TM-442, reads back). Its id keys the
+ *       per-recipient notifications ({@code source_ref = "admin_message:<id>"}).
+ *   <li><b>Deliver durably (the inbox — one-way, push-pref-independent).</b>
+ *       {@link NotificationWriter#writeAdminMessage} writes one {@code ADMIN_MESSAGE} row per active
+ *       recipient. This is <em>write-only</em>: a recipient can never post <em>into</em> an admin
+ *       message — the channel is a notification, not a conversation, so one-way is structural, not a
+ *       runtime check (and the endpoint itself is admin-gated, so a regular user can't send one
+ *       either). The inbox is delivered to <em>every</em> active recipient regardless of push
+ *       preference (an email-only user still reads their bell).
+ *   <li><b>Fan out push (best-effort, opt-out-respecting).</b> On top of the durable inbox, a
+ *       transient push is sent to the subset that opted into push — a suspended or push-opted-out
+ *       account gets the inbox row but no push. A device token shared across recipients is pushed
+ *       once. The push body is a {@link #pushPreview preview} of a possibly-long message; the full
+ *       text lives in the durable inbox row (and the campaign header).
+ *   <li><b>Audit.</b> One {@link AuditAction#ADMIN_MESSAGE_SENT} row records the target, recipient
+ *       count and delivery counts — never the body or any device token.
+ * </ol>
+ *
+ * <p><strong>Reuses, never rebuilds.</strong> Audience resolution is {@link RecipientResolver}, the
+ * durable write is {@link NotificationWriter}, and the actual FCM fan-out is
+ * {@link PushNotificationService#sendToTokens} (so token resolution, {@code UNREGISTERED}-pruning and
+ * outcome classification stay inside the notify package). The opt-out / skip-disabled / shared-token
+ * dedupe rails mirror {@code BroadcastService} (TM-364).
+ */
+@Service
+public class AdminMessageService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminMessageService.class);
+
+    /** Audit {@code target_type} for an admin-message campaign — the kind of thing acted on. */
+    private static final String TARGET_TYPE = "AdminMessage";
+
+    /** {@code source_ref} prefix that ties each durable notification back to its campaign header. */
+    static final String SOURCE_REF_PREFIX = "admin_message:";
+
+    /**
+     * Max chars of the message body carried in the transient push. The full body (up to ~5000 chars)
+     * survives in the durable inbox row; a push is only a preview and an oversized FCM payload
+     * (&gt;4KB) would be rejected outright, so the push shows the opening of the message and a tap
+     * opens the full text in-app.
+     */
+    static final int PUSH_PREVIEW_LENGTH = 500;
+
+    private final RecipientResolver recipientResolver;
+    private final NotificationWriter notificationWriter;
+    private final PushNotificationService push;
+    private final DeviceTokenRepository deviceTokens;
+    private final UserRepository users;
+    private final AdminMessageRepository adminMessages;
+    private final AuditService audit;
+
+    public AdminMessageService(
+            RecipientResolver recipientResolver,
+            NotificationWriter notificationWriter,
+            PushNotificationService push,
+            DeviceTokenRepository deviceTokens,
+            UserRepository users,
+            AdminMessageRepository adminMessages,
+            AuditService audit) {
+        this.recipientResolver = recipientResolver;
+        this.notificationWriter = notificationWriter;
+        this.push = push;
+        this.deviceTokens = deviceTokens;
+        this.users = users;
+        this.adminMessages = adminMessages;
+        this.audit = audit;
+    }
+
+    /**
+     * Send {@code title}/{@code body} (+ optional {@code deepLink}) to the audience described by
+     * {@code spec}, on behalf of the admin {@code actorUid}. See the class doc for the full sequence.
+     *
+     * @param actorUid   Firebase UID of the admin sending the message (attribution; never null)
+     * @param spec       the audience to resolve (one target type; validated at the API edge)
+     * @param targetType which single dimension {@code spec} targets (persisted on the campaign header)
+     * @param targetRef  a human-readable descriptor of the target for the sent-history view
+     * @param title      the message headline (non-blank/bounded at the web edge)
+     * @param body       the message body (non-blank/bounded at the web edge; up to ~5000 chars)
+     * @param deepLink   an optional known deep-link route ({@code null} = none); an off-list route is a 400
+     * @return the campaign id, target and delivery counts
+     * @throws BadRequestException if {@code deepLink} is off-list, or the audience resolves to nobody
+     */
+    @Transactional
+    public AdminSendResult send(
+            String actorUid,
+            AudienceSpec spec,
+            TargetType targetType,
+            String targetRef,
+            String title,
+            String body,
+            String deepLink) {
+        // 1. Validate the deep-link once, up-front — admin input against the stricter exact allow-list —
+        // so an off-list route is a clean 400 BEFORE we resolve, persist or send anything.
+        if (deepLink != null && !PushRoutes.isKnown(deepLink)) {
+            throw new BadRequestException(
+                    "Unknown deep-link route '" + deepLink + "'. Allowed: " + PushRoutes.KNOWN);
+        }
+
+        // 2. Resolve the audience to the concrete active-account snapshot. Empty = a send to nobody,
+        // which the resolver's contract leaves for the sender to reject as a 400.
+        Set<Long> recipients = recipientResolver.resolve(spec);
+        if (recipients.isEmpty()) {
+            throw new BadRequestException("This message resolved to no recipients.");
+        }
+
+        // 3. Append the immutable campaign header first, so its id keys the per-recipient notifications.
+        AdminMessage campaign = adminMessages.save(
+                new AdminMessage(actorUid, title, body, deepLink, targetType, targetRef, recipients.size()));
+        String sourceRef = SOURCE_REF_PREFIX + campaign.getId();
+
+        // 4. Durable inbox (one-way): one ADMIN_MESSAGE row per ACTIVE recipient, pref-independent.
+        // The writer narrows to enabled, non-tombstoned accounts and is idempotent on (user, source_ref).
+        int notified = notificationWriter.writeAdminMessage(recipients, title, body, deepLink, sourceRef, false);
+
+        // 5. Best-effort push on top of the durable inbox, respecting the opt-out / skip-disabled rails.
+        PushMessage pushMessage = new PushMessage(title, pushPreview(body), deepLink);
+        PushTally tally = fanOutPush(recipients, pushMessage);
+
+        // 6. One audit summary row — target + counts only, never the body or any device token.
+        audit.record(
+                actorUid,
+                AuditAction.ADMIN_MESSAGE_SENT,
+                TARGET_TYPE,
+                String.valueOf(campaign.getId()),
+                Map.<String, Object>ofEntries(
+                        Map.entry("targetType", targetType.name()),
+                        Map.entry("targetRef", targetRef),
+                        Map.entry("recipientCount", recipients.size()),
+                        Map.entry("notified", notified),
+                        Map.entry("pushTargeted", tally.targeted),
+                        Map.entry("pushDelivered", tally.delivered),
+                        Map.entry("pushPruned", tally.pruned),
+                        Map.entry("pushFailed", tally.failed),
+                        Map.entry("pushSkipped", tally.skipped),
+                        Map.entry("title", title),
+                        Map.entry("route", deepLink == null ? "" : deepLink)));
+
+        log.info(
+                "Admin message {} by {}: target={}({}), recipients={}, notified={}, push[targeted={}, "
+                        + "delivered={}, pruned={}, failed={}, skipped={}]",
+                campaign.getId(),
+                actorUid,
+                targetType,
+                targetRef,
+                recipients.size(),
+                notified,
+                tally.targeted,
+                tally.delivered,
+                tally.pruned,
+                tally.failed,
+                tally.skipped);
+
+        return new AdminSendResult(
+                campaign.getId(),
+                targetType,
+                recipients.size(),
+                notified,
+                tally.targeted,
+                tally.delivered,
+                tally.pruned,
+                tally.failed,
+                tally.skipped);
+    }
+
+    /**
+     * Fan the transient push out to the opted-in subset of {@code recipients}, de-duplicating a device
+     * token shared across recipients so it is pushed exactly once. Recipients are re-loaded through
+     * {@link UserRepository} (the {@code @SQLRestriction} keeps this active-only) so the opt-out and
+     * skip-disabled gates can be applied — a suspended or push-opted-out account got the durable inbox
+     * row but gets no push. A recipient with no registered device is not a push skip (they are reachable,
+     * just have nothing to push to); a gated recipient is.
+     */
+    private PushTally fanOutPush(Set<Long> recipients, PushMessage pushMessage) {
+        // One batch read of the recipient accounts, keyed by id (soft-deleted rows already excluded by
+        // the resolver AND by the entity's @SQLRestriction, so a missing id here is a gated skip).
+        Map<Long, User> byId = users.findAllById(recipients).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+
+        // Tokens already handed to the sender in THIS send, so a device shared across two recipients is
+        // pushed once, not twice. Insertion-ordered for stable, reviewable behaviour.
+        Set<String> sentTokens = new LinkedHashSet<>();
+        int targeted = 0;
+        int delivered = 0;
+        int pruned = 0;
+        int failed = 0;
+        int skipped = 0;
+
+        for (Long userId : recipients) {
+            User user = byId.get(userId);
+            if (user == null || !user.isEnabled() || !user.getNotificationPref().permitsPush()) {
+                // Suspended, soft-deleted or opted out of push: durable inbox reached them, push does not.
+                skipped++;
+                continue;
+            }
+
+            // Resolve this user's tokens and drop any already sent to in this send — the dedupe. What's
+            // left is delivered exactly once, so the aggregate is the natural sum across recipients.
+            List<String> toSend = new ArrayList<>();
+            for (DeviceToken device : deviceTokens.findByUserId(userId)) {
+                if (sentTokens.add(device.getToken())) {
+                    toSend.add(device.getToken());
+                }
+            }
+            if (toSend.isEmpty()) {
+                continue; // opted in, but no (not-already-sent) device to deliver to
+            }
+            PushFanout fanout = push.sendToTokens(toSend, pushMessage);
+            targeted += fanout.targeted();
+            delivered += fanout.delivered();
+            pruned += fanout.pruned();
+            failed += fanout.failed();
+        }
+        return new PushTally(targeted, delivered, pruned, failed, skipped);
+    }
+
+    /**
+     * The body carried in the transient push: the whole body if short enough, otherwise its first
+     * {@link #PUSH_PREVIEW_LENGTH} chars with a trailing ellipsis. The durable inbox row keeps the full
+     * text — this only bounds the push so a long admin message can't exceed FCM's payload limit.
+     */
+    static String pushPreview(String body) {
+        if (body.length() <= PUSH_PREVIEW_LENGTH) {
+            return body;
+        }
+        return body.substring(0, PUSH_PREVIEW_LENGTH - 1).stripTrailing() + "…";
+    }
+
+    /** Mutable-free tally of the push fan-out across all recipients (never leaves this class). */
+    private record PushTally(int targeted, int delivered, int pruned, int failed, int skipped) {}
+}
