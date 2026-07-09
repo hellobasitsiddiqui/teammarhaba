@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,8 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>the thread-lifecycle / close policy (TM-446) — rejects a post to a closed thread via
  *       {@link EventChatLifecycleService#isThreadReadOnly}, which it <em>consumes</em> rather than
  *       re-deriving the close window here;</li>
- *   <li>the push fan-out hook (TM-437) — triggers {@link NewMessageNotifier#onMessageCreated} so
- *       every other active member hears about the message without the app open.</li>
+ *   <li>the push fan-out hook (TM-437) — so every other active member hears about the message without
+ *       the app open. This service no longer calls the notifier in-line; it publishes a
+ *       {@link MessageCreatedEvent} which {@link MessageCreatedPushListener} consumes
+ *       <em>after commit</em> (TM-579), so a rolled-back post never pushes and the FCM call never holds
+ *       the write connection.</li>
  * </ul>
  *
  * <p><b>Identity is always the verified caller.</b> The acting member is resolved from the
@@ -57,11 +61,14 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>Body length</b> is bounded at the edge by Bean Validation on {@code PostMessageRequest}
  * (≤ {@code 500}); this service takes the already-validated text.
  *
- * <p><b>Ordering (all in one transaction, like {@code AdminMessageService}):</b> persist the message
- * (flushed so the DB-authoritative {@code createdAt} reads straight back), record one
- * {@link AuditAction#EVENT_CHAT_MESSAGE_POSTED} audit row, then fan the push out. The push is the
- * last step and nothing follows that could roll the message back, so calling the notifier in-line
- * (rather than strictly post-commit) never pushes about a message that then disappears.
+ * <p><b>Ordering.</b> In the write transaction: persist the message (flushed so the DB-authoritative
+ * {@code createdAt} reads straight back), record one {@link AuditAction#EVENT_CHAT_MESSAGE_POSTED}
+ * audit row, then <em>publish</em> a {@link MessageCreatedEvent}. The push fan-out itself is not run
+ * here — {@link MessageCreatedPushListener} fires it {@code AFTER_COMMIT} (TM-579). Publishing rather
+ * than pushing in-line is what makes the fan-out honour {@link NewMessageNotifier}'s contract ("invoke
+ * after commit"): if the commit fails after the message row was written, the listener never runs, so no
+ * recipient is pushed about a rolled-back message; and because the push runs post-commit it no longer
+ * holds the write connection open across the FCM network call.
  */
 @Service
 public class MessagePostService {
@@ -72,7 +79,7 @@ public class MessagePostService {
     private final MessageRepository messages;
     private final EventRepository events;
     private final EventChatLifecycleService lifecycle;
-    private final NewMessageNotifier notifier;
+    private final ApplicationEventPublisher publisher;
     private final AuditService audit;
     private final Clock clock;
 
@@ -88,9 +95,9 @@ public class MessagePostService {
             MessageRepository messages,
             EventRepository events,
             EventChatLifecycleService lifecycle,
-            NewMessageNotifier notifier,
+            ApplicationEventPublisher publisher,
             AuditService audit) {
-        this(users, conversations, members, messages, events, lifecycle, notifier, audit, Clock.systemUTC());
+        this(users, conversations, members, messages, events, lifecycle, publisher, audit, Clock.systemUTC());
     }
 
     /** Test-visible constructor: inject a fixed {@link Clock} to drive the close-policy time deterministically. */
@@ -101,7 +108,7 @@ public class MessagePostService {
             MessageRepository messages,
             EventRepository events,
             EventChatLifecycleService lifecycle,
-            NewMessageNotifier notifier,
+            ApplicationEventPublisher publisher,
             AuditService audit,
             Clock clock) {
         this.users = users;
@@ -110,15 +117,16 @@ public class MessagePostService {
         this.messages = messages;
         this.events = events;
         this.lifecycle = lifecycle;
-        this.notifier = notifier;
+        this.publisher = publisher;
         this.audit = audit;
         this.clock = clock;
     }
 
     /**
      * Post {@code body} to thread {@code conversationId} as the verified caller. Applies the
-     * member + open-thread gate, persists the message, audits the post, and triggers the push
-     * fan-out. Returns the created message as the read DTO (with an empty reaction summary — a brand
+     * member + open-thread gate, persists the message, audits the post, and publishes the
+     * {@link MessageCreatedEvent} that fires the push fan-out after commit. Returns the created message
+     * as the read DTO (with an empty reaction summary — a brand
      * new message has no reactions yet) so the client can append it to the timeline optimistically.
      *
      * @throws ResourceNotFoundException {@code 404} if the thread does not exist
@@ -148,8 +156,10 @@ public class MessagePostService {
                 conversationId.toString(),
                 Map.of("messageId", saved.getId()));
 
-        // Fan the new-message push out to every other active member — reuse the TM-437 hook, don't rebuild.
-        notifier.onMessageCreated(saved);
+        // Announce the message in-transaction; MessageCreatedPushListener fans the TM-437 push out
+        // AFTER_COMMIT (TM-579), so a rolled-back post never pushes and the FCM call never holds the
+        // write connection.
+        publisher.publishEvent(new MessageCreatedEvent(saved));
 
         // A freshly posted message carries no reactions yet.
         return ConversationMessageResponse.from(saved, List.of());
