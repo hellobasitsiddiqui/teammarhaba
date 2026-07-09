@@ -780,7 +780,10 @@ function renderTable() {
   if (shell) shell.selectAll = null;
 
   if (state.loading) {
-    shell.table.append(el("p", { class: "tm-muted", text: "Loading users…" }));
+    // TM-550: a themed loading block (centred token-inked spinner + label) rather than a bare line of
+    // muted text, so the console's loading state matches the refreshed look. Styling only — the state
+    // machine (state.loading gate) is unchanged.
+    shell.table.append(el("p", { class: "tm-muted tm-table-loading", text: "Loading users…" }));
     return;
   }
   if (state.error) {

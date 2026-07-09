@@ -790,6 +790,18 @@ h3,
 [data-sketchy="on"] .app-nav button,
 [data-sketchy="on"] .tm-btn,
 [data-sketchy="on"] .auth-mark,
+/* Admin-console cards (TM-550): the restyle folds the stats/toolbar/table/pager and the broadcast +
+   ops panels into the same raised Paper cards as the rest of the app, so they must also pick up the
+   hand-drawn edge under the wavy toggle — otherwise they read as crisp-edged leftovers while every
+   other card wobbles (the exact "half-migrated" tell the ticket calls out). Decorative, gated on the
+   per-user toggle, dropped under reduced-motion below — no palette/behaviour change. */
+[data-sketchy="on"] .tm-stat,
+[data-sketchy="on"] .tm-toolbar,
+[data-sketchy="on"] .tm-table-wrap,
+[data-sketchy="on"] .tm-pager,
+[data-sketchy="on"] .tm-broadcast,
+[data-sketchy="on"] .tm-push-preview,
+[data-sketchy="on"] .tm-ops,
 [data-sketchy="on"] hr {
     filter: url("#wobble-soft");
 }
@@ -810,6 +822,14 @@ h3,
     [data-sketchy="on"] .auth button,
     [data-sketchy="on"] .app-nav button,
     [data-sketchy="on"] .tm-btn,
+    /* Admin-console cards (TM-550) — drop the decorative wobble under reduced-motion, same as the rest. */
+    [data-sketchy="on"] .tm-stat,
+    [data-sketchy="on"] .tm-toolbar,
+    [data-sketchy="on"] .tm-table-wrap,
+    [data-sketchy="on"] .tm-pager,
+    [data-sketchy="on"] .tm-broadcast,
+    [data-sketchy="on"] .tm-push-preview,
+    [data-sketchy="on"] .tm-ops,
     [data-sketchy="on"] hr {
         filter: none;
     }
@@ -852,11 +872,25 @@ h3,
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-4);
 }
 
 .tm-admin-head h2 {
     margin: 0;
+}
+
+/* Admin page header (TM-550) — SCOPED to the console shell so it doesn't touch the shared `.tm-admin-head`
+   layout reused by the user-facing onboarding / terms / events headers. Inside an admin view the heading
+   sits beside its action buttons on a 2px inky Paper rule, so each console reads as a titled page rather
+   than an untitled container. Token-only. */
+.admin-console .tm-admin-head {
+    padding-bottom: var(--space-3);
+    margin-bottom: var(--space-4);
+    border-bottom: var(--border-width) solid var(--border);
+}
+
+.admin-console .tm-admin-head h2 {
+    font-size: var(--fs-5);
 }
 
 .tm-muted {
@@ -864,42 +898,56 @@ h3,
     font-weight: 500;
 }
 
-/* Stats bar */
+/* Stats bar — four at-a-glance totals as raised Paper "sticker" cards (TM-550). Surface-card + the
+   offset sketched shadow (--shadow-sm) match the shared component library / the newer admin cards, so
+   the stats read as lifted tiles on the ruled page rather than flat panels. Token-only: the value
+   inks with the per-user --accent, so it re-tints with the accent swatch and reads under both toggle
+   states + dark automatically. */
 .tm-stats {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 0.75rem;
-    margin: 1rem 0;
+    gap: var(--space-3);
+    margin: var(--space-4) 0;
 }
 
 .tm-stat {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.75rem 1rem;
-    background: var(--surface);
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface-card);
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-stat-value {
-    font-size: 1.5rem;
+    font-size: var(--fs-5);
     font-weight: 700;
+    line-height: 1.1;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
 }
 
 .tm-stat-label {
-    font-size: 0.8rem;
+    font-size: var(--fs-2);
     color: var(--muted);
 }
 
-/* Toolbar */
+/* Toolbar — search / role+status filter / rows-per-page, grouped into one raised Paper control bar
+   (TM-550) so the console's controls read as a single card above the table (matching the compose/ops
+   cards) instead of loose inputs floating on the page. Token-only surface/border/radius/shadow. */
 .tm-toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-input {
@@ -920,12 +968,15 @@ h3,
     outline-offset: 1px;
 }
 
-/* Table */
+/* Table — the users list as a raised Paper card (TM-550): surface-card + offset sketched shadow, to
+   match the stats/toolbar/compose cards. Stays a horizontal-scroll wrapper (overflow-x) so a wide
+   table never forces the page sideways on a phone; the header row keeps its recessed --surface-2. */
 .tm-table-wrap {
     overflow-x: auto;
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--surface);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-table {
@@ -1080,14 +1131,20 @@ h3,
     cursor: pointer;
 }
 
-/* Pager */
+/* Pager — the range + Prev/Next controls under the table, as a quiet Paper bar (TM-550) matching the
+   toolbar so the console is bookended by two consistent control cards. Token-only. */
 .tm-pager {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    margin-top: 0.75rem;
-    font-size: 0.85rem;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--fs-2);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-pager-controls {
@@ -1096,9 +1153,59 @@ h3,
     gap: 0.5rem;
 }
 
+/* Table states (loading / empty / error) — themed so they never render as a bare line of text inside
+   the console card (TM-550). All three centre in a comfortable padded block; colours are tokens, so
+   they read under any accent + both toggle states + dark. */
 .tm-error {
-    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-4);
     text-align: center;
+    color: var(--muted);
+}
+
+.tm-empty {
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+}
+
+.tm-empty p {
+    margin: 0;
+}
+
+/* Loading: a centred spinner + label. The spinner is a token-inked ring (track = --border, active
+   arc = --accent) so it re-tints with the per-user accent; the spin is dropped under reduced-motion. */
+.tm-table-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+}
+
+.tm-table-loading::before {
+    content: "";
+    width: 1.1rem;
+    height: 1.1rem;
+    border: var(--border-width) solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: var(--radius-pill);
+    animation: tm-spin 0.7s linear infinite;
+}
+
+@keyframes tm-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tm-table-loading::before {
+        animation: none;
+    }
 }
 
 /* Toasts */
@@ -1658,10 +1765,11 @@ h3,
    at the foot of the #/admin view. Token-only styling, mirroring the broadcast panel's surface card. */
 .tm-ops {
     margin: 1.25rem 0 0;
-    padding: 1rem;
-    background: var(--surface);
+    padding: var(--space-4);
+    background: var(--surface-card);
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-ops-head h2 {
@@ -1751,11 +1859,12 @@ h3,
 }
 
 .tm-broadcast {
-    margin: 0 0 1rem;
-    padding: 1rem;
-    background: var(--surface);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-4);
+    background: var(--surface-card);
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .tm-broadcast-head {
