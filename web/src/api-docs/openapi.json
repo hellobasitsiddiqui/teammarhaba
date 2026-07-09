@@ -450,6 +450,9 @@
             },
             "type" : "array"
           },
+          "readReceipt" : {
+            "$ref" : "#/components/schemas/MessageReadReceipt"
+          },
           "senderId" : {
             "format" : "int64",
             "type" : "integer"
@@ -1072,6 +1075,22 @@
           "reactions" : {
             "items" : {
               "$ref" : "#/components/schemas/EmojiReactionCount"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "MessageReadReceipt" : {
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "readerIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
             },
             "type" : "array"
           }

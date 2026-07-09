@@ -33,7 +33,7 @@
 // every node is built via ui.js `el()` (textContent only, no innerHTML), so untrusted titles, previews
 // and message bodies can never inject markup.
 
-import { clear, el, toast } from "./ui.js";
+import { clear, el, modal, toast } from "./ui.js";
 import { avatar, badge, reaction, tag } from "./components.js";
 import { lineIcon } from "./icons.js";
 import {
@@ -319,7 +319,12 @@ function repaintBody() {
     body.append(emptyThread());
     return;
   }
-  for (const m of all) body.append(messageRow(m, Boolean(m.pending) || thread.mineIds.has(m.id)));
+  // A message renders out-going when it's a pending echo, one we posted this session (`mineIds`), OR the
+  // server attached a read receipt to it — which it only does for the caller's OWN messages (TM-463), so
+  // that presence is an authoritative "mine" signal for messages loaded from history (not just this session).
+  for (const m of all) {
+    body.append(messageRow(m, Boolean(m.pending) || thread.mineIds.has(m.id) || Boolean(m.readReceipt)));
+  }
   if (atBottom) requestAnimationFrame(() => { body.scrollTop = body.scrollHeight; });
 }
 
@@ -530,6 +535,9 @@ function messageRow(m, mine = false) {
     pill.classList.add("tm-chat-reaction");
     row.append(pill);
   }
+  // Read receipt (TM-463): a "read by N" indicator (not a tick) on the caller's OWN messages — the
+  // server sends `readReceipt` only for those, so its presence gates this. Tap it to see who's read it.
+  if (m.readReceipt && !m.pending) row.append(readReceiptIndicator(m.readReceipt));
   return row;
 }
 
@@ -563,6 +571,52 @@ function messageCta(cta) {
     el("span", { class: "tm-chat-cta-label", text: cta.label }),
     el("span", { class: "tm-chat-cta-arrow", "aria-hidden": "true", text: "→" }),
   ]);
+}
+
+/**
+ * The read-receipt indicator for one own-message: a small "Read by N" (or "Sent" when nobody's read it
+ * yet) control. When at least one member has read it, it's a button that opens the "who read it" list;
+ * with zero readers there's no list to show, so it renders as a quiet, non-interactive label.
+ * @param {{count: number, readerIds: string[]}} receipt a normalised receipt (chat-core).
+ */
+function readReceiptIndicator(receipt) {
+  const label = core.readReceiptLabel(receipt); // "Sent" | "Read by N"
+  if (receipt.count <= 0) {
+    return el("div", { class: "tm-chat-receipt tm-chat-receipt--empty", "data-testid": "chat-receipt" }, [
+      el("span", { class: "tm-chat-receipt-text", text: label }),
+    ]);
+  }
+  return el(
+    "button",
+    {
+      class: "tm-chat-receipt",
+      type: "button",
+      "data-testid": "chat-receipt",
+      "aria-label": `${label}. Tap to see who has read this message.`,
+      onClick: () => showReaders(receipt),
+    },
+    [el("span", { class: "tm-chat-receipt-text", text: label })],
+  );
+}
+
+/**
+ * Open the "who has read this" list for a message (TM-463). The read API returns reader ids, not names,
+ * and the chat surface has no id→name resolver yet, so each reader shows as a neutral member row — the
+ * list length is the read count. Humanising the rows to display names is a follow-up (needs a members
+ * endpoint); the receipt count + list are already correct and member-gated.
+ * @param {{count: number, readerIds: string[]}} receipt
+ */
+function showReaders(receipt) {
+  const list = el("ul", { class: "tm-chat-readers", "data-testid": "chat-readers" });
+  for (const id of receipt.readerIds) {
+    list.append(
+      el("li", { class: "tm-chat-reader", dataset: { readerId: id } }, [
+        avatar("👤"),
+        el("span", { class: "tm-chat-reader-name", text: "Member" }),
+      ]),
+    );
+  }
+  modal(core.readReceiptLabel(receipt), [list]);
 }
 
 // Bridge for the router (which imports this) + ad-hoc use / QA.

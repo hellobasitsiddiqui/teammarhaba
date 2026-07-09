@@ -21,6 +21,8 @@ import {
   totalUnread,
   ADMIN_AUTHOR,
   deepLinkCta,
+  normaliseReceipt,
+  readReceiptLabel,
   toThreadMessage,
   toThreadMessages,
   MAX_MESSAGE_LENGTH,
@@ -187,6 +189,38 @@ test("toThreadMessage flags system messages and defaults missing fields safely",
   assert.deepEqual(m.reactions, []);
   assert.equal(m.deepLink, null);
   assert.equal(m.timeLabel, "");
+});
+
+/* ─────────────────────────────── read receipts (TM-463) ───────────────────────────────────────── */
+
+test("normaliseReceipt: null for a message with no receipt (not the caller's own)", () => {
+  assert.equal(normaliseReceipt(undefined), null);
+  assert.equal(normaliseReceipt(null), null);
+  assert.equal(normaliseReceipt("nope"), null);
+});
+
+test("normaliseReceipt: keeps count + stringifies reader ids, and never drops below the ids held", () => {
+  assert.deepEqual(normaliseReceipt({ count: 0, readerIds: [] }), { count: 0, readerIds: [] });
+  assert.deepEqual(normaliseReceipt({ count: 2, readerIds: [7, 9] }), { count: 2, readerIds: ["7", "9"] });
+  // count is clamped to >= the number of ids we actually have (defensive against a skewed payload).
+  assert.deepEqual(normaliseReceipt({ count: 1, readerIds: [7, 9] }), { count: 2, readerIds: ["7", "9"] });
+  // negative / junk count clamps to 0 (then to the id count).
+  assert.deepEqual(normaliseReceipt({ count: -5, readerIds: [] }), { count: 0, readerIds: [] });
+  assert.deepEqual(normaliseReceipt({ count: 3 }), { count: 3, readerIds: [] });
+});
+
+test("readReceiptLabel: 'Sent' at zero readers, 'Read by N' otherwise, '' with no receipt", () => {
+  assert.equal(readReceiptLabel(null), "");
+  assert.equal(readReceiptLabel({ count: 0, readerIds: [] }), "Sent");
+  assert.equal(readReceiptLabel({ count: 1, readerIds: ["7"] }), "Read by 1");
+  assert.equal(readReceiptLabel({ count: 3, readerIds: ["7", "9", "5"] }), "Read by 3");
+});
+
+test("toThreadMessage carries a normalised readReceipt for own messages, null otherwise", () => {
+  const own = toThreadMessage({ id: 5, body: "mine", createdAt: "2026-07-09T09:00:00", readReceipt: { count: 2, readerIds: [7, 9] } });
+  assert.deepEqual(own.readReceipt, { count: 2, readerIds: ["7", "9"] });
+  const other = toThreadMessage({ id: 6, body: "theirs", createdAt: "2026-07-09T09:01:00" });
+  assert.equal(other.readReceipt, null);
 });
 
 test("toThreadMessages orders oldest-first regardless of the server's page order", () => {
