@@ -21,6 +21,13 @@ import {
   totalUnread,
   toThreadMessage,
   toThreadMessages,
+  MAX_MESSAGE_LENGTH,
+  validateDraft,
+  composeAvailability,
+  classifyPostError,
+  pendingMessage,
+  upsertMessage,
+  threadSignature,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -187,4 +194,138 @@ test("toThreadMessages orders oldest-first regardless of the server's page order
   const ordered = toThreadMessages(items);
   assert.deepEqual(ordered.map((m) => m.body), ["first", "second", "third"]);
   assert.deepEqual(toThreadMessages(null), []);
+});
+
+/* ─────────────────────────────── composer: draft validation (TM-448) ──────────────────────────── */
+
+test("validateDraft: non-blank + ≤500 is sendable; trims; reports length / remaining", () => {
+  const ok = validateDraft("  hello  ");
+  assert.equal(ok.value, "hello"); // trimmed for the wire
+  assert.equal(ok.length, 5);
+  assert.equal(ok.remaining, MAX_MESSAGE_LENGTH - 5);
+  assert.equal(ok.canSend, true);
+  assert.equal(ok.empty, false);
+  assert.equal(ok.tooLong, false);
+});
+
+test("validateDraft: blank / whitespace-only is not sendable", () => {
+  for (const bad of ["", "   ", "\n\t", null, undefined]) {
+    const v = validateDraft(bad);
+    assert.equal(v.canSend, false, `"${bad}" should not send`);
+    assert.equal(v.empty, true);
+  }
+});
+
+test("validateDraft: >500 chars is too long and not sendable (boundary is inclusive at 500)", () => {
+  const at = validateDraft("x".repeat(MAX_MESSAGE_LENGTH));
+  assert.equal(at.canSend, true);
+  assert.equal(at.remaining, 0);
+  const over = validateDraft("x".repeat(MAX_MESSAGE_LENGTH + 1));
+  assert.equal(over.tooLong, true);
+  assert.equal(over.canSend, false);
+  assert.equal(over.remaining, -1);
+});
+
+/* ─────────────────────────────── composer: up-front availability (TM-448) ─────────────────────── */
+
+test("composeAvailability: admin broadcasts are read-only up-front; event chats are open", () => {
+  // Raw backend type…
+  assert.equal(composeAvailability({ type: "ADMIN_BROADCAST" }).canPost, false);
+  assert.match(composeAvailability({ type: "ADMIN_BROADCAST" }).reason, /admin/i);
+  assert.equal(composeAvailability({ type: "EVENT_GROUP" }).canPost, true);
+  assert.equal(composeAvailability({ type: "EVENT_GROUP" }).reason, null);
+  // …and an already-mapped row shape ({ type: { key } }).
+  assert.equal(composeAvailability({ type: { key: "admin" } }).canPost, false);
+  assert.equal(composeAvailability({ type: { key: "event" } }).canPost, true);
+  // Unknown / missing type defaults to open (attempt-and-see, like the badge default).
+  assert.equal(composeAvailability({}).canPost, true);
+  assert.equal(composeAvailability(null).canPost, true);
+});
+
+/* ─────────────────────────────── composer: post-error classification (TM-448) ─────────────────── */
+
+test("classifyPostError: 403 muted → lock with the muted reason", () => {
+  const out = classifyPostError({ status: 403, message: "You are muted in this thread and cannot post." });
+  assert.equal(out.locked, true);
+  assert.equal(out.transient, false);
+  assert.equal(out.reasonKey, "muted");
+  assert.match(out.reason, /muted/i);
+});
+
+test("classifyPostError: 403 not-a-member/removed → lock as removed", () => {
+  const out = classifyPostError({ status: 403, message: "You are not a member of this thread." });
+  assert.equal(out.locked, true);
+  assert.equal(out.reasonKey, "removed");
+  assert.match(out.reason, /not a member/i);
+});
+
+test("classifyPostError: 409 closed thread → lock as closed", () => {
+  const out = classifyPostError({ status: 409, message: "This thread is closed; you can no longer post." });
+  assert.equal(out.locked, true);
+  assert.equal(out.reasonKey, "closed");
+  assert.match(out.reason, /closed/i);
+});
+
+test("classifyPostError: 404 → lock, gone (friendly, ignores the technical body)", () => {
+  const out = classifyPostError({ status: 404, message: "conversation 9 not found" });
+  assert.equal(out.locked, true);
+  assert.equal(out.reasonKey, "gone");
+  assert.match(out.reason, /no longer available/i);
+});
+
+test("classifyPostError: 400 validation → surface inline, do NOT lock", () => {
+  const out = classifyPostError({ status: 400, message: "body must not be blank" });
+  assert.equal(out.locked, false);
+  assert.equal(out.transient, false);
+  assert.equal(out.reasonKey, "invalid");
+});
+
+test("classifyPostError: 5xx / network / unknown → transient, keep composing", () => {
+  for (const err of [{ status: 500 }, { status: 503, message: "upstream" }, {}, null]) {
+    const out = classifyPostError(err);
+    assert.equal(out.locked, false, JSON.stringify(err));
+    assert.equal(out.transient, true);
+    assert.equal(out.reasonKey, "transient");
+    assert.match(out.message, /try again/i);
+  }
+});
+
+/* ─────────────────────────────── composer: optimistic echo + refresh maths (TM-448) ───────────── */
+
+test("pendingMessage: a toThreadMessage-shaped echo flagged pending, at the given local id", () => {
+  const now = new Date(2026, 6, 9, 14, 5, 0);
+  const p = pendingMessage("  see you there  ", { localId: "pending-1", now });
+  assert.equal(p.id, "pending-1");
+  assert.equal(p.body, "  see you there  "); // body kept verbatim (chat.js sends the trimmed value)
+  assert.equal(p.pending, true);
+  assert.equal(p.system, false);
+  assert.deepEqual(p.reactions, []);
+  assert.equal(p.timeLabel, "14:05"); // formatted like a real message
+  assert.equal(p.sortAt, now.getTime()); // sorts after all loaded messages
+});
+
+test("upsertMessage: inserts by sortAt order and replaces (never duplicates) by id", () => {
+  const base = [
+    { id: "1", sortAt: 100 },
+    { id: "2", sortAt: 200 },
+  ];
+  const appended = upsertMessage(base, { id: "3", sortAt: 300 });
+  assert.deepEqual(appended.map((m) => m.id), ["1", "2", "3"]);
+  assert.deepEqual(base.map((m) => m.id), ["1", "2"]); // input not mutated
+  // A middle insert lands in order.
+  assert.deepEqual(upsertMessage(base, { id: "9", sortAt: 150 }).map((m) => m.id), ["1", "9", "2"]);
+  // Same id replaces in place (idempotent poll / confirm).
+  const replaced = upsertMessage(base, { id: "2", sortAt: 200, body: "edited" });
+  assert.equal(replaced.length, 2);
+  assert.equal(replaced.find((m) => m.id === "2").body, "edited");
+});
+
+test("threadSignature: changes when a message is appended, stable otherwise", () => {
+  const a = [{ id: "1", sortAt: 100 }, { id: "2", sortAt: 200 }];
+  const same = [{ id: "1", sortAt: 100 }, { id: "2", sortAt: 200 }];
+  const grown = [...a, { id: "3", sortAt: 300 }];
+  assert.equal(threadSignature(a), threadSignature(same)); // unchanged → poll won't repaint
+  assert.notEqual(threadSignature(a), threadSignature(grown)); // appended → repaint
+  assert.equal(threadSignature([]), "0");
+  assert.equal(threadSignature(null), "0");
 });
