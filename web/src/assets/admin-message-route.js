@@ -40,3 +40,16 @@ export function adminMessageNewHash() {
 export function isAdminMessageComposeRoute(hash) {
   return hash === ADMIN_MESSAGE_NEW_ROUTE;
 }
+
+/**
+ * True only for the bare sent-history LIST route (`#/admin/messages`, TM-444) — NOT the compose
+ * sub-route (`…/new`) and nothing deeper. Kept as its own exact-match predicate (mirroring
+ * {@link isAdminMessageComposeRoute}) so the router can gate + mount the list view without re-deriving
+ * the string, and so the one route lives in exactly one place. Added additively alongside the compose
+ * predicate — the compose route math is untouched.
+ * @param {unknown} hash
+ * @returns {boolean}
+ */
+export function isAdminMessageListRoute(hash) {
+  return hash === ADMIN_MESSAGES_ROUTE;
+}

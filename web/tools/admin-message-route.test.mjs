@@ -9,6 +9,7 @@ import {
   ADMIN_MESSAGE_NEW_ROUTE,
   adminMessageNewHash,
   isAdminMessageComposeRoute,
+  isAdminMessageListRoute,
 } from "../src/assets/admin-message-route.js";
 
 test("the route constants are the expected hashes", () => {
@@ -43,5 +44,30 @@ test("unrelated / malformed hashes are not compose routes", () => {
     undefined,
   ]) {
     assert.equal(isAdminMessageComposeRoute(h), false, `expected non-compose: ${String(h)}`);
+  }
+});
+
+test("the bare list route IS a list route (TM-444)", () => {
+  assert.equal(isAdminMessageListRoute("#/admin/messages"), true);
+  assert.equal(isAdminMessageListRoute(ADMIN_MESSAGES_ROUTE), true);
+});
+
+test("the compose route is NOT the list route (they are distinct surfaces)", () => {
+  assert.equal(isAdminMessageListRoute(ADMIN_MESSAGE_NEW_ROUTE), false);
+  assert.equal(isAdminMessageListRoute("#/admin/messages/new"), false);
+});
+
+test("unrelated / malformed hashes are not list routes", () => {
+  for (const h of [
+    "#/admin",
+    "#/admin/events",
+    "#/home",
+    "#/admin/messages/",
+    "#/admin/messages/42",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(isAdminMessageListRoute(h), false, `expected non-list: ${String(h)}`);
   }
 });

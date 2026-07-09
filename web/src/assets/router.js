@@ -23,7 +23,11 @@ import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-r
 // gate as #/admin). admin-messages.js mounts it into #admin-message-form-view; the route math is the
 // pure admin-message-route.js (unit-tested on the PR gate). Kept additive to this shared router.
 import { enterAdminMessageCompose } from "./admin-messages.js";
-import { isAdminMessageComposeRoute } from "./admin-message-route.js";
+// Admin sent-history list (TM-444): the full-page #/admin/messages sent-message list, ADMIN-only (same
+// gate as #/admin). admin-sent-history.js mounts it into #admin-message-list-view; the route math (the
+// exact-match #/admin/messages predicate) is the pure admin-message-route.js. Additive to this router.
+import { enterAdminSentHistory } from "./admin-sent-history.js";
+import { isAdminMessageComposeRoute, ADMIN_MESSAGES_ROUTE } from "./admin-message-route.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
 import { enterHome } from "./home.js";
@@ -46,6 +50,11 @@ const ADMIN = "#/admin";
 // Admin events console (TM-395) — protected + ADMIN-only, the same gate as #/admin. Its own hash so
 // it's a distinct exact-match route; admin-events.js mounts into #admin-events-view.
 const ADMIN_EVENTS = "#/admin/events";
+// Admin sent-history list (TM-444) — protected + ADMIN-only, the same gate as #/admin. Its own exact
+// hash (the bare #/admin/messages, distinct from the #/admin/messages/new compose sub-route, TM-443);
+// admin-sent-history.js mounts into #admin-message-list-view. The one route string lives in
+// admin-message-route.js (ADMIN_MESSAGES_ROUTE), imported here so it isn't duplicated.
+const ADMIN_MESSAGES = ADMIN_MESSAGES_ROUTE;
 // Full-page create/edit event form (TM-426) — ADMIN-only, same gate as #/admin/events. The form used
 // to be a modal that overflowed short viewports (TM-421); it's now its own page at #/admin/events/new
 // (create) and #/admin/events/{id}/edit (edit). The edit route carries a dynamic id, so — like the
@@ -88,7 +97,7 @@ const CHAT = "#/chat";
 // nav "Notifications" link (the bottom nav's four tabs have no room; the wireframe shows it as a
 // pushed screen with a back-to-home button).
 const NOTIFICATIONS = "#/notifications";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -154,6 +163,10 @@ let adminEventFormEntered = null;
 // entry and reset on leaving (mirrors the single-route views like notifications). The route is a single
 // exact hash (#/admin/messages/new), so a boolean is enough — there's no id to switch between.
 let adminMessageComposeEntered = false;
+// Admin sent-history list (TM-444): whether the list view is currently mounted, so we mount it once on
+// entry into #/admin/messages and reset on leaving (mirrors the single-route views like the events
+// console). Re-entry reloads from page 0 so a just-sent campaign shows at the top.
+let adminMessagesActive = false;
 // Profile view (TM-167; TM-514): the last profile sub-route we entered (`#/profile` hub or
 // `#/profile/public` preview), so a repeated guard() for the SAME route doesn't rebuild/refetch, while
 // switching hub↔preview re-enters. Reset to null when leaving the profile area. (This route-entered
@@ -192,7 +205,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
@@ -241,6 +254,9 @@ function render() {
   // Admin message compose (TM-443) — shown for the exact #/admin/messages/new route.
   const adminMessageFormView = $("admin-message-form-view");
   if (adminMessageFormView) adminMessageFormView.hidden = !isAdminMessageComposeRoute(route);
+  // Admin sent-history list (TM-444) — shown for the exact #/admin/messages route.
+  const adminMessageListView = $("admin-message-list-view");
+  if (adminMessageListView) adminMessageListView.hidden = route !== ADMIN_MESSAGES;
   if (profileView) profileView.hidden = !isProfileRoute(route);
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
@@ -396,6 +412,14 @@ function guard() {
     go(HOME);
     return;
   }
+  // The sent-history list (TM-444) is ADMIN-only too — same rule as #/admin; the backend (TM-442) is
+  // the real gate, this just avoids showing an unusable page to a non-admin.
+  if (route === ADMIN_MESSAGES && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminMessagesActive = false;
+    go(HOME);
+    return;
+  }
   render();
   // Load the console on entry into the admin route (and reset on leaving so re-entry reloads).
   if (route === ADMIN && isAdmin) {
@@ -440,6 +464,17 @@ function guard() {
     }
   } else {
     adminMessageComposeEntered = false;
+  }
+  // Admin sent-history list (TM-444): mount once on entry into #/admin/messages, reset on leaving so a
+  // future entry re-mounts and reloads from page 0 (a just-sent campaign then shows at the top). Single
+  // exact route, so a boolean guard is enough (mirrors the compose lifecycle above).
+  if (route === ADMIN_MESSAGES && isAdmin) {
+    if (!adminMessagesActive) {
+      adminMessagesActive = true;
+      enterAdminSentHistory();
+    }
+  } else {
+    adminMessagesActive = false;
   }
   // Profile view (TM-167; TM-514): mount + (re)load on entry, and re-enter when the profile sub-route
   // CHANGES (hub ↔ public preview) so the right layout renders, without refetching on the repeated
