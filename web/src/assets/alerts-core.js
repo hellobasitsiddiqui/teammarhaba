@@ -147,6 +147,29 @@ export function visibleAlerts(alerts, stores) {
 }
 
 /**
+ * A stable fingerprint of a *rendered* banner set — each visible alert reduced to `id + contentHash`,
+ * in order. The banner host uses this to decide whether a poll actually changed anything: two ~5-min
+ * polls that yield the same fingerprint are visually identical, so the host can leave the mounted DOM
+ * untouched instead of clear()+rebuild. That matters for accessibility — every rebuilt `.tm-alert`
+ * carries a live-region role (`role="alert"`/`aria-live`), and re-inserting that node makes screen
+ * readers RE-ANNOUNCE a still-active alert; a PERSISTENT CRITICAL notice would loop assertively for its
+ * whole lifetime, undercutting "announce CRITICAL once" (TM-572).
+ *
+ * Keyed by id + contentHash (not message alone) so the diff mirrors the dismissal keys: a new, removed
+ * or EDITED alert (same id, new hash) — a real change worth re-announcing — changes the fingerprint and
+ * repaints, while an unchanged set does not. Order-sensitive: a reordering is a genuine visual change.
+ * The field/record separators are control chars that can't occur in an id or a base36 hash, so distinct
+ * sets can never collide into the same string.
+ *
+ * @param {Array} visible the alerts about to be painted (already dismissal-filtered).
+ * @returns {string}
+ */
+export function alertsSignature(visible) {
+  if (!Array.isArray(visible)) return "";
+  return visible.map((alert) => `${alert?.id}${contentHash(alert)}`).join("");
+}
+
+/**
  * Record a dismissal into the correct store: ACKNOWLEDGE persists to localStorage (survives sessions),
  * DISMISS to sessionStorage (this session only), PERSISTENT is a no-op (nothing to remember). Pure with
  * respect to the injected stores, so a test can assert exactly what was written where.

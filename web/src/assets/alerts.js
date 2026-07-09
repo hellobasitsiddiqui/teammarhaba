@@ -19,7 +19,7 @@
 
 import { getActiveAlerts } from "./api.js";
 import { el, clear } from "./ui.js";
-import { visibleAlerts, recordDismissal, levelClass, ariaRole, showsDismissControl, dismissControl } from "./alerts-core.js";
+import { visibleAlerts, alertsSignature, recordDismissal, levelClass, ariaRole, showsDismissControl, dismissControl } from "./alerts-core.js";
 
 const HOST_ID = "tm-alerts";
 const POLL_MS = 5 * 60 * 1000; // ~5-minute light poll; the banner is not real-time.
@@ -104,11 +104,21 @@ function render() {
   const node = host();
   if (!node) return;
   const visible = visibleAlerts(lastActive, stores);
+  const signature = alertsSignature(visible);
+  // TM-572: skip the clear()+rebuild when the visible set hasn't changed. render() runs on every ~5-min
+  // poll; re-inserting each .tm-alert live-region node (role="alert"/aria-live) makes screen readers
+  // RE-ANNOUNCE a still-active alert, and a PERSISTENT CRITICAL notice would loop assertively forever.
+  // The signature is keyed by id + content-hash, so a new/edited/removed/reordered alert (a real change
+  // worth announcing) still repaints, while an identical set is left mounted and untouched. We stash it
+  // ON THE HOST NODE (not a module variable) so a freshly (re)created host — empty, no signature — is
+  // always repainted rather than skipped as "unchanged".
+  if (node.dataset.tmAlertsSig === signature) return;
   clear(node);
   for (const alert of visible) {
     node.appendChild(banner(alert));
   }
   node.hidden = visible.length === 0;
+  node.dataset.tmAlertsSig = signature;
 }
 
 /**
@@ -118,7 +128,15 @@ function render() {
  */
 export async function refresh() {
   if (typeof document === "undefined") return;
-  lastActive = await getActiveAlerts();
+  applyActive(await getActiveAlerts());
+}
+
+/**
+ * Adopt a known active set and repaint. Split out of refresh() so the fetch and the render are testable
+ * apart: a test can drive the exact rebuild-vs-skip behaviour (TM-572) without stubbing the network.
+ */
+export function applyActive(alerts) {
+  lastActive = Array.isArray(alerts) ? alerts : [];
   render();
 }
 

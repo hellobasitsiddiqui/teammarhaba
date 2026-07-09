@@ -20,6 +20,7 @@ import {
   dismissControl,
   isDismissed,
   visibleAlerts,
+  alertsSignature,
   recordDismissal,
 } from "../src/assets/alerts-core.js";
 
@@ -123,6 +124,37 @@ test("editing an acknowledged alert (same id, new content) re-shows it", () => {
 test("contentHash is stable and order-insensitive for identical content", () => {
   assert.equal(contentHash(warnAck), contentHash({ ...warnAck }));
   assert.notEqual(contentHash(warnAck), contentHash({ ...warnAck, level: Level.CRITICAL }));
+});
+
+// --- Render fingerprint: skip the rebuild (and re-announce) when the set is unchanged (TM-572) ---
+
+test("alertsSignature is identical for an unchanged set (even as fresh objects) → render is skipped", () => {
+  const first = [critPersistent, warnAck];
+  // A second poll returning the SAME content as brand-new objects (reference-different) — the diff must
+  // be by id + content, not identity, so the live-region banners are NOT re-inserted / re-announced.
+  const second = [{ ...critPersistent }, { ...warnAck }];
+  assert.equal(alertsSignature(first), alertsSignature(second));
+});
+
+test("editing an alert (same id, new message) changes the signature → it repaints and re-announces", () => {
+  const before = [critPersistent];
+  const after = [{ ...critPersistent, message: "Service degraded — now fully down" }];
+  assert.notEqual(alertsSignature(before), alertsSignature(after));
+});
+
+test("adding, removing or reordering an alert changes the signature", () => {
+  const base = [critPersistent, warnAck];
+  assert.notEqual(alertsSignature(base), alertsSignature([critPersistent]), "removal changes it");
+  assert.notEqual(alertsSignature(base), alertsSignature([critPersistent, warnAck, infoDismiss]), "addition changes it");
+  assert.notEqual(alertsSignature(base), alertsSignature([warnAck, critPersistent]), "reorder changes it");
+});
+
+test("alertsSignature keys by id AND content — distinct alerts never collide into one signature", () => {
+  // Same content, different id → different signature (id is part of the key).
+  assert.notEqual(alertsSignature([warnAck]), alertsSignature([{ ...warnAck, id: 99 }]));
+  // Empty / non-array → empty signature (host paints nothing, stays hidden).
+  assert.equal(alertsSignature([]), "");
+  assert.equal(alertsSignature(null), "");
 });
 
 // --- Level → colour class + a11y role mapping ---------------------------------------------------
