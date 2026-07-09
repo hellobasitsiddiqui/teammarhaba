@@ -64,7 +64,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  *       close-policy window (TM-446) are both {@code 409};</li>
  *   <li><b>length cap</b> — a blank body and an over-500-char body are both a Bean-Validation
  *       {@code 400}; a 500-char body is accepted;</li>
- *   <li><b>unknown thread</b> — a {@code 404} that never leaks whether the caller would be a member.</li>
+ *   <li><b>unknown thread</b> — a uniform {@code 403} (never a {@code 404}, TM-573) so a POST can't
+ *       probe which thread ids exist, indistinguishable from a non-member.</li>
  * </ul>
  */
 @AutoConfigureMockMvc
@@ -257,13 +258,16 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
     // ── unknown thread ───────────────────────────────────────────────────────────────────────────
 
     @Test
-    void unknownThreadIsNotFound() throws Exception {
+    void unknownThreadIsForbiddenNotFound() throws Exception {
+        // TM-573: an unknown/foreign thread is the SAME 403 as a non-member — never a 404 — so a POST
+        // can't be used to probe which conversation ids exist (uniform with the GET read gate,
+        // ConversationReadIntegrationTest.threadIsMembersOnly).
         provision("u-caller");
         mockMvc.perform(post("/api/v1/conversations/{id}/messages", 9_999_999L)
                         .with(user("u-caller"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"body\":\"anyone home?\"}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isForbidden());
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────────────────────────
