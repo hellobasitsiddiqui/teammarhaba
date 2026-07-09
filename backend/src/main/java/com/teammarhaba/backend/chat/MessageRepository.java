@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 /**
  * Data access for {@link Message} (TM-435) — a thread's timeline, plus the unread support.
@@ -61,4 +62,19 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
                 ? countByConversationIdAndDeletedAtIsNull(conversationId)
                 : countByConversationIdAndDeletedAtIsNullAndCreatedAtAfter(conversationId, since);
     }
+
+    /**
+     * The database's own current instant ({@code now()}). Read-cursor stamping (TM-580) must use a
+     * DB-sourced instant, not the app clock: {@code message.created_at} is DB-authoritative
+     * ({@code DEFAULT now()}) and {@link #countUnread} compares {@code created_at > last_read_at}, so
+     * under app/DB clock skew an app-clock cursor can leave a just-seen message counted unread (or,
+     * in the reverse skew, mark a later message read). The mark-read path prefers the newest live
+     * message's {@code created_at}; this is the fallback for a <em>silent</em> thread (no live message
+     * to anchor to), keeping the cursor on the same clock as any message that later arrives.
+     *
+     * <p>Native {@code SELECT now()} — {@code now()} returns the transaction's start instant, which is
+     * exactly the clock the DB stamps {@code created_at} with in a subsequently-started insert.
+     */
+    @Query(value = "SELECT now()", nativeQuery = true)
+    Instant databaseNow();
 }

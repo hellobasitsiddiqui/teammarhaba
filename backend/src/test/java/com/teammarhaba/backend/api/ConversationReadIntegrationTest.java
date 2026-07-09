@@ -297,6 +297,43 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void markReadStampsCursorFromNewestMessageDbInstantSoUnreadIsZeroRegardlessOfClockSkew()
+            throws Exception {
+        // TM-580: markRead used to stamp the cursor from Instant.now() (the app clock), but
+        // message.created_at is DB-authoritative (DEFAULT now()) and countUnread compares
+        // created_at > last_read_at — so under app/DB clock skew a just-seen message could stay
+        // counted unread and MarkReadResponse.unreadCount could be non-zero right after mark-read.
+        // The cursor is now stamped from the newest live message's DB created_at, sharing one clock
+        // with the timestamps it is compared against.
+        String uid = "conv-mr-skew-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+        Long thread = newBroadcastThread();
+        addMember(thread, userId, MemberRole.MEMBER, MuteState.NONE);
+
+        // Two messages in separate txns (each gets its own DB now()), so there is a definite newest.
+        messages.save(Message.fromSystem(thread, "m1", null));
+        messages.save(Message.fromSystem(thread, "m2", null));
+
+        // The newest live message's DB-authoritative created_at — sourced from the DB (re-fetched
+        // through the finder), never the app clock. This is the exact value the cursor must land on.
+        List<Message> chronological = chronological(thread);
+        Instant newestAt = chronological.get(chronological.size() - 1).getCreatedAt();
+
+        // Mark read via the API with no new message landing: unread must be 0.
+        JsonNode marked = postJson("/api/v1/conversations/" + thread + "/read", caller(uid));
+        assertThat(marked.get("unreadCount").asLong()).isZero();
+
+        // Proof the cursor is DB-sourced, not app-sourced: it equals the newest message's DB
+        // created_at exactly. An Instant.now() (app-clock) stamp would essentially never match a DB
+        // timestamp to the microsecond — and under skew could sit behind created_at, the very bug.
+        Instant cursor = Instant.parse(marked.get("lastReadAt").asText());
+        assertThat(cursor).isEqualTo(newestAt);
+
+        // And it stays 0 on a re-read (idempotent, forward-only cursor).
+        assertThat(unreadFor(uid, thread)).isZero();
+    }
+
+    @Test
     void markReadIsMembersOnly() throws Exception {
         Long thread = newBroadcastThread();
         addMember(thread, newUser("conv-mr-member-" + UUID.randomUUID()), MemberRole.MEMBER, MuteState.NONE);

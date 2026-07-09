@@ -139,16 +139,33 @@ public class ConversationReadService {
     }
 
     /**
-     * Mark the thread read for the caller (TM-436): advance their {@code last_read_at} cursor to now
+     * Mark the thread read for the caller (TM-436): advance their {@code last_read_at} cursor
      * (forward-only via {@link ConversationMember#markRead}, so a stale re-read never rewinds it) and
      * return the fresh cursor + recomputed unread count. Members-only — a non-member is a {@code 403}.
+     *
+     * <p><b>The cursor is stamped from a DB-sourced instant, never the app clock (TM-580).</b> {@link
+     * MessageRepository#countUnread} counts live messages whose DB-authoritative {@code created_at}
+     * ({@code DEFAULT now()}) is strictly after the cursor, so cursor and message timestamps must
+     * share one clock. Stamping from {@link Instant#now()} (the app clock) meant that under app/DB
+     * clock skew a message the caller has just seen — created at a DB instant slightly ahead of the
+     * app clock — still satisfied {@code created_at > last_read_at} and stayed counted unread, so
+     * {@code unreadCount} could be non-zero right after mark-read. We anchor the cursor to the newest
+     * live message's {@code created_at}: that is precisely the value {@code countUnread} compares
+     * against, so no already-posted message can read as unread here. A silent thread (no live message)
+     * has nothing unread regardless, and falls back to the DB's own {@code now()} so the cursor still
+     * advances on the same clock any later message will be timestamped by.
      */
     @Transactional
     public MarkReadResponse markRead(VerifiedUser caller, Long conversationId) {
         Long userId = users.provision(caller).getId();
         ConversationMember member = requireMember(conversationId, userId);
 
-        member.markRead(Instant.now()); // forward-only, idempotent; dirty-checking flushes on commit
+        Instant readCursor = messages
+                .findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(conversationId)
+                .map(Message::getCreatedAt)
+                .orElseGet(messages::databaseNow);
+
+        member.markRead(readCursor); // forward-only, idempotent; dirty-checking flushes on commit
         members.save(member);
 
         long unread = messages.countUnread(conversationId, member.getLastReadAt());
