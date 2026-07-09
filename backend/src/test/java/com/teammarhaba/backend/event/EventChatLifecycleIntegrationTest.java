@@ -238,8 +238,11 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         Instant now = Instant.now();
         int closed = lifecycle.sweepDueThreadCloses(now, 50);
 
-        // Exactly the one due thread is soft-closed; the not-yet-due and never-close ones stay open.
-        assertThat(closed).isEqualTo(1);
+        // The due thread is soft-closed; the not-yet-due and never-close ones stay open. The sweep is a
+        // GLOBAL reconcile (not scoped to this test's events), so the returned count reflects every
+        // due-open thread in the shared test DB — assert it closed at least our due one, and verify the
+        // per-event outcomes below (which are the real ACs) rather than pinning an exact global count.
+        assertThat(closed).isGreaterThanOrEqualTo(1);
         assertThat(conversations.findByEventId(due.getId()).orElseThrow().isClosed()).isTrue();
         assertThat(conversations.findByEventId(notYet.getId()).orElseThrow().isClosed())
                 .as("a thread inside its close window is left open").isFalse();
