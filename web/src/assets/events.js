@@ -12,7 +12,7 @@
 // XSS-safety is inherited from ui.js `el()` (textContent only, no innerHTML seam) — event headings,
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
-import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, ApiError } from "./api.js";
+import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
@@ -314,7 +314,22 @@ async function renderDetail(view, id) {
   }
   if (mine !== renderToken) return;
 
-  paintDetail(view, detail, me);
+  // TM-450: resolve this event's group-chat thread so the detail can offer an "Open chat" deep-link.
+  // Fetched ONLY for members (a GOING attendee or an admin) — a non-member can't have a thread, so a
+  // browse-by non-member pays no extra request and still gets the correct disabled-with-hint entry.
+  // Best-effort: a failure just degrades to the "chat isn't ready yet" hint rather than blocking the
+  // detail. Re-guard after the await so a slow response can't paint over a newer navigation.
+  let conversations = [];
+  if (core.isEventChatMember(detail, me)) {
+    const conv = await listMyConversations().catch((err) => {
+      console.warn("[events] conversations load failed (chat entry degrades):", err?.message ?? err);
+      return null;
+    });
+    if (mine !== renderToken) return;
+    conversations = conv?.items ?? [];
+  }
+
+  paintDetail(view, detail, me, conversations);
 }
 
 function notFoundBlock(view) {
@@ -329,7 +344,7 @@ function notFoundBlock(view) {
   );
 }
 
-function paintDetail(view, detail, me) {
+function paintDetail(view, detail, me, conversations = []) {
   const now = Date.now();
   const when = core.describeWhen(detail.startAt, detail.endAt, detail.timezone, { viewerTz: VIEWER_TZ, locale: LOCALE });
   const bandLabel = core.ageBandLabel(detail);
@@ -366,6 +381,11 @@ function paintDetail(view, detail, me) {
 
       // The action CTA — RSVP / waitlist / claim / cancel, driven entirely by the tested model.
       actionSection(view, detail, now, me),
+
+      // "Open chat" entry (TM-450) — deep-links a member (GOING attendee or admin) into this event's
+      // group-chat thread; disabled with a hint for non-members / when the thread isn't ready. Sits
+      // just below the RSVP CTA so becoming eligible and jumping into the chat are adjacent.
+      chatEntrySection(detail, me, conversations),
     ]),
   );
 }
@@ -603,6 +623,53 @@ function actionSection(view, detail, now, me) {
     wrap.append(el("p", { class: "tm-event-remind tm-muted", "data-testid": "event-remind-note", text: model.remindNote }));
   }
 
+  return wrap;
+}
+
+/**
+ * The "Open chat" entry (TM-450) — deep-links a member into this event's group-chat thread. The whole
+ * decision (who sees it enabled, whether the thread exists, the disabled-hint copy) lives in the tested
+ * core (`eventChatEntryModel`); this only renders the model. An ENABLED entry is an <a> — it navigates
+ * to `#/chat/{conversationId}`, it isn't a command — so a plain tap/click (and cmd-click) works like any
+ * link; the ineligible / not-ready states render a disabled <button> plus a muted hint, mirroring the
+ * detail's existing disabled-action pattern (`aria-describedby` → the reason). Deliberately no chat.js
+ * edits: this is the entry point, not the thread UI.
+ */
+function chatEntrySection(detail, me, conversations) {
+  const model = core.eventChatEntryModel({ detail, me, conversations });
+  const wrap = el("section", { class: "tm-event-chat-entry", "data-testid": "event-chat-entry" });
+
+  if (model.enabled) {
+    wrap.append(
+      el("a", {
+        class: "tm-btn tm-btn-primary tm-event-chat-open",
+        href: model.href,
+        "data-testid": "event-chat-open",
+        dataset: { conversationId: String(model.conversationId) },
+        text: model.label,
+      }),
+    );
+    return wrap;
+  }
+
+  // Disabled: a non-member, or a member whose thread isn't provisioned yet. A disabled button plus the
+  // honest reason so it's clear why chat isn't open and (for non-members) how to get in.
+  wrap.append(
+    el("button", {
+      class: "tm-btn tm-event-chat-open",
+      type: "button",
+      disabled: true,
+      "data-testid": "event-chat-open",
+      "aria-describedby": "event-chat-entry-reason",
+      text: model.label,
+    }),
+    el("p", {
+      class: "tm-event-reason tm-muted",
+      id: "event-chat-entry-reason",
+      "data-testid": "event-chat-entry-reason",
+      text: model.reason,
+    }),
+  );
   return wrap;
 }
 
