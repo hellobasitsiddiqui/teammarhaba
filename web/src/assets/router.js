@@ -19,6 +19,11 @@ import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
 import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
+// Admin message compose (TM-443): the full-page #/admin/messages/new compose form, ADMIN-only (same
+// gate as #/admin). admin-messages.js mounts it into #admin-message-form-view; the route math is the
+// pure admin-message-route.js (unit-tested on the PR gate). Kept additive to this shared router.
+import { enterAdminMessageCompose } from "./admin-messages.js";
+import { isAdminMessageComposeRoute } from "./admin-message-route.js";
 import { enterProfile } from "./profile.js";
 import { enterEvents } from "./events.js";
 import { enterHome } from "./home.js";
@@ -117,7 +122,9 @@ function isProtected(route) {
     isProfileRoute(route) ||
     isEventsRoute(route) ||
     isChatRoute(route) ||
-    isAdminEventFormRoute(route)
+    isAdminEventFormRoute(route) ||
+    // Admin message compose (TM-443) — ADMIN-only, so protected too.
+    isAdminMessageComposeRoute(route)
   );
 }
 
@@ -143,6 +150,10 @@ let adminEventsActive = false;
 // repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does.
 // Reset to null when leaving the form (mirrors eventsRouteEntered).
 let adminEventFormEntered = null;
+// Admin message compose (TM-443): whether the compose page is currently mounted, so we mount it once on
+// entry and reset on leaving (mirrors the single-route views like notifications). The route is a single
+// exact hash (#/admin/messages/new), so a boolean is enough — there's no id to switch between.
+let adminMessageComposeEntered = false;
 // Profile view (TM-167; TM-514): the last profile sub-route we entered (`#/profile` hub or
 // `#/profile/public` preview), so a repeated guard() for the SAME route doesn't rebuild/refetch, while
 // switching hub↔preview re-enters. Reset to null when leaving the profile area. (This route-entered
@@ -188,6 +199,8 @@ function currentRoute() {
   if (isChatRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
   if (isAdminEventFormRoute(hash)) return hash;
+  // Admin message compose (TM-443): the exact #/admin/messages/new route.
+  if (isAdminMessageComposeRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -225,6 +238,9 @@ function render() {
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   // Admin event form (TM-426) — shown for the create route and any {id} edit route.
   if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
+  // Admin message compose (TM-443) — shown for the exact #/admin/messages/new route.
+  const adminMessageFormView = $("admin-message-form-view");
+  if (adminMessageFormView) adminMessageFormView.hidden = !isAdminMessageComposeRoute(route);
   if (profileView) profileView.hidden = !isProfileRoute(route);
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
@@ -267,6 +283,11 @@ function render() {
   if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
   // The admin events console link (TM-395) follows the same ADMIN-only, hidden-while-gated rule.
   if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
+  // The admin "Messages" link (TM-443) — the entry point to the compose page — follows the same
+  // ADMIN-only, hidden-while-gated rule. It targets compose directly since the sent-history list
+  // (#/admin/messages) is TM-444 (a later wave) and doesn't exist yet.
+  const navAdminMessages = $("nav-admin-messages");
+  if (navAdminMessages) navAdminMessages.hidden = !(signedIn && isAdmin) || gated;
   const homeAdminLink = $("home-admin-link");
   if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
 
@@ -368,6 +389,13 @@ function guard() {
     go(HOME);
     return;
   }
+  // The full-page message compose form (TM-443) is ADMIN-only too — same rule as the consoles above.
+  if (isAdminMessageComposeRoute(route) && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminMessageComposeEntered = false;
+    go(HOME);
+    return;
+  }
   render();
   // Load the console on entry into the admin route (and reset on leaving so re-entry reloads).
   if (route === ADMIN && isAdmin) {
@@ -401,6 +429,17 @@ function guard() {
     }
   } else {
     adminEventFormEntered = null;
+  }
+  // Full-page message compose (TM-443): mount once on entry into #/admin/messages/new, reset on leaving
+  // so a future entry re-mounts a fresh draft. Single exact route, so a boolean guard is enough (unlike
+  // the create/edit event form, which switches between id targets).
+  if (isAdminMessageComposeRoute(route) && isAdmin) {
+    if (!adminMessageComposeEntered) {
+      adminMessageComposeEntered = true;
+      enterAdminMessageCompose();
+    }
+  } else {
+    adminMessageComposeEntered = false;
   }
   // Profile view (TM-167; TM-514): mount + (re)load on entry, and re-enter when the profile sub-route
   // CHANGES (hub ↔ public preview) so the right layout renders, without refetching on the repeated

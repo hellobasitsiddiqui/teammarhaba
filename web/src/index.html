@@ -99,6 +99,10 @@
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
                 <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin-events" href="#/admin/events" hidden>Events</a>
+                <!-- Admin message compose link (TM-443): the entry point to the full-page compose form.
+                     Shown by router.js only for a signed-in ADMIN; targets compose directly since the
+                     sent-history list (#/admin/messages) is TM-444, a later wave. -->
+                <a id="nav-admin-messages" href="#/admin/messages/new" hidden>Messages</a>
                 <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
                      to re-run the whole-site walkthrough or the current page's tour. -->
                 <button id="nav-help" type="button" hidden>Help</button>
@@ -296,6 +300,13 @@
              submit button — TM-421) onto its own admin page so it scrolls naturally. admin-events.js
              builds it here; router.js owns visibility + the ADMIN gate (same as the events console). -->
         <section id="admin-event-form-view" class="admin-console" aria-label="Event form" hidden></section>
+
+        <!-- Admin message compose (TM-443): the full-page #/admin/messages/new compose form (audience
+             picker + title/body/deep-link + confirm). admin-messages.js (imported by router.js) builds
+             it here; router.js owns visibility + the ADMIN gate (same as the events form). Opens as its
+             own page, not a modal, so the form scrolls and the Send button stays reachable (mirrors the
+             event-form page decision, TM-426). -->
+        <section id="admin-message-form-view" class="admin-console" aria-label="Compose message" hidden></section>
 
         <!-- Edit-profile view (TM-167): self-service #/profile view for any signed-in user. profile.js
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
