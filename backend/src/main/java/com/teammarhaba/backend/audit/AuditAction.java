@@ -86,5 +86,25 @@ public enum AuditAction {
      * conversation id as the target and the created message id in its metadata; the durable message
      * text lives in the {@code message} row, never in the audit log.
      */
-    EVENT_CHAT_MESSAGE_POSTED
+    EVENT_CHAT_MESSAGE_POSTED,
+
+    /**
+     * An app admin removed (soft-deleted) a chat message via {@code POST
+     * /api/v1/admin/conversations/{conversationId}/messages/{messageId}/remove} (TM-449, epic Event
+     * Chat). One row per removal carrying the conversation id as the target and the removed message id
+     * in its metadata. The message row is kept (soft-deleted, {@code deletedAt} stamped) so removal is
+     * never a hard delete; it simply drops out of every timeline read. Idempotent — re-removing an
+     * already-removed message still records the moderator's action (the audit log is append-only).
+     */
+    EVENT_CHAT_MESSAGE_REMOVED,
+
+    /**
+     * An app admin changed a thread member's mute / removal state via {@code POST
+     * /api/v1/admin/conversations/{conversationId}/members/{userId}/mute} (TM-449, epic Event Chat).
+     * One row per change carrying the conversation id as the target, and the affected {@code userId}
+     * plus the new {@code mute} state ({@code READ_ONLY} = muted, {@code REMOVED} = kicked from the
+     * thread, {@code NONE} = reinstated) in its metadata. Muting never touches the member's event RSVP —
+     * a removed member is still "going" to the event, they just lose thread access.
+     */
+    EVENT_CHAT_MEMBER_MUTED
 }
