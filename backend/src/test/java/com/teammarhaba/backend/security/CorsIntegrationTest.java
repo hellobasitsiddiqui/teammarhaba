@@ -72,4 +72,46 @@ class CorsIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://127.0.0.1:8081"));
     }
+
+    /**
+     * Regression for TM-569: the admin Diagnostics panel ({@code admin.js loadDiagnostic()}) does an
+     * authenticated cross-origin fetch of {@code /actuator/info} + {@code /actuator/metrics}. The
+     * {@code Authorization} header makes it a non-simple request, so the browser sends a CORS preflight
+     * ahead of auth. {@code CorsConfig} only registered {@code /api/**}, {@code /version} and
+     * {@code /health}, so before the fix the actuator preflight got no {@code Access-Control-Allow-Origin}
+     * header and the fetch was blocked in prod (web and backend are different origins). The preflight —
+     * requesting the {@code Authorization} header — must now succeed for an allowed origin, and the header
+     * must be advertised as allowed.
+     */
+    @Test
+    void actuatorInfoAllowsAuthenticatedPreflightFromConfiguredOrigin() throws Exception {
+        mockMvc.perform(options("/actuator/info")
+                        .header(HttpHeaders.ORIGIN, "http://127.0.0.1:8081")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://127.0.0.1:8081"))
+                // The requested Authorization header is accepted (Spring echoes it back on the
+                // preflight, case per the request), proving the token-bearing fetch won't be blocked.
+                .andExpect(header().exists(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS));
+    }
+
+    @Test
+    void actuatorMetricsAllowsAuthenticatedPreflightFromConfiguredOrigin() throws Exception {
+        mockMvc.perform(options("/actuator/metrics")
+                        .header(HttpHeaders.ORIGIN, "http://127.0.0.1:8081")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://127.0.0.1:8081"));
+    }
+
+    @Test
+    void actuatorPreflightRejectedFromUnknownOrigin() throws Exception {
+        mockMvc.perform(options("/actuator/metrics")
+                        .header(HttpHeaders.ORIGIN, "https://evil.example.com")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization"))
+                .andExpect(status().isForbidden());
+    }
 }

@@ -23,6 +23,14 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  *       header and the browser/WebView fetch was blocked by CORS (TM-308).</li>
  *   <li>{@code /health} — the public health probe, also read by the web first page; same root-level
  *       gap, covered here for consistency.</li>
+ *   <li>{@code /actuator/**} — the admin Diagnostics panel ({@code admin.js loadDiagnostic()}) does an
+ *       authenticated cross-origin fetch of {@code /actuator/info} + {@code /actuator/metrics} (TM-569).
+ *       The {@code Authorization} header makes it a non-simple request, so the browser sends a CORS
+ *       preflight; without a registration here the preflight got no {@code Access-Control-Allow-Origin}
+ *       header and every admin saw "Couldn't reach the backend" in prod (web and backend are different
+ *       origins). Covered as a group so {@code /actuator/health} (already public) and any future actuator
+ *       endpoint stay consistent. CORS only governs response headers — authorization is unchanged, so
+ *       {@code /info}/{@code /metrics} remain {@code authenticated} (see {@code SecurityConfig}).</li>
  * </ul>
  *
  * <p>Credentials (cookies) are intentionally <strong>not</strong> allowed: this is a stateless
@@ -45,6 +53,9 @@ public class CorsConfig {
         // Public root-level diagnostics endpoints the web first page fetches cross-origin (TM-308).
         source.registerCorsConfiguration("/version", cors);
         source.registerCorsConfiguration("/health", cors);
+        // Admin Diagnostics panel fetches /actuator/info + /actuator/metrics cross-origin with a
+        // Bearer token (TM-569); register the actuator group so the preflight carries the allow-list.
+        source.registerCorsConfiguration("/actuator/**", cors);
         return source;
     }
 }
