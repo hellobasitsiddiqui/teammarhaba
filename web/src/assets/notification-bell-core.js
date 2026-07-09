@@ -87,3 +87,80 @@ export function bellAriaLabel(count) {
 export function shouldShowBell({ signedIn, gated } = {}) {
   return Boolean(signedIn) && !gated;
 }
+
+/**
+ * The bell's async-paint coordinator (TM-556). It keeps a STALE in-flight `refresh()` GET — one that
+ * started with the PRE-seen count — from repainting over the freshly-zeroed badge after the user opens
+ * the bell (mark-seen). Pure: no DOM/Firebase, so it runs under `node --test`; the DOM half
+ * (notification-bell.js) injects the real getNotificationBadge / markNotificationsSeen / paint, and
+ * the tests inject fakes + control the async ordering to reproduce the race.
+ *
+ * The mechanism is a monotonic generation counter (the "epoch"):
+ *   • Every `refresh()` captures the epoch when it STARTS and only paints its result if the epoch is
+ *     still the same when it RESOLVES. A newer authoritative action bumps the epoch in between, so a
+ *     late-arriving stale result is simply dropped instead of overwriting the fresh count.
+ *   • `markSeenAndPaint()` (and `supersede()` on sign-out) bumps the epoch FIRST — invalidating any
+ *     in-flight refresh — and releases the in-flight latch, so (a) the stale GET's result is ignored
+ *     on arrival, and (b) a corrective refresh after mark-seen isn't swallowed by the dedup latch the
+ *     stale GET still holds.
+ *
+ * @param {{
+ *   fetchBadge: () => Promise<any>,   // the badge GET (getNotificationBadge)
+ *   markSeen: () => Promise<any>,     // mark-everything-seen, returns the now-zeroed counts
+ *   paint: (badge: any) => void,      // paint a badge payload onto the DOM
+ *   onError?: (label: string, err: any) => void, // best-effort logging; the bell never throws
+ * }} deps
+ * @returns {{ refresh: () => Promise<void>, markSeenAndPaint: () => Promise<void>, supersede: () => void }}
+ */
+export function createBadgeSync({ fetchBadge, markSeen, paint, onError } = {}) {
+  let epoch = 0; // monotonic generation; bumped whenever the badge is authoritatively zeroed
+  let inFlight = false; // a badge GET is running — dedupe overlapping refreshes
+
+  function warn(label, err) {
+    if (onError) onError(label, err);
+  }
+
+  /**
+   * Supersede any in-flight refresh (its result will be dropped when it resolves) and release the
+   * dedup latch so a corrective refresh can start. Called by mark-seen and by sign-out/re-gate.
+   */
+  function supersede() {
+    epoch += 1;
+    inFlight = false;
+  }
+
+  /**
+   * Fetch the latest counts and repaint — deduped and epoch-guarded. If a mark-seen/sign-out bumps
+   * the epoch while this GET is in flight, its result is dropped so it can't repaint a stale count.
+   */
+  async function refresh() {
+    if (inFlight) return;
+    inFlight = true;
+    const gen = epoch;
+    try {
+      const badge = await fetchBadge();
+      if (gen === epoch) paint(badge); // still current → paint; superseded → drop the stale result
+    } catch (err) {
+      warn("refresh", err);
+    } finally {
+      // Only release the latch if THIS refresh still owns it: a supersede() during the fetch already
+      // released it (and may have started a fresh refresh), so don't stomp that newer owner.
+      if (gen === epoch) inFlight = false;
+    }
+  }
+
+  /**
+   * Mark everything seen and paint the returned (zeroed) counts. Supersedes any in-flight refresh
+   * FIRST so its stale pre-seen count is ignored on arrival, then paints the authoritative result.
+   */
+  async function markSeenAndPaint() {
+    supersede();
+    try {
+      paint(await markSeen());
+    } catch (err) {
+      warn("mark-seen", err);
+    }
+  }
+
+  return { refresh, markSeenAndPaint, supersede };
+}

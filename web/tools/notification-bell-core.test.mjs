@@ -14,7 +14,19 @@ import {
   hasBadge,
   bellAriaLabel,
   shouldShowBell,
+  createBadgeSync,
 } from "../src/assets/notification-bell-core.js";
+
+/** A promise plus its resolve/reject, so a test can hold a fetch "in flight" and resolve it on cue. */
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 test("badgeTotal: the admin/system unseen count is the bell total (chat half not yet wired)", () => {
   assert.equal(badgeTotal({ unseen: 3, unread: 5 }), 3); // unseen is the badge, NOT unread
@@ -77,4 +89,124 @@ test("shouldShowBell: signed-in + un-gated only (same gate as the tab bar)", () 
   assert.equal(shouldShowBell({ signedIn: false, gated: true }), false);
   assert.equal(shouldShowBell({}), false); // missing flags → hidden
   assert.equal(shouldShowBell(), false); // no arg → hidden, never throws
+});
+
+// --- createBadgeSync: the TM-556 mark-seen-vs-refresh race guard -----------------------------------
+
+test("createBadgeSync: THE RACE — a stale in-flight refresh must NOT repaint over a mark-seen", async () => {
+  const painted = [];
+  const fetchGate = deferred(); // hold the refresh GET "in flight" with the pre-seen count
+  const sync = createBadgeSync({
+    fetchBadge: () => fetchGate.promise,
+    markSeen: async () => ({ unseen: 0 }), // opening the bell clears the badge
+    paint: (badge) => painted.push(badgeTotal(badge)),
+  });
+
+  // 1) A refresh() GET is already in flight (the 60s poll / route render) carrying the PRE-seen count.
+  const refreshing = sync.refresh();
+
+  // 2) The user clicks the bell: mark-seen supersedes the in-flight refresh and paints 0.
+  await sync.markSeenAndPaint();
+  assert.deepEqual(painted, [0]); // badge cleared
+
+  // 3) NOW the stale GET resolves with the pre-seen N=7 — it must be DROPPED, not painted.
+  fetchGate.resolve({ unseen: 7 });
+  await refreshing;
+
+  assert.deepEqual(painted, [0]); // still only the mark-seen paint; the stale 7 was ignored
+});
+
+test("createBadgeSync: a refresh with no intervening mark-seen paints its result as normal", async () => {
+  const painted = [];
+  const sync = createBadgeSync({
+    fetchBadge: async () => ({ unseen: 4 }),
+    markSeen: async () => ({ unseen: 0 }),
+    paint: (badge) => painted.push(badgeTotal(badge)),
+  });
+
+  await sync.refresh();
+  assert.deepEqual(painted, [4]); // no supersede happened, so the fresh count paints
+});
+
+test("createBadgeSync: overlapping refreshes dedupe — only one GET is in flight at a time", async () => {
+  let calls = 0;
+  const gate = deferred();
+  const sync = createBadgeSync({
+    fetchBadge: () => {
+      calls += 1;
+      return gate.promise;
+    },
+    markSeen: async () => ({ unseen: 0 }),
+    paint: () => {},
+  });
+
+  const a = sync.refresh();
+  const b = sync.refresh(); // swallowed by the in-flight latch — must NOT fire a second GET
+  gate.resolve({ unseen: 1 });
+  await Promise.all([a, b]);
+
+  assert.equal(calls, 1);
+});
+
+test("createBadgeSync: after mark-seen a corrective refresh still runs (not swallowed by the stale latch)", async () => {
+  const painted = [];
+  const staleGate = deferred();
+  let fetchCalls = 0;
+  const sync = createBadgeSync({
+    fetchBadge: () => {
+      fetchCalls += 1;
+      // GET #1 = the stale in-flight refresh (held open); later GETs resolve immediately with a fresh 2.
+      return fetchCalls === 1 ? staleGate.promise : Promise.resolve({ unseen: 2 });
+    },
+    markSeen: async () => ({ unseen: 0 }),
+    paint: (badge) => painted.push(badgeTotal(badge)),
+  });
+
+  const stale = sync.refresh(); // GET #1 in flight (pre-seen count)
+  await sync.markSeenAndPaint(); // supersede + paint 0, release the latch the stale GET held
+  await sync.refresh(); // corrective refresh MUST run now → fresh count 2
+  staleGate.resolve({ unseen: 7 }); // stale GET #1 resolves late → dropped
+  await stale;
+
+  assert.equal(fetchCalls, 2); // the corrective refresh actually fired (the latch didn't swallow it)
+  assert.deepEqual(painted, [0, 2]); // cleared, then reconciled to the fresh 2; the stale 7 dropped
+});
+
+test("createBadgeSync: supersede() on sign-out drops an in-flight refresh's result", async () => {
+  const painted = [];
+  const fetchGate = deferred();
+  const sync = createBadgeSync({
+    fetchBadge: () => fetchGate.promise,
+    markSeen: async () => ({ unseen: 0 }),
+    paint: (badge) => painted.push(badgeTotal(badge)),
+  });
+
+  const refreshing = sync.refresh(); // in flight with some count
+  sync.supersede(); // signed out / re-gated
+  fetchGate.resolve({ unseen: 5 }); // resolves after sign-out → must be dropped
+  await refreshing;
+
+  assert.deepEqual(painted, []); // nothing painted: the stale post-sign-out result was ignored
+});
+
+test("createBadgeSync: never throws on a failing fetch/mark-seen — routes to onError", async () => {
+  const errors = [];
+  const sync = createBadgeSync({
+    fetchBadge: async () => {
+      throw new Error("offline");
+    },
+    markSeen: async () => {
+      throw new Error("500");
+    },
+    paint: () => assert.fail("must not paint on error"),
+    onError: (label, err) => errors.push([label, err.message]),
+  });
+
+  await sync.refresh();
+  await sync.markSeenAndPaint();
+
+  assert.deepEqual(errors, [
+    ["refresh", "offline"],
+    ["mark-seen", "500"],
+  ]);
 });
