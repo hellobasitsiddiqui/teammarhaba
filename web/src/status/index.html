@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TeamMarhaba — Status</title>
+    <meta name="description" content="Live status and recent performance of the TeamMarhaba API and website — is the service up, and how has it been responding?" />
+    <meta name="robots" content="index, follow" />
+
+    <!--
+      Public status/uptime page (TM-182). Modelled on https://status.firebase.google.com/cloud-messaging/:
+      a big Available/degraded/outage banner, plus API latency + API availability charts (Day view,
+      one bar per 15-minute window, green = normal / amber = a deviation from the observed baseline).
+
+      STANDALONE by design — like /download (TM-246) and /api-docs (TM-520), this is a REAL static file
+      (web/dist/status/index.html) that Firebase Hosting returns directly, BEFORE the SPA rewrite
+      (** -> /index.html). So it needs no auth (there's no client-side guard to reach), is not touched by
+      the /assets fingerprinter, and renders even if the SPA bundle failed to load. It carries its own
+      self-contained Paper-token CSS (it can't import the fingerprinted /assets/styles.css from out here)
+      so it still LOOKS like the app. The banner needs no infra setup (it polls the public /health); the
+      charts are measured live from this page's own /health probes today (see status.js), with a Cloud
+      Monitoring historical backfill + Month view as the fast-follow tracked in the HITL ticket.
+    -->
+
+    <!-- Same hand-lettered Paper faces the app loads (TM-529). If the request fails, we degrade to the
+         system stack declared in the font-family below — identical fallback behaviour to index.html. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&display=swap" rel="stylesheet" />
+
+    <style>
+      /* Paper token contract, mirrored from web/src/assets/styles.css (TM-529). Self-contained because
+         this page is served outside /assets and can't reference the fingerprinted stylesheet. */
+      :root {
+        color-scheme: light dark;
+        --paper: #fafafa;
+        --card: #ffffff;
+        --ink: #2b2b2b;
+        --muted: #6a6a6a;
+        --line: rgba(43, 43, 43, 0.28);
+        --accent: #0f9d8c;   /* Paper default accent (teal) */
+        --ok: #0a7d57;       /* --success */
+        --warn: #b45309;     /* --accent-paper-amber */
+        --bad: #b00020;      /* --danger */
+        --radius: 12px;
+        --font-sans: "Patrick Hand", "Bradley Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif;
+        --font-display: "Gochi Hand", "Patrick Hand", ui-rounded, system-ui, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #1a1a1a;
+          --card: #202020;
+          --ink: #ececec;
+          --muted: #a6a6a6;
+          --line: rgba(236, 236, 236, 0.22);
+          --accent: #34c9b6;
+          --ok: #4ec9a0;
+          --warn: #e08b3e;
+          --bad: #ff6b7e;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-sans);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 2.25rem 1.15rem 3.5rem; }
+      header.page { text-align: center; margin-bottom: 1.75rem; }
+      header.page h1 {
+        font-family: var(--font-display);
+        font-size: 2.1rem; margin: 0 0 0.15rem; letter-spacing: 0.4px;
+      }
+      header.page .sub { color: var(--muted); margin: 0; }
+      header.page a.home { color: var(--accent); text-decoration: none; font-size: 0.95rem; }
+
+      /* ── Overall banner ─────────────────────────────────────────────────────────────────── */
+      .status-banner {
+        display: flex; align-items: center; gap: 0.9rem;
+        border: 2px solid var(--line); border-radius: var(--radius);
+        background: var(--card); padding: 1.15rem 1.25rem; margin-bottom: 1.5rem;
+      }
+      .status-banner .dot {
+        flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%;
+        background: var(--muted); box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 22%, transparent);
+      }
+      .status-banner .txt { flex: 1 1 auto; }
+      .status-banner .title { font-family: var(--font-display); font-size: 1.4rem; }
+      .status-banner .detail { color: var(--muted); font-size: 0.98rem; }
+      .status-banner .stamp { color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
+      /* Level colours — the class status.js sets from status-core's classifyOverall(). */
+      .level-available { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+      .level-available .dot { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+      .level-degraded { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--card)); }
+      .level-degraded .dot { background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 25%, transparent); }
+      .level-outage { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--card)); }
+      .level-outage .dot { background: var(--bad); box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 25%, transparent); }
+
+      /* ── Chart cards ────────────────────────────────────────────────────────────────────── */
+      .card {
+        border: 2px solid var(--line); border-radius: var(--radius);
+        background: var(--card); padding: 1.1rem 1.2rem 1.25rem; margin-bottom: 1.25rem;
+      }
+      .card h2 { font-family: var(--font-display); font-size: 1.2rem; margin: 0 0 0.15rem; }
+      .card .cap { color: var(--muted); font-size: 0.88rem; margin: 0 0 0.85rem; }
+      .view-toggle { display: inline-flex; gap: 0.35rem; margin-bottom: 0.9rem; }
+      .view-toggle .pill {
+        font: inherit; font-size: 0.85rem; border: 2px solid var(--line); background: transparent;
+        color: var(--muted); border-radius: 999px; padding: 0.15rem 0.8rem; cursor: default;
+      }
+      .view-toggle .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .view-toggle .pill.disabled { opacity: 0.55; }
+
+      /* The fixed 96-slot bar row. Bars grow from the baseline; empty windows are near-invisible ticks. */
+      .bars {
+        display: flex; align-items: flex-end; gap: 1px;
+        height: 120px; padding-top: 6px; border-bottom: 2px solid var(--line);
+      }
+      .bars .bar { flex: 1 1 0; min-width: 0; border-radius: 2px 2px 0 0; background: var(--muted); }
+      .bars .bar-normal { background: var(--ok); }
+      .bars .bar-deviation { background: var(--warn); }
+      .bars .bar-nodata { background: var(--line); height: 3px !important; border-radius: 0; }
+      .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.75rem; margin-top: 0.35rem; }
+
+      .legend { display: flex; flex-wrap: wrap; gap: 0.85rem; margin: 0.7rem 0 0; color: var(--muted); font-size: 0.82rem; }
+      .legend .key { display: inline-flex; align-items: center; gap: 0.35rem; }
+      .legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+      .legend .swatch.ok { background: var(--ok); }
+      .legend .swatch.warn { background: var(--warn); }
+      .caveat { color: var(--muted); font-size: 0.8rem; font-style: italic; margin: 0.55rem 0 0; }
+      #charts-empty { color: var(--muted); font-size: 0.85rem; margin: 0.6rem 0 0; }
+
+      footer.page { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 2rem; }
+      footer.page a { color: var(--accent); }
+      footer.page .byline { margin: 0.6rem 0 0; font-size: 0.8rem; }
+      footer.page .byline a { color: var(--muted); text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="page">
+        <h1>TeamMarhaba Status</h1>
+        <p class="sub">Live health &amp; recent performance of the API and website.</p>
+        <a class="home" href="/">← Back to TeamMarhaba</a>
+      </header>
+
+      <!-- Overall outage-status banner (AC2). status.js sets the level-* class + fills the text from
+           the live /health + web-reachability probes. Renders "Checking status…" until the first
+           probe settles, so it never flashes a scary red on load. -->
+      <section id="overall-banner" class="status-banner level-checking" role="status" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="txt">
+          <div id="overall-title" class="title">Checking status…</div>
+          <div id="overall-detail" class="detail">Contacting the TeamMarhaba API…</div>
+        </span>
+        <span id="last-checked" class="stamp"></span>
+      </section>
+
+      <!-- API latency chart (AC3): one bar per 15-minute window, Day view. -->
+      <section class="card" aria-label="API latency status">
+        <h2>API latency</h2>
+        <p class="cap">Average response time per 15-minute window.</p>
+        <div class="view-toggle" role="group" aria-label="Time range">
+          <button type="button" class="pill active" aria-current="true">Day</button>
+          <button type="button" class="pill disabled" aria-disabled="true" disabled title="Coming soon">Month</button>
+        </div>
+        <div id="latency-bars" class="bars" aria-hidden="true"></div>
+        <div class="axis"><span>24h ago</span><span>now</span></div>
+        <div class="legend">
+          <span class="key"><span class="swatch ok"></span> Normal</span>
+          <span class="key"><span class="swatch warn"></span> Performance deviation</span>
+        </div>
+        <p class="caveat">A single amber bar represents a performance deviation within a 15-minute window, but not necessarily an SLO violation.</p>
+      </section>
+
+      <!-- API availability chart (AC3): non-5xx success rate per 15-minute window, Day view. -->
+      <section class="card" aria-label="API availability status">
+        <h2>API availability</h2>
+        <p class="cap">Share of successful (non-5xx) responses per 15-minute window.</p>
+        <div class="view-toggle" role="group" aria-label="Time range">
+          <button type="button" class="pill active" aria-current="true">Day</button>
+          <button type="button" class="pill disabled" aria-disabled="true" disabled title="Coming soon">Month</button>
+        </div>
+        <div id="availability-bars" class="bars" aria-hidden="true"></div>
+        <div class="axis"><span>24h ago</span><span>now</span></div>
+        <div class="legend">
+          <span class="key"><span class="swatch ok"></span> Healthy</span>
+          <span class="key"><span class="swatch warn"></span> Reduced success rate</span>
+        </div>
+        <p id="charts-empty" hidden>Collecting live measurements — bars fill in as the page samples the API. History is kept for the last 24 hours.</p>
+      </section>
+
+      <footer class="page">
+        <p>
+          Charts are measured live from this page. Longer history from Cloud Monitoring and a Month
+          view are on the way. If something looks wrong here, it's likely on our side — not yours.
+        </p>
+        <p class="byline">A product of <a href="https://10xai.co.uk" target="_blank" rel="noopener">10xAI</a></p>
+      </footer>
+    </div>
+
+    <!-- Config first (classic script → runs before the deferred module), then the controller module.
+         status-config.js sets window.TM_STATUS_CONFIG.apiBaseUrl (dev default; deploy injects the live
+         Cloud Run URL). status.js imports ./status-core.js relative to /status/. -->
+    <script src="./status-config.js"></script>
+    <script type="module" src="./status.js"></script>
+  </body>
+</html>
