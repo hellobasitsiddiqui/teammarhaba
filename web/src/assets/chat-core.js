@@ -23,6 +23,24 @@
 //                                    → toThreadMessage()
 // Both arrive inside the shared page envelope `{ items, page, size, totalElements, totalPages }`, so
 // the DOM layer passes `data.items` straight into toConversationRows() / toThreadMessages().
+//
+// ── ONE-WAY ADMIN MESSAGES (TM-445) ──────────────────────────────────────────────────────────────
+// Admin broadcasts (ConversationType.ADMIN_BROADCAST) are one-way "from TeamMarhaba" announcements a
+// user can re-read in the chat section after the push is gone. The backend marks every such line with
+// `senderId == null` → the convenience `system` flag (ConversationMessageResponse doc: "drives the
+// 'from TeamMarhaba' render"), and may attach an in-app `deepLink` (e.g. `/events/42`) the client
+// surfaces as a tap-through CTA. So the one-way presentation is driven PER MESSAGE by `system` (robust
+// even on a cold deep-link where the conversation `type` isn't cached), while the thread-level
+// affordances TM-448 already ships — the Admin type badge + the disabled composer (announcements are
+// read-only, see composeAvailability) — stay type-driven. This module adds the pure pieces that render
+// needs: ADMIN_AUTHOR (the attribution name) + deepLinkCta() (the untrusted-link → safe CTA rule).
+//
+// The deep-link CTA reuses the notification panel's TM-285 trust boundary (safeRoute) rather than
+// re-deriving it, so an admin's link can only ever navigate WITHIN the app (a scheme'd / off-app /
+// unknown target is dropped and the CTA simply isn't drawn). Importing one pure core from another is an
+// established pattern here (calendar-core←events-core, chat-tab-badge-core←notification-bell-core), and
+// keeps this module import-safe in a plain Node test (no DOM / Firebase / Capacitor reaches it).
+import { safeRoute } from "./notification-panel-core.js";
 
 /**
  * The five reaction emoji the (future) reaction picker offers. Kept here as the single source of truth
@@ -178,14 +196,45 @@ export function totalUnread(rowsOrItems) {
 /* ─────────────────────────────── Thread message adapters ──────────────────────────────────────── */
 
 /**
+ * The author label a `system` (senderId == null) message is attributed to in the thread — the app's
+ * own name, so a one-way admin broadcast reads as "from TeamMarhaba" rather than an anonymous line.
+ * Single source of truth shared by the render + its tests.
+ */
+export const ADMIN_AUTHOR = "TeamMarhaba";
+
+/**
+ * Turn a message's optional `deepLink` into the tap-through CTA the thread renders, or null when there
+ * is none / it isn't a safe in-app destination (TM-445). The link is UNTRUSTED (an admin typed it into
+ * the compose form), so it passes through the notification panel's TM-285 trust boundary
+ * ({@link safeRoute}): a scheme'd / off-app / scheme-relative / unknown target yields null and the CTA
+ * is simply not drawn, so a bad link is inert rather than navigated blindly. A good link is coerced to
+ * a same-app hash route (`/events/42` → `#/events/42`) and given a purpose-fit label from the route
+ * family so the button reads well ("View event" / "Open chat"), defaulting to a neutral "Open".
+ * @param {string|null|undefined} deepLink the raw ConversationMessageResponse.deepLink.
+ * @returns {{href: string, label: string}|null}
+ */
+export function deepLinkCta(deepLink) {
+  const href = safeRoute(deepLink);
+  if (!href) return null;
+  let label = "Open";
+  if (/^#\/events\/[^/]+$/.test(href)) label = "View event";
+  else if (/^#\/chat\/[^/]+$/.test(href)) label = "Open chat";
+  else if (href === "#/events") label = "Browse events";
+  return { href, label };
+}
+
+/**
  * Map one ConversationMessageResponse to the message view-model the thread renders. The read API does
  * not expose the caller's own numeric id (GET /api/v1/me has no id), so TM-438 cannot mark a message
  * as "mine" / draw out-going ticks — it renders a flat, chronological message list. `system` messages
- * (e.g. "You joined the event") render as a centred notice rather than a bubble. Reactions are carried
- * through for read-only display.
+ * (an admin broadcast, or an in-thread notice like "You joined the event") render as a centred
+ * "from TeamMarhaba" notice rather than a bubble, and — new in TM-445 — carry a pre-derived `cta` when
+ * their deep-link is a safe in-app route, so chat.js can draw the tap-through affordance without
+ * re-checking the link. Reactions are carried through for read-only display.
  * @param {Object} msg a ConversationMessageResponse.
  * @param {Date} [now]
  * @returns {{id: string, body: string, system: boolean, deepLink: (string|null),
+ *            cta: ({href: string, label: string}|null),
  *            reactions: Array<{emoji: string, count: number, mine: boolean}>, timeLabel: string,
  *            sortAt: number}}
  */
@@ -198,11 +247,13 @@ export function toThreadMessage(msg, now = new Date()) {
       count: Math.max(0, Math.trunc(Number(r.count) || 0)),
       mine: Boolean(r.mine),
     }));
+  const deepLink = m.deepLink ? String(m.deepLink) : null;
   return {
     id: String(m.id ?? ""),
     body: String(m.body ?? ""),
     system: Boolean(m.system),
-    deepLink: m.deepLink ? String(m.deepLink) : null,
+    deepLink,
+    cta: deepLinkCta(deepLink),
     reactions,
     timeLabel: formatTimeLabel(m.createdAt, now),
     sortAt: epoch(m.createdAt),
@@ -329,8 +380,8 @@ export function classifyPostError(error) {
  * resolves, or rolled back on failure.
  * @param {string} body the message text.
  * @param {{localId?: string, now?: Date}} [opts]
- * @returns {{id: string, body: string, system: boolean, deepLink: null, reactions: [], timeLabel: string,
- *            sortAt: number, pending: boolean}}
+ * @returns {{id: string, body: string, system: boolean, deepLink: null, cta: null, reactions: [],
+ *            timeLabel: string, sortAt: number, pending: boolean}}
  */
 export function pendingMessage(body, { localId = "pending", now = new Date() } = {}) {
   return {
@@ -338,6 +389,7 @@ export function pendingMessage(body, { localId = "pending", now = new Date() } =
     body: String(body ?? ""),
     system: false,
     deepLink: null,
+    cta: null,
     reactions: [],
     timeLabel: formatTimeLabel(now.toISOString(), now),
     sortAt: now.getTime(),
