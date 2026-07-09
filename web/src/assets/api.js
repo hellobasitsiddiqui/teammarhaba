@@ -443,6 +443,37 @@ export async function adminBroadcastPush({ title, body, route, userIds }) {
 }
 
 /**
+ * POST /api/v1/admin/messages — send an admin message (title + body + optional deep-link) to a
+ * resolved audience of ONE target type (TM-441 endpoint → TM-443 compose UI). The body is built by
+ * admin-messages-core.buildAdminMessagePayload: `{ title, body, deepLink?, userIds | cities | eventIds }`
+ * with exactly one audience dimension present. Modelled on {@link adminBroadcastPush}: JSON in/out, and
+ * a non-2xx is parsed as RFC-7807 and thrown as an {@link ApiError} — a 400 carries per-field `errors`
+ * (a title/body over cap, or "provide exactly one target type"), an off-list deep-link is a clean 400,
+ * and an audience that resolves to nobody is a 400 with the service's message. On success the backend
+ * writes a durable inbox notification per recipient and fans out a best-effort push, returning the
+ * campaign + delivery counts (AdminMessageResponse) so the caller can toast an honest summary. A 401
+ * will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @param {{title: string, body: string, deepLink?: string, userIds?: number[], cities?: string[], eventIds?: number[]}} payload
+ * @returns {Promise<{id: number, targetType: string, recipientCount: number, notified: number, pushTargeted: number, pushDelivered: number, pushPruned: number, pushFailed: number, pushSkipped: number}>}
+ * @throws {ApiError}
+ */
+export async function sendAdminMessage(payload) {
+  const response = await apiFetch("/api/v1/admin/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Send failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/events — the visible-now listing (TM-393), soonest-first, in the shared page envelope
  * `{ items, page, size, totalElements, totalPages }`. Each item is an EventCard
  * (`{ id, heading, locationText, timezone, startAt, endAt, capacity, imagePath, goingCount, myState }`).
@@ -549,6 +580,7 @@ if (typeof window !== "undefined") {
     markNotificationsSeen,
     getPushRoutes,
     adminBroadcastPush,
+    sendAdminMessage,
     listEvents,
     getEvent,
     rsvpToEvent,
