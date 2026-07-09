@@ -1163,7 +1163,6 @@ h3,
     gap: var(--space-3);
     padding: var(--space-6) var(--space-4);
     text-align: center;
-    color: var(--muted);
 }
 
 .tm-empty {
@@ -1171,7 +1170,14 @@ h3,
     text-align: center;
 }
 
-.tm-empty p {
+/* Admin-console-only tone (TM-557): the muted error colour + the single-line zero-margin were part of
+   the TM-550 restyle but leaked onto the shared user-facing events/profile error + empty states
+   (muting load-failure copy, collapsing empty-state title spacing). Scope them to the console. */
+.admin-console .tm-error {
+    color: var(--muted);
+}
+
+.admin-console .tm-empty p {
     margin: 0;
 }
 
