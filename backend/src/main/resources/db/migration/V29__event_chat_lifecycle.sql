@@ -1,0 +1,27 @@
+-- V29__event_chat_lifecycle — per-event inputs for the event group-chat lifecycle (TM-446)
+--
+-- The event group chat (epic TM-433) is auto-created on an event's FIRST GOING RSVP and its
+-- membership is kept in sync with attendance (join on GOING, leave on un-RSVP) by
+-- EventChatLifecycleService, which hooks EventRsvpService. The conversation / conversation_member /
+-- message tables themselves — and the event → conversation ON DELETE CASCADE that makes deleting an
+-- event take its whole thread with it — already exist from V27 (TM-435); this migration adds only
+-- the two additive, per-event knobs the lifecycle resolves over. It changes no existing rows.
+-- Flyway owns the DDL; Hibernate runs validate-only, so the Event entity must match these columns.
+--
+--   include_waitlist_in_chat  Whether this event's WAITLISTED members are also chat members
+--                             (TM-446 AC). NOT NULL DEFAULT false — the shipped default is OFF: only
+--                             GOING attendees (plus the host) are in the thread. When true, a
+--                             waitlisted member joins the thread and their membership tracks their
+--                             attendance as they convert to GOING or leave. Enforced in the service
+--                             (EventChatLifecycleService), not by the DB.
+--   chat_close_hours          Per-event override of the group-chat close/lock window, in whole hours
+--                             AFTER the event ends (end_at, or start_at for an open-ended event with
+--                             no end_at). NULL = inherit — EventChatClosePolicy then falls back to
+--                             the per-city default and finally the APP DEFAULT OF "NEVER CLOSE"
+--                             (see app.event-chat-close.* and EventChatCloseProperties). A closed
+--                             thread is read-only; the close is a soft-close (conversation.closed_at),
+--                             never a hard delete. Same event → city → app-default order as the
+--                             location-reveal (V15) and booking-cutoff (V16) overrides, via the
+--                             shared LayeredHours resolver (TM-408).
+ALTER TABLE events ADD COLUMN include_waitlist_in_chat BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE events ADD COLUMN chat_close_hours         INTEGER;

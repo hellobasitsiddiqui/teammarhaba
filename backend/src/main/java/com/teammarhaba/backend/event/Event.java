@@ -103,6 +103,28 @@ public class Event {
     @Column(name = "cancellation_window_hours")
     private Integer cancellationWindowHours;
 
+    /**
+     * Whether this event's {@code WAITLISTED} attendees are also members of its group chat (TM-446).
+     * Shipped default {@code false} (both on a fresh entity and via the column's {@code DEFAULT
+     * false}): only {@code GOING} attendees plus the host are in the thread. When {@code true}, a
+     * waitlisted member joins the thread and {@link EventChatLifecycleService} keeps their membership
+     * in sync as they convert to {@code GOING} or leave. The lifecycle enforces this; the DB only
+     * carries the flag.
+     */
+    @Column(name = "include_waitlist_in_chat", nullable = false)
+    private boolean includeWaitlistInChat = false;
+
+    /**
+     * Per-event override of the group-chat close/lock window, in whole hours <em>after</em> the event
+     * ends (TM-446). {@code null} = inherit — {@link EventChatClosePolicy} then falls back to the
+     * per-city default and finally the app default of <b>never close</b>, the same event → city →
+     * app-default order as the reveal ({@link #locationRevealHours}) and cutoff
+     * ({@link #bookingCutoffHours}) windows above. A closed thread is read-only (a soft-close on the
+     * conversation, never a hard delete).
+     */
+    @Column(name = "chat_close_hours")
+    private Integer chatCloseHours;
+
     /** IANA timezone id of the event's locale; pairs with the UTC instants for client rendering. */
     @Column(name = "timezone", nullable = false)
     private String timezone;
@@ -289,6 +311,23 @@ public class Event {
 
     public void setCancellationWindowHours(Integer cancellationWindowHours) {
         this.cancellationWindowHours = cancellationWindowHours;
+    }
+
+    /** Whether waitlisted attendees are also group-chat members (TM-446); default {@code false}. */
+    public boolean isIncludeWaitlistInChat() {
+        return includeWaitlistInChat;
+    }
+
+    public void setIncludeWaitlistInChat(boolean includeWaitlistInChat) {
+        this.includeWaitlistInChat = includeWaitlistInChat;
+    }
+
+    public Integer getChatCloseHours() {
+        return chatCloseHours;
+    }
+
+    public void setChatCloseHours(Integer chatCloseHours) {
+        this.chatCloseHours = chatCloseHours;
     }
 
     public String getTimezone() {

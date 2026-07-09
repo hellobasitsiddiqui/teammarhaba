@@ -173,6 +173,19 @@ app:
     #     london: 2
     #     dubai: 3
     city-hours: {}
+  # Event group-chat close/lock policy (TM-446). An event's group chat auto-closes (goes read-only)
+  # `closeHours` after the event ends (end_at, or start_at for an open-ended event); a closed thread is
+  # read-only (a soft-close on the conversation, never a hard delete). closeHours resolves per event
+  # exactly like booking-cutoff: event.chatCloseHours override → this per-city map → default-hours.
+  # The APP DEFAULT IS "NEVER CLOSE": leave default-hours UNSET (null) — as shipped — and no event's
+  # chat ever auto-closes. Set default-hours (or a per-city entry) to opt in. Tunables, not secrets.
+  event-chat-close:
+    # default-hours: ${EVENT_CHAT_CLOSE_DEFAULT_HOURS:}   # UNSET = never close (the app default); set N to auto-close N hours after the event ends
+    # Optional per-city defaults (city name → whole hours after the event ends), matched case-insensitively:
+    #   city-hours:
+    #     london: 24
+    #     dubai: 12
+    city-hours: {}
   # Current published terms/privacy version (TM-170). The client gates the app until the user's
   # accepted version (terms_accepted_version, migration V6) matches this. Bump it (via the env var or
   # this default) when the terms change to re-prompt everyone. Exposed read-only on GET /api/v1/me as

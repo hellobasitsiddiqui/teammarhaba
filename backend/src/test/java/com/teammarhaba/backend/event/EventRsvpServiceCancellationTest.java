@@ -52,12 +52,16 @@ class EventRsvpServiceCancellationTest {
     /** TM-404's one-active-event guard uses this for open-ended events — not exercised on the cancel path. */
     @Mock private EventPhasePolicy phasePolicy;
 
+    /** TM-446's event-chat lifecycle — invoked on the leave (onLeave) path; a mocked no-op here. */
+    @Mock private EventChatLifecycleService chatLifecycle;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
 
     private EventRsvpService service() {
-        return new EventRsvpService(events, attendance, users, policy, ageGate, publisher, bookingCutoff, phasePolicy);
+        return new EventRsvpService(
+                events, attendance, users, policy, ageGate, publisher, bookingCutoff, phasePolicy, chatLifecycle);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)
