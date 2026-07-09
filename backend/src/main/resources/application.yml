@@ -179,6 +179,18 @@ app:
   # `currentTermsVersion`. Blank/unset falls back to the shipped default in TermsProperties.
   terms:
     current-version: ${APP_TERMS_CURRENT_VERSION:2026-06-01}
+  # Per-client API rate limit (TM-158): a token-bucket in front of /api/** that bounds abuse and cheap
+  # DoS beyond Firebase's login lockout. Keyed by authenticated uid when present, else client IP; over
+  # the limit -> 429 + Retry-After + the RFC 7807 problem body. /health + readiness/liveness are outside
+  # /api/** and thus exempt. Sane defaults (120 req/min per client, burst 120) — tunables, NOT secrets;
+  # prod may tighten via the env. enabled=false makes it a no-op (the test profile does this so the
+  # existing integration suite isn't throttled).
+  rate-limit:
+    enabled: ${API_RATE_LIMIT_ENABLED:true}
+    capacity: ${API_RATE_LIMIT_CAPACITY:120}                 # burst: max back-to-back requests per client
+    refill-tokens: ${API_RATE_LIMIT_REFILL_TOKENS:120}       # tokens replenished each refill-period
+    refill-period: ${API_RATE_LIMIT_REFILL_PERIOD:1m}        # window over which refill-tokens are added back
+    max-tracked-clients: ${API_RATE_LIMIT_MAX_TRACKED_CLIENTS:100000}  # hard cap on tracked keys (bounds the limiter)
   auth:
     email-code:
       length: ${EMAIL_CODE_LENGTH:6}            # digits in the one-time code (matches the SMS UX)

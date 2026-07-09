@@ -115,3 +115,34 @@ plugins (`object-src 'none'`).
 If a future endpoint serves HTML/assets that need broader sources, tune the policy in
 `SecurityHeadersFilter` (or lift it to per-route configuration) and extend the tests.
 Per-route CSP tuning is intentionally out of scope here.
+
+## Rate limiting (TM-158)
+
+A per-client **token-bucket** caps `/api/**` traffic to bound abuse and cheap DoS beyond what
+Firebase's login lockout covers. `security.RateLimitFilter` runs just **after** the auth filter in
+the security chain (wired in `SecurityConfig`), so `security.RateLimiter` can key each bucket by the
+authenticated **`uid`** when present — following the user across IPs — and fall back to **client IP**
+(leftmost `X-Forwarded-For`, else the socket address) for anonymous traffic.
+
+- Over the limit → a uniform RFC 7807 **`429 Too Many Requests`** (same `application/problem+json`
+  shape as every other error, via `Problems`) plus a **`Retry-After`** header (whole seconds until a
+  token frees up), so a well-behaved client backs off.
+- **Only `/api/**` is limited.** `/health`, the readiness/liveness probes (`/actuator/health/**`) and
+  `/version` sit outside that prefix and are inherently **exempt**, so a throttled abuser can't take
+  the instance out of rotation.
+- **Bounded memory.** Buckets live in a size-capped Caffeine cache (`max-tracked-clients`) that evicts
+  idle clients, so a spoofed-`X-Forwarded-For` flood can't grow the limiter into a new unbounded map
+  (the DoS the TM-247 review guarded against). It's **process-local** — fine per Cloud Run instance; a
+  shared store (Redis) / edge rule (Cloud Armor) is the future improvement for a strict global limit.
+
+| Setting (`app.rate-limit.*`) | Env var | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | `API_RATE_LIMIT_ENABLED` | `true` | Master switch. The `test` profile sets it `false` so the suite isn't throttled. |
+| `capacity` | `API_RATE_LIMIT_CAPACITY` | `120` | Burst — max back-to-back requests per client. |
+| `refill-tokens` | `API_RATE_LIMIT_REFILL_TOKENS` | `120` | Tokens replenished each period. |
+| `refill-period` | `API_RATE_LIMIT_REFILL_PERIOD` | `1m` | Window over which the tokens are added back. |
+| `max-tracked-clients` | `API_RATE_LIMIT_MAX_TRACKED_CLIENTS` | `100000` | Hard cap on tracked keys (bounds the limiter). |
+
+Defaults are deliberately generous (120 req/min per client) — sane, not a science project; tighten
+per environment via the env. `RateLimitFilterIntegrationTest` covers the under-limit-passes /
+over-limit-429 contract with a tiny budget.

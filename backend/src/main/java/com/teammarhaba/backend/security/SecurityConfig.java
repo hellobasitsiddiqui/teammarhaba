@@ -39,6 +39,11 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * <p>Sessions are stateless and CSRF is off — this is a token API, not a browser form app.
  * Response security headers stay owned by {@link SecurityHeadersFilter} (TM-78), so Spring
  * Security's own header writer is disabled to keep a single source of truth.
+ *
+ * <p>A per-client {@link RateLimitFilter} (TM-158) is slotted in just after the auth filter to cap
+ * {@code /api/**} traffic (keyed by {@code uid}, else IP) — bounding abuse / cheap DoS beyond
+ * Firebase's login lockout, and returning a uniform {@code 429} with {@code Retry-After} over the
+ * limit. The health/readiness probes sit outside {@code /api/**} and are unaffected.
  */
 @Configuration
 public class SecurityConfig {
@@ -48,8 +53,14 @@ public class SecurityConfig {
             HttpSecurity http,
             ObjectProvider<FirebaseAuth> firebaseAuth,
             ObjectMapper objectMapper,
+            ObjectProvider<RateLimiter> rateLimiter,
+            ObjectProvider<RateLimitProperties> rateLimitProperties,
             CorsConfigurationSource corsConfigurationSource)
             throws Exception {
+        // The auth filter that establishes the VerifiedUser principal. Held in a variable so the
+        // rate-limit filter (TM-158) can be slotted in right AFTER it — that way the SecurityContext
+        // already carries the uid, letting RateLimiter key its bucket per-account (else per-IP).
+        FirebaseAuthenticationFilter firebaseAuthenticationFilter = new FirebaseAuthenticationFilter(firebaseAuth);
         http.authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/health",
                                 "/version",
@@ -73,14 +84,24 @@ public class SecurityConfig {
                 // CORS for the browser SPA (TM-104). The CorsFilter runs ahead of auth so the
                 // preflight OPTIONS is answered without a token; the allow-list lives in CorsConfig.
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
-                .addFilterBefore(
-                        new FirebaseAuthenticationFilter(firebaseAuth),
-                        UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(firebaseAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
                         .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper)))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(headers -> headers.disable());
+
+        // Per-client rate limit on /api/** (TM-158), slotted in right AFTER the auth filter so it can
+        // key by uid; a no-op when disabled or off the API surface (see RateLimitFilter#shouldNotFilter).
+        // Resolved via ObjectProvider (like FirebaseAuth above) so a slim @WebMvcTest slice that imports
+        // this config but doesn't supply the beans still builds a working chain — the filter is simply
+        // omitted there. The full application context always has both, so the guard is always present.
+        RateLimiter limiter = rateLimiter.getIfAvailable();
+        RateLimitProperties limitProps = rateLimitProperties.getIfAvailable();
+        if (limiter != null && limitProps != null) {
+            http.addFilterAfter(
+                    new RateLimitFilter(limiter, limitProps, objectMapper), FirebaseAuthenticationFilter.class);
+        }
         return http.build();
     }
 }
