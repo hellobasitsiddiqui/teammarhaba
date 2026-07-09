@@ -601,6 +601,21 @@
         },
         "type" : "object"
       },
+      "EmojiReactionCount" : {
+        "properties" : {
+          "count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "emoji" : {
+            "type" : "string"
+          },
+          "mine" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
       "EventCard" : {
         "properties" : {
           "capacity" : {
@@ -947,6 +962,21 @@
         },
         "type" : "object"
       },
+      "MessageReactionSummary" : {
+        "properties" : {
+          "messageId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "reactions" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EmojiReactionCount"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "NotificationBadge" : {
         "properties" : {
           "unread" : {
@@ -1170,6 +1200,33 @@
         },
         "type" : "object"
       },
+      "PageResponseThreadMessageResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ThreadMessageResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PagedResponseUserResponse" : {
         "properties" : {
           "items" : {
@@ -1214,6 +1271,16 @@
           "targeted" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "ReactionRequest" : {
+        "properties" : {
+          "emoji" : {
+            "maxLength" : 32,
+            "minLength" : 0,
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -1269,6 +1336,35 @@
         "properties" : {
           "route" : {
             "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ThreadMessageResponse" : {
+        "properties" : {
+          "body" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deepLink" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "reactions" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EmojiReactionCount"
+            },
+            "type" : "array"
+          },
+          "senderId" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -2156,6 +2252,49 @@
         "tags" : [ "email-code-controller" ]
       }
     },
+    "/api/v1/conversations/{conversationId}/messages" : {
+      "get" : {
+        "operationId" : "messages",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "conversationId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseThreadMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-message-controller" ]
+      }
+    },
     "/api/v1/events" : {
       "get" : {
         "operationId" : "list_2",
@@ -2619,6 +2758,74 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/messages/{messageId}/reactions" : {
+      "delete" : {
+        "operationId" : "unreact",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "messageId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "emoji",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageReactionSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "message-reaction-controller" ]
+      },
+      "post" : {
+        "operationId" : "react",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "messageId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReactionRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MessageReactionSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "message-reaction-controller" ]
       }
     },
     "/api/v1/meta" : {

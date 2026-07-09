@@ -112,6 +112,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.notify.NotificationFeedService notificationFeedService;
 
+    // MessageReactionController + ConversationMessageController (TM-461) both need a
+    // MessageReactionService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.MessageReactionService messageReactionService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")
