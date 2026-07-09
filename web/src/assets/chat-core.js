@@ -259,13 +259,56 @@ export function readReceiptLabel(receipt) {
 }
 
 /**
+ * The label shown for a quoted parent whose original has been moderation-removed / is missing (TM-466)
+ * — the AC's "message unavailable". Kept here so the DOM and its tests share one string.
+ */
+export const MESSAGE_UNAVAILABLE = "Message unavailable";
+
+/** Max length of a quote excerpt the composer builds locally (mirrors the backend's QuotedMessage cap). */
+export const QUOTE_EXCERPT_MAX = 140;
+
+/**
+ * Collapse whitespace, trim, and truncate a body to a short quote excerpt (mirrors the backend's
+ * QuotedMessage excerpt rule, so a composer-built preview matches what the thread will render). Empty
+ * in → empty out.
+ * @param {string} text
+ * @param {number} [max]
+ * @returns {string}
+ */
+export function quoteExcerpt(text, max = QUOTE_EXCERPT_MAX) {
+  const collapsed = String(text ?? "").trim().replace(/\s+/g, " ");
+  if (collapsed.length <= max) return collapsed;
+  return `${collapsed.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Map the API's `replyTo` snippet (a backend QuotedMessage, or nullish) to the quote view-model the
+ * thread renders ABOVE a reply (TM-466). `null` when the message isn't a reply. A parent that's been
+ * removed comes back `available: false` — we withhold its (absent) excerpt and the DOM shows
+ * {@link MESSAGE_UNAVAILABLE}. `id` is always carried so a tap can scroll to the original if it's loaded.
+ * @param {?Object} replyTo a QuotedMessage: { id, senderId, system, excerpt, available }.
+ * @returns {?{id: string, system: boolean, available: boolean, excerpt: string}}
+ */
+export function toQuotedPreview(replyTo) {
+  if (!replyTo) return null;
+  const available = Boolean(replyTo.available);
+  return {
+    id: String(replyTo.id ?? ""),
+    system: Boolean(replyTo.system),
+    available,
+    // Only a live parent carries an excerpt; a removed one shows the "unavailable" copy instead.
+    excerpt: available ? String(replyTo.excerpt ?? "") : MESSAGE_UNAVAILABLE,
+  };
+}
+
+/**
  * Map one ConversationMessageResponse to the message view-model the thread renders. The read API does
  * not expose the caller's own numeric id (GET /api/v1/me has no id), so TM-438 cannot mark a message
  * as "mine" / draw out-going ticks purely from the payload. `system` messages (an admin broadcast, or an
  * in-thread notice like "You joined the event") render as a centred "from TeamMarhaba" notice rather than
  * a bubble, and — new in TM-445 — carry a pre-derived `cta` when their deep-link is a safe in-app route,
  * so chat.js can draw the tap-through affordance without re-checking the link. Reactions are carried
- * through for read-only display.
+ * through for read-only display; `replyTo` (TM-466) is the quoted-parent preview, or null for a non-reply.
  *
  * <p>TM-463: `readReceipt` is carried through (normalised, or null). Because the backend only attaches it
  * to the caller's OWN messages, a non-null `readReceipt` is now the authoritative "this message is mine"
@@ -274,8 +317,10 @@ export function readReceiptLabel(receipt) {
  * @param {Date} [now]
  * @returns {{id: string, body: string, system: boolean, deepLink: (string|null),
  *            cta: ({href: string, label: string}|null),
- *            reactions: Array<{emoji: string, count: number, mine: boolean}>, timeLabel: string,
- *            sortAt: number, readReceipt: ({count: number, readerIds: string[]}|null)}}
+ *            reactions: Array<{emoji: string, count: number, mine: boolean}>,
+ *            replyTo: (?{id: string, system: boolean, available: boolean, excerpt: string}),
+ *            timeLabel: string, sortAt: number,
+ *            readReceipt: ({count: number, readerIds: string[]}|null)}}
  */
 export function toThreadMessage(msg, now = new Date()) {
   const m = msg || {};
@@ -294,10 +339,24 @@ export function toThreadMessage(msg, now = new Date()) {
     deepLink,
     cta: deepLinkCta(deepLink),
     reactions,
+    replyTo: toQuotedPreview(m.replyTo),
     timeLabel: formatTimeLabel(m.createdAt, now),
     sortAt: epoch(m.createdAt),
     readReceipt: normaliseReceipt(m.readReceipt),
   };
+}
+
+/**
+ * Build the composer's active-reply target from the thread message the user chose to reply to (TM-466):
+ * the parent id to send + a local quote preview (excerpt) so the composer can show what's being quoted
+ * before the round-trip. System messages can be quoted too. Returns null for a message with no id.
+ * @param {{id?: string, body?: string, system?: boolean}} message a thread message view-model.
+ * @returns {?{id: string, excerpt: string, system: boolean, available: boolean}}
+ */
+export function replyTargetFrom(message) {
+  const id = String(message?.id ?? "");
+  if (!id) return null;
+  return { id, excerpt: quoteExcerpt(message?.body), system: Boolean(message?.system), available: true };
 }
 
 /**
@@ -417,13 +476,15 @@ export function classifyPostError(error) {
  * Build the optimistic-echo view-model for a just-sent message — the SAME shape {@link toThreadMessage}
  * produces so the thread renders it identically, plus `pending: true` so the DOM can dim it and label
  * it "Sending…". Replaced by the server's confirmed message (via {@link upsertMessage}) once the POST
- * resolves, or rolled back on failure.
+ * resolves, or rolled back on failure. `replyTo` (TM-466) carries the quoted-parent preview so the echo
+ * shows the quote immediately, exactly as the confirmed reply will.
  * @param {string} body the message text.
- * @param {{localId?: string, now?: Date}} [opts]
+ * @param {{localId?: string, now?: Date, replyTo?: ?Object}} [opts]
  * @returns {{id: string, body: string, system: boolean, deepLink: null, cta: null, reactions: [],
- *            timeLabel: string, sortAt: number, pending: boolean, readReceipt: null}}
+ *            replyTo: (?Object), timeLabel: string, sortAt: number, pending: boolean,
+ *            readReceipt: null}}
  */
-export function pendingMessage(body, { localId = "pending", now = new Date() } = {}) {
+export function pendingMessage(body, { localId = "pending", now = new Date(), replyTo = null } = {}) {
   return {
     id: String(localId),
     body: String(body ?? ""),
@@ -431,6 +492,7 @@ export function pendingMessage(body, { localId = "pending", now = new Date() } =
     deepLink: null,
     cta: null,
     reactions: [],
+    replyTo: replyTo || null,
     timeLabel: formatTimeLabel(now.toISOString(), now),
     sortAt: now.getTime(),
     pending: true,

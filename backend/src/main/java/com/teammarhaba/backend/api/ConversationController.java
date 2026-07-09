@@ -84,8 +84,11 @@ public class ConversationController {
 
     /**
      * Post a new message to the thread (TM-447). Member + open-thread gated in the service; the body is
-     * validated (non-blank, ≤ 500 chars) before it gets here. Returns the created message ({@code 201}),
-     * which also triggers the push fan-out to the thread's other active members.
+     * validated (non-blank, ≤ 500 chars) before it gets here. An optional {@code replyToMessageId}
+     * (TM-466) quotes an earlier message in the same thread — the service validates it names a live,
+     * same-thread message ({@code 400} otherwise). Returns the created message ({@code 201}, carrying
+     * the quoted-parent snippet when it's a reply), which also triggers the push fan-out to the thread's
+     * other active members.
      */
     @PostMapping("/conversations/{id}/messages")
     @ResponseStatus(HttpStatus.CREATED)
@@ -93,7 +96,7 @@ public class ConversationController {
             @AuthenticationPrincipal VerifiedUser caller,
             @PathVariable Long id,
             @Valid @RequestBody PostMessageRequest body) {
-        return posts.post(caller, id, body.body());
+        return posts.post(caller, id, body.body(), body.replyToMessageId());
     }
 
     /** Advance the caller's read cursor for the thread; returns the fresh cursor + unread count. */

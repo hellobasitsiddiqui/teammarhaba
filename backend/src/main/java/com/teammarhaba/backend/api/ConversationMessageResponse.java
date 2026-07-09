@@ -29,6 +29,11 @@ import java.util.List;
  * {@code last_read_at} cursors and ride the same page (computed without an N+1). See {@link
  * MessageReadReceipt}.
  *
+ * <p><b>{@code replyTo}</b> is the quoted-parent snippet (TM-466) — present <b>only</b> when this
+ * message is a reply, {@code null} otherwise. It carries just what the quote UI needs (author + a short
+ * excerpt, or an "unavailable" marker when the parent was removed) and, like reactions and the receipt,
+ * rides the same page (batch-resolved, no N+1). See {@link QuotedMessage}.
+ *
  * @param id          the message's surrogate id
  * @param senderId    the author's {@code users.id}; {@code null} = a system / admin message
  * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
@@ -37,6 +42,7 @@ import java.util.List;
  * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
  * @param reactions   the message's reaction summary, oldest-reacted emoji first; empty if none
  * @param readReceipt read receipt for the caller's OWN message (count + reader ids); {@code null} if not theirs
+ * @param replyTo     the quoted parent snippet when this is a reply (TM-466); {@code null} otherwise
  */
 public record ConversationMessageResponse(
         Long id,
@@ -46,14 +52,21 @@ public record ConversationMessageResponse(
         String deepLink,
         Instant createdAt,
         List<EmojiReactionCount> reactions,
-        MessageReadReceipt readReceipt) {
+        MessageReadReceipt readReceipt,
+        QuotedMessage replyTo) {
 
     /**
-     * Map a persisted {@link Message} plus its reaction summary and (nullable) read receipt to its wire
-     * form. {@code readReceipt} is {@code null} unless the message is the caller's own.
+     * Map a persisted {@link Message} plus its reaction summary, (nullable) read receipt and (nullable)
+     * quoted-parent snippet to its wire form. {@code readReceipt} is {@code null} unless the message is
+     * the caller's own; {@code replyTo} is {@code null} for a non-reply message. This full overload is
+     * the one the thread read (which resolves both per page, no N+1) and the POST echo (empty receipt +
+     * resolved quote) call.
      */
     public static ConversationMessageResponse from(
-            Message message, List<EmojiReactionCount> reactions, MessageReadReceipt readReceipt) {
+            Message message,
+            List<EmojiReactionCount> reactions,
+            MessageReadReceipt readReceipt,
+            QuotedMessage replyTo) {
         return new ConversationMessageResponse(
                 message.getId(),
                 message.getSenderId(),
@@ -62,17 +75,20 @@ public record ConversationMessageResponse(
                 message.getDeepLink(),
                 message.getCreatedAt(),
                 reactions,
-                readReceipt);
+                readReceipt,
+                replyTo);
     }
 
     /**
-     * Convenience overload for the paths that can't resolve a per-caller receipt: the SSE live-broadcast
-     * (TM-464), whose single payload fans out to every connected member and so can't carry one member's
-     * private "read by" view. Maps with {@code readReceipt == null} ("not resolved / not yours"); a
-     * subscriber that turns out to be the sender still gets the authoritative receipt from the read API
-     * (and from its own POST echo), so nothing is lost by omitting it from the broadcast frame.
+     * Convenience overload for the paths that can't resolve a per-caller receipt or the quoted parent:
+     * the SSE live-broadcast (TM-464), whose single payload fans out to every connected member and so
+     * can't carry one member's private "read by" view, and whose post-commit hook doesn't re-load the
+     * reply parent. Maps with {@code readReceipt == null} ("not resolved / not yours") AND {@code
+     * replyTo == null}; a subscriber that turns out to be the sender still gets the authoritative receipt
+     * — and any reply quote — from the read API (and from its own POST echo), so nothing is lost by
+     * omitting them from the broadcast frame.
      */
     public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
-        return from(message, reactions, null);
+        return from(message, reactions, null, null);
     }
 }

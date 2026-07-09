@@ -1,0 +1,28 @@
+-- V31__message_reply_to — reply / quote a message (TM-466, epic Event Chat)
+--
+-- A chat message may now REPLY TO an earlier message in the same thread: the thread then renders a
+-- quoted snippet (author + excerpt) of the parent above the reply, so a busy event chat stays
+-- readable. This adds the single nullable self-referential column the feature needs; the read
+-- projection (ConversationMessageResponse.replyTo) and the post request (PostMessageRequest
+-- .replyToMessageId) build on it and add no schema of their own.
+--
+-- Flyway owns this DDL; Hibernate runs validate-only, so the Message entity must match this column
+-- exactly (nullable BIGINT, non-updatable — a message's reply target is fixed at post time).
+--
+--   reply_to_message_id  The message this one replies to, a self-FK to message(id) WITHIN THE SAME
+--                        thread (the post path enforces same-conversation + still-live at write
+--                        time; a foreign / soft-deleted target is rejected there, never stored).
+--                        NULL = a normal, non-reply message (the overwhelming majority), so the
+--                        column is additive and changes no existing row.
+--
+--                        ON DELETE SET NULL: if a parent message is ever HARD-deleted, the reply keeps
+--                        its row but loses the dangling link (rather than blocking the delete). In
+--                        practice messages are only moderation SOFT-deleted (deleted_at) — the row
+--                        stays and the read side renders "message unavailable"
+--                        (QuotedMessage.available = false) — so this never fires in prod for a single
+--                        message. The one true hard-delete path is the event → conversation → message
+--                        ON DELETE CASCADE from V27, which drops a whole thread (parent AND replies)
+--                        together. SET NULL (over a no-op FK) also lets a self-referential row set be
+--                        torn down in any order — e.g. a repository deleteAll() in tests — without a
+--                        constraint-ordering violation.
+ALTER TABLE message ADD COLUMN reply_to_message_id BIGINT REFERENCES message (id) ON DELETE SET NULL;

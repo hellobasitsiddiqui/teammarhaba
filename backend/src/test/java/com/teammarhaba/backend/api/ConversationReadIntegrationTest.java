@@ -259,6 +259,50 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    // ------------------------------------------------------------------ reply / quote (TM-466)
+
+    @Test
+    void threadRendersQuotedParentAndDeletedParentIsUnavailable() throws Exception {
+        String uid = "conv-reply-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+        Long thread = newBroadcastThread();
+        addMember(thread, userId, MemberRole.MEMBER, MuteState.NONE);
+
+        Long authorA = newUser("conv-reply-author-" + UUID.randomUUID());
+        Long replier = newUser("conv-reply-replier-" + UUID.randomUUID());
+
+        // A live parent + a reply quoting it.
+        Long parent = messages.save(Message.fromUser(thread, authorA, "original question")).getId();
+        messages.save(Message.replyFromUser(thread, replier, "here's my answer", parent));
+
+        // A second parent that then gets moderation-removed, plus a reply quoting it.
+        Long doomed = messages.save(Message.fromUser(thread, authorA, "will be removed")).getId();
+        messages.save(Message.replyFromUser(thread, replier, "replying to the doomed one", doomed));
+        Message removed = messages.findById(doomed).orElseThrow();
+        removed.softDelete(Instant.now());
+        messages.save(removed);
+
+        JsonNode body = getJson("/api/v1/conversations/" + thread + "/messages", caller(uid));
+
+        // The reply to the LIVE parent quotes its author + excerpt, flagged available.
+        JsonNode reply = findByBody(body, "here's my answer");
+        JsonNode quote = reply.get("replyTo");
+        assertThat(quote.get("available").asBoolean()).isTrue();
+        assertThat(quote.get("id").asLong()).isEqualTo(parent);
+        assertThat(quote.get("senderId").asLong()).isEqualTo(authorA);
+        assertThat(quote.get("excerpt").asText()).isEqualTo("original question");
+
+        // The reply to the REMOVED parent renders as "message unavailable": no excerpt, not available,
+        // but keeps the parent id for provenance / tap-to-scroll.
+        JsonNode orphan = findByBody(body, "replying to the doomed one").get("replyTo");
+        assertThat(orphan.get("available").asBoolean()).isFalse();
+        assertThat(orphan.get("excerpt").isNull()).isTrue();
+        assertThat(orphan.get("id").asLong()).isEqualTo(doomed);
+
+        // A normal, non-reply message carries a null replyTo.
+        assertThat(findByBody(body, "original question").get("replyTo").isNull()).isTrue();
+    }
+
     // ------------------------------------------------------------------ unread + mark-read
 
     @Test
@@ -565,5 +609,15 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
             out.add(item.get("id").asLong());
         }
         return out;
+    }
+
+    /** The first message item in the page whose body matches — used to assert per-message reply quotes. */
+    private static JsonNode findByBody(JsonNode page, String body) {
+        for (JsonNode item : page.get("items")) {
+            if (body.equals(item.get("body").asText())) {
+                return item;
+            }
+        }
+        throw new AssertionError("no message with body \"" + body + "\" in the page");
     }
 }

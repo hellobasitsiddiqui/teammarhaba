@@ -534,16 +534,26 @@ export async function markConversationRead(id) {
  *   • 5xx / network                                     → transient: keep the draft, offer a retry
  * The mapping itself is the pure, unit-tested `classifyPostError` in chat-core.js. A 401 will already
  * have refreshed/redirected via {@link apiFetch}.
+ * <p>An optional {@code replyToMessageId} (TM-466) posts this as a REPLY quoting an earlier message in
+ * the same thread; the backend validates it names a live, same-thread message (a foreign / removed
+ * target is a {@code 400}). Omitted / nullish → a plain message. The created response then carries the
+ * quoted-parent snippet in {@code replyTo} so the confirmed echo renders the quote.
  * @param {number|string} id the conversation id.
  * @param {string} body the message text (≤500 chars, non-blank).
+ * @param {{replyToMessageId?: (number|string|null)}} [opts] optional reply target (TM-466).
  * @returns {Promise<Object>} the created ConversationMessageResponse.
  * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason.
  */
-export async function postConversationMessage(id, body) {
+export async function postConversationMessage(id, body, { replyToMessageId = null } = {}) {
+  const payload = { body };
+  // Only include the reply target when it's a real, positive id — keep a plain post's body minimal
+  // (and never send a null the backend's @Positive would trip on).
+  const replyId = Number(replyToMessageId);
+  if (Number.isFinite(replyId) && replyId > 0) payload.replyToMessageId = replyId;
   const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     throw await toApiError(response, `Could not send your message (${response.status}). Please try again.`);

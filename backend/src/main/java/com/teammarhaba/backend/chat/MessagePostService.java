@@ -2,12 +2,14 @@ package com.teammarhaba.backend.chat;
 
 import com.teammarhaba.backend.api.ConversationMessageResponse;
 import com.teammarhaba.backend.api.MessageReadReceipt;
+import com.teammarhaba.backend.api.QuotedMessage;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.UserService;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import java.time.Clock;
 import java.time.Instant;
@@ -131,18 +133,27 @@ public class MessagePostService {
     }
 
     /**
-     * Post {@code body} to thread {@code conversationId} as the verified caller. Applies the
-     * member + open-thread gate, persists the message, audits the post, and publishes the
-     * {@link MessageCreatedEvent} that fires the push fan-out after commit. Returns the created message
-     * as the read DTO (with an empty reaction summary — a brand
-     * new message has no reactions yet) so the client can append it to the timeline optimistically.
+     * Post {@code body} to thread {@code conversationId} as the verified caller, optionally as a REPLY
+     * quoting {@code replyToMessageId} (TM-466). Applies the member + open-thread gate, validates the
+     * reply target (when present), persists the message, audits the post, and publishes the
+     * {@link MessageCreatedEvent} that fires the push + live-SSE fan-outs after commit. Returns the
+     * created message as the read DTO — with an empty reaction summary (a brand-new message has none
+     * yet), an empty read receipt (TM-463: as the caller's OWN message, "read by 0" the instant it's
+     * created), and the quoted-parent snippet when it's a reply — so the client can append it to the
+     * timeline optimistically, receipt and quote and all.
      *
+     * @param replyToMessageId the message being replied to, or {@code null} for a plain message. When
+     *     non-null it must name a live message in THIS thread, else a {@code 400} (below) — the reply
+     *     target is checked AFTER the member/open gate, so it can't be used to probe other threads.
      * @throws AccessDeniedException {@code 403} if the caller is not an active (NONE) member — this
      *     includes an unknown / foreign thread (no membership row), so thread existence isn't leaked
      * @throws ConflictException     {@code 409} if the thread is closed / read-only
+     * @throws BadRequestException   {@code 400} if {@code replyToMessageId} names a message that isn't a
+     *     live message of this thread (missing, moderation-removed, or in another conversation)
      */
     @Transactional
-    public ConversationMessageResponse post(VerifiedUser caller, Long conversationId, String body) {
+    public ConversationMessageResponse post(
+            VerifiedUser caller, Long conversationId, String body, Long replyToMessageId) {
         Long userId = users.provision(caller).getId();
 
         // Membership gate FIRST (TM-573): an unknown thread has no membership row and falls through to
@@ -160,8 +171,17 @@ public class MessagePostService {
 
         requireOpenThread(conversation);
 
-        // Persist, flushing so the @Generated DB-authoritative created_at is read straight back for the DTO.
-        Message saved = messages.saveAndFlush(Message.fromUser(conversationId, userId, body));
+        // Reply target check (TM-466), only reached by an active member of an open thread: the parent
+        // must be a live message OF THIS conversation. A missing / soft-deleted / foreign target is a
+        // uniform 400 (below), so a reply can't be used to probe which message ids exist elsewhere.
+        Message parent = requireReplyTarget(conversationId, replyToMessageId);
+
+        // Persist, flushing so the @Generated DB-authoritative created_at is read straight back for the
+        // DTO. A reply carries its parent id; a plain message doesn't.
+        Message saved = messages.saveAndFlush(
+                replyToMessageId == null
+                        ? Message.fromUser(conversationId, userId, body)
+                        : Message.replyFromUser(conversationId, userId, body, replyToMessageId));
 
         // Audit the post (the durable text lives in the message row; the audit only names it).
         audit.record(
@@ -181,10 +201,32 @@ public class MessagePostService {
 
         // A freshly posted message carries no reactions yet, and — as the caller's OWN message — an
         // empty read receipt (TM-463): nobody else could have read it in the instant since it was
-        // created, so the sender immediately sees it as "sent, read by 0". This is the exact DTO the
-        // poster gets back; the live-broadcast payload is rebuilt identically in the stream listener
-        // from the same message, so the wire shape can never diverge between the two paths.
-        return ConversationMessageResponse.from(saved, List.of(), MessageReadReceipt.empty());
+        // created, so the sender immediately sees it as "sent, read by 0". We ALSO echo the
+        // quoted-parent snippet (TM-466) so the optimistic client render shows the quote immediately
+        // (the parent is already loaded + validated above). This is the exact DTO the poster gets back;
+        // the live-broadcast payload is rebuilt in the stream listener from the same message (with a null
+        // receipt + null quote — a broadcast is caller-independent and re-syncs over the read API), so
+        // the poster's own optimistic echo is the richest view and nothing diverges lossily.
+        return ConversationMessageResponse.from(
+                saved, List.of(), MessageReadReceipt.empty(), QuotedMessage.resolve(replyToMessageId, parent));
+    }
+
+    /**
+     * Validate an optional reply target (TM-466): {@code null} (a plain message) resolves to {@code
+     * null}; otherwise the id must name a still-live message that belongs to {@code conversationId}.
+     * A missing, moderation-removed, or foreign (other-thread) target is a uniform {@code 400} with a
+     * generic reason, so a reply can't probe which message ids exist in threads the caller can't read.
+     * Returns the resolved parent so the caller can build the echo's quoted snippet without re-loading.
+     */
+    private Message requireReplyTarget(Long conversationId, Long replyToMessageId) {
+        if (replyToMessageId == null) {
+            return null;
+        }
+        return messages
+                .findById(replyToMessageId)
+                .filter(parent -> !parent.isDeleted() && parent.getConversationId().equals(conversationId))
+                .orElseThrow(() -> new BadRequestException(
+                        "The message you're replying to isn't available in this thread."));
     }
 
     /**

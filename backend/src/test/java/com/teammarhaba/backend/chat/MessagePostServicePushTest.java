@@ -110,7 +110,7 @@ class MessagePostServicePushTest extends AbstractIntegrationTest {
     void pushFiresAfterCommit() {
         // A plain, successful post: its own @Transactional commits, so the AFTER_COMMIT listener runs the
         // fan-out before post() returns — the recipient's device has the push.
-        postService.post(author, threadId, "hello team");
+        postService.post(author, threadId, "hello team", null); // null = plain, non-reply message (TM-466)
 
         assertThat(deliveredTokens()).containsExactly("tok-recipient");
         PushMessage pushed = sender.deliveries().get(0).message();
@@ -129,7 +129,7 @@ class MessagePostServicePushTest extends AbstractIntegrationTest {
         // outer boundary — never fires. This is the phantom-push scenario the ticket fixes.
         TransactionTemplate tx = new TransactionTemplate(txManager);
         assertThatThrownBy(() -> tx.executeWithoutResult(status -> {
-                    postService.post(author, threadId, "will roll back");
+                    postService.post(author, threadId, "will roll back", null); // null = non-reply (TM-466)
                     // A failure AFTER the message row + event were written, before commit.
                     throw new IllegalStateException("boom after post, before commit");
                 }))
