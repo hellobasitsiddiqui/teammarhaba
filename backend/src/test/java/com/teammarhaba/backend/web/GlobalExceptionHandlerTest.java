@@ -100,6 +100,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.LocationRevealPolicy locationRevealPolicy;
 
+    // NotificationController (TM-454) needs a NotificationFeedService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.notify.NotificationFeedService notificationFeedService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")
