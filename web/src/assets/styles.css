@@ -5278,6 +5278,30 @@ button.tm-c-reaction {
     background: color-mix(in srgb, var(--accent) 12%, var(--surface-card));
 }
 
+/* Recalled (tombstoned) admin message (TM-473, HYBRID recall): the recipient had already seen it, so it
+   isn't deleted — it's kept but quietened and struck through, with a "Recalled by admin · <time>" note.
+   Inert (a div, not a button): there's nothing to navigate to and no read state to change. Muted + no
+   left accent stripe so it reads as retired, not active. */
+.tm-np-row--recalled {
+    color: var(--muted);
+    background: var(--surface-card);
+    cursor: default;
+}
+
+/* Strike through the recalled message's title + body so it's visibly withdrawn (tombstoned, not gone). */
+.tm-np-row--recalled .tm-np-strike {
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+}
+
+/* The "Recalled by admin · <time>" status line under a recalled row — quiet, italic, not struck. */
+.tm-np-recalled {
+    margin-top: 3px;
+    font-size: var(--fs-1);
+    font-style: italic;
+    color: var(--muted);
+}
+
 .tm-np-row .tm-c-dot {
     margin-top: 6px;
     flex: 0 0 auto;

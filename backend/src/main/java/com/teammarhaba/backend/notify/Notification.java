@@ -83,6 +83,18 @@ public class Notification {
     @Column(name = "read_at")
     private Instant readAt;
 
+    /**
+     * When this notification was recalled by an admin (TM-473); {@code null} = live. The tombstone
+     * marker for the HYBRID admin-message recall: an already-SEEN row is kept and stamped here (rather
+     * than deleted) so the panel renders it struck-through with "Recalled by admin · &lt;time&gt;" —
+     * don't silently vanish something the recipient already looked at. Unseen rows are deleted at
+     * recall, not stamped, so they never carry this. Set once via {@link #markRecalled(Instant)} and
+     * never rewritten (one-way set-if-null, like {@link #seenAt}/{@link #readAt}). Owned by Flyway
+     * ({@code V26__notification_recalled}).
+     */
+    @Column(name = "recalled_at")
+    private Instant recalledAt;
+
     /** Required by JPA. */
     protected Notification() {
     }
@@ -139,6 +151,27 @@ public class Notification {
         }
     }
 
+    /**
+     * Tombstone this notification as recalled by an admin (TM-473) — the SEEN half of the HYBRID
+     * recall. One-way and idempotent, like {@link #markSeen(Instant)}: the first call stamps {@code
+     * recalledAt}; a later call is a no-op so the original recall moment is preserved. Only the
+     * already-seen rows of a recalled campaign are stamped (the unseen ones are deleted, never reach
+     * here); the caller ({@code AdminMessageService.recall} / the repository bulk update) owns which
+     * rows this applies to. Kept for symmetry with the entity's other read-model transitions; the
+     * recall path uses the repository bulk update for the fan-out, but a per-row caller/test can use
+     * this.
+     *
+     * @param when the recall timestamp
+     * @return {@code true} if this call performed the recall (was live), {@code false} if already recalled
+     */
+    public boolean markRecalled(Instant when) {
+        if (this.recalledAt != null) {
+            return false;
+        }
+        this.recalledAt = when;
+        return true;
+    }
+
     public Long getId() {
         return id;
     }
@@ -181,5 +214,15 @@ public class Notification {
 
     public Instant getReadAt() {
         return readAt;
+    }
+
+    /** When this notification was recalled by an admin, or {@code null} if it is still live (TM-473). */
+    public Instant getRecalledAt() {
+        return recalledAt;
+    }
+
+    /** Whether this notification has been recalled (the tombstone the feed/panel render struck-through). */
+    public boolean isRecalled() {
+        return recalledAt != null;
     }
 }

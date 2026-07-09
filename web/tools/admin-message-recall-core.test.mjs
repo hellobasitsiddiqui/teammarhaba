@@ -22,11 +22,12 @@ test("labels are the live vs recalled action copy", () => {
 
 // --- confirm copy -----------------------------------------------------------------------------
 
-test("confirm copy is honest about the best-effort-push limit", () => {
+test("confirm copy describes the HYBRID behaviour and is honest about the best-effort-push limit", () => {
   const copy = recallConfirmCopy();
-  // Names the two in-app surfaces it DOES clear...
-  assert.match(copy, /in-app inbox/i);
-  assert.match(copy, /notification bell/i);
+  // Names the HYBRID split: unseen recipients won't see it, already-seen ones keep it as a tombstone...
+  assert.match(copy, /haven't seen it yet/i);
+  assert.match(copy, /already saw it/i);
+  assert.match(copy, /Recalled by admin/i);
   // ...and is explicit that an already-delivered push can't be un-sent (the documented limit).
   assert.match(copy, /can't be un-sent|tray/i);
   // ...and that recall itself is irreversible (recall + resend, no edit).
@@ -35,15 +36,28 @@ test("confirm copy is honest about the best-effort-push limit", () => {
 
 // --- result summary ---------------------------------------------------------------------------
 
-test("summariseRecall leads with the removed reach, pluralised", () => {
-  assert.equal(summariseRecall({ removed: 42 }), "Message recalled — removed from 42 inboxes");
-  assert.equal(summariseRecall({ removed: 1 }), "Message recalled — removed from 1 inbox");
+test("summariseRecall leads with the total reach, pluralised", () => {
+  // All unseen (deleted): no tombstone clause.
+  assert.equal(summariseRecall({ removed: 42, tombstoned: 0 }), "Message recalled — pulled from 42 recipients");
+  assert.equal(summariseRecall({ removed: 1 }), "Message recalled — pulled from 1 recipient");
 });
 
-test("summariseRecall treats removed:0 as a successful no-op recall, not a failure", () => {
+test("summariseRecall names the tombstoned (already-seen) partition when there is one", () => {
+  assert.equal(
+    summariseRecall({ removed: 12, tombstoned: 30 }),
+    "Message recalled — pulled from 42 recipients (30 had seen it, now marked recalled)",
+  );
+  // A pure-tombstone recall (everyone had already seen it) still reads honestly.
+  assert.equal(
+    summariseRecall({ removed: 0, tombstoned: 1 }),
+    "Message recalled — pulled from 1 recipient (1 had seen it, now marked recalled)",
+  );
+});
+
+test("summariseRecall treats a zero total as a successful no-op recall, not a failure", () => {
   const zero = "Message recalled — no in-app copies remained to remove";
-  assert.equal(summariseRecall({ removed: 0 }), zero);
-  assert.equal(summariseRecall({}), zero); // missing/absent count
+  assert.equal(summariseRecall({ removed: 0, tombstoned: 0 }), zero);
+  assert.equal(summariseRecall({}), zero); // missing/absent counts
   assert.equal(summariseRecall(), zero); // no arg
   assert.equal(summariseRecall({ removed: "not-a-number" }), zero); // coerces safely
 });

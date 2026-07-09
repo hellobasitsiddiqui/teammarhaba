@@ -49,6 +49,10 @@
           "removed" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "tombstoned" : {
+            "format" : "int32",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -934,6 +938,13 @@
             "type" : "boolean"
           },
           "readAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "recalled" : {
+            "type" : "boolean"
+          },
+          "recalledAt" : {
             "format" : "date-time",
             "type" : "string"
           },

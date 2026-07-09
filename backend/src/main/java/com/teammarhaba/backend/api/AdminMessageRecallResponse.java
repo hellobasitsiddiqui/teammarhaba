@@ -18,13 +18,22 @@ import java.time.Instant;
  * @param id         the {@code admin_message} campaign id that was recalled
  * @param recalledAt when it was recalled (the header's {@code recalled_at})
  * @param recalledBy Firebase UID of the admin who recalled it
- * @param removed    how many durable in-app copies were deleted (inbox/panel + bell); {@code 0} for a
- *                   re-recall of an already-recalled message (idempotent no-op)
+ * @param removed    how many durable in-app copies were <b>deleted</b> — the unseen partition (never
+ *                   surfaced in the bell/panel), which vanish cleanly; {@code 0} for a re-recall of an
+ *                   already-recalled message (idempotent no-op)
+ * @param tombstoned how many durable in-app copies were <b>tombstoned</b> — the already-seen partition,
+ *                   kept + marked recalled and rendered struck-through as "Recalled by admin"; {@code 0}
+ *                   on an idempotent no-op or when nobody had seen it yet
  */
-public record AdminMessageRecallResponse(long id, Instant recalledAt, String recalledBy, int removed) {
+public record AdminMessageRecallResponse(
+        long id, Instant recalledAt, String recalledBy, int removed, int tombstoned) {
 
     static AdminMessageRecallResponse from(AdminRecallResult result) {
         return new AdminMessageRecallResponse(
-                result.campaignId(), result.recalledAt(), result.recalledBy(), result.removed());
+                result.campaignId(),
+                result.recalledAt(),
+                result.recalledBy(),
+                result.removed(),
+                result.tombstoned());
     }
 }

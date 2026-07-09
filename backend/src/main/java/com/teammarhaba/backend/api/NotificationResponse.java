@@ -23,10 +23,15 @@ import java.time.Instant;
  * @param sourceRef optional opaque reference to the originating entity; {@code null} if none
  * @param sticky    pinned/exempt-from-purge (admin-send only) — surfaced so the UI can flag it
  * @param createdAt DB-authoritative creation instant (drives the newest-first feed order)
- * @param seenAt    when the caller last saw it in the panel; {@code null} while unseen
- * @param readAt    when the caller opened/read it; {@code null} while unread
- * @param seen      convenience: {@code seenAt != null} (does not count toward the bell badge)
- * @param read      convenience: {@code readAt != null} (does not count toward the unread count)
+ * @param seenAt     when the caller last saw it in the panel; {@code null} while unseen
+ * @param readAt     when the caller opened/read it; {@code null} while unread
+ * @param seen       convenience: {@code seenAt != null} (does not count toward the bell badge)
+ * @param read       convenience: {@code readAt != null} (does not count toward the unread count)
+ * @param recalledAt when an admin recalled it (TM-473); {@code null} while live. Only an already-seen
+ *                   admin message carries this — the HYBRID recall tombstones the seen copies and
+ *                   deletes the unseen ones, so a recalled row is by definition one the caller had seen.
+ * @param recalled   convenience: {@code recalledAt != null} — drives the panel's struck-through
+ *                   "Recalled by admin · &lt;time&gt;" render for a tombstoned admin message
  */
 public record NotificationResponse(
         Long id,
@@ -40,9 +45,14 @@ public record NotificationResponse(
         Instant seenAt,
         Instant readAt,
         boolean seen,
-        boolean read) {
+        boolean read,
+        Instant recalledAt,
+        boolean recalled) {
 
-    /** Map a persisted {@link Notification} to its wire form, deriving the {@code seen}/{@code read} flags. */
+    /**
+     * Map a persisted {@link Notification} to its wire form, deriving the {@code seen}/{@code read}/
+     * {@code recalled} flags from their backing timestamps.
+     */
     public static NotificationResponse from(Notification n) {
         return new NotificationResponse(
                 n.getId(),
@@ -56,6 +66,8 @@ public record NotificationResponse(
                 n.getSeenAt(),
                 n.getReadAt(),
                 n.getSeenAt() != null,
-                n.getReadAt() != null);
+                n.getReadAt() != null,
+                n.getRecalledAt(),
+                n.getRecalledAt() != null);
     }
 }

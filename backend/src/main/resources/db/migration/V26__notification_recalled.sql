@@ -1,0 +1,38 @@
+-- V26__notification_recalled — per-recipient notification TOMBSTONE for an admin-message recall
+-- (TM-473 / epic TM-432).
+--
+-- Version PRE-ASSIGNED as V26 (this branch already owns V25__admin_message_recall, which added the
+-- recall marker to the admin_message HEADER). Do NOT auto-pick "next free" — V26 is owned by the
+-- hybrid-recall change and must stay V26 even if a sibling adds a later version.
+--
+-- WHY THIS COLUMN (the design change from blanket delete → HYBRID recall):
+-- Recall used to blanket-delete every ADMIN_MESSAGE notification row a campaign created (V25's
+-- AdminMessageService.recall → NotificationRepository.deleteByTypeAndSourceRef). The owner's design
+-- decision (TM-473 "Design decision (owner) — recall behaviour") makes the recipient-facing effect
+-- HYBRID, per notification row:
+--   • NOT yet SEEN (seen_at IS NULL — never surfaced in the bell/panel) → still DELETED (clean vanish,
+--     no trace — the recipient never knew it existed, so removing it silently is correct).
+--   • Already SEEN (seen_at IS NOT NULL — the recipient viewed the bell/panel that contained it) →
+--     TOMBSTONED: the row is kept and stamped recalled_at, and the panel renders it struck-through
+--     with "Recalled by admin · <time>". Don't silently vanish something someone already looked at.
+-- So the SEEN partition needs a durable "this was recalled, when" marker on the notification row —
+-- that is this column. (The delete partition needs no column: those rows are gone.)
+--
+--   recalled_at  When this notification was recalled by an admin (TM-473); NULL = live (the vast
+--                majority of rows). Set once on the SEEN partition at recall time, never rewritten
+--                (Notification.markRecalled is a one-way set-if-null, mirroring seen_at/read_at). A
+--                non-null value is the tombstone the feed API surfaces (NotificationResponse.recalled)
+--                and the panel renders struck-through. Unseen rows are deleted, not stamped, so they
+--                never carry this.
+--
+-- Nullable + default NULL, so every existing row is valid unchanged — a backward-compatible,
+-- forward-only change. Hibernate runs validate-only, so the Notification entity's new recalledAt
+-- field must match this column exactly.
+ALTER TABLE notification ADD COLUMN recalled_at TIMESTAMPTZ;
+
+-- The recall write is "stamp the SEEN rows of one campaign" (type = 'ADMIN_MESSAGE', a given
+-- source_ref, seen_at IS NOT NULL); the read is the feed, which already rides
+-- idx_notification_user_created_at and simply surfaces recalled_at per row. No new index is needed:
+-- the recall write is keyed by (type, source_ref) — a rare, admin-initiated, bounded fan-out — and
+-- recalled rows are a tiny minority, so a dedicated index would cost more on every insert than it
+-- saves on the occasional recall.

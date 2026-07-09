@@ -55,6 +55,30 @@ export const TYPE_ICONS = Object.freeze({
 /** Fallback glyph for an unknown/absent type — a generic bell, so no row renders icon-less. */
 export const DEFAULT_ITEM_ICON = "spot";
 
+/**
+ * The prefix for a recalled (tombstoned) admin-message row's status line (TM-473, HYBRID recall). An
+ * admin message the recipient had ALREADY SEEN is not deleted on recall — it is kept and rendered
+ * struck-through with this label so a message someone already looked at doesn't silently vanish. The
+ * DOM half (notification-panel.js) appends the relative recall time to build "Recalled by admin ·
+ * &lt;time&gt;" via {@link recalledItemLabel}. Kept generic ("by admin", not a named admin) — recipients
+ * don't need to know which admin, only that it was officially pulled. (Unseen copies are deleted and
+ * never reach the panel, so no label is needed for them.)
+ */
+export const RECALLED_BY_ADMIN = "Recalled by admin";
+
+/**
+ * The full status line for a recalled item row: "Recalled by admin · {time}" when a formatted relative
+ * time is given, or just "Recalled by admin" when it isn't (a missing/blank time still yields a valid
+ * label rather than a dangling separator). The relative-time formatting stays in the DOM half (it owns
+ * ui.js's relativeTime); this pure helper only composes the string so it can be node-tested.
+ * @param {string} [relativeTimeText] the already-formatted relative recall time (e.g. "3m ago").
+ * @returns {string}
+ */
+export function recalledItemLabel(relativeTimeText) {
+  const t = typeof relativeTimeText === "string" ? relativeTimeText.trim() : "";
+  return t ? `${RECALLED_BY_ADMIN} · ${t}` : RECALLED_BY_ADMIN;
+}
+
 /** Glyph for a chat group row — the speech-bubble, matching the wireframe's chat note. */
 export const CHAT_ICON = "chat";
 
@@ -189,7 +213,10 @@ export function chatGroupLabel(group) {
  *   • Chat group — { kind: "chat", key, title, route, icon, ids, unreadIds, unread, preview,
  *                    createdAt, read }. `ids`/`unreadIds` drive mark-read; `route` is the thread tap
  *                    target; `read` is true once every member is read (so the group clears — the AC).
- *   • Item       — { kind: "item", id, type, icon, title, body, route, createdAt, read, sticky }.
+ *   • Item       — { kind: "item", id, type, icon, title, body, route, createdAt, read, sticky,
+ *                    recalled, recalledAt }. `recalled` (a tombstoned admin message the recipient had
+ *                    already seen) makes the DOM half render it struck-through as "Recalled by admin ·
+ *                    <time>" instead of a normal row; `recalledAt` is that time.
  *
  * Grouping key for chat: the safe thread route (all messages in one thread share `#/chat/{id}`), or —
  * when a chat notification carries no thread link — its title, so same-titled chat notes still merge.
@@ -246,6 +273,10 @@ export function buildPanel(items) {
         group.createdAt = n.createdAt ?? group.createdAt;
       }
     } else {
+      // A recalled (tombstoned) admin message: kept in the feed but the panel renders it struck-through
+      // as "Recalled by admin · <time>" rather than a normal, tappable row (TM-473, HYBRID recall). We
+      // trust either the server flag (`recalled`) or a present `recalledAt` so both wire shapes resolve.
+      const recalled = n.recalled === true || (typeof n.recalledAt === "string" && n.recalledAt.trim() !== "");
       others.push({
         kind: ITEM,
         id: n.id,
@@ -259,6 +290,8 @@ export function buildPanel(items) {
         maxId: idValue(n.id),
         read: n.read === true,
         sticky: n.sticky === true,
+        recalled,
+        recalledAt: recalled ? (n.recalledAt ?? null) : null,
       });
     }
   }

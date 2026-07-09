@@ -18,6 +18,7 @@ import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
 import com.teammarhaba.backend.messaging.AdminMessage;
 import com.teammarhaba.backend.messaging.AdminMessageRepository;
+import com.teammarhaba.backend.notify.Notification;
 import com.teammarhaba.backend.notify.NotificationRepository;
 import com.teammarhaba.backend.notify.NotificationType;
 import com.teammarhaba.backend.user.NotificationPref;
@@ -43,9 +44,12 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * (same package) so a send's push fan-out never hits real FCM. Covers the ACs:
  *
  * <ul>
- *   <li><b>removes inbox + bell copies</b> — after recall, every recipient's {@code ADMIN_MESSAGE}
- *       notification row is gone (the in-app inbox/panel) and their unseen bell badge drops back to 0
- *       (the bell reads the same rows);
+ *   <li><b>HYBRID recall (the owner's design decision, TM-473)</b> — when no recipient has seen it yet,
+ *       recall <em>deletes</em> every {@code ADMIN_MESSAGE} row (clean vanish) and their unseen bell
+ *       badge drops back to 0; when a recipient has <em>already seen</em> it, that row is instead
+ *       <em>tombstoned</em> (kept + {@code recalledAt} stamped) and the feed API surfaces it
+ *       {@code recalled} so the panel renders it struck-through — the unseen ones for the same campaign
+ *       are still deleted;
  *   <li><b>sent-history marked recalled</b> — the campaign header is stamped {@code recalledAt}/
  *       {@code recalledBy} and the sent-history row reads {@code status = RECALLED};
  *   <li><b>admin-gated</b> — anonymous → 401, USER → 403;
@@ -133,6 +137,20 @@ class AdminMessageRecallIntegrationTest extends AbstractIntegrationTest {
                 .count();
     }
 
+    private List<Notification> adminMessageNotifications(long userId) {
+        return notifications.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
+                .filter(n -> n.getType() == NotificationType.ADMIN_MESSAGE)
+                .toList();
+    }
+
+    /** Simulate the recipient opening their bell/panel: stamp their ADMIN_MESSAGE rows seen. */
+    private void markAdminMessagesSeen(long userId) {
+        for (Notification n : adminMessageNotifications(userId)) {
+            n.markSeen(Instant.now());
+            notifications.saveAndFlush(n);
+        }
+    }
+
     // --- the happy path: removes inbox + bell, marks recalled, audits ------------------------------
 
     @Test
@@ -154,7 +172,8 @@ class AdminMessageRecallIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").value((int) id))
-                .andExpect(jsonPath("$.removed").value(2)) // both in-app copies removed
+                .andExpect(jsonPath("$.removed").value(2)) // both unseen → both in-app copies deleted
+                .andExpect(jsonPath("$.tombstoned").value(0)) // nobody had seen it → nothing tombstoned
                 .andExpect(jsonPath("$.recalledBy").value("admin-recall"))
                 .andExpect(jsonPath("$.recalledAt").isNotEmpty());
 
@@ -190,6 +209,60 @@ class AdminMessageRecallIntegrationTest extends AbstractIntegrationTest {
         // send integration test uses).
         assertThat(recalls.get(0).getMetadata()).containsKey("removed");
         assertThat(((Number) recalls.get(0).getMetadata().get("removed")).intValue()).isEqualTo(2);
+        assertThat(((Number) recalls.get(0).getMetadata().get("tombstoned")).intValue()).isZero();
+    }
+
+    // --- HYBRID recall: delete the unseen, tombstone the seen --------------------------------------
+
+    @Test
+    void recallTombstonesSeenAndDeletesUnseen() throws Exception {
+        long seen = seedUser("recall-seen"); // will open the bell → their copy is SEEN → tombstoned
+        long unseen = seedUser("recall-unseen"); // never opens it → their copy is UNSEEN → deleted
+
+        long id = send("admin-hybrid", List.of(seen, unseen));
+
+        // The 'seen' recipient opens their bell/panel; the 'unseen' one does not.
+        markAdminMessagesSeen(seen);
+        assertThat(notifications.countByUserIdAndSeenAtIsNull(seen)).isZero(); // seen
+        assertThat(notifications.countByUserIdAndSeenAtIsNull(unseen)).isEqualTo(1); // still unseen
+
+        mockMvc.perform(post("/api/v1/admin/messages/" + id + "/recall").with(admin("admin-hybrid")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.removed").value(1)) // the unseen copy deleted
+                .andExpect(jsonPath("$.tombstoned").value(1)) // the seen copy kept + marked recalled
+                .andExpect(jsonPath("$.recalledAt").isNotEmpty());
+
+        // The UNSEEN recipient's row is gone entirely (clean vanish, no trace).
+        assertThat(adminMessageRows(unseen)).isZero();
+
+        // The SEEN recipient's row is KEPT but tombstoned — present, and stamped recalled.
+        List<Notification> seenRows = adminMessageNotifications(seen);
+        assertThat(seenRows).hasSize(1);
+        assertThat(seenRows.get(0).isRecalled()).isTrue();
+        assertThat(seenRows.get(0).getRecalledAt()).isNotNull();
+
+        // The feed API surfaces the recalled/tombstone state (+ time) so the panel renders it struck-through.
+        mockMvc.perform(get("/api/v1/me/notifications").with(regularUser("recall-seen")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(seenRows.get(0).getId().intValue()))
+                .andExpect(jsonPath("$.items[0].recalled").value(true))
+                .andExpect(jsonPath("$.items[0].recalledAt").isNotEmpty());
+
+        // The campaign header is recalled, and the audit row records BOTH partitions.
+        assertThat(adminMessages
+                        .findByIdAndActorUid(id, "admin-hybrid")
+                        .orElseThrow()
+                        .isRecalled())
+                .isTrue();
+        List<AuditEvent> recalls = audits
+                .findByTargetTypeAndTargetIdOrderByCreatedAtDesc("AdminMessage", String.valueOf(id))
+                .stream()
+                .filter(a -> a.getAction() == AuditAction.ADMIN_MESSAGE_RECALLED)
+                .toList();
+        assertThat(recalls).hasSize(1);
+        assertThat(((Number) recalls.get(0).getMetadata().get("removed")).intValue()).isEqualTo(1);
+        assertThat(((Number) recalls.get(0).getMetadata().get("tombstoned")).intValue())
+                .isEqualTo(1);
     }
 
     // --- admin gate --------------------------------------------------------------------------------

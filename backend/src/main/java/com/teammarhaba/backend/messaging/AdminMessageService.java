@@ -247,13 +247,27 @@ public class AdminMessageService {
      *   <li><b>Mark recalled.</b> {@link AdminMessage#markRecalled} stamps the header's one-way
      *       {@code recalledAt}/{@code recalledBy}; the sent-history view then shows it {@code RECALLED}.
      *       Idempotent: recalling an already-recalled message is a no-op that removes nothing and does
-     *       not re-audit (returns {@code removed = 0} with the original recall stamp).
-     *   <li><b>Remove the in-app copies.</b> Every durable {@code ADMIN_MESSAGE} row this campaign
-     *       created ({@code source_ref = 'admin_message:<id>'}) is deleted in one statement, so the
-     *       message vanishes from every recipient's in-app inbox/panel <em>and</em> their notification
-     *       bell (the unseen/unread counts derive from those rows — inbox and bell are the same store).
+     *       not re-audit (returns {@code removed = 0, tombstoned = 0} with the original recall stamp).
+     *   <li><b>Partition the in-app copies (HYBRID recall — the owner's design decision, TM-473).</b>
+     *       The durable {@code ADMIN_MESSAGE} rows this campaign created ({@code source_ref =
+     *       'admin_message:<id>'}) are split by whether the recipient has <em>seen</em> them — i.e.
+     *       viewed the bell/panel that contained them ({@code seen_at}), NOT whether they opened/read
+     *       the item:
+     *       <ul>
+     *         <li><b>Unseen</b> ({@code seen_at is null}) → <b>deleted</b>
+     *             ({@link NotificationRepository#deleteUnseenByTypeAndSourceRef}): a clean vanish with no
+     *             trace — the recipient never knew it existed — which also clears the unseen bell count
+     *             those rows drive (inbox and bell are the same store).
+     *         <li><b>Seen</b> ({@code seen_at is not null}) → <b>tombstoned</b>
+     *             ({@link NotificationRepository#markRecalledSeenByTypeAndSourceRef}): the row is kept and
+     *             stamped {@code recalled_at}, so the feed API surfaces it recalled and the panel renders
+     *             it struck-through with "Recalled by admin · &lt;time&gt;". We don't silently vanish
+     *             something the recipient already looked at.
+     *       </ul>
+     *       Both partitions use the same recall {@link Instant} the header was stamped with, so the
+     *       header and every tombstone share one recall moment.
      *   <li><b>Audit.</b> One {@link AuditAction#ADMIN_MESSAGE_RECALLED} row records the campaign id and
-     *       how many copies were removed — never the body.
+     *       how many copies were removed vs tombstoned — never the body.
      * </ol>
      *
      * <p><b>Best-effort on push (documented limit).</b> Recall removes only the durable IN-APP copies. A
@@ -264,7 +278,7 @@ public class AdminMessageService {
      *
      * @param actorUid  Firebase UID of the admin recalling the message (the verified caller)
      * @param messageId the campaign id to recall
-     * @return the recall outcome (campaign id, recall stamp, and rows removed)
+     * @return the recall outcome (campaign id, recall stamp, unseen rows removed + seen rows tombstoned)
      * @throws ResourceNotFoundException if no campaign with that id was sent by this admin
      */
     @Transactional
@@ -273,34 +287,45 @@ public class AdminMessageService {
                 .findByIdAndActorUid(messageId, actorUid)
                 .orElseThrow(() -> new ResourceNotFoundException("No message " + messageId + " to recall."));
 
-        // Idempotent: an already-recalled campaign returns its recorded recall, removing nothing and not
+        // One recall moment shared by the header stamp and every seen-row tombstone below.
+        Instant recalledAt = Instant.now();
+
+        // Idempotent: an already-recalled campaign returns its recorded recall, changing nothing and not
         // re-auditing — a double-tap / retried recall can't double-count or write a second audit row.
-        if (!campaign.markRecalled(actorUid, Instant.now())) {
+        if (!campaign.markRecalled(actorUid, recalledAt)) {
             return new AdminRecallResult(
-                    campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), 0);
+                    campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), 0, 0);
         }
 
-        // Delete the durable in-app copies this campaign created — clears the inbox/panel AND the bell
-        // (same store). Best-effort on push: an OS-tray push already delivered can't be un-sent (no FCM
-        // recall); only the in-app copies are removed. See the method javadoc.
+        // HYBRID recall of the durable in-app copies this campaign created (see the method javadoc):
+        //   • UNSEEN rows (never surfaced in the recipient's bell/panel) → DELETED (clean vanish); this
+        //     also clears the unseen bell count they drive (inbox and bell are the same store).
+        //   • SEEN rows (the recipient already viewed the bell/panel containing them) → TOMBSTONED:
+        //     kept and stamped recalled, so the panel shows them struck-through as "Recalled by admin".
+        // Best-effort on push: an OS-tray push already delivered can't be un-sent (no FCM recall); only
+        // the in-app copies are touched.
         String sourceRef = SOURCE_REF_PREFIX + campaign.getId();
-        int removed = notifications.deleteByTypeAndSourceRef(NotificationType.ADMIN_MESSAGE, sourceRef);
+        int removed = notifications.deleteUnseenByTypeAndSourceRef(NotificationType.ADMIN_MESSAGE, sourceRef);
+        int tombstoned =
+                notifications.markRecalledSeenByTypeAndSourceRef(NotificationType.ADMIN_MESSAGE, sourceRef, recalledAt);
 
         audit.record(
                 actorUid,
                 AuditAction.ADMIN_MESSAGE_RECALLED,
                 TARGET_TYPE,
                 String.valueOf(campaign.getId()),
-                Map.<String, Object>of("removed", removed));
+                Map.<String, Object>of("removed", removed, "tombstoned", tombstoned));
 
         log.info(
-                "Admin message {} recalled by {}: removed {} in-app copies (push already delivered is best-effort)",
+                "Admin message {} recalled by {}: removed {} unseen + tombstoned {} seen in-app copies "
+                        + "(push already delivered is best-effort)",
                 campaign.getId(),
                 actorUid,
-                removed);
+                removed,
+                tombstoned);
 
         return new AdminRecallResult(
-                campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), removed);
+                campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), removed, tombstoned);
     }
 
     /**

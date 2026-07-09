@@ -102,19 +102,49 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     }
 
     /**
-     * Delete every notification a single source produced — the admin-message <b>recall</b> path
-     * (TM-473). An admin send writes one {@code ADMIN_MESSAGE} row per recipient, all cross-linked by
-     * {@code source_ref = 'admin_message:<id>'}; recall removes exactly those rows in one statement, so
-     * the message disappears from every recipient's in-app inbox/panel <em>and</em> their notification
-     * bell (the unseen/unread counts are computed from these rows, so deleting them also clears the
-     * bell — inbox and bell are the same store since TM-452/TM-453). Scoped by {@code type} as well as
-     * {@code sourceRef} so it can only ever remove admin-message rows, never a system notification that
-     * happened to share a ref. Returns the number of rows removed (the recall's reach). Bulk delete (not
-     * a load-then-delete loop) so a large fan-out is one round-trip; requires an active transaction (the
-     * recall service provides one). This is the only delete besides the retention {@link #purgeForUser}.
+     * The <b>delete</b> half of the HYBRID admin-message <b>recall</b> (TM-473): delete every
+     * <em>UNSEEN</em> notification a single campaign produced. An admin send writes one {@code
+     * ADMIN_MESSAGE} row per recipient, all cross-linked by {@code source_ref = 'admin_message:<id>'};
+     * recall removes the rows the recipient <em>never saw</em> ({@code seen_at is null} — never
+     * surfaced in the bell/panel) in one statement, so for those recipients the message vanishes
+     * cleanly with no trace (and the unseen bell count they drive drops too — inbox and bell are the
+     * same store since TM-452/TM-453). The already-seen rows are NOT deleted here — they are tombstoned
+     * by {@link #markRecalledSeenByTypeAndSourceRef} so the recipient sees a struck-through "Recalled by
+     * admin" instead of a silent disappearance.
+     *
+     * <p>Scoped by {@code type} as well as {@code sourceRef} so it can only ever remove admin-message
+     * rows, never a system notification that happened to share a ref. Returns the number of rows
+     * removed (the delete-partition reach). Bulk delete (not a load-then-delete loop) so a large
+     * fan-out is one round-trip; requires an active transaction (the recall service provides one).
      */
     @Modifying
-    @Query("delete from Notification n where n.type = :type and n.sourceRef = :sourceRef")
-    int deleteByTypeAndSourceRef(
+    @Query("delete from Notification n where n.type = :type and n.sourceRef = :sourceRef and n.seenAt is null")
+    int deleteUnseenByTypeAndSourceRef(
             @Param("type") NotificationType type, @Param("sourceRef") String sourceRef);
+
+    /**
+     * The <b>tombstone</b> half of the HYBRID admin-message <b>recall</b> (TM-473): mark every
+     * already-<em>SEEN</em> notification a single campaign produced as recalled, keeping the row.
+     * Complement of {@link #deleteUnseenByTypeAndSourceRef}: those rows whose recipient already viewed
+     * the bell/panel that contained them ({@code seen_at is not null}) are stamped {@code recalled_at}
+     * rather than deleted, so the feed API surfaces them ({@code NotificationResponse.recalled}) and the
+     * panel renders them struck-through with "Recalled by admin · &lt;time&gt;" — we don't silently
+     * vanish something the recipient already looked at.
+     *
+     * <p>Guarded by {@code recalled_at is null} so it only ever <b>sets</b> the marker on a live row and
+     * never rewrites an earlier recall — the same one-way, first-moment-wins semantics as {@link
+     * Notification#markRecalled(Instant)} / {@link Notification#markSeen(java.time.Instant)}. Scoped by
+     * {@code type} + {@code sourceRef} like the delete half. Returns the number of rows tombstoned (the
+     * tombstone-partition reach). Bulk update (not a load-mutate-save loop) so the whole seen partition
+     * stamps in one statement; requires an active transaction (the recall service provides one).
+     */
+    @Modifying
+    @Query(
+            "update Notification n set n.recalledAt = :recalledAt "
+                    + "where n.type = :type and n.sourceRef = :sourceRef "
+                    + "and n.seenAt is not null and n.recalledAt is null")
+    int markRecalledSeenByTypeAndSourceRef(
+            @Param("type") NotificationType type,
+            @Param("sourceRef") String sourceRef,
+            @Param("recalledAt") Instant recalledAt);
 }

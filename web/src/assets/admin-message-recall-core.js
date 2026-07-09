@@ -32,19 +32,21 @@ export const RECALLED_LABEL = "Recalled";
 
 /**
  * The message shown in the pre-recall danger confirm. Recall is a deliberate, consequential action, so
- * it is always confirmed — and the copy is HONEST about its one real limit: it pulls the message from
- * every recipient's in-app inbox and notification bell, but a push that already reached someone's phone
- * tray can't be un-sent (there is no un-push). Keeping that in the confirm means an admin recalls with
- * eyes open and never believes recall is more total than it is.
+ * it is always confirmed — and the copy is HONEST about what recall does and its one real limit. It
+ * describes the HYBRID behaviour (TM-473, the owner's design decision): recipients who haven't seen it
+ * yet won't see it at all, while anyone who already saw it keeps it struck-through and marked "Recalled
+ * by admin" (we don't silently vanish something someone already looked at). And it's explicit that a
+ * push already delivered to a phone tray can't be un-sent (there is no un-push). Keeping all that in
+ * the confirm means an admin recalls with eyes open and never believes recall is more total than it is.
  *
  * @returns {string}
  */
 export function recallConfirmCopy() {
   return (
-    "Recall this message? It will be removed from every recipient's in-app inbox and notification " +
-    "bell. A phone push that was already delivered can't be un-sent, so it may still show in their " +
-    "notification tray until they clear it. You can't undo a recall — to change a message, recall it " +
-    "and send a new one."
+    "Recall this message? Recipients who haven't seen it yet won't see it at all. Anyone who already " +
+    "saw it will keep it struck through and marked “Recalled by admin”. A phone push that was " +
+    "already delivered can't be un-sent, so it may still show in their notification tray until they " +
+    "clear it. You can't undo a recall — to change a message, recall it and send a new one."
   );
 }
 
@@ -52,25 +54,36 @@ export function recallConfirmCopy() {
 
 /**
  * An honest one-line summary of a recall result for the success toast, read off the
- * AdminMessageRecallResponse (TM-473): `removed` is how many durable in-app copies were deleted (the
- * inbox/panel rows, which also back the bell). The copy leads with that reach; a `removed` of 0 means
- * there was nothing left in-app to pull (already recalled, or every recipient had already cleared it),
- * which is still a successful recall — so it says so rather than implying a failure.
+ * AdminMessageRecallResponse (TM-473). The HYBRID recall touches two partitions, reported separately:
+ *   - `removed`    : durable in-app copies DELETED — the recipients who hadn't seen it yet (clean vanish);
+ *   - `tombstoned` : durable in-app copies KEPT + marked recalled — recipients who'd already seen it
+ *                    (now shown struck-through as "Recalled by admin").
+ * The copy leads with the total reach (removed + tombstoned) and, when some were already seen, names how
+ * many were kept as tombstones — so the admin sees exactly what happened. A total of 0 means there was
+ * nothing left in-app to pull (already recalled, or every copy had been purged), which is still a
+ * successful recall — so it says so rather than implying a failure.
  *
- *   "Message recalled — removed from 42 inboxes"
- *   "Message recalled — removed from 1 inbox"
- *   "Message recalled — no in-app copies remained to remove"   (removed === 0)
+ *   "Message recalled — pulled from 42 recipients"                              (all unseen)
+ *   "Message recalled — pulled from 42 recipients (30 had seen it, now marked recalled)"
+ *   "Message recalled — pulled from 1 recipient"
+ *   "Message recalled — no in-app copies remained to remove"                    (total === 0)
  *
- * @param {{removed?: number}} [result]
+ * @param {{removed?: number, tombstoned?: number}} [result]
  * @returns {string}
  */
 export function summariseRecall(result = {}) {
   const removed = Number(result.removed) || 0;
-  if (removed <= 0) {
+  const tombstoned = Number(result.tombstoned) || 0;
+  const total = removed + tombstoned;
+  if (total <= 0) {
     return "Message recalled — no in-app copies remained to remove";
   }
-  const noun = removed === 1 ? "inbox" : "inboxes";
-  return `Message recalled — removed from ${removed} ${noun}`;
+  const noun = total === 1 ? "recipient" : "recipients";
+  let summary = `Message recalled — pulled from ${total} ${noun}`;
+  if (tombstoned > 0) {
+    summary += ` (${tombstoned} had seen it, now marked recalled)`;
+  }
+  return summary;
 }
 
 // --- control state (the reusable bit TM-444's list rows also consume) --------------------------
