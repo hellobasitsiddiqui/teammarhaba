@@ -20,6 +20,7 @@ import {
   Level,
   latencyLevel,
   availabilityLevel,
+  latencyTooltip,
 } from "../src/status/status-core.js";
 
 // A fixed "now" on a clean 15-minute boundary keeps bucket maths easy to reason about.
@@ -136,4 +137,22 @@ test("availabilityLevel: amber below the 99.5% non-5xx success threshold", () =>
   assert.equal(availabilityLevel(0.98), Level.DEVIATION, "98% → amber");
   assert.equal(availabilityLevel(0), Level.DEVIATION, "total failure → amber");
   assert.equal(availabilityLevel(null), Level.NODATA, "no data → no bar");
+});
+
+test("latencyTooltip: a measured window shows the rounded mean and probe count", () => {
+  assert.equal(latencyTooltip({ avgLatencyMs: 149.6, count: 3 }), "150 ms avg · 3 probes");
+  assert.equal(latencyTooltip({ avgLatencyMs: 42, count: 1 }), "42 ms avg · 1 probe", "singular probe");
+});
+
+test("latencyTooltip: a FULL-OUTAGE window (probes, but no measurable latency) never shows '0 ms avg'", () => {
+  // The TM-570 regression: ~30 failed probes → hasData true but avgLatencyMs null. The old hasData
+  // gate rendered "0 ms avg · 30 probes"; it must instead read "no latency data", matching the grey bar.
+  const tip = latencyTooltip({ avgLatencyMs: null, count: 30 });
+  assert.doesNotMatch(tip, /ms avg/, "no false latency figure for an all-failed window");
+  assert.doesNotMatch(tip, /\b0 ms\b/, "specifically never the misleading 0 ms");
+  assert.equal(tip, "no latency data · 30 probes", "says there's no latency data, keeps the probe count");
+});
+
+test("latencyTooltip: a truly empty window (no probes at all) reads 'no data'", () => {
+  assert.equal(latencyTooltip({ avgLatencyMs: null, count: 0 }), "no data");
 });
