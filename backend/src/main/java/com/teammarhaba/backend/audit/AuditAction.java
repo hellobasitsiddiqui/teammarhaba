@@ -78,5 +78,13 @@ public enum AuditAction {
      * An admin cancelled an event via {@code POST /api/v1/admin/events/{id}/cancel} (TM-392). The
      * row is kept (status {@code CANCELLED}) — cancel is not delete.
      */
-    EVENT_CANCELLED
+    EVENT_CANCELLED,
+
+    /**
+     * A member posted a message to an event group thread via {@code POST
+     * /api/v1/conversations/{id}/messages} (TM-447, epic Event Chat). One row per post carrying the
+     * conversation id as the target and the created message id in its metadata; the durable message
+     * text lives in the {@code message} row, never in the audit log.
+     */
+    EVENT_CHAT_MESSAGE_POSTED
 }

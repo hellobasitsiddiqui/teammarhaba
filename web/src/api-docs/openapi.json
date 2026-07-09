@@ -1365,6 +1365,17 @@
         },
         "type" : "object"
       },
+      "PostMessageRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "body" ],
+        "type" : "object"
+      },
       "PushFanoutResponse" : {
         "properties" : {
           "delivered" : {
@@ -2372,6 +2383,41 @@
               }
             },
             "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      },
+      "post" : {
+        "operationId" : "post",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PostMessageRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMessageResponse"
+                }
+              }
+            },
+            "description" : "Created"
           }
         },
         "tags" : [ "conversation-controller" ]
