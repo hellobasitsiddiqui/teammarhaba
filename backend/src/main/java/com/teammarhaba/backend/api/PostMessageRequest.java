@@ -23,7 +23,8 @@ public record PostMessageRequest(@NotBlank @Size(max = MAX_BODY_LENGTH) String b
 
     /**
      * Max chat-message length (TM-447 clarification: "~500 characters max", validated client + server).
-     * The {@code message.body} column is unbounded {@code TEXT}, so this is the only limit that applies.
+     * The {@code message.body} column is {@code VARCHAR(4000)} (migration V27), so this 500-char cap is
+     * the tighter limit that actually applies.
      */
     public static final int MAX_BODY_LENGTH = 500;
 }

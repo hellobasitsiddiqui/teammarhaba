@@ -2,9 +2,7 @@ package com.teammarhaba.backend.chat;
 
 import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MessageReactionSummary;
-import com.teammarhaba.backend.api.ThreadMessageResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
-import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.UserService;
@@ -19,16 +17,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Message reactions (TM-461) — the light-touch "react without replying" interaction on top of the
  * shared message store (TM-435). Owns the react / un-react toggle and the per-message reaction
- * summary the thread-messages read projection carries.
+ * summary the conversation read projection carries.
  *
  * <p><b>Identity is always the verified caller.</b> Every entry point resolves the acting member from
  * the {@link VerifiedUser} principal via {@link UserService#provision} (the same just-in-time
@@ -154,36 +149,12 @@ public class MessageReactionService {
     }
 
     /**
-     * The thread-messages read projection (the F2 / C2 read path) — a page of a thread's live messages,
-     * newest-first, each carrying its reaction summary (emoji → count, plus whether the caller reacted).
-     * Member-gated: the caller must be a non-removed member of the thread (a closed thread is still
-     * readable — history stays visible). Reactions for the whole page are loaded in one query (no N+1).
-     */
-    @Transactional
-    public PageResponse<ThreadMessageResponse> threadMessages(
-            VerifiedUser caller, Long conversationId, Pageable pageable) {
-        Long userId = users.provision(caller).getId();
-        // 404 if the thread doesn't exist (before the membership check, so a probe can't distinguish a
-        // thread they're not in from one that isn't there — both are indistinguishable to a non-member).
-        if (!conversations.existsById(conversationId)) {
-            throw new ResourceNotFoundException("conversation " + conversationId + " not found");
-        }
-        requireNonRemovedMember(conversationId, userId);
-
-        Page<Message> page = messages.findByConversationIdAndDeletedAtIsNull(conversationId, pageable);
-        Map<Long, List<EmojiReactionCount>> summaries =
-                summariesFor(userId, page.getContent().stream().map(Message::getId).toList());
-
-        return PageResponse.from(page, message -> ThreadMessageResponse.from(
-                message, summaries.getOrDefault(message.getId(), List.of())));
-    }
-
-    /**
      * Reaction summaries for a page of messages, keyed by message id, from {@code callerUserId}'s
      * perspective (the per-emoji "did the caller react" flag). Loaded in one query for the whole page
-     * (no N+1); a message with no reactions is simply absent from the map. Shared by this service's own
-     * {@link #threadMessages} and the conversation read endpoint (TM-436), so both surface reactions
-     * from one place.
+     * (no N+1); a message with no reactions is simply absent from the map. Shared by the conversation
+     * read endpoint (TM-436, the live thread read after the TM-436/447 consolidation) and this
+     * service's own single-message {@link #summaryFor}, so every surface tallies reactions from one
+     * place.
      */
     @Transactional(readOnly = true)
     public Map<Long, List<EmojiReactionCount>> summariesFor(Long callerUserId, Collection<Long> messageIds) {
@@ -225,16 +196,6 @@ public class MessageReactionService {
             throw new ResourceNotFoundException("message " + messageId + " not found");
         }
         return conversationId;
-    }
-
-    /** The read-projection member gate: the caller must be a member of the thread and not {@link MuteState#REMOVED}. */
-    private void requireNonRemovedMember(Long conversationId, Long userId) {
-        MuteState mute = members.findByConversationIdAndUserId(conversationId, userId)
-                .map(ConversationMember::getMute)
-                .orElseThrow(() -> new AccessDeniedException("You are not a member of this thread."));
-        if (mute == MuteState.REMOVED) {
-            throw new AccessDeniedException("You are not a member of this thread.");
-        }
     }
 
     /**

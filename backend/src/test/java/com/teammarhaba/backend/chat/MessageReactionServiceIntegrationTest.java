@@ -6,9 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MessageReactionSummary;
-import com.teammarhaba.backend.api.ThreadMessageResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
-import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
@@ -18,29 +16,24 @@ import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.security.access.AccessDeniedException;
 
 /**
  * Verifies message reactions (TM-461) end-to-end against a real Postgres (Testcontainers) — the
  * toggle on/off, the duplicate guard the {@code UNIQUE (message_id, user_id, emoji)} constraint
- * enforces, the per-emoji counts + caller {@code mine} flag the thread projection carries, the member
- * gate (non-member / removed → 404, indistinguishable from a missing message — TM-576; read-only
- * allowed), the closed-thread freeze (→ 409), the
- * "like = default emoji" behaviour, and the {@code 404} for an unknown / moderation-removed message.
+ * enforces, the per-emoji counts + caller {@code mine} flag the reaction summary carries, the member
+ * gate (a non-member / removed member is a 404 — indistinguishable from a missing message, TM-576;
+ * a read-only member is allowed), the closed-thread freeze (→ 409, including an event thread past its
+ * close-policy window — TM-574, mirroring the post path), the "like = default emoji" behaviour, and
+ * the {@code 404} for an unknown / moderation-removed message.
  *
  * <p>Deliberately <b>not</b> {@code @Transactional} at class level: each service call runs in its own
  * transaction so every reaction/message row gets its own DB-side {@code now()} — a shared test
  * transaction would stamp one identical instant and defeat the first-reacted chip ordering.
  */
 class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
-
-    /** Newest-first page — enough to hold every message a test posts. */
-    private static final PageRequest FIRST_PAGE =
-            PageRequest.of(0, 50, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
 
     @Autowired
     private MessageReactionService service;
@@ -71,6 +64,11 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
 
     private VerifiedUser caller(String uid) {
         return new VerifiedUser(uid, uid + "@example.com");
+    }
+
+    /** The provisioned {@code users.id} behind a {@link VerifiedUser} — the key {@code summariesFor} takes. */
+    private Long userIdOf(VerifiedUser caller) {
+        return users.findByFirebaseUid(caller.uid()).orElseThrow().getId();
     }
 
     /** A user provisioned AND joined to the thread with the given mute state — returns their VerifiedUser. */
@@ -124,13 +122,9 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         return events.save(event).getId();
     }
 
-    /** The reaction summary for one message as seen by a caller, read back through the thread projection. */
-    private List<EmojiReactionCount> reactionsSeenBy(VerifiedUser caller, Long conversationId, Long messageId) {
-        return service.threadMessages(caller, conversationId, FIRST_PAGE).items().stream()
-                .filter(m -> m.id().equals(messageId))
-                .findFirst()
-                .map(ThreadMessageResponse::reactions)
-                .orElseThrow();
+    /** The reaction summary for one message as seen by a caller, read back through the shared summariser. */
+    private List<EmojiReactionCount> reactionsSeenBy(VerifiedUser caller, Long messageId) {
+        return service.summariesFor(userIdOf(caller), List.of(messageId)).getOrDefault(messageId, List.of());
     }
 
     // ── toggle on / off + duplicate guard ─────────────────────────────────────────────────────────
@@ -176,10 +170,10 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(2);
     }
 
-    // ── per-emoji counts + caller-reacted flag, via the thread projection ─────────────────────────
+    // ── per-emoji counts + caller-reacted flag, via the shared reaction summariser ────────────────
 
     @Test
-    void threadProjectionCarriesPerEmojiCountsAndCallerReactedFlag() {
+    void reactionSummaryCarriesPerEmojiCountsAndCallerReactedFlag() {
         Conversation thread = openThread();
         VerifiedUser a = member(thread.getId(), "count-a", MuteState.NONE);
         VerifiedUser b = member(thread.getId(), "count-b", MuteState.NONE);
@@ -191,41 +185,36 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         service.react(c, message, "❤️"); // second emoji, one reactor
 
         // Counts are per distinct emoji, in first-reacted order; 👍 has 2, ❤️ has 1.
-        assertThat(reactionsSeenBy(a, thread.getId(), message))
+        assertThat(reactionsSeenBy(a, message))
                 .containsExactly(
                         new EmojiReactionCount("👍", 2, true), // A reacted 👍 → mine=true
                         new EmojiReactionCount("❤️", 1, false)); // A did not react ❤️
 
         // The mine flag is per-caller: from C's view 👍 is not theirs but ❤️ is.
-        assertThat(reactionsSeenBy(c, thread.getId(), message))
+        assertThat(reactionsSeenBy(c, message))
                 .containsExactly(
                         new EmojiReactionCount("👍", 2, false),
                         new EmojiReactionCount("❤️", 1, true));
     }
 
     @Test
-    void threadProjectionExcludesSoftDeletedMessagesButKeepsSystemMessages() {
+    void summariesForBatchesReactionsPerMessageAndOmitsMessagesWithNone() {
         Conversation thread = openThread();
-        VerifiedUser member = member(thread.getId(), "proj-member", MuteState.NONE);
-        Long author = newUser("proj-author");
+        VerifiedUser member = member(thread.getId(), "batch-member", MuteState.NONE);
+        Long author = newUser("batch-author");
 
-        Long kept = postMessage(thread.getId(), author, "keep me");
-        messages.save(Message.fromSystem(thread.getId(), "from TeamMarhaba", "/home"));
-        Message removed = messages.save(Message.fromUser(thread.getId(), author, "remove me"));
-        removed.softDelete(Instant.now());
-        messages.save(removed);
-        service.react(member, kept, "👍");
+        Long reacted = postMessage(thread.getId(), author, "react to me");
+        Long silent = postMessage(thread.getId(), author, "nothing here");
+        service.react(member, reacted, "👍");
 
-        PageResponse<ThreadMessageResponse> page = service.threadMessages(member, thread.getId(), FIRST_PAGE);
-
-        // The moderation-removed message never surfaces; the live user + system messages do.
-        assertThat(page.items()).extracting(ThreadMessageResponse::body)
-                .containsExactlyInAnyOrder("keep me", "from TeamMarhaba");
-        // A system message carries a null sender; a message with no reactions has an empty summary.
-        ThreadMessageResponse system = page.items().stream()
-                .filter(m -> m.body().equals("from TeamMarhaba")).findFirst().orElseThrow();
-        assertThat(system.senderId()).isNull();
-        assertThat(system.reactions()).isEmpty();
+        // One query for the whole batch: the reacted message carries its summary; a message with no
+        // reactions is simply absent from the map (the read projection then defaults it to an empty
+        // list). This is the surviving reaction-summary coverage after the thread-messages read moved
+        // to ConversationReadService (TM-436/447 consolidation, TM-577).
+        Map<Long, List<EmojiReactionCount>> summaries =
+                service.summariesFor(userIdOf(member), List.of(reacted, silent));
+        assertThat(summaries.get(reacted)).containsExactly(new EmojiReactionCount("👍", 1, true));
+        assertThat(summaries).doesNotContainKey(silent);
     }
 
     // ── like = default emoji ──────────────────────────────────────────────────────────────────────
@@ -251,7 +240,7 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(service.unreact(member, message, null).reactions()).isEmpty();
     }
 
-    // ── member gate ───────────────────────────────────────────────────────────────────────────────
+    // ── member gate: non-member / removed collapse to 404 (TM-576) ────────────────────────────────
 
     @Test
     void reactByANonMemberOrRemovedMemberIs404NotForbidden() {
@@ -278,11 +267,9 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         VerifiedUser readOnly = member(thread.getId(), "gate-readonly", MuteState.READ_ONLY);
         assertThat(service.react(readOnly, message, "👍").reactions())
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
-
-        // The read projection is member-gated separately — a non-member still cannot read the thread (403).
-        assertThatThrownBy(() -> service.threadMessages(stranger, thread.getId(), FIRST_PAGE))
-                .isInstanceOf(AccessDeniedException.class);
     }
+
+    // ── closed-thread freeze (409) ────────────────────────────────────────────────────────────────
 
     @Test
     void reactingOnAClosedThreadIsRejectedButHistoryStaysReadable() {
@@ -301,7 +288,7 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
                 .isInstanceOf(ConflictException.class);
 
         // ...but the closed thread (and its existing reactions) stays readable — soft-close, not delete.
-        assertThat(reactionsSeenBy(member, thread.getId(), message))
+        assertThat(reactionsSeenBy(member, message))
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
     }
 
@@ -345,10 +332,6 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         removed.softDelete(Instant.now());
         messages.save(removed);
         assertThatThrownBy(() -> service.react(member, removed.getId(), "👍"))
-                .isInstanceOf(ResourceNotFoundException.class);
-
-        // An unknown thread on the read path is a 404.
-        assertThatThrownBy(() -> service.threadMessages(member, 999_999L, FIRST_PAGE))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 }
