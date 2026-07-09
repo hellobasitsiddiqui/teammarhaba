@@ -19,6 +19,15 @@
 //      renders exactly as before. Tapping the bell opens the inbox in the existing ui.js modal;
 //      opening it marks everything read.
 //
+// RETIRED WHEN THE STATIC BELL IS PRESENT (TM-561): the TM-455 static header bell (#nav-notif-bell,
+// static in index.html) + the TM-456 panel now own the header notification-bell surface. When that
+// static bell is in the DOM this recovery bell no longer mounts — otherwise TWO identical
+// .tm-notif-bell controls render side-by-side in nav.app-nav on the native shell (the duplicate this
+// module used to create on first foreground push). Only the duplicate BELL is dropped: the
+// foreground-push REFRESH is kept (notifyForegroundPush still dispatches the `tm:notification` event
+// that the static bell re-fetches its server-backed badge on) and the persistent card still shows.
+// See STATIC_BELL_ID + paintBadge().
+//
 // READ SEMANTICS (documented decision): an entry counts as SEEN when the user interacts with it —
 // View-tapped, ×-dismissed (the text was on screen and they acted on it), or the inbox was opened.
 // An entry with NO interaction (app quit/reloaded while its card was up) stays unread, which is
@@ -42,6 +51,9 @@ import {
 } from "./notification-inbox.js";
 
 const BELL_ID = "tm-notif-bell";
+// The TM-455 static header bell's id (static in index.html). When it's present it owns the header
+// notification-bell surface, so this TM-374 recovery bell must not also mount (TM-561).
+const STATIC_BELL_ID = "nav-notif-bell";
 
 // The in-memory inbox (newest first), hydrated from localStorage on init. The pure module owns all
 // list transforms; this module just holds the current value and repaints.
@@ -78,6 +90,16 @@ function navigateTo(route) {
 }
 
 /**
+ * Whether the TM-455 static header bell (#nav-notif-bell) is currently in the DOM. When it is, it
+ * (plus the TM-456 panel) owns the header notification-bell surface, so this TM-374 recovery bell
+ * stays retired — never mounting a second, identical bell next to it (TM-561).
+ * @returns {boolean}
+ */
+function staticBellPresent() {
+  return typeof document !== "undefined" && document.getElementById(STATIC_BELL_ID) != null;
+}
+
+/**
  * The nav bell button, created on demand as a DIRECT child of the account nav (not inside
  * #nav-items) so it stays visible next to the hamburger when the nav collapses on narrow screens —
  * where the native shell (the only surface that gets foreground pushes) always is. Self-mounting
@@ -110,6 +132,15 @@ function bellHost(create) {
  */
 function paintBadge() {
   if (typeof document === "undefined") return;
+  // TM-561: never co-exist with the TM-455 static bell. When it owns the surface, keep this recovery
+  // bell retired — remove a stray one (defensive; e.g. if it had mounted before the static markup
+  // existed) and stop before creating one. The push-refresh still fires from notifyForegroundPush, so
+  // the static bell's badge still bumps on a foreground push; only this duplicate control is dropped.
+  if (staticBellPresent()) {
+    const stray = document.getElementById(BELL_ID);
+    if (stray) stray.remove();
+    return;
+  }
   const bell = bellHost(entries.length > 0);
   if (!bell) return;
   bell.hidden = entries.length === 0;
