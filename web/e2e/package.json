@@ -9,7 +9,8 @@
     "emulator": "firebase emulators:start --only auth,storage --project teammarhaba --config ../../firebase.json",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "capture:chat": "node capture-chat-foundation.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.49.1",
