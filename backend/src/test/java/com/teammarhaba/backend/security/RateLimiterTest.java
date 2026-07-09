@@ -83,6 +83,54 @@ class RateLimiterTest {
     }
 
     @Test
+    void burstGreaterThanSustainedDoesNotGrantFreeFullBurstAcrossIdleEviction() {
+        // Regression for TM-571. A tightened config where burst (capacity) far exceeds the sustained
+        // rate (refillTokens/period): 10-token burst but only 2 tokens/sec sustained. The full-refill
+        // horizon is capacity/refillTokens x period = 10/2 x 1s = 5s, so a client that drains its
+        // bucket then idles ONE period (1.5s) is long enough to be evicted under the OLD
+        // expireAfterAccess(refillPeriod) — which would recreate a FULL 10-token bucket — but is well
+        // inside the 5s horizon under the fix, so the bucket survives and only lazily refills.
+        RateLimitProperties burst = new RateLimitProperties(true, 10, 2, Duration.ofSeconds(1), 100);
+        AtomicLong clock = new AtomicLong(0);
+        RateLimiter burstLimiter = new RateLimiter(burst, clock::get);
+        MockHttpServletRequest request = request("1.2.3.4");
+
+        // Empty the whole 10-token burst, then confirm the bucket is spent.
+        for (int i = 0; i < 10; i++) {
+            assertThat(burstLimiter.tryAcquire(request).allowed()).isTrue();
+        }
+        assertThat(burstLimiter.tryAcquire(request).allowed()).isFalse();
+
+        // Idle just over one refill period (1.6s) — the exact "pause to reset" an attacker would use.
+        clock.addAndGet(Duration.ofMillis(1600).toNanos());
+
+        // The sustained rate holds: lazy refill grants only 2 tokens/sec x 1.6s = ~3.2 tokens, so at
+        // most three requests get through before the next denial — NOT a free full burst of 10. Under
+        // the old idle-eviction bug this loop would have allowed all ten (a fresh full bucket).
+        int allowedAfterIdle = 0;
+        for (int i = 0; i < 10; i++) {
+            if (burstLimiter.tryAcquire(request).allowed()) {
+                allowedAfterIdle++;
+            }
+        }
+        assertThat(allowedAfterIdle).isEqualTo(3);
+    }
+
+    @Test
+    void fullRefillHorizonStretchesWithBurstButCollapsesToPeriodWhenBalanced() {
+        // The eviction TTL is capacity/refillTokens x refillPeriod. For the balanced default
+        // (capacity == refillTokens) it is exactly the refill period — the pre-fix behaviour, preserved.
+        assertThat(RateLimiter.fullRefillHorizon(
+                        new RateLimitProperties(true, 120, 120, Duration.ofMinutes(1), 100)))
+                .isEqualTo(Duration.ofMinutes(1));
+
+        // For a burst>sustained config it stretches proportionally: 1000/60 x 1m = ~16m40s.
+        assertThat(RateLimiter.fullRefillHorizon(
+                        new RateLimitProperties(true, 1000, 60, Duration.ofMinutes(1), 100)))
+                .isEqualTo(Duration.ofMinutes(1).multipliedBy(1000).dividedBy(60));
+    }
+
+    @Test
     void distinctClientsHaveIndependentBudgets() {
         MockHttpServletRequest a = request("1.1.1.1");
         MockHttpServletRequest b = request("2.2.2.2");
