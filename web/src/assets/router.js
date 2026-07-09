@@ -33,6 +33,7 @@ import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
 import { updateTabbar } from "./tabbar.js";
+import { updateNotificationBell } from "./notification-bell.js";
 
 const LOGIN = "#/login";
 const HOME = "#/home";
@@ -275,6 +276,12 @@ function render() {
   // source of truth (no second hashchange/auth listener). Hidden while EITHER first-run gate is up, so
   // a gated user can't side-step the gate via a tab.
   updateTabbar({ signedIn, gated, route });
+
+  // Notification bell (TM-455): the top-right header bell + unread badge, shown for the SAME
+  // signed-in, un-gated user as the tab bar (hidden signed-out and on the onboarding / terms gates).
+  // Driven from here so the bell shares router's single source of truth — this also gives the
+  // "refresh on route change" AC for free, since render() runs on every hashchange + auth change.
+  updateNotificationBell({ signedIn, gated });
 }
 
 /**

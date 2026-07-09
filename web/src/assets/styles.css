@@ -2824,7 +2824,11 @@ html {
 
 /* The bell rides as a direct child of .app-nav (next to the hamburger on narrow screens, where the
    native shell lives) and inherits the .app-nav button quiet-action look; this just squares it up
-   to the same 44px tap target as .app-nav-toggle and anchors the badge. */
+   to the same 44px tap target as .app-nav-toggle and anchors the badge.
+   NOTE (TM-455): the primary header bell (#nav-notif-bell, notification-bell.js) reuses these
+   .tm-notif-bell / .tm-notif-badge classes — it's the always-on, server-feed-backed bell shown for
+   any signed-in, onboarded user; the TM-374 bell above is the native-only foreground-push recovery
+   bell. Both share this look intentionally. Its glyph is an inline SVG, sized by its own attributes. */
 .tm-notif-bell {
     position: relative;
     display: inline-grid;
