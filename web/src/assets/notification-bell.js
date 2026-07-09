@@ -27,7 +27,14 @@
 // recovery bell continues to serve its localStorage inbox.
 
 import { getNotificationBadge, markNotificationsSeen } from "./api.js";
-import { badgeTotal, badgeText, hasBadge, bellAriaLabel, shouldShowBell } from "./notification-bell-core.js";
+import {
+  badgeTotal,
+  badgeText,
+  hasBadge,
+  bellAriaLabel,
+  shouldShowBell,
+  createBadgeSync,
+} from "./notification-bell-core.js";
 
 const BELL_ID = "nav-notif-bell";
 const BADGE_SELECTOR = ".tm-notif-badge";
@@ -37,7 +44,6 @@ const NOTIFICATIONS_ROUTE = "#/notifications";
 const POLL_MS = 60000;
 
 let visible = false; // whether the bell is currently shown (signed-in + un-gated)
-let inFlight = false; // a badge fetch is running — dedupe overlapping refreshes
 let pollTimer = null; // the visible-only poll interval handle
 let wired = false; // the click + push listeners are attached exactly once
 
@@ -68,35 +74,37 @@ function paintBadge(badge) {
   paintCount(badgeTotal(badge));
 }
 
+// The async-paint coordinator (TM-556). It owns the dedup + a monotonic epoch guard so a stale
+// in-flight refresh (started with the pre-seen count) can't repaint over the freshly-zeroed badge
+// after the user opens the bell. The race-safe logic is pure + node-tested in the core; here we just
+// inject the real feed-API calls and the DOM paint.
+const badgeSync = createBadgeSync({
+  fetchBadge: getNotificationBadge,
+  markSeen: markNotificationsSeen,
+  paint: paintBadge,
+  onError: (label, err) => console.warn(`[notif-bell] ${label} failed:`, err?.message ?? err),
+});
+
 /**
  * Fetch the latest counts and repaint. Best-effort: a failure (offline, transient 5xx) leaves the
- * last painted count and logs quietly — the bell must never break navigation. Deduped so overlapping
- * triggers (a route change mid-poll) don't stack requests.
+ * last painted count and logs quietly — the bell must never break navigation. Deduped + epoch-guarded
+ * by the coordinator so overlapping triggers (a route change mid-poll) don't stack requests and a
+ * stale result can't overwrite a fresher one.
  */
 async function refresh() {
-  if (!visible || inFlight) return;
-  inFlight = true;
-  try {
-    paintBadge(await getNotificationBadge());
-  } catch (err) {
-    console.warn("[notif-bell] could not refresh badge:", err?.message ?? err);
-  } finally {
-    inFlight = false;
-  }
+  if (!visible) return;
+  await badgeSync.refresh();
 }
 
 /**
  * Open the bell: mark everything seen (which clears the badge), then hand off to the panel. mark-seen
  * returns the refreshed (now zero-unseen) counts, so the badge clears from the response with no
  * follow-up GET; if it fails we still open the panel (reaching notifications matters more than the
- * count).
+ * count). The coordinator supersedes any in-flight refresh first, so a racing pre-seen GET resolving
+ * afterwards can't repaint the stale badge (TM-556).
  */
 async function open() {
-  try {
-    paintBadge(await markNotificationsSeen());
-  } catch (err) {
-    console.warn("[notif-bell] mark-seen failed:", err?.message ?? err);
-  }
+  await badgeSync.markSeenAndPaint();
   openPanel();
 }
 
@@ -170,9 +178,11 @@ export function updateNotificationBell({ signedIn, gated } = {}) {
     // Still visible on a route change — refresh (the "refresh on route change" AC).
     refresh();
   } else if (visible) {
-    // Signed out / re-gated: stop polling and clear the count so a stale badge can't flash on return.
+    // Signed out / re-gated: stop polling, supersede any in-flight refresh (so its result is dropped
+    // rather than repainting after we clear), and clear the count so a stale badge can't flash.
     visible = false;
     stopPoll();
+    badgeSync.supersede();
     paintCount(0);
   }
 }
