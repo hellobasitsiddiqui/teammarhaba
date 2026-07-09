@@ -510,6 +510,12 @@
          false; clears itself once the token refreshes post-verification. Calls the resend-verification
          endpoint (TM-165). Inert when signed out / already verified. -->
     <script type="module" src="/assets/verify-banner.js"></script>
+    <!-- Site-wide alert banners (TM-243): mounts a banner host at the top of the app shell that polls
+         GET /api/v1/alerts/active (~5 min) and renders each active, global, colour-coded notice on every
+         route + inside the Android WebView. Colour by level via Paper theme tokens; ACKNOWLEDGE (sticky,
+         localStorage + content-hash) / DISMISS (session) / PERSISTENT dismissal. Public read, so a
+         warning shows pre-login; inert with nothing active. -->
+    <script type="module" src="/assets/alerts.js"></script>
     <!-- Nav avatar (TM-166): paints the signed-in user's Firebase photoURL into #nav-avatar. -->
     <script type="module" src="/assets/nav-avatar.js"></script>
     <!-- Responsive nav toggle (TM-229): hamburger open/close for the collapsed nav on narrow
