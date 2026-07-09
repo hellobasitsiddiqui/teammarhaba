@@ -1046,6 +1046,23 @@
         },
         "type" : "object"
       },
+      "MemberMuteResponse" : {
+        "properties" : {
+          "conversationId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "mute" : {
+            "enum" : [ "NONE", "READ_ONLY", "REMOVED" ],
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "MessageReactionSummary" : {
         "properties" : {
           "messageId" : {
@@ -1059,6 +1076,16 @@
             "type" : "array"
           }
         },
+        "type" : "object"
+      },
+      "MuteMemberRequest" : {
+        "properties" : {
+          "state" : {
+            "enum" : [ "NONE", "READ_ONLY", "REMOVED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "state" ],
         "type" : "object"
       },
       "NotificationBadge" : {
@@ -1437,6 +1464,26 @@
         "required" : [ "platform", "token" ],
         "type" : "object"
       },
+      "RemovedMessageResponse" : {
+        "properties" : {
+          "conversationId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "messageId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "removed" : {
+            "type" : "boolean"
+          },
+          "removedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "RsvpResult" : {
         "properties" : {
           "goingCount" : {
@@ -1736,6 +1783,86 @@
           }
         },
         "tags" : [ "alert-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/conversations/{conversationId}/members/{userId}/mute" : {
+      "post" : {
+        "operationId" : "muteMember",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "conversationId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "userId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MuteMemberRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MemberMuteResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "chat-moderation-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/conversations/{conversationId}/messages/{messageId}/remove" : {
+      "post" : {
+        "operationId" : "removeMessage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "conversationId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "messageId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RemovedMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "chat-moderation-admin-controller" ]
       }
     },
     "/api/v1/admin/events" : {
