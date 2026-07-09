@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.event;
 
+import java.time.Instant;
+
 /**
  * Domain event published when a waitlisted member successfully claims a freed spot (TM-397) — the
  * offer cascade's terminal move, raised from {@link EventRsvpService#claim}.
@@ -16,8 +18,17 @@ package com.teammarhaba.backend.event;
  * resolves them through {@code UserRepository} (which hides tombstoned accounts) rather than trusting
  * a detached entity.
  *
- * @param eventId the {@code events.id} of the claimed event
- * @param userId  the {@code users.id} of the claimant (who gets the confirmation)
- * @param heading the event heading at claim time (the push title)
+ * <p><b>{@code claimedAt} — the per-episode key (TM-555).</b> A member can legitimately re-claim: a
+ * cancel hard-deletes their attendance row, so leave → rejoin the waitlist → re-offer → re-claim is a
+ * genuinely new promotion that publishes a <em>second</em> {@code EventClaimedEvent}. The consumer
+ * keys the durable {@code RSVP_CONFIRMED} inbox row's idempotency {@code sourceRef} on this claim
+ * instant so each episode is its own row (a static per-event key would let {@code NotificationWriter}
+ * suppress the second write — push without a durable bell row, the TM-374 divergence). It mirrors the
+ * offer cascade's per-episode {@code :offer:<offerAtMillis>} key.
+ *
+ * @param eventId   the {@code events.id} of the claimed event
+ * @param userId    the {@code users.id} of the claimant (who gets the confirmation)
+ * @param heading   the event heading at claim time (the push title)
+ * @param claimedAt the instant this promotion committed — scopes the inbox row to this claim episode
  */
-public record EventClaimedEvent(long eventId, long userId, String heading) {}
+public record EventClaimedEvent(long eventId, long userId, String heading, Instant claimedAt) {}

@@ -264,7 +264,10 @@ public class EventRsvpService {
         // The offer cascade's terminal signal (TM-397): a genuine WAITLISTED -> GOING promotion (not
         // the double-tap-already-GOING path above) publishes in-transaction, so the "You're in ✓"
         // confirmation push fires from EventLifecycleNotifier only after this claim actually commits.
-        publisher.publishEvent(new EventClaimedEvent(eventId, user.getId(), event.getHeading()));
+        // Carry the claim instant so the notifier can scope the durable RSVP_CONFIRMED inbox row to
+        // THIS claim episode (TM-555) — a later leave+rejoin+re-claim is a distinct row, not a
+        // suppressed duplicate.
+        publisher.publishEvent(new EventClaimedEvent(eventId, user.getId(), event.getHeading(), now));
         return new RsvpResult(AttendanceState.GOING, going + 1, waitlisted - 1);
     }
 

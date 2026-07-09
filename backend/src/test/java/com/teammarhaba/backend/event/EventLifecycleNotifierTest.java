@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -237,19 +238,41 @@ class EventLifecycleNotifierTest {
 
     @Test
     void claimConfirmsExactlyTheClaimant() {
-        notifierUnderTest().onClaimed(new EventClaimedEvent(EVENT_ID, 7L, HEADING));
+        notifierUnderTest().onClaimed(new EventClaimedEvent(EVENT_ID, 7L, HEADING, NOW));
 
         ArgumentCaptor<PushMessage> message = ArgumentCaptor.forClass(PushMessage.class);
         verify(notifier).pushToUser(eq(7L), message.capture());
         assertThat(message.getValue().title()).isEqualTo("You're in ✓");
         assertThat(message.getValue().route()).isEqualTo("#/events/" + EVENT_ID);
 
-        // The confirmation is written to just the claimant's durable inbox, typed RSVP_CONFIRMED.
+        // The confirmation is written to just the claimant's durable inbox, typed RSVP_CONFIRMED, with
+        // an idempotency key scoped to THIS claim episode (the claim instant), not a static per-event
+        // key — so a later re-claim writes a fresh row rather than being suppressed (TM-555).
         verify(writer)
                 .writeSystemToUser(
                         eq(NotificationType.RSVP_CONFIRMED),
                         eq(7L),
                         any(PushMessage.class),
-                        eq("event:" + EVENT_ID + ":rsvp"));
+                        eq("event:" + EVENT_ID + ":rsvp:" + NOW.toEpochMilli()));
+    }
+
+    @Test
+    void distinctClaimEpisodesGetDistinctSourceRefs() {
+        // Two genuine promotions of the same user to the same event (leave+rejoin+re-claim) commit at
+        // different instants, so each writes under its own key — the writer sees two distinct source
+        // refs and cannot suppress the second as a duplicate of the first (TM-555).
+        Instant firstClaim = NOW;
+        Instant secondClaim = NOW.plus(Duration.ofMinutes(30));
+
+        notifierUnderTest().onClaimed(new EventClaimedEvent(EVENT_ID, 7L, HEADING, firstClaim));
+        notifierUnderTest().onClaimed(new EventClaimedEvent(EVENT_ID, 7L, HEADING, secondClaim));
+
+        ArgumentCaptor<String> sourceRef = ArgumentCaptor.forClass(String.class);
+        verify(writer, times(2))
+                .writeSystemToUser(eq(NotificationType.RSVP_CONFIRMED), eq(7L), any(PushMessage.class), sourceRef.capture());
+        assertThat(sourceRef.getAllValues())
+                .containsExactly(
+                        "event:" + EVENT_ID + ":rsvp:" + firstClaim.toEpochMilli(),
+                        "event:" + EVENT_ID + ":rsvp:" + secondClaim.toEpochMilli());
     }
 }
