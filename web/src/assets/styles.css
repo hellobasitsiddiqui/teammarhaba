@@ -744,35 +744,10 @@ h3,
     --radius-pill: 999px;
 }
 
-/*
- * The faint ruled-paper grid (TM-236, now the sketchy layer). A subtle CSS `repeating-linear-gradient`
- * on BOTH axes — ink ruling on the off-white page, layered behind everything via `body` (whose
- * background otherwise paints flat `--page-bg` and would cover a grid set on <html>). A bolder line
- * every 5th cell gives the classic "major/minor" ruling of graph/sketch paper. Purely decorative: the
- * lines sit at ~6–9% ink, far below text, so contrast stays well above WCAG AAA. Tinted off `--fg`.
- */
-[data-sketchy="on"] body {
-    --grid-line: color-mix(in srgb, var(--fg) 9%, transparent);
-    --grid-line-minor: color-mix(in srgb, var(--fg) 6%, transparent);
-    --grid: 22px;            /* minor cell size */
-    background-color: var(--page-bg);
-    background-image:
-        /* major lines (every 5th) — vertical then horizontal */
-        repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
-        repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px calc(var(--grid) * 5)),
-        /* minor lines — vertical then horizontal */
-        repeating-linear-gradient(to right, var(--grid-line-minor) 0 1px, transparent 1px var(--grid)),
-        repeating-linear-gradient(to bottom, var(--grid-line-minor) 0 1px, transparent 1px var(--grid));
-    background-attachment: fixed;
-}
-
-/* Dark variant: the ruling brightens to stay visible on the near-black paper. */
-@media (prefers-color-scheme: dark) {
-    [data-sketchy="on"] body {
-        --grid-line: color-mix(in srgb, var(--fg) 16%, transparent);
-        --grid-line-minor: color-mix(in srgb, var(--fg) 9%, transparent);
-    }
-}
+/* The ruled graph-paper grid (TM-236) was DROPPED from the default Paper look (TM-552, owner request) —
+ * it read like a squared math exercise book. The base `body` still paints `--page-bg`, so the paper
+ * colour stays; the sketchy skin keeps its doodles + hand-drawn wobble (below) — only the grid is gone.
+ * (User-selectable backgrounds are tracked separately as TM-553.) */
 
 /*
  * The reusable "wobble" skin — the `#wobble-soft` SVG filter (defs in index.html) applied to the
