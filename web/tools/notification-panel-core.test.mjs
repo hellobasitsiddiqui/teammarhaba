@@ -14,8 +14,10 @@ import {
   chatThreadRoute,
   isChatNotification,
   panelUnreadTotal,
+  recalledItemLabel,
   safeRoute,
   typeIcon,
+  RECALLED_BY_ADMIN,
   TYPE_ICONS,
   DEFAULT_ITEM_ICON,
   CHAT_ICON,
@@ -168,4 +170,61 @@ test("panelUnreadTotal sums unread chat members and unread items", () => {
   assert.equal(panelUnreadTotal(buildPanel(sampleFeed())), 4); // coffee(1) + dogwalk(1) + admin(1) + reminder(1)
   assert.equal(panelUnreadTotal([]), 0);
   assert.equal(panelUnreadTotal(null), 0);
+});
+
+/* ────────────────────────── recalled (tombstoned) admin message — TM-473 ─────────────────────── */
+
+test("buildPanel carries the recalled tombstone state + time on a seen, recalled admin message", () => {
+  // The SEEN half of the HYBRID recall: the row is kept in the feed and flagged recalled, so the DOM
+  // half renders it struck-through instead of a live row.
+  const feed = [
+    {
+      id: 7,
+      type: "ADMIN_MESSAGE",
+      title: "Venue changed",
+      body: "The venue moved to Hall B.",
+      createdAt: "2026-07-09T09:00:00Z",
+      seen: true,
+      read: true,
+      recalled: true,
+      recalledAt: "2026-07-09T10:30:00Z",
+    },
+  ];
+  const [item] = buildPanel(feed);
+  assert.equal(item.kind, ITEM);
+  assert.equal(item.recalled, true);
+  assert.equal(item.recalledAt, "2026-07-09T10:30:00Z");
+  assert.equal(item.title, "Venue changed"); // still shown (struck-through) so the recipient sees WHAT was recalled
+});
+
+test("buildPanel also treats a present recalledAt (without an explicit flag) as recalled", () => {
+  const [item] = buildPanel([
+    { id: 8, type: "ADMIN_MESSAGE", title: "Hi", createdAt: "2026-07-09T09:00:00Z", recalledAt: "2026-07-09T10:00:00Z" },
+  ]);
+  assert.equal(item.recalled, true);
+  assert.equal(item.recalledAt, "2026-07-09T10:00:00Z");
+});
+
+test("buildPanel leaves a live item un-recalled (recalled=false, recalledAt=null)", () => {
+  const [item] = buildPanel([
+    { id: 9, type: "ADMIN_MESSAGE", title: "Live", createdAt: "2026-07-09T09:00:00Z", read: false },
+  ]);
+  assert.equal(item.recalled, false);
+  assert.equal(item.recalledAt, null);
+});
+
+test("buildPanel treats a blank/whitespace recalledAt as still-live", () => {
+  const [item] = buildPanel([
+    { id: 10, type: "ADMIN_MESSAGE", title: "Blank", createdAt: "2026-07-09T09:00:00Z", recalledAt: "   " },
+  ]);
+  assert.equal(item.recalled, false);
+  assert.equal(item.recalledAt, null);
+});
+
+test("recalledItemLabel composes 'Recalled by admin · <time>' (and degrades without a time)", () => {
+  assert.equal(recalledItemLabel("3m ago"), `${RECALLED_BY_ADMIN} · 3m ago`);
+  assert.equal(recalledItemLabel(""), RECALLED_BY_ADMIN); // no dangling separator when time is absent
+  assert.equal(recalledItemLabel("   "), RECALLED_BY_ADMIN);
+  assert.equal(recalledItemLabel(undefined), RECALLED_BY_ADMIN);
+  assert.equal(RECALLED_BY_ADMIN, "Recalled by admin");
 });

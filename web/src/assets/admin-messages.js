@@ -25,7 +25,7 @@
 // best-effort push on top respects opt-out). So the user picker offers all accounts, not just push-able
 // ones — a deliberate difference from the broadcast compose panel.
 
-import { apiFetch, sendAdminMessage, getPushRoutes, ApiError } from "./api.js";
+import { apiFetch, sendAdminMessage, recallAdminMessage, getPushRoutes, ApiError } from "./api.js";
 import { clear, el, confirmDialog, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
@@ -47,6 +47,13 @@ import {
   confirmCopy,
   summariseSend,
 } from "./admin-messages-core.js";
+// Recall control — pure confirm/label/summary logic (TM-473), shared with TM-444's sent-history rows.
+import {
+  RECALL_LABEL,
+  RECALLED_LABEL,
+  recallConfirmCopy,
+  summariseRecall,
+} from "./admin-message-recall-core.js";
 
 // Where compose returns to on success / cancel: the sent-history LIST at ADMIN_MESSAGES_ROUTE
 // (#/admin/messages), now that TM-444 has landed it — the AC's "returns to the messages list /
@@ -442,9 +449,11 @@ async function sendMessage() {
   try {
     const result = await sendAdminMessage(buildAdminMessagePayload(d));
     toast(summariseSend(result), { type: "success", timeout: 8000 });
-    // Delivered — return to the sent-history list (TM-444), where the just-sent campaign shows at the
-    // top (the list reloads from page 0 on entry). The success toast carries the summary across the nav.
-    window.location.hash = RETURN_ROUTE;
+    // Delivered. Show the sent-success panel with a RECALL control (TM-473), carrying the campaign id
+    // (result.id) so an admin who realises the audience was wrong can immediately pull the message back.
+    // Its "Done" / "← Admin" go to RETURN_ROUTE — now TM-444's sent-history list (#/admin/messages),
+    // where the just-sent campaign shows at the top and the same recall control renders per row.
+    renderSentSuccess(result, {});
   } catch (err) {
     // RFC-7807 from the backend: a 400 may carry per-field errors (title/body over cap, off-list
     // deep-link, or "exactly one target type"). Attach the ones we can, toast the rest.
@@ -463,6 +472,93 @@ async function sendMessage() {
     state.sending = false;
     ui.send.textContent = original;
     refresh();
+  }
+}
+
+// ---- sent-success panel + recall (TM-473) -------------------------------------------------
+
+/**
+ * After a successful send, replace the compose form with a "sent" confirmation panel that shows the
+ * delivery summary AND a self-contained RECALL control (TM-473). This is the branch's mount point for
+ * the recall affordance — "wherever a sent message is shown". The panel carries the campaign id
+ * (`result.id`), so recall targets the exact message just sent. Re-rendered in the recalled state after
+ * a successful recall so the admin sees it worked. TM-444's sent-history list mounts the SAME control
+ * (via the shared recall-core) per row; here it's the single just-sent message.
+ *
+ * @param {{id: number|string, recipientCount?: number, pushDelivered?: number, pushSkipped?: number}} result
+ * @param {{recalled?: boolean}} [opts]
+ */
+function renderSentSuccess(result, { recalled = false } = {}) {
+  const view = document.getElementById("admin-message-form-view");
+  if (!view) return;
+
+  // The delivery summary of what was sent (unchanged by a later recall — it's the record of the send).
+  const summary = el("p", { class: "tm-msg-sent-summary", text: summariseSend(result) });
+
+  // The honesty note: recall clears the in-app inbox + bell, but an already-delivered push can't be
+  // un-sent (mirrors recallConfirmCopy()'s limit, shown here as standing context).
+  const note = el("p", { class: "tm-msg-sent-note tm-muted" }, recalled
+    ? "This message was recalled — removed from recipients' in-app inbox and notification bell. "
+        + "A push already delivered to a phone can't be un-sent, so it may still show in their tray."
+    : "Sent to the wrong audience? You can recall it — this removes it from recipients' in-app inbox "
+        + "and notification bell. A push already delivered to a phone can't be un-sent.");
+
+  // The action: a live message offers RECALL (danger); a recalled one shows a disabled "Recalled" state.
+  const actions = recalled
+    ? [el("button", { class: "tm-btn", type: "button", disabled: true }, RECALLED_LABEL)]
+    : [el("button", {
+        class: "tm-btn tm-btn-danger",
+        id: "admin-msg-recall",
+        type: "button",
+        onClick: () => recall(result),
+      }, RECALL_LABEL)];
+  actions.push(el("a", { class: "tm-btn tm-btn-primary", id: "admin-msg-done", href: RETURN_ROUTE }, "Done"));
+
+  clear(view).append(
+    el("div", { class: "tm-admin-head tm-msg-head" }, [
+      el("h2", {}, [doodle("chat", { class: "tm-doodle-header" }), recalled ? "Message recalled" : "Message sent"]),
+      el("a", { class: "tm-btn tm-btn-sm", href: RETURN_ROUTE }, "← Admin"),
+    ]),
+    el("div", { class: "tm-msg-sent" }, [
+      summary,
+      note,
+      el("div", { class: "tm-form-actions" }, actions),
+    ]),
+  );
+}
+
+/**
+ * Confirm-then-recall the just-sent message (TM-473). Recall is consequential + irreversible, so it is
+ * always confirmed via the shared recall-core copy (which surfaces the best-effort-push limit). On
+ * success the panel re-renders in the recalled state; on failure it toasts and leaves the button
+ * ready to retry. The api.js call is admin-gated + scoped to the sender server-side.
+ *
+ * @param {{id: number|string}} result the sent-message result carrying the campaign id.
+ */
+async function recall(result) {
+  const ok = await confirmDialog({
+    title: "Recall message?",
+    message: recallConfirmCopy(),
+    confirmLabel: RECALL_LABEL,
+    danger: true,
+  });
+  if (!ok) return;
+
+  const btn = document.getElementById("admin-msg-recall");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Recalling…";
+  }
+  try {
+    const recallResult = await recallAdminMessage(result.id);
+    toast(summariseRecall(recallResult), { type: "success", timeout: 8000 });
+    renderSentSuccess(result, { recalled: true });
+  } catch (err) {
+    toast(err instanceof ApiError ? err.message : "Could not recall the message.", { type: "error" });
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = RECALL_LABEL;
+    }
   }
 }
 

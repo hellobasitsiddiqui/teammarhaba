@@ -25,7 +25,7 @@ import { clear, el, relativeTime } from "./ui.js";
 import { unreadDot } from "./components.js";
 import { lineIcon } from "./icons.js";
 import { listNotifications, markNotificationRead } from "./api.js";
-import { buildPanel, chatGroupLabel, CHAT_GROUP } from "./notification-panel-core.js";
+import { buildPanel, chatGroupLabel, recalledItemLabel, CHAT_GROUP } from "./notification-panel-core.js";
 
 const PANEL_ID = "tm-notif-panel";
 const BACKDROP_ID = "tm-notif-panel-backdrop";
@@ -144,6 +144,37 @@ function itemRow(item) {
   );
 }
 
+/**
+ * One RECALLED (tombstoned) admin-message row (TM-473, HYBRID recall). An admin message the recipient
+ * had ALREADY SEEN isn't deleted on recall — it's kept and shown here struck-through with a "Recalled
+ * by admin · <time>" note, so a message they already looked at doesn't silently vanish (unseen copies
+ * are deleted server-side and never reach the panel). It's inert, not a button: there's nothing to
+ * navigate to (the message was pulled) and no read state to change, so it renders as a plain div —
+ * distinct from the live {@link itemRow}. The title/body still render (via textContent) so the
+ * recipient can see WHAT was recalled, just struck through.
+ * @param {object} item an ITEM section from buildPanel() with `recalled === true`.
+ * @returns {HTMLElement}
+ */
+function recalledItemRow(item) {
+  const when = relativeTime(item.recalledAt);
+  return el(
+    "div",
+    {
+      class: "tm-np-row tm-np-row--recalled",
+      "data-testid": "notif-panel-item-recalled",
+      dataset: { kind: "item", recalled: "true" },
+    },
+    [
+      iconCircle(item.icon),
+      el("span", { class: "tm-np-text" }, [
+        item.title ? el("span", { class: "tm-np-title tm-np-strike", text: item.title }) : null,
+        item.body ? el("span", { class: "tm-np-body tm-np-strike", text: item.body }) : null,
+        el("span", { class: "tm-np-recalled", text: recalledItemLabel(when.text), title: when.title }),
+      ]),
+    ],
+  );
+}
+
 /** Tap a chat group: mark its unread notifications read, open the thread, close the panel. */
 function onTapGroup(group) {
   markRead(group.unreadIds);
@@ -178,7 +209,15 @@ function renderSections(sections) {
   }
   const list = el("div", { class: "tm-np-list", "data-testid": "notif-panel-list" });
   for (const section of sections) {
-    list.append(section.kind === CHAT_GROUP ? chatGroupRow(section) : itemRow(section));
+    // Chat group → chatGroupRow; a recalled (tombstoned) admin item → struck-through recalledItemRow;
+    // any other ungrouped item → the live itemRow.
+    const row =
+      section.kind === CHAT_GROUP
+        ? chatGroupRow(section)
+        : section.recalled
+          ? recalledItemRow(section)
+          : itemRow(section);
+    list.append(row);
   }
   clear(body).append(list);
 }

@@ -59,6 +59,15 @@ public enum AuditAction {
      */
     ADMIN_MESSAGE_SENT,
 
+    /**
+     * An admin recalled (unsent) a message they had sent via {@code POST
+     * /api/v1/admin/messages/{id}/recall} (TM-473 / epic TM-432). One row per recall carrying the
+     * campaign id and how many in-app copies were removed; the header row is stamped recalled
+     * ({@code recalled_at}/{@code recalled_by}). Best-effort on push — an already-delivered OS-tray
+     * push can't be un-sent, so only the in-app inbox + bell copies are removed.
+     */
+    ADMIN_MESSAGE_RECALLED,
+
     /** An admin created a meetup event via {@code POST /api/v1/admin/events} (TM-392). */
     EVENT_CREATED,
 

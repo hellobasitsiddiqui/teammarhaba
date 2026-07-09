@@ -4,6 +4,8 @@ import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.NotificationRepository;
+import com.teammarhaba.backend.notify.NotificationType;
 import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
@@ -12,6 +14,8 @@ import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.BadRequestException;
+import com.teammarhaba.backend.web.ResourceNotFoundException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -90,6 +94,7 @@ public class AdminMessageService {
 
     private final RecipientResolver recipientResolver;
     private final NotificationWriter notificationWriter;
+    private final NotificationRepository notifications;
     private final PushNotificationService push;
     private final DeviceTokenRepository deviceTokens;
     private final UserRepository users;
@@ -99,6 +104,7 @@ public class AdminMessageService {
     public AdminMessageService(
             RecipientResolver recipientResolver,
             NotificationWriter notificationWriter,
+            NotificationRepository notifications,
             PushNotificationService push,
             DeviceTokenRepository deviceTokens,
             UserRepository users,
@@ -106,6 +112,7 @@ public class AdminMessageService {
             AuditService audit) {
         this.recipientResolver = recipientResolver;
         this.notificationWriter = notificationWriter;
+        this.notifications = notifications;
         this.push = push;
         this.deviceTokens = deviceTokens;
         this.users = users;
@@ -227,6 +234,98 @@ public class AdminMessageService {
     @Transactional(readOnly = true)
     public Page<AdminMessage> sentHistory(String actorUid, Pageable pageable) {
         return adminMessages.findByActorUid(actorUid, pageable);
+    }
+
+    /**
+     * Recall (unsend) a message the calling admin previously sent (TM-473). In one transaction:
+     *
+     * <ol>
+     *   <li><b>Scope + exist.</b> The campaign is loaded by id <em>scoped to the caller</em>
+     *       ({@link AdminMessageRepository#findByIdAndActorUid}); an unknown id OR another admin's
+     *       message is a uniform {@code 404} ({@link ResourceNotFoundException}), so recall never leaks
+     *       a campaign the caller didn't send (same 404-not-403 rule as the sent-history read).
+     *   <li><b>Mark recalled.</b> {@link AdminMessage#markRecalled} stamps the header's one-way
+     *       {@code recalledAt}/{@code recalledBy}; the sent-history view then shows it {@code RECALLED}.
+     *       Idempotent: recalling an already-recalled message is a no-op that removes nothing and does
+     *       not re-audit (returns {@code removed = 0, tombstoned = 0} with the original recall stamp).
+     *   <li><b>Partition the in-app copies (HYBRID recall — the owner's design decision, TM-473).</b>
+     *       The durable {@code ADMIN_MESSAGE} rows this campaign created ({@code source_ref =
+     *       'admin_message:<id>'}) are split by whether the recipient has <em>seen</em> them — i.e.
+     *       viewed the bell/panel that contained them ({@code seen_at}), NOT whether they opened/read
+     *       the item:
+     *       <ul>
+     *         <li><b>Unseen</b> ({@code seen_at is null}) → <b>deleted</b>
+     *             ({@link NotificationRepository#deleteUnseenByTypeAndSourceRef}): a clean vanish with no
+     *             trace — the recipient never knew it existed — which also clears the unseen bell count
+     *             those rows drive (inbox and bell are the same store).
+     *         <li><b>Seen</b> ({@code seen_at is not null}) → <b>tombstoned</b>
+     *             ({@link NotificationRepository#markRecalledSeenByTypeAndSourceRef}): the row is kept and
+     *             stamped {@code recalled_at}, so the feed API surfaces it recalled and the panel renders
+     *             it struck-through with "Recalled by admin · &lt;time&gt;". We don't silently vanish
+     *             something the recipient already looked at.
+     *       </ul>
+     *       Both partitions use the same recall {@link Instant} the header was stamped with, so the
+     *       header and every tombstone share one recall moment.
+     *   <li><b>Audit.</b> One {@link AuditAction#ADMIN_MESSAGE_RECALLED} row records the campaign id and
+     *       how many copies were removed vs tombstoned — never the body.
+     * </ol>
+     *
+     * <p><b>Best-effort on push (documented limit).</b> Recall removes only the durable IN-APP copies. A
+     * push that already fired to a recipient's OS notification tray is fire-and-forget and cannot be
+     * un-sent — there is no FCM "recall" — so a tray push may linger until the OS/user clears it; tapping
+     * it just opens the (now-removed) in-app item. This is the honest boundary of recall and is surfaced
+     * in the API/UI copy (see {@code AdminMessageRecallResponse} / {@code admin-message-recall-core.js}).
+     *
+     * @param actorUid  Firebase UID of the admin recalling the message (the verified caller)
+     * @param messageId the campaign id to recall
+     * @return the recall outcome (campaign id, recall stamp, unseen rows removed + seen rows tombstoned)
+     * @throws ResourceNotFoundException if no campaign with that id was sent by this admin
+     */
+    @Transactional
+    public AdminRecallResult recall(String actorUid, long messageId) {
+        AdminMessage campaign = adminMessages
+                .findByIdAndActorUid(messageId, actorUid)
+                .orElseThrow(() -> new ResourceNotFoundException("No message " + messageId + " to recall."));
+
+        // One recall moment shared by the header stamp and every seen-row tombstone below.
+        Instant recalledAt = Instant.now();
+
+        // Idempotent: an already-recalled campaign returns its recorded recall, changing nothing and not
+        // re-auditing — a double-tap / retried recall can't double-count or write a second audit row.
+        if (!campaign.markRecalled(actorUid, recalledAt)) {
+            return new AdminRecallResult(
+                    campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), 0, 0);
+        }
+
+        // HYBRID recall of the durable in-app copies this campaign created (see the method javadoc):
+        //   • UNSEEN rows (never surfaced in the recipient's bell/panel) → DELETED (clean vanish); this
+        //     also clears the unseen bell count they drive (inbox and bell are the same store).
+        //   • SEEN rows (the recipient already viewed the bell/panel containing them) → TOMBSTONED:
+        //     kept and stamped recalled, so the panel shows them struck-through as "Recalled by admin".
+        // Best-effort on push: an OS-tray push already delivered can't be un-sent (no FCM recall); only
+        // the in-app copies are touched.
+        String sourceRef = SOURCE_REF_PREFIX + campaign.getId();
+        int removed = notifications.deleteUnseenByTypeAndSourceRef(NotificationType.ADMIN_MESSAGE, sourceRef);
+        int tombstoned =
+                notifications.markRecalledSeenByTypeAndSourceRef(NotificationType.ADMIN_MESSAGE, sourceRef, recalledAt);
+
+        audit.record(
+                actorUid,
+                AuditAction.ADMIN_MESSAGE_RECALLED,
+                TARGET_TYPE,
+                String.valueOf(campaign.getId()),
+                Map.<String, Object>of("removed", removed, "tombstoned", tombstoned));
+
+        log.info(
+                "Admin message {} recalled by {}: removed {} unseen + tombstoned {} seen in-app copies "
+                        + "(push already delivered is best-effort)",
+                campaign.getId(),
+                actorUid,
+                removed,
+                tombstoned);
+
+        return new AdminRecallResult(
+                campaign.getId(), campaign.getRecalledAt(), campaign.getRecalledBy(), removed, tombstoned);
     }
 
     /**
