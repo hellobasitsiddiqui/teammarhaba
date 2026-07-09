@@ -19,9 +19,21 @@
 // (clean/doodle/sketch) is retired — Paper is the single app theme. The only look the user can
 // change is now PER-USER, from profile settings: the accent swatch + the wavy/sketchy toggle,
 // persisted server-side (see appearance.js / appearance-settings.js). Nothing app-wide to configure.
+//
+// `ops*` (TM-183) drive the admin Operations panel's external-console links (Cloud Run, Logs Explorer,
+// Firebase Auth, Artifact Registry, GitHub, Jira, the live site). They are the project's identifiers —
+// NOT hardcoded in admin.js — so a re-skin/replay renders correct links by changing config, not code.
+// The values below are TeamMarhaba's worked example (mirroring docs/agents/CONSTANTS.md); the deploy
+// injects them into the built config.js the same way it injects `apiBaseUrl` (TM-142), so a re-skinned
+// deploy.yml/CONSTANTS flows through. Any left blank simply hides its link (admin-ops-core.js).
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
     storageEmulatorHost: null,
     buildVersion: "dev",
+    opsProject: "teammarhaba",
+    opsRegion: "europe-west2",
+    opsService: "teammarhaba-backend",
+    opsRepo: "hellobasitsiddiqui/teammarhaba",
+    opsJiraBoardUrl: "https://10xai.atlassian.net/jira/software/projects/TM/boards/1",
 });
