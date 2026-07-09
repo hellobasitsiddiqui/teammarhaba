@@ -221,3 +221,153 @@ export function toThreadMessages(items, now = new Date()) {
     .map((m) => toThreadMessage(m, now))
     .sort((a, b) => a.sortAt - b.sortAt);
 }
+
+/* ─────────────────────────────── Composer (TM-448) ─────────────────────────────────────────────
+ * Posting a message (TM-448) turns the read-only thread (TM-438) into a real conversation: a compose
+ * box that sends to the member-gated POST endpoint (TM-447). All the DECISIONS live here as pure,
+ * node-tested rules so chat.js stays a thin DOM shell:
+ *   • validateDraft  — is the typed text sendable (non-blank, ≤500)?  (also drives the send button)
+ *   • composeAvailability — can the caller compose here AT ALL, from the conversation type alone?
+ *       (admin broadcasts are announcements — read-only for attendees, so the box is disabled up-front)
+ *   • classifyPostError — a failed POST → lock the composer with a clear reason (muted / removed /
+ *       closed / gone) vs a transient blip the caller can retry. This is the ONLY place the backend's
+ *       403/409/404 (there is no capability field on the read API) becomes the AC's "disabled with a
+ *       clear reason" — muted/removed/closed are only knowable by attempting the write.
+ *   • pendingMessage / upsertMessage / threadSignature — the optimistic-echo + near-live-refresh maths.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The backend's PostMessageRequest bound (openapi: body maxLength 500). The composer enforces it too. */
+export const MAX_MESSAGE_LENGTH = 500;
+
+/**
+ * Validate a compose-box draft against the post contract (non-blank after trim, ≤ MAX_MESSAGE_LENGTH).
+ * Pure so the send button's enabled state + the char counter derive from ONE tested rule rather than
+ * being re-implemented inline. `value` is the trimmed text to actually send.
+ * @param {string} text the raw input value.
+ * @returns {{value: string, length: number, remaining: number, empty: boolean, tooLong: boolean,
+ *            canSend: boolean}}
+ */
+export function validateDraft(text) {
+  const value = String(text ?? "").trim();
+  const length = value.length;
+  const empty = length === 0;
+  const tooLong = length > MAX_MESSAGE_LENGTH;
+  return {
+    value,
+    length,
+    remaining: MAX_MESSAGE_LENGTH - length,
+    empty,
+    tooLong,
+    canSend: !empty && !tooLong,
+  };
+}
+
+/**
+ * Whether the caller can compose in this conversation AT ALL, decided from the conversation TYPE alone
+ * (the only capability the read API exposes). Admin broadcasts are one-way announcements, so the box is
+ * disabled up-front with a clear reason; event group chats are open to attempt (per-caller mute/removal
+ * and thread closure aren't on the read API, so those surface via classifyPostError on the first send).
+ * Accepts either a raw ConversationSummaryResponse (`type: "ADMIN_BROADCAST"`) or an already-mapped row
+ * (`type: { key: "admin" }`).
+ * @param {{type?: (string|{key?: string})}} conversation
+ * @returns {{canPost: boolean, reason: (string|null)}}
+ */
+export function composeAvailability(conversation) {
+  const type = conversation?.type;
+  const key = typeof type === "string" ? type : type?.key;
+  if (key === "ADMIN_BROADCAST" || key === "admin") {
+    return { canPost: false, reason: "Only admins can post here — this is an announcements channel." };
+  }
+  return { canPost: true, reason: null };
+}
+
+/**
+ * Map a FAILED post ({@link ApiError} with `.status` + backend `.message`) to a composer outcome. The
+ * backend (TM-447) is the sole source of truth for muted/removed/closed (there is no capability field
+ * to read up-front), so this is where the AC's "compose is disabled with a clear reason" is realised:
+ *   • 403 → membership block: muted (READ_ONLY) or not-a-member/removed → LOCK, reason from the body.
+ *   • 409 → the thread is closed / read-only                            → LOCK.
+ *   • 404 → the conversation is gone                                    → LOCK.
+ *   • 400 → the body failed validation (blank / >500)                  → surface inline, do NOT lock.
+ *   • anything else (5xx / network / unknown)                          → TRANSIENT, keep the draft.
+ * The backend's own copy ("You are muted in this thread and cannot post." etc.) is already user-facing,
+ * so it's preferred as the reason; `reasonKey` is a stable token for styling/tests, never shown.
+ * @param {{status?: number, message?: string}} error
+ * @returns {{locked: boolean, transient: boolean, reasonKey: string, reason: string, message: string}}
+ */
+export function classifyPostError(error) {
+  const status = Number(error?.status) || 0;
+  const raw = String(error?.message ?? "").trim();
+  const lock = (reasonKey, fallback) => ({
+    locked: true,
+    transient: false,
+    reasonKey,
+    reason: raw || fallback,
+    message: raw || fallback,
+  });
+
+  if (status === 403) {
+    // The copy only distinguishes muted from not-a-member; removed reads as "not a member" too.
+    return /mut/i.test(raw)
+      ? lock("muted", "You are muted in this thread and cannot post.")
+      : lock("removed", "You are not a member of this thread.");
+  }
+  if (status === 409) return lock("closed", "This thread is closed; you can no longer post.");
+  if (status === 404) return { locked: true, transient: false, reasonKey: "gone", reason: "This conversation is no longer available.", message: raw || "This conversation is no longer available." };
+  if (status === 400) {
+    const msg = raw || `Your message must be 1–${MAX_MESSAGE_LENGTH} characters.`;
+    return { locked: false, transient: false, reasonKey: "invalid", reason: msg, message: msg };
+  }
+  // Transient: a network drop or a 5xx — the draft is kept and the caller can retry.
+  return { locked: false, transient: true, reasonKey: "transient", reason: "", message: "Couldn't send your message. Please try again." };
+}
+
+/**
+ * Build the optimistic-echo view-model for a just-sent message — the SAME shape {@link toThreadMessage}
+ * produces so the thread renders it identically, plus `pending: true` so the DOM can dim it and label
+ * it "Sending…". Replaced by the server's confirmed message (via {@link upsertMessage}) once the POST
+ * resolves, or rolled back on failure.
+ * @param {string} body the message text.
+ * @param {{localId?: string, now?: Date}} [opts]
+ * @returns {{id: string, body: string, system: boolean, deepLink: null, reactions: [], timeLabel: string,
+ *            sortAt: number, pending: boolean}}
+ */
+export function pendingMessage(body, { localId = "pending", now = new Date() } = {}) {
+  return {
+    id: String(localId),
+    body: String(body ?? ""),
+    system: false,
+    deepLink: null,
+    reactions: [],
+    timeLabel: formatTimeLabel(now.toISOString(), now),
+    sortAt: now.getTime(),
+    pending: true,
+  };
+}
+
+/**
+ * Insert (or replace, by id) a message into an oldest-first message list, returning a NEW array kept in
+ * `sortAt` order. Used to fold a POST's confirmed message into the loaded thread without a full refetch,
+ * and to make a poll idempotent (a message already present is replaced, never duplicated).
+ * @param {Array<{id: string, sortAt: number}>} messages
+ * @param {{id: string, sortAt: number}} message
+ * @returns {Array}
+ */
+export function upsertMessage(messages, message) {
+  const rest = (Array.isArray(messages) ? messages : []).filter((m) => m.id !== message.id);
+  return [...rest, message].sort((a, b) => a.sortAt - b.sortAt);
+}
+
+/**
+ * A cheap change-signature for a loaded message list, so the near-live poll only repaints the thread
+ * when something actually changed (a new/edited message) instead of clobbering scroll position + any
+ * in-progress read every tick. Count + last id + last timestamp is enough to catch an appended message.
+ * @param {Array<{id: string, sortAt: number}>} messages
+ * @returns {string}
+ */
+export function threadSignature(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (list.length === 0) return "0";
+  const last = list[list.length - 1];
+  return `${list.length}:${last.id}:${last.sortAt}`;
+}

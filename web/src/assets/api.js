@@ -438,11 +438,14 @@ export async function markNotificationRead(id) {
 }
 
 /* ─────────────────────────────── Conversations (chat) — read API, F2 / TM-436 ──────────────────
- * The Chat section (TM-438) reads three endpoints: the caller's conversation list, one thread's
- * messages, and a mark-read POST fired when a thread is opened. All three use the shared page
- * envelope `{ items, page, size, totalElements, totalPages }` for the GETs (zero-based `page`), the
- * exact same shape the notifications + events feeds use, so the view consumes `data.items` uniformly.
- * Writing (posting a message) is a later ticket (TM-447) — these are read-only.
+ * The Chat section reads three endpoints: the caller's conversation list, one thread's messages, and
+ * a mark-read POST fired when a thread is opened (all TM-438). All the GETs use the shared page
+ * envelope `{ items, page, size, totalElements, totalPages }` (zero-based `page`), the exact same
+ * shape the notifications + events feeds use, so the view consumes `data.items` uniformly.
+ * Writing is now live too: {@link postConversationMessage} (TM-448) sends to the member-gated POST
+ * endpoint (TM-447), which is stricter than reading — it 403s a non-member / muted / removed caller
+ * and 409s a closed thread, so the composer can lock itself with a clear reason (see chat-core.js
+ * `classifyPostError`).
  * ---------------------------------------------------------------------------------------------- */
 
 /**
@@ -510,6 +513,39 @@ export async function markConversationRead(id) {
   });
   if (!response.ok) {
     throw new Error(`POST /api/v1/conversations/${id}/read failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/conversations/{id}/messages — post a message to a conversation thread (TM-448 wiring the
+ * TM-447 endpoint). `body` is the message text (the backend bounds it non-blank, ≤500; the composer
+ * validates the same rule client-side first). Returns the created ConversationMessageResponse (201) so
+ * the caller can echo the confirmed message (with its real id / server `createdAt`) in place of the
+ * optimistic bubble.
+ *
+ * <p>Unlike the read endpoints (which throw a bare Error), this throws an {@link ApiError} carrying the
+ * HTTP `.status` and the backend's problem `detail`, because the composer must DISTINGUISH outcomes:
+ *   • 403 — not a member / muted (READ_ONLY) / removed  → a permanent block: lock the composer
+ *   • 409 — the thread is closed / read-only            → a permanent block: lock the composer
+ *   • 404 — the conversation no longer exists           → a permanent block: lock the composer
+ *   • 400 — body failed validation (blank / >500)       → surface inline, keep composing
+ *   • 5xx / network                                     → transient: keep the draft, offer a retry
+ * The mapping itself is the pure, unit-tested `classifyPostError` in chat-core.js. A 401 will already
+ * have refreshed/redirected via {@link apiFetch}.
+ * @param {number|string} id the conversation id.
+ * @param {string} body the message text (≤500 chars, non-blank).
+ * @returns {Promise<Object>} the created ConversationMessageResponse.
+ * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason.
+ */
+export async function postConversationMessage(id, body) {
+  const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Could not send your message (${response.status}). Please try again.`);
   }
   return response.json();
 }
