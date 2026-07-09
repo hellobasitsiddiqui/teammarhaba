@@ -136,17 +136,18 @@ test("the hand-lettered faces are the single Paper type contract (on :root, read
 });
 
 test("the wavy/sketchy skin lives on [data-sketchy=\"on\"] (TM-529 AC3)", () => {
-  // The wobble filter and the ruled-paper grid are the hand-drawn layer, gated on the per-user toggle.
+  // The wobble filter + doodles are the hand-drawn layer, gated on the per-user toggle. (The ruled
+  // graph-paper grid was DROPPED from the default look in TM-552 — owner request; wobble + doodles remain.)
   assert.ok(count('[data-sketchy="on"]') >= 5, "the sketchy skin must be scoped to [data-sketchy=\"on\"]");
   assert.match(
     CSS,
     /\[data-sketchy="on"\][^{]*\{\s*filter:\s*url\("#wobble-soft"\)/s,
     "the wobble filter must apply under [data-sketchy=\"on\"]",
   );
-  assert.match(
-    CSS,
-    /\[data-sketchy="on"\] body[^}]*repeating-linear-gradient/s,
-    "the ruled-paper grid must apply under [data-sketchy=\"on\"] body",
+  assert.equal(
+    count("repeating-linear-gradient"),
+    0,
+    "the ruled-paper grid was removed (TM-552) — no repeating-linear-gradient should remain",
   );
   // Clean Paper hides the decorative doodles; sketchy shows them.
   assert.match(CSS, /:root:not\(\[data-sketchy="on"\]\) \.tm-doodle/, "doodles hide in clean Paper");
