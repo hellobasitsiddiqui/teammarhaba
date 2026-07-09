@@ -19,6 +19,8 @@ import {
   sortConversations,
   toConversationRows,
   totalUnread,
+  ADMIN_AUTHOR,
+  deepLinkCta,
   toThreadMessage,
   toThreadMessages,
   MAX_MESSAGE_LENGTH,
@@ -194,6 +196,59 @@ test("toThreadMessages orders oldest-first regardless of the server's page order
   const ordered = toThreadMessages(items);
   assert.deepEqual(ordered.map((m) => m.body), ["first", "second", "third"]);
   assert.deepEqual(toThreadMessages(null), []);
+});
+
+/* ─────────────────────────────── one-way admin messages (TM-445) ──────────────────────────────── */
+
+test("ADMIN_AUTHOR is the app attribution name for a one-way system message", () => {
+  assert.equal(ADMIN_AUTHOR, "TeamMarhaba");
+});
+
+test("deepLinkCta labels each safe in-app route family and coerces loose shapes", () => {
+  // Detail routes get a purpose-fit label; the id segment's case is preserved.
+  assert.deepEqual(deepLinkCta("#/events/42"), { href: "#/events/42", label: "View event" });
+  assert.deepEqual(deepLinkCta("/events/42"), { href: "#/events/42", label: "View event" });
+  assert.deepEqual(deepLinkCta("events/42"), { href: "#/events/42", label: "View event" });
+  assert.deepEqual(deepLinkCta("#/chat/7"), { href: "#/chat/7", label: "Open chat" });
+  // The events list gets its own label; any other known static route falls back to a neutral "Open".
+  assert.deepEqual(deepLinkCta("/events"), { href: "#/events", label: "Browse events" });
+  assert.deepEqual(deepLinkCta("/home"), { href: "#/home", label: "Open" });
+  assert.deepEqual(deepLinkCta("#/profile"), { href: "#/profile", label: "Open" });
+});
+
+test("deepLinkCta drops unsafe / off-app / unknown links so a bad CTA is never drawn", () => {
+  for (const bad of [
+    "https://evil.example/steal",
+    "http://x",
+    "javascript:alert(1)", // eslint-disable-line no-script-url
+    "//evil.example",
+    "/nope/xyz", // a known-shape but unknown base → rejected by the trust boundary
+    "",
+    "   ",
+    null,
+    undefined,
+    42,
+  ]) {
+    assert.equal(deepLinkCta(bad), null, `"${String(bad)}" must not produce a CTA`);
+  }
+});
+
+test("toThreadMessage pre-derives the CTA from a safe deep-link (admin broadcast render)", () => {
+  const admin = toThreadMessage({ id: 5, senderId: null, system: true, body: "Doors open at 6pm", deepLink: "/events/9" });
+  assert.equal(admin.system, true);
+  assert.equal(admin.deepLink, "/events/9"); // raw link carried as-sent (un-normalised)
+  assert.deepEqual(admin.cta, { href: "#/events/9", label: "View event" }); // …but the CTA is the safe route
+});
+
+test("toThreadMessage: no deep-link → no CTA, and an unsafe deep-link → no CTA (raw link still carried)", () => {
+  assert.equal(toThreadMessage({ id: 1, system: true, body: "Welcome!" }).cta, null);
+  const unsafe = toThreadMessage({ id: 2, system: true, body: "Visit us", deepLink: "https://evil.example" });
+  assert.equal(unsafe.cta, null); // dropped by the trust boundary → CTA not drawn
+  assert.equal(unsafe.deepLink, "https://evil.example"); // raw value preserved, just not made tappable
+});
+
+test("pendingMessage carries a null cta so the optimistic echo shares the render shape", () => {
+  assert.equal(pendingMessage("hi", { localId: "p1" }).cta, null);
 });
 
 /* ─────────────────────────────── composer: draft validation (TM-448) ──────────────────────────── */

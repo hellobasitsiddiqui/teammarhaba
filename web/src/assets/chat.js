@@ -1,4 +1,13 @@
-// Chat section — DOM view (TM-438 read + TM-448 compose), reading/writing the F2 conversation API.
+// Chat section — DOM view (TM-438 read + TM-448 compose + TM-445 one-way admin render), reading/writing
+// the F2 conversation API.
+//
+// TM-445 layers the one-way ADMIN_BROADCAST presentation on top: an admin thread carries the "Admin"
+// type badge in its head, its messages render as centred "from TeamMarhaba" notices (not bubbles) with
+// the optional in-app deep-link surfaced as a tap-through CTA, and the composer stays disabled (TM-448
+// already returns it read-only for the admin type) — so a user can re-read + act on a broadcast in the
+// chat section after the push is gone. The "from TeamMarhaba" attribution + CTA are driven per-message
+// by the `system` flag (senderId == null), so they're robust even on a cold deep-link where the
+// conversation `type` isn't cached; the head badge is type-driven from the cached list row.
 //
 // The Chat section inside the bottom-nav shell (TM-434): a UNIFIED conversation list (event group
 // chats + admin broadcasts together, each with a type badge) and a per-conversation thread view.
@@ -79,16 +88,26 @@ function listHeader() {
   return el("header", { class: "tm-chat-head" }, [el("h2", { class: "tm-chat-title", text: "Chats" })]);
 }
 
-/** The thread top bar: back to the list + the conversation title + a type sub-line. */
+/**
+ * The thread top bar: back to the list + the conversation title + a type sub-line. For a known admin
+ * broadcast (TM-445) the head also carries the "Admin" type badge next to the title and an accent
+ * modifier class, so the one-way "from TeamMarhaba" channel is visibly distinct from an event chat
+ * (mirrors the type badge the unified list already shows on each row).
+ */
 function threadHeader(meta) {
-  return el("header", { class: "tm-chat-thread-head" }, [
+  const admin = meta.typeKey === "admin";
+  const heading = el("div", { class: "tm-chat-thread-heading" }, [
+    el("div", { class: "tm-chat-thread-titlerow" }, [
+      el("h2", { class: "tm-chat-thread-title", text: meta.title }),
+      admin ? typeBadge(core.conversationBadge("ADMIN_BROADCAST")) : null,
+    ]),
+    el("p", { class: "tm-chat-thread-sub", text: meta.sub }),
+  ]);
+  return el("header", { class: admin ? "tm-chat-thread-head tm-chat-thread-head--admin" : "tm-chat-thread-head" }, [
     el("a", { class: "tm-chat-back", href: "#/chat", "aria-label": "Back to chats" }, [
       el("span", { class: "tm-chat-back-glyph", "aria-hidden": "true", text: "←" }),
     ]),
-    el("div", { class: "tm-chat-thread-heading" }, [
-      el("h2", { class: "tm-chat-thread-title", text: meta.title }),
-      el("p", { class: "tm-chat-thread-sub", text: meta.sub }),
-    ]),
+    heading,
   ]);
 }
 
@@ -427,20 +446,19 @@ function emptyThread() {
 }
 
 /**
- * One message row. `system` messages (e.g. "You joined the event") render as a centred notice; regular
- * messages render as a bubble with the body, a time stamp and any read-only reaction pills. `mine`
- * (a pending echo, or a message we posted this session) draws it out-going (right-aligned, accent wash)
- * — best-effort, since the read API can't tell us which loaded messages are ours. A pending echo is
- * dimmed and stamped "Sending…" until its POST confirms.
+ * One message row. A `system` message (senderId == null — an admin broadcast, or an in-thread notice)
+ * renders as a centred, one-way "from TeamMarhaba" notice (TM-445): the app attribution, the body, its
+ * stamp, and — when the message carries a safe in-app deep-link — a tap-through CTA, so a broadcast can
+ * be re-read and acted on after the push is gone. A regular message renders as a bubble with the body,
+ * a time stamp and any read-only reaction pills. `mine` (a pending echo, or a message we posted this
+ * session) draws it out-going (right-aligned, accent wash) — best-effort, since the read API can't tell
+ * us which loaded messages are ours. A pending echo is dimmed and stamped "Sending…" until its POST
+ * confirms.
  * @param {Object} m the message view-model (from chat-core).
  * @param {boolean} mine whether to render it as an out-going bubble.
  */
 function messageRow(m, mine = false) {
-  if (m.system) {
-    return el("div", { class: "tm-chat-system", "data-testid": "chat-system" }, [
-      el("span", { class: "tm-chat-system-text", text: m.body }),
-    ]);
-  }
+  if (m.system) return systemNotice(m);
 
   const side = mine ? "tm-chat-msg tm-chat-msg--out" : "tm-chat-msg tm-chat-msg--in";
   const row = el("div", {
@@ -450,6 +468,7 @@ function messageRow(m, mine = false) {
   row.append(el("div", { class: "tm-chat-bub", text: m.body }));
   if (m.pending) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
   else if (m.timeLabel) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: m.timeLabel })]));
+  if (m.cta) row.append(messageCta(m.cta)); // an in-app deep-link on a normal message → same CTA affordance
   // Read-only reaction pills (no picker yet): surface whatever the API returned.
   for (const r of m.reactions) {
     const pill = reaction(r.emoji, r.count);
@@ -457,6 +476,38 @@ function messageRow(m, mine = false) {
     row.append(pill);
   }
   return row;
+}
+
+/**
+ * A one-way "from TeamMarhaba" system notice (TM-445) — the shape an admin broadcast takes in a thread.
+ * Distinct from an event bubble: a centred card with a megaphone + attribution line, the message body,
+ * a time stamp, and the optional deep-link CTA. All of it text-only nodes via el(), so an admin-authored
+ * body / link can never inject markup.
+ */
+function systemNotice(m) {
+  const notice = el("div", { class: "tm-chat-system tm-chat-system--admin", "data-testid": "chat-system" }, [
+    el("div", { class: "tm-chat-from" }, [
+      el("span", { class: "tm-chat-from-glyph", "aria-hidden": "true", text: "📣" }),
+      el("span", { class: "tm-chat-from-name", text: `from ${core.ADMIN_AUTHOR}` }),
+    ]),
+    el("p", { class: "tm-chat-system-text", text: m.body }),
+  ]);
+  if (m.timeLabel) notice.append(el("div", { class: "tm-chat-system-stamp" }, [el("span", { text: m.timeLabel })]));
+  if (m.cta) notice.append(messageCta(m.cta));
+  return notice;
+}
+
+/**
+ * The deep-link CTA drawn under a message that carries one (TM-445). `cta` is already the pre-derived,
+ * SAFE `{ href, label }` from chat-core.deepLinkCta (an unsafe/off-app link never reaches here — it's
+ * dropped in the core, so no CTA is drawn). The href is a same-app hash route, so a tap navigates via
+ * the existing hash router with no extra JS.
+ */
+function messageCta(cta) {
+  return el("a", { class: "tm-chat-cta", href: cta.href, "data-testid": "chat-cta" }, [
+    el("span", { class: "tm-chat-cta-label", text: cta.label }),
+    el("span", { class: "tm-chat-cta-arrow", "aria-hidden": "true", text: "→" }),
+  ]);
 }
 
 // Bridge for the router (which imports this) + ad-hoc use / QA.
