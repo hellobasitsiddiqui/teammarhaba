@@ -178,12 +178,13 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expect(page.locator("#events-view")).toBeVisible();
     await expect(page.locator("#tab-events")).toHaveAttribute("aria-current", "page");
 
-    // Tap Chat → the refreshed chat LIST (TM-515) + Chat active. The list shows the "Chats" heading and
-    // the seed conversations from the paper-chat-list wireframe.
+    // Tap Chat → the API-backed chat LIST (TM-438) + Chat active. The list shows the "Chats" heading and
+    // the unified conversation-list container (event chats + admin broadcasts, read from GET
+    // /api/v1/me/conversations — rows depend on backend seeding, so we assert the container not a row).
     await page.locator("#tab-chat").click();
     await expect(page.locator("#chat-view")).toBeVisible();
     await expect(page.locator("#chat-view")).toContainText("Chats");
-    await expect(page.locator('[data-testid="chat-row"]').first()).toContainText("Sunday Dog Walk");
+    await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
 
     // Tap Home → back to the home view + Home active.
@@ -205,94 +206,26 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
   });
 
-  test("opening a chat row shows the thread, read-receipt ticks and a working composer (TM-515)", async ({
+  test("opening a chat thread shows the read-only thread view: back-to-list chrome, no composer (TM-438)", async ({
     page,
   }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
-    await page.evaluate(() => (window.location.hash = "#/chat"));
-    // Open the first conversation → the thread deep-link, still lighting the Chat tab.
-    await page.locator('[data-testid="chat-row"]').first().click();
-    await expect(page).toHaveURL(/#\/chat\/sunday-dog-walk$/);
-    const thread = page.locator('[data-testid="chat-thread"]');
-    await expect(thread).toBeVisible();
-    await expect(thread).toContainText("See you all at 10!");
-    // The full read-receipt ladder renders (TM-511 component): single, double AND triple tick.
-    await expect(thread.locator(".tm-c-ticks--sent")).toHaveCount(1);
-    await expect(thread.locator(".tm-c-ticks--read")).toHaveCount(1);
-    await expect(thread.locator(".tm-c-ticks--group")).toHaveCount(1);
+    // Deep-link into a thread route. Whatever the backend returns for this id (messages, an empty
+    // thread, or not-a-member), the shell always renders its thread chrome: a back-to-list control and
+    // the Chat tab lit. Message posting is a later ticket (TM-447), so there is NO composer here.
+    await page.evaluate(() => (window.location.hash = "#/chat/1"));
+    await expect(page.locator("#chat-view")).toBeVisible();
+    await expect(page.locator(".tm-chat-back")).toBeVisible();
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
-    // The composer echoes a sent message locally (no backend yet, TM-433).
-    await page.locator('[data-testid="chat-composer-input"]').fill("Running 5 late!");
-    await page.locator('[data-testid="chat-composer"] .tm-chat-send').click();
-    await expect(thread).toContainText("Running 5 late!");
-  });
+    await expect(page.locator('[data-testid="chat-composer"]')).toHaveCount(0);
 
-  test("the reaction picker: open an incoming bubble, pick an emoji, and backdrop/Escape close it (TM-536)", async ({
-    page,
-  }) => {
-    await page.goto("/#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await signInAsAdmin(page);
-    // Deep-link straight into a populated thread so the react-able incoming bubbles are mounted.
-    await page.evaluate(() => (window.location.hash = "#/chat/sunday-dog-walk"));
-    const thread = page.locator('[data-testid="chat-thread"]');
-    await expect(thread).toBeVisible();
-
-    // Target Mike's incoming message — it has NO seeded reaction, so a pick is a clean FIRST react
-    // (a fresh pill appearing, not a count replacing an existing one). Incoming bubbles are buttons
-    // (`.tm-chat-bub--react`); outgoing ones are static, so only incoming rows open the picker.
-    const mikeRow = thread.locator(".tm-chat-msg--in", { hasText: "bring treats" });
-    const mikeBubble = mikeRow.locator(".tm-chat-bub--react");
-    await expect(mikeRow.locator(".tm-chat-reaction")).toHaveCount(0);
-
-    // Tap the bubble → the picker opens over its dimmed backdrop and the bubble takes the selection
-    // ring. It offers the five reaction emoji plus the "＋ more" affordance (six controls).
-    await mikeBubble.click();
-    const picker = page.locator(".tm-chat-picker");
-    await expect(picker).toBeVisible();
-    await expect(mikeBubble).toHaveClass(/tm-chat-bub--selected/);
-    await expect(picker.locator(".tm-chat-picker-emoji")).toHaveCount(6);
-
-    // Pick 🎉 → the message gains an inline reaction pill of that emoji (count 1), the picker closes,
-    // and the bubble's selection ring clears. (🎉 has no emoji variation selector, so the text
-    // assertion is exact.)
-    await picker.getByRole("menuitem", { name: "React 🎉" }).click();
-    await expect(page.locator(".tm-chat-picker")).toBeHidden();
-    await expect(mikeBubble).not.toHaveClass(/tm-chat-bub--selected/);
-    const pill = mikeRow.locator(".tm-chat-reaction");
-    await expect(pill).toHaveCount(1);
-    await expect(pill.locator(".tm-c-reaction__emoji")).toHaveText("🎉");
-    await expect(pill).toContainText("1");
-
-    // Reopen → clicking the dimmed backdrop (outside the picker) closes it WITHOUT changing the
-    // reaction. Click the top-left corner, well clear of the centred picker card.
-    await mikeBubble.click();
-    await expect(page.locator(".tm-chat-picker")).toBeVisible();
-    await page.locator(".tm-chat-picker-backdrop").click({ position: { x: 5, y: 5 } });
-    await expect(page.locator(".tm-chat-picker")).toBeHidden();
-    await expect(pill.locator(".tm-c-reaction__emoji")).toHaveText("🎉"); // unchanged
-
-    // Reopen → Escape closes it too (keyboard dismissal).
-    await mikeBubble.click();
-    await expect(page.locator(".tm-chat-picker")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.locator(".tm-chat-picker")).toBeHidden();
-
-    // The overlay never left a stray horizontal scroll behind.
+    // Back returns to the unified conversation list.
+    await page.locator(".tm-chat-back").click();
+    await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
+    await expect(page.locator("#chat-view")).toContainText("Chats");
     await expectNoHorizontalPageScroll(page);
-  });
-
-  test("the empty conversation shows the first-message prompt (paper-chat-empty, TM-515)", async ({
-    page,
-  }) => {
-    await page.goto("/#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await signInAsAdmin(page);
-    await page.evaluate(() => (window.location.hash = "#/chat/park-picnic"));
-    await expect(page.locator('[data-testid="chat-empty"]')).toBeVisible();
-    await expect(page.locator('[data-testid="chat-empty"]')).toContainText("No messages yet");
   });
 
   test("the notifications feed renders and Mark all read clears the unread rows (TM-515)", async ({

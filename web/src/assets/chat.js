@@ -1,35 +1,47 @@
-// Event group chat — DOM view (TM-515 / TM-433).
+// Chat section — DOM view (TM-438), reading the F2 conversation API (TM-436).
 //
-// The Chat section, refreshed to the approved paper wireframes (paper-chat-list, paper-chat-thread,
-// paper-chat-empty, paper-reaction-picker) at the production default theme, inside the bottom-nav
-// shell (TM-434). Replaces the TM-434 "coming soon" placeholder that used to live here — the router
-// wiring, the Chat tab and the nav are unchanged (that was the whole point of the placeholder seam).
+// The Chat section inside the bottom-nav shell (TM-434): a UNIFIED conversation list (event group
+// chats + admin broadcasts together, each with a type badge) and a per-conversation thread view.
+// Replaces the earlier TM-515 seed-driven wireframe: the list + thread now read the live backend
+// (GET /api/v1/me/conversations, GET /api/v1/conversations/{id}/messages), and opening a thread marks
+// it read (POST /api/v1/conversations/{id}/read). Message POSTING is a later ticket (TM-447), so this
+// view is read-only — there is no composer yet.
 //
 // Two views, mounted into the same #chat-view container by the router (mirrors events.js list/detail):
-//   • #/chat        → the chat LIST  (renderList)   — a top-level tab, no back button
-//   • #/chat/{id}   → the chat THREAD (renderThread) — back to the list, or the empty state
+//   • #/chat        → the conversation LIST  (renderList)   — a top-level tab, no back button
+//   • #/chat/{id}   → the message THREAD      (renderThread) — back to the list
 //
-// Built from the SHARED component library (TM-511) so it restyles from tokens with the theme (clean /
-// doodle / sketch) and matches the gallery/showcase: `avatar` (list + —), `badge` (unread count),
-// `readReceipt` (the single/double/TRIPLE-tick delivery ladder — ✓ / ✓✓ / ✓✓✓ whole-group-read, the
-// TM-433 semantics), and `reaction` (the inline 👍 3 pill). All decision logic (seed conversations,
-// thread lookup, and the receipt-state derivation) lives in the pure, unit-tested chat-core.js; this
-// module is the thin DOM shell around it.
+// It follows the events.js house pattern for an API-backed view: a monotonic `renderToken` so a slow
+// fetch can't paint over a newer navigation, a shared loading state, and a retryable error state. All
+// decision logic (mapping the API shapes to view-models, the type badge, time labels, ordering) lives
+// in the pure, unit-tested chat-core.js; this module is the thin DOM shell around it.
 //
-// XSS-safe: every node is built via ui.js `el()` (textContent only, no innerHTML), so message text,
-// names and previews — untrusted once TM-433 wires a real backend — can never inject markup.
+// Theming is inherited: the shared component library (avatar / badge / tag / reaction) and the
+// .tm-chat-* rules restyle from CSS tokens with the theme (clean / doodle / sketch), so no per-theme
+// code lives here. XSS-safe: every node is built via ui.js `el()` (textContent only, no innerHTML), so
+// untrusted titles, previews and message bodies can never inject markup.
 
 import { clear, el } from "./ui.js";
-import { avatar, badge, reaction, readReceipt } from "./components.js";
+import { avatar, badge, reaction, tag } from "./components.js";
 import { lineIcon } from "./icons.js";
+import { listMyConversations, getConversationMessages, markConversationRead } from "./api.js";
 import * as core from "./chat-core.js";
 
 const $ = (id) => document.getElementById(id);
 
+// The last loaded list, cached so a thread deep-link (#/chat/{id}) can name its conversation + type
+// without a second round-trip, and so marking a thread read can clear that row's unread badge for the
+// instant back-nav. Best-effort — a cache miss just weakens the thread header (falls back to "Chat").
+const state = { rows: [] };
+
+// Monotonic guard: a fetch that resolves after the user has navigated away must not paint stale
+// content over the new view (mirrors events.js / the router's settle-or-fallback discipline).
+let renderToken = 0;
+
 /**
  * Router entry (TM-109). `threadId` is the conversation id parsed from `#/chat/{id}`, or null/empty
  * for the `#/chat` list. Re-invoked on every entry so list↔thread↔another-thread navigation always
- * repaints (mirrors enterEvents).
+ * repaints with fresh data (mirrors enterEvents).
  * @param {?string} threadId
  */
 export function enterChat(threadId) {
@@ -39,266 +51,207 @@ export function enterChat(threadId) {
   else renderList(view);
 }
 
-/* ─────────────────────────────── Chat list (#/chat) ───────────────────────────────────────────── */
+/* ─────────────────────────────── Shared chrome / states ───────────────────────────────────────── */
 
-function renderList(view) {
-  clear(view).append(
-    el("header", { class: "tm-chat-head" }, [el("h2", { class: "tm-chat-title", text: "Chats" })]),
-    el(
-      "div",
-      { class: "tm-chat-list", "data-testid": "chat-list" },
-      core.listConversations().map(listRow),
-    ),
-  );
+/** The list top bar: just the "Chats" title (a top-level tab, no back button). */
+function listHeader() {
+  return el("header", { class: "tm-chat-head" }, [el("h2", { class: "tm-chat-title", text: "Chats" })]);
 }
 
-/** One chat-list row — a link into the thread. Matches paper-chat-list `.row`. */
-function listRow(conv) {
-  // The preview line: a self ("You: …") preview shows a leading read-receipt tick (the wireframe's
-  // "✓✓ You: …" / "✓ …"); an incoming preview is just the text.
-  const preview = el("span", { class: "tm-chat-row-preview" });
-  if (conv.preview.self && conv.preview.receipt) preview.append(readReceipt(conv.preview.receipt));
-  preview.append(el("span", { class: "tm-chat-row-preview-text", text: conv.preview.text }));
-
-  return el(
-    "a",
-    {
-      class: "tm-chat-row",
-      href: `#/chat/${encodeURIComponent(conv.id)}`,
-      "data-testid": "chat-row",
-      dataset: { threadId: conv.id },
-    },
-    [
-      avatar(conv.avatar),
-      el("div", { class: "tm-chat-row-mid" }, [
-        el("div", { class: "tm-chat-row-name", text: conv.name }),
-        preview,
-      ]),
-      el("div", { class: "tm-chat-row-meta" }, [
-        el("span", { class: "tm-chat-row-time", text: conv.preview.time || conv.day }),
-        conv.unread > 0 ? badge(conv.unread) : null,
-      ]),
-    ],
-  );
-}
-
-/* ─────────────────────────────── Chat thread (#/chat/{id}) ────────────────────────────────────── */
-
-function renderThread(view, id) {
-  const conv = core.getConversation(id);
-  if (!conv) {
-    // Unknown thread id (e.g. a stale deep link) — degrade to the list rather than a blank screen.
-    renderList(view);
-    return;
-  }
-
-  // The scrolling message column. Empty conversation → the paper-chat-empty state; otherwise the day
-  // separator + the messages (out-going ones already carry their derived receipt state from the core).
-  const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
-  const messages = core.threadMessages(id);
-  if (messages.length === 0) {
-    body.append(emptyState());
-  } else {
-    body.append(el("div", { class: "tm-chat-day", text: conv.day }));
-    for (const m of messages) body.append(messageRow(m));
-  }
-
-  clear(view).append(threadHeader(conv), body, composer(conv, body));
-  // Land at the newest message (bottom), like every chat app.
-  requestAnimationFrame(() => {
-    body.scrollTop = body.scrollHeight;
-  });
-}
-
-/** Thread top bar: back to the list + the group name + its "N going" sub-line. */
-function threadHeader(conv) {
+/** The thread top bar: back to the list + the conversation title + a type sub-line. */
+function threadHeader(meta) {
   return el("header", { class: "tm-chat-thread-head" }, [
     el("a", { class: "tm-chat-back", href: "#/chat", "aria-label": "Back to chats" }, [
       el("span", { class: "tm-chat-back-glyph", "aria-hidden": "true", text: "←" }),
     ]),
     el("div", { class: "tm-chat-thread-heading" }, [
-      el("h2", { class: "tm-chat-thread-title", text: conv.name }),
-      el("p", { class: "tm-chat-thread-sub", text: `${conv.going} going` }),
+      el("h2", { class: "tm-chat-thread-title", text: meta.title }),
+      el("p", { class: "tm-chat-thread-sub", text: meta.sub }),
     ]),
   ]);
 }
 
-/** The paper-chat-empty "No messages yet / Be the first to say hi 👋" first-message prompt. */
-function emptyState() {
+/**
+ * A one-line view state (loading / error), optionally with a retry button — reuses the shared
+ * .tm-empty / .tm-muted / .tm-btn styles the events + notifications views use, so it themes for free.
+ */
+function stateBlock(message, { testid, muted = false, onRetry } = {}) {
+  return el("div", { class: muted ? "tm-chat-state tm-muted" : "tm-chat-state tm-empty", "data-testid": testid || null }, [
+    el("p", { class: "tm-chat-state-text", text: message }),
+    onRetry ? el("button", { class: "tm-btn", type: "button", onClick: onRetry }, "Retry") : null,
+  ]);
+}
+
+/* ─────────────────────────────── Conversation list (#/chat) ───────────────────────────────────── */
+
+async function renderList(view) {
+  const mine = ++renderToken;
+  clear(view).append(listHeader(), stateBlock("Loading your chats…", { testid: "chat-loading", muted: true }));
+
+  let data;
+  try {
+    data = await listMyConversations();
+  } catch (err) {
+    if (mine !== renderToken) return;
+    clear(view).append(
+      listHeader(),
+      stateBlock("Couldn't load your chats. Please try again.", {
+        testid: "chat-error",
+        onRetry: () => renderList(view),
+      }),
+    );
+    console.warn("[chat] list load failed:", err?.message ?? err);
+    return;
+  }
+  if (mine !== renderToken) return;
+
+  state.rows = core.toConversationRows(data?.items);
+  paintList(view);
+}
+
+/** Paint the (already fetched) list — the unified rows, or the empty state, inside the list region. */
+function paintList(view) {
+  const list = el("div", { class: "tm-chat-list", "data-testid": "chat-list" });
+  if (state.rows.length === 0) list.append(emptyList());
+  else for (const row of state.rows) list.append(listRow(row));
+  clear(view).append(listHeader(), list);
+}
+
+/** The "no conversations yet" empty state for the list. */
+function emptyList() {
+  return el("div", { class: "tm-chat-empty", "data-testid": "chat-list-empty" }, [
+    el("div", { class: "tm-chat-empty-icon", "aria-hidden": "true" }, [lineIcon("chat", { size: 44, strokeWidth: 1.6 })]),
+    el("h3", { class: "tm-chat-empty-title", text: "No conversations yet" }),
+    el("p", { class: "tm-chat-empty-lead", text: "Join an event to start chatting — your group chats and announcements land here." }),
+  ]);
+}
+
+/** One conversation row — a link into the thread, with a type badge, preview, time and unread badge. */
+function listRow(row) {
+  return el(
+    "a",
+    {
+      class: "tm-chat-row",
+      href: `#/chat/${encodeURIComponent(row.id)}`,
+      "data-testid": "chat-row",
+      dataset: { threadId: row.id, type: row.type.key },
+    },
+    [
+      avatar(row.avatar),
+      el("div", { class: "tm-chat-row-mid" }, [
+        el("div", { class: "tm-chat-row-name" }, [
+          el("span", { class: "tm-chat-row-name-text", text: row.title }),
+          typeBadge(row.type),
+        ]),
+        el("span", { class: "tm-chat-row-preview" }, [
+          el("span", { class: "tm-chat-row-preview-text", text: row.preview || "No messages yet" }),
+        ]),
+      ]),
+      el("div", { class: "tm-chat-row-meta" }, [
+        row.timeLabel ? el("span", { class: "tm-chat-row-time", text: row.timeLabel }) : null,
+        row.unread > 0 ? badge(row.unread) : null,
+      ]),
+    ],
+  );
+}
+
+/** The event/admin type badge — the shared `tag()` component with a per-type accent class. */
+function typeBadge(type) {
+  const node = tag(type.label);
+  node.classList.add("tm-chat-type", `tm-chat-type--${type.key}`);
+  return node;
+}
+
+/* ─────────────────────────────── Message thread (#/chat/{id}) ─────────────────────────────────── */
+
+async function renderThread(view, id) {
+  const mine = ++renderToken;
+  const meta = threadMeta(id);
+  clear(view).append(threadHeader(meta), stateBlock("Loading messages…", { testid: "chat-loading", muted: true }));
+
+  let data;
+  try {
+    data = await getConversationMessages(id);
+  } catch (err) {
+    if (mine !== renderToken) return;
+    clear(view).append(
+      threadHeader(meta),
+      stateBlock("Couldn't load this chat. Please try again.", {
+        testid: "chat-error",
+        onRetry: () => renderThread(view, id),
+      }),
+    );
+    console.warn("[chat] thread load failed:", err?.message ?? err);
+    return;
+  }
+  if (mine !== renderToken) return;
+
+  const messages = core.toThreadMessages(data?.items);
+  const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
+  if (messages.length === 0) body.append(emptyThread());
+  else for (const m of messages) body.append(messageRow(m));
+
+  clear(view).append(threadHeader(meta), body);
+  // Land at the newest message (bottom), like every chat app.
+  requestAnimationFrame(() => {
+    body.scrollTop = body.scrollHeight;
+  });
+
+  markThreadRead(id);
+}
+
+/**
+ * The conversation title + sub-line for the thread header, resolved from the cached list when we have
+ * it (e.g. arrived via a list tap) and degrading to a neutral "Chat" on a cold deep-link.
+ */
+function threadMeta(id) {
+  const row = state.rows.find((r) => r.id === String(id));
+  if (!row) return { title: "Chat", sub: "" };
+  return { title: row.title, sub: row.type.key === "admin" ? "Admin messages" : "Event chat" };
+}
+
+/** Mark the opened thread read (fire-and-forget) and clear its cached unread so back-nav reflects it. */
+function markThreadRead(id) {
+  const row = state.rows.find((r) => r.id === String(id));
+  if (row) row.unread = 0;
+  Promise.resolve(markConversationRead(id)).catch((err) => {
+    // Non-fatal: the badge just stays until the next list refresh. Never surfaces to the user.
+    console.warn("[chat] mark-read failed:", err?.message ?? err);
+  });
+}
+
+/** The "no messages yet" empty thread state. */
+function emptyThread() {
   return el("div", { class: "tm-chat-empty", "data-testid": "chat-empty" }, [
     el("div", { class: "tm-chat-empty-icon", "aria-hidden": "true" }, [lineIcon("chat", { size: 44, strokeWidth: 1.6 })]),
     el("h3", { class: "tm-chat-empty-title", text: "No messages yet" }),
-    el("p", { class: "tm-chat-empty-lead", text: "Be the first to say hi 👋 — break the ice with the group." }),
+    el("p", { class: "tm-chat-empty-lead", text: "Nothing here yet — messages will appear as they're posted." }),
   ]);
 }
 
 /**
- * One message bubble. Incoming (`in`) messages show the sender name and are INTERACTIVE — tapping the
- * bubble opens the reaction picker (paper-reaction-picker); outgoing (`out`) messages show the time +
- * the read-receipt ticks. Both may carry an inline reaction pill.
+ * One message row. `system` messages (e.g. "You joined the event") render as a centred notice; regular
+ * messages render as a bubble with the body, a time stamp and any read-only reaction pills. The read
+ * API doesn't expose the caller's own id, so messages are a flat, sender-agnostic list (out-going ticks
+ * / reaction picker are later tickets).
  */
 function messageRow(m) {
-  const out = m.from === "me";
-  const row = el("div", { class: `tm-chat-msg ${out ? "tm-chat-msg--out" : "tm-chat-msg--in"}` });
-
-  if (!out && m.who) row.append(el("div", { class: "tm-chat-who", text: m.who }));
-
-  if (out) {
-    // The user's own message: a static bubble + a stamp of "time · <ticks>".
-    row.append(el("div", { class: "tm-chat-bub", text: m.text }));
-    row.append(
-      el("div", { class: "tm-chat-stamp" }, [
-        m.at ? el("span", { text: `${m.at} ` }) : null,
-        readReceipt(m.receipt),
-      ]),
-    );
-  } else {
-    // An incoming message: a button bubble so a tap / keyboard activation opens the reaction picker.
-    const bubble = el(
-      "button",
-      { class: "tm-chat-bub tm-chat-bub--react", type: "button", "aria-label": `React to ${m.who || "message"}` },
-      m.text,
-    );
-    bubble.addEventListener("click", () => openReactionPicker(row, bubble));
-    row.append(bubble);
+  if (m.system) {
+    return el("div", { class: "tm-chat-system", "data-testid": "chat-system" }, [
+      el("span", { class: "tm-chat-system-text", text: m.body }),
+    ]);
   }
 
-  if (m.reaction) row.append(reactionPill(row, m.reaction.emoji, m.reaction.count));
+  const row = el("div", { class: "tm-chat-msg tm-chat-msg--in" });
+  row.append(el("div", { class: "tm-chat-bub", text: m.body }));
+  if (m.timeLabel) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: m.timeLabel })]));
+  // Read-only reaction pills (no picker in TM-438): just surface whatever the API returned.
+  for (const r of m.reactions) {
+    const pill = reaction(r.emoji, r.count);
+    pill.classList.add("tm-chat-reaction");
+    row.append(pill);
+  }
   return row;
-}
-
-/** An inline reaction pill (the `reaction` component), tracked so the picker can replace it. */
-function reactionPill(row, emoji, count) {
-  const pill = reaction(emoji, count);
-  pill.classList.add("tm-chat-reaction");
-  row.dataset.hasReaction = "true";
-  return pill;
-}
-
-/**
- * The composer — a real text field + send button (paper-chat-thread / paper-chat-empty). With no
- * backend yet (TM-433), Send optimistically ECHOES the typed message into the thread as a just-sent
- * (✓) out-going bubble and clears the field — so the "Be the first to say hi" first-message flow
- * actually works and is testable. A <form> so Enter submits; the field is a real <input> so the
- * bottom-nav keyboard guard (tabbar.js) hides the tab bar while typing.
- */
-function composer(conv, body) {
-  const input = el("input", {
-    class: "tm-chat-input",
-    type: "text",
-    placeholder: conv.messages.length === 0 ? "Say hi…" : "Message…",
-    "aria-label": "Message",
-    autocomplete: "off",
-    "data-testid": "chat-composer-input",
-  });
-  const form = el(
-    "form",
-    { class: "tm-chat-composer", "data-testid": "chat-composer" },
-    [
-      input,
-      el(
-        "button",
-        { class: "tm-chat-send", type: "submit", "aria-label": "Send" },
-        [
-          // A paper-plane send glyph (matches the wireframe's send button); inks with currentColor.
-          el("span", { class: "tm-chat-send-glyph", "aria-hidden": "true" }, [lineIcon("send", { size: 18, strokeWidth: 2 })]),
-        ],
-      ),
-    ],
-  );
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = input.value.trim();
-    if (!text) return;
-    appendOutgoing(body, text);
-    input.value = "";
-    input.focus();
-  });
-  return form;
-}
-
-/** Append a just-sent outgoing message (✓) to the thread, replacing the empty state on the first one. */
-function appendOutgoing(body, text) {
-  const empty = body.querySelector(".tm-chat-empty");
-  if (empty) {
-    // First message in a previously-empty thread: swap the empty state for a day separator.
-    empty.remove();
-    body.append(el("div", { class: "tm-chat-day", text: "Today" }));
-  }
-  const now = new Date();
-  const at = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  // A freshly-sent message is read by nobody yet → "sent" (single tick), per chat-core's ladder.
-  body.append(messageRow({ from: "me", text, at, receipt: "sent" }));
-  body.scrollTop = body.scrollHeight;
-}
-
-/* ─────────────────────────────── Reaction picker (paper-reaction-picker) ──────────────────────── */
-
-/**
- * Open the long-press emoji reaction picker over a dimmed backdrop, anchored above the tapped message
- * (paper-reaction-picker: 👍 ❤️ 😂 🎉 🙌 ＋, with the target bubble highlighted). Picking an emoji sets
- * / replaces that message's inline reaction pill and closes; the backdrop or Escape closes it too.
- * @param {HTMLElement} row the message row.
- * @param {HTMLElement} bubble the tapped bubble (gets the accent selection ring while open).
- */
-function openReactionPicker(row, bubble) {
-  bubble.classList.add("tm-chat-bub--selected");
-
-  const onKey = (e) => {
-    if (e.key === "Escape") close();
-  };
-  const close = () => {
-    backdrop.remove();
-    bubble.classList.remove("tm-chat-bub--selected");
-    document.removeEventListener("keydown", onKey);
-  };
-
-  const picker = el(
-    "div",
-    { class: "tm-chat-picker", role: "menu", "aria-label": "Add a reaction" },
-    [
-      ...core.REACTION_EMOJIS.map((emoji) =>
-        el(
-          "button",
-          {
-            class: "tm-chat-picker-emoji",
-            type: "button",
-            role: "menuitem",
-            "aria-label": `React ${emoji}`,
-            onClick: () => {
-              setReaction(row, emoji);
-              close();
-            },
-          },
-          emoji,
-        ),
-      ),
-      // The "＋ more" affordance from the wireframe (a fuller picker is a later concern).
-      el("button", { class: "tm-chat-picker-emoji tm-chat-picker-more", type: "button", "aria-label": "More reactions", text: "＋" }),
-    ],
-  );
-
-  const backdrop = el(
-    "div",
-    {
-      class: "tm-backdrop tm-chat-picker-backdrop",
-      onClick: (e) => {
-        if (e.target === backdrop) close();
-      },
-    },
-    [picker],
-  );
-  document.body.append(backdrop);
-  document.addEventListener("keydown", onKey);
-  picker.querySelector("button")?.focus();
-}
-
-/** Set / replace a message's inline reaction pill with the picked emoji (count 1 for a fresh react). */
-function setReaction(row, emoji) {
-  row.querySelector(".tm-chat-reaction")?.remove();
-  // The pick→pill rule (single-select, fresh count 1, replace prior) lives in the unit-tested core.
-  const picked = core.pickReaction(emoji);
-  row.append(reactionPill(row, picked.emoji, picked.count));
 }
 
 // Bridge for the router (which imports this) + ad-hoc use / QA.
