@@ -84,6 +84,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.notify.BroadcastService broadcastService;
 
+    // AdminMessageController (TM-441) needs an AdminMessageService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.messaging.AdminMessageService adminMessageService;
+
     // EventAdminController (TM-392) needs an EventAdminService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.event.EventAdminService eventAdminService;

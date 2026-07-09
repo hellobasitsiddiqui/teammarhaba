@@ -33,6 +33,92 @@
         },
         "type" : "object"
       },
+      "AdminMessageRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "cities" : {
+            "items" : {
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "deepLink" : {
+            "type" : "string"
+          },
+          "eventIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "title" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "userIds" : {
+            "items" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "maxItems" : 500,
+            "minItems" : 0,
+            "type" : "array"
+          }
+        },
+        "required" : [ "body", "title" ],
+        "type" : "object"
+      },
+      "AdminMessageResponse" : {
+        "properties" : {
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "notified" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pushDelivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pushFailed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pushPruned" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pushSkipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pushTargeted" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "recipientCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "targetType" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "AttendeeAvatar" : {
         "properties" : {
           "displayName" : {
@@ -1316,6 +1402,34 @@
           }
         },
         "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/messages" : {
+      "post" : {
+        "operationId" : "send",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AdminMessageRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdminMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-message-controller" ]
       }
     },
     "/api/v1/admin/push/broadcast" : {
