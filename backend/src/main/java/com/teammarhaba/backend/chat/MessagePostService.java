@@ -8,7 +8,6 @@ import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
-import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -40,16 +39,17 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>The gate (per the AC), in order:</b>
  * <ol>
- *   <li>an unknown thread → {@code 404} ({@link ResourceNotFoundException}), mirroring the read gate
- *       so the not-found path is uniform;</li>
- *   <li>the caller must be a member whose {@link MuteState} is {@link MuteState#NONE NONE} — a
- *       non-member, a {@link MuteState#REMOVED REMOVED} (kicked) member, and a
- *       {@link MuteState#READ_ONLY READ_ONLY} (muted) member are all {@code 403}
- *       ({@link AccessDeniedException}). Posting is stricter than reacting: reactions allow a
- *       {@code READ_ONLY} member (a read-side signal), but the AC gates posting on "non-removed,
+ *   <li>the caller must be an active member whose {@link MuteState} is {@link MuteState#NONE NONE} — a
+ *       non-member, a {@link MuteState#REMOVED REMOVED} (kicked) member, a
+ *       {@link MuteState#READ_ONLY READ_ONLY} (muted) member, <em>and an unknown / foreign thread</em>
+ *       (which simply has no membership row) are all a uniform {@code 403}
+ *       ({@link AccessDeniedException}), so a POST can't probe which thread ids exist — matching the
+ *       read gate ({@link ConversationReadService#messages}) rather than leaking existence with a
+ *       {@code 404} (TM-573). Posting is stricter than reacting: reactions allow a {@code READ_ONLY}
+ *       member (a read-side signal), but the AC gates posting on "non-removed,
  *       <em>non-read-only-muted</em>", so anything but an active member is denied;</li>
- *   <li>the thread must be open → a closed / read-only thread is {@code 409}
- *       ({@link ConflictException}). For an event thread this is TM-446's
+ *   <li>the thread must be open → a closed / read-only thread the caller <em>is</em> a member of is
+ *       {@code 409} ({@link ConflictException}). For an event thread this is TM-446's
  *       {@link EventChatLifecycleService#isThreadReadOnly} (manually soft-closed, or past its policy
  *       close time); a soft-deleted event has no live chat, so it too reads as closed.</li>
  * </ol>
@@ -121,20 +121,27 @@ public class MessagePostService {
      * fan-out. Returns the created message as the read DTO (with an empty reaction summary — a brand
      * new message has no reactions yet) so the client can append it to the timeline optimistically.
      *
-     * @throws ResourceNotFoundException {@code 404} if the thread does not exist
-     * @throws AccessDeniedException     {@code 403} if the caller is not an active (NONE) member
-     * @throws ConflictException         {@code 409} if the thread is closed / read-only
+     * @throws AccessDeniedException {@code 403} if the caller is not an active (NONE) member — this
+     *     includes an unknown / foreign thread (no membership row), so thread existence isn't leaked
+     * @throws ConflictException     {@code 409} if the thread is closed / read-only
      */
     @Transactional
     public ConversationMessageResponse post(VerifiedUser caller, Long conversationId, String body) {
         Long userId = users.provision(caller).getId();
 
-        // 404 first (before the membership check) so a missing thread is uniform with the read gate.
+        // Membership gate FIRST (TM-573): an unknown thread has no membership row and falls through to
+        // the same 403 as a non-member / REMOVED member, so a POST can't probe which thread ids exist —
+        // mirroring the read gate (ConversationReadService.requireMember) rather than leaking existence
+        // with a 404.
+        requireActiveMember(conversationId, userId);
+
+        // The caller is an active member, so the thread exists; load it for the close-policy check. A
+        // membership row with no surviving thread ("shouldn't happen") stays uniform at 403 rather than
+        // 500-ing or re-introducing an existence leak.
         Conversation conversation = conversations
                 .findById(conversationId)
-                .orElseThrow(() -> new ResourceNotFoundException("conversation " + conversationId + " not found"));
+                .orElseThrow(() -> new AccessDeniedException("You are not a member of this thread."));
 
-        requireActiveMember(conversationId, userId);
         requireOpenThread(conversation);
 
         // Persist, flushing so the @Generated DB-authoritative created_at is read straight back for the DTO.
