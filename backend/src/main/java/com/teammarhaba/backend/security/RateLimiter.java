@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Duration;
 import java.util.function.LongSupplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -21,11 +22,14 @@ import org.springframework.util.StringUtils;
  *
  * <p><strong>Bounded by construction.</strong> Buckets live in a Caffeine cache that is
  * {@linkplain Caffeine#maximumSize size-capped} at {@link RateLimitProperties#maxTrackedClients()} and
- * {@linkplain Caffeine#expireAfterAccess evicts} a client idle for a whole refill period. That cap is
- * the critical bit: it stops the limiter from itself becoming a new unbounded map when an attacker
- * rotates a spoofed {@code X-Forwarded-For} (the unbounded-map DoS the TM-247 review found). Worst
- * case the oldest idle buckets are evicted and those clients get a fresh (already fully-refilled)
- * budget; memory stays bounded.
+ * {@linkplain Caffeine#expireAfterAccess evicts} a client idle for the <em>full-refill horizon</em>
+ * ({@code capacity/refillTokens x refillPeriod} — see {@link #fullRefillHorizon}). That cap is the
+ * critical bit: it stops the limiter from itself becoming a new unbounded map when an attacker rotates
+ * a spoofed {@code X-Forwarded-For} (the unbounded-map DoS the TM-247 review found). Worst case the
+ * oldest idle buckets are evicted and those clients get a fresh (already fully-refilled) budget; memory
+ * stays bounded. The horizon (not the bare refill period) is the eviction TTL precisely so a recreated
+ * full bucket only ever appears once idling that long <em>would</em> have refilled it to capacity
+ * anyway — otherwise a burst&gt;sustained config would leak a free full burst on eviction (TM-571).
  *
  * <p><strong>Process-local</strong>, like the email-code limiter (TM-247): fine for a single Cloud Run
  * instance, and the per-instance rate simply multiplies by the instance count. A shared store (Redis)
@@ -57,10 +61,37 @@ public class RateLimiter {
         this.refillPerNano = (double) props.refillTokens() / props.refillPeriod().toNanos();
         this.buckets = Caffeine.newBuilder()
                 .maximumSize(props.maxTrackedClients())
-                // Idle a whole refill period => the bucket would be fully refilled anyway, so evicting
-                // it (and later recreating a full one) is behaviourally equivalent and bounds memory.
-                .expireAfterAccess(props.refillPeriod())
+                // Drive eviction off the SAME clock as the refill (default System.nanoTime in prod, an
+                // advanceable clock in tests) so the TTL below is deterministic and can't diverge from
+                // the lazy-refill it's meant to mirror.
+                .ticker(nanoClock::getAsLong)
+                // Evict only after the FULL-REFILL HORIZON — the time a drained bucket needs to climb all
+                // the way back to capacity. Only once idling that long would genuinely have refilled the
+                // bucket to the brim is dropping it (and recreating a full one) behaviourally equivalent.
+                // Using the bare refillPeriod (the old code) was equivalent ONLY when capacity ==
+                // refillTokens; on a burst>sustained config (e.g. capacity=1000, refillTokens=60) a client
+                // that drained its bucket then idled one period would be evicted and handed a fresh FULL
+                // burst instead of the ~refillTokens a lazy refill grants — sustaining ~capacity/refillTokens
+                // times the intended rate by simply pausing (TM-571).
+                .expireAfterAccess(fullRefillHorizon(props))
                 .build();
+    }
+
+    /**
+     * The full-refill horizon: how long a fully-drained bucket takes to refill all the way back to
+     * {@code capacity}, namely {@code capacity / refillTokens x refillPeriod}. This is the cache
+     * eviction TTL — a bucket is only dropped (and later recreated at full capacity) after idling this
+     * long, by which point a lazy refill would itself have topped it up to capacity, so the two are
+     * behaviourally equivalent. Collapses to exactly {@code refillPeriod} for the {@code capacity ==
+     * refillTokens} default, and stretches proportionally for burst&gt;sustained configs (TM-571).
+     */
+    static Duration fullRefillHorizon(RateLimitProperties props) {
+        // capacity >= refillTokens >= 1 (Bean Validation), so the ratio is >= 1 and the horizon never
+        // shrinks below the refill period. Compute in double then round to nanos — the magnitudes here
+        // (period in ns x a modest ratio) stay far inside long range, so there's no overflow risk.
+        long horizonNanos =
+                Math.round((double) props.refillPeriod().toNanos() * props.capacity() / props.refillTokens());
+        return Duration.ofNanos(horizonNanos);
     }
 
     /**
