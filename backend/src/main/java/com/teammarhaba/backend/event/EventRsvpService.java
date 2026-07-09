@@ -92,6 +92,7 @@ public class EventRsvpService {
     private final ApplicationEventPublisher publisher;
     private final BookingCutoffPolicy bookingCutoff;
     private final EventPhasePolicy phasePolicy;
+    private final EventChatLifecycleService chatLifecycle;
 
     public EventRsvpService(
             EventRepository events,
@@ -101,7 +102,8 @@ public class EventRsvpService {
             AgeEligibilityPolicy ageGate,
             ApplicationEventPublisher publisher,
             BookingCutoffPolicy bookingCutoff,
-            EventPhasePolicy phasePolicy) {
+            EventPhasePolicy phasePolicy,
+            EventChatLifecycleService chatLifecycle) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -110,6 +112,7 @@ public class EventRsvpService {
         this.publisher = publisher;
         this.bookingCutoff = bookingCutoff;
         this.phasePolicy = phasePolicy;
+        this.chatLifecycle = chatLifecycle;
     }
 
     /**
@@ -149,6 +152,15 @@ public class EventRsvpService {
                         guardOneActiveEvent(user.getId(), eventId, now);
                     }
                     attendance.save(new EventAttendance(eventId, user.getId(), state));
+                    // Event-chat lifecycle (TM-446): a GOING landing joins (and lazily creates) the
+                    // group thread; a waitlisted landing joins only if the event opts its waitlist into
+                    // chat. Runs inside this locked RSVP transaction, so membership commits atomically
+                    // with the attendance row.
+                    if (state == AttendanceState.GOING) {
+                        chatLifecycle.onGoing(event, user.getId());
+                    } else {
+                        chatLifecycle.onWaitlisted(event, user.getId());
+                    }
                     return state == AttendanceState.GOING
                             ? new RsvpResult(state, going + 1, waitlisted)
                             : new RsvpResult(state, going, waitlisted + 1);
@@ -210,6 +222,10 @@ public class EventRsvpService {
         }
 
         attendance.deleteByEventIdAndUserId(eventId, user.getId());
+        // Event-chat lifecycle (TM-446): leaving the event removes the member from its group thread
+        // (a no-op for the host, or someone who was never a chat member). In-transaction, so the
+        // membership change commits atomically with the attendance delete.
+        chatLifecycle.onLeave(event, user.getId());
         // A committed late cancel bumps the strike counter (dirty-checking flushes on commit).
         return lateCancel
                 ? CancelResult.committedLate(user.recordLateCancel())
@@ -257,6 +273,10 @@ public class EventRsvpService {
         guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
+        // Event-chat lifecycle (TM-446): a claim is a WAITLISTED -> GOING landing, so the claimant
+        // joins the group thread here — whether or not the event opted its waitlist into chat (a
+        // waitlist-in-chat member is already in; ensureMember makes this idempotent).
+        chatLifecycle.onGoing(event, user.getId());
         boolean lastSpotFilled = event.hasCapacityLimit() && going + 1 >= event.getCapacity();
         if (lastSpotFilled) {
             attendance.clearOpenOffers(eventId); // cascade-stop signal: void the remaining live offers

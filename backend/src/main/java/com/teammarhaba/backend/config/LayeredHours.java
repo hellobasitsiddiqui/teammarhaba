@@ -40,6 +40,20 @@ public final class LayeredHours {
      * app default.
      */
     public static int resolve(Integer override, Integer cityDefault, int appDefault) {
+        // The int appDefault auto-boxes to a non-null Integer, so the shared resolver can never
+        // return null here — this is the "always has an app default" flavour.
+        return resolveNullable(override, cityDefault, appDefault);
+    }
+
+    /**
+     * The same three-tier collapse as {@link #resolve}, but for policies whose <em>app default can
+     * itself be absent</em> ("no setting at any level"): a non-null per-event {@code override} wins;
+     * otherwise a non-null per-city {@code cityDefault}; otherwise the (possibly {@code null})
+     * {@code appDefault}. A {@code null} result therefore means "unset at every tier" — e.g. the
+     * event-chat close policy (TM-446) reads that as <b>never close</b>, rather than falling back to
+     * a fixed number of hours the way the reveal/cutoff policies do.
+     */
+    public static Integer resolveNullable(Integer override, Integer cityDefault, Integer appDefault) {
         if (override != null) {
             return override;
         }
