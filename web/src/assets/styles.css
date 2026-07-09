@@ -5503,3 +5503,25 @@ button.tm-c-reaction {
         justify-content: flex-start;
     }
 }
+
+/* Sent-success panel (TM-473): shown after a send in place of the compose form, carrying the delivery
+ * summary + the recall control. A calm, bordered card (not an alert) — the send succeeded; recall is an
+ * available action, not a warning. Reuses the message-form max width so it sits where the form was. */
+.tm-msg-sent {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 44rem;
+    padding: 1rem 1.1rem;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.tm-msg-sent-summary {
+    margin: 0;
+    font-weight: 600;
+}
+.tm-msg-sent-note {
+    margin: 0;
+    font-size: 0.85rem;
+}

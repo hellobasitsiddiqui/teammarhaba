@@ -100,4 +100,21 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     default int purgeForUser(Long userId) {
         return purgeNonStickyBeyondCapForUser(userId, RETAIN_PER_USER);
     }
+
+    /**
+     * Delete every notification a single source produced — the admin-message <b>recall</b> path
+     * (TM-473). An admin send writes one {@code ADMIN_MESSAGE} row per recipient, all cross-linked by
+     * {@code source_ref = 'admin_message:<id>'}; recall removes exactly those rows in one statement, so
+     * the message disappears from every recipient's in-app inbox/panel <em>and</em> their notification
+     * bell (the unseen/unread counts are computed from these rows, so deleting them also clears the
+     * bell — inbox and bell are the same store since TM-452/TM-453). Scoped by {@code type} as well as
+     * {@code sourceRef} so it can only ever remove admin-message rows, never a system notification that
+     * happened to share a ref. Returns the number of rows removed (the recall's reach). Bulk delete (not
+     * a load-then-delete loop) so a large fan-out is one round-trip; requires an active transaction (the
+     * recall service provides one). This is the only delete besides the retention {@link #purgeForUser}.
+     */
+    @Modifying
+    @Query("delete from Notification n where n.type = :type and n.sourceRef = :sourceRef")
+    int deleteByTypeAndSourceRef(
+            @Param("type") NotificationType type, @Param("sourceRef") String sourceRef);
 }

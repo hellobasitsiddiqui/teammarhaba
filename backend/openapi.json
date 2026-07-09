@@ -33,6 +33,26 @@
         },
         "type" : "object"
       },
+      "AdminMessageRecallResponse" : {
+        "properties" : {
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "recalledAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "recalledBy" : {
+            "type" : "string"
+          },
+          "removed" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "AdminMessageRequest" : {
         "properties" : {
           "body" : {
@@ -133,6 +153,10 @@
           "id" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "recalledAt" : {
+            "format" : "date-time",
+            "type" : "string"
           },
           "recipientCount" : {
             "format" : "int32",
@@ -1688,6 +1712,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/AdminMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "admin-message-controller" ]
+      }
+    },
+    "/api/v1/admin/messages/{id}/recall" : {
+      "post" : {
+        "operationId" : "recall",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdminMessageRecallResponse"
                 }
               }
             },

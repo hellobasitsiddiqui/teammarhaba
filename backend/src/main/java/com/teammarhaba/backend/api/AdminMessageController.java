@@ -11,6 +11,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,6 +33,10 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET /admin/messages} — the calling admin's sent-message history (TM-442): the campaign
  *       headers they've sent, newest first, paged via the shared list convention. Read-only over the
  *       append-only header table (no new schema).</li>
+ *   <li>{@code POST /admin/messages/{id}/recall} — recall (unsend) a message the caller sent (TM-473):
+ *       mark the campaign recalled and remove the durable in-app copies (inbox/panel + bell). Scoped to
+ *       the caller, so an unknown id or another admin's message is a {@code 404}. Recall only — there is
+ *       deliberately no edit endpoint (to change a message, recall it and resend).</li>
  * </ul>
  *
  * <p>Modelled on {@link PushAdminController}: a thin controller that validates the body
@@ -102,5 +107,23 @@ public class AdminMessageController {
         Pageable pageable = PageRequests.of(page, size, sort, SORTABLE, DEFAULT_SORT);
         return PageResponse.from(
                 adminMessageService.sentHistory(caller.uid(), pageable), AdminSentHistoryResponse::from);
+    }
+
+    /**
+     * Recall (unsend) a message the calling admin previously sent (TM-473): mark the campaign recalled
+     * and delete the durable in-app copies it created (they disappear from every recipient's inbox/panel
+     * and their notification bell). <b>Recall only</b> — there is no edit endpoint; to change a message,
+     * recall it and send a new one. Scoped to the caller by {@link VerifiedUser}, so recalling an unknown
+     * id or another admin's message is a uniform {@code 404} (never leaking that it exists). Admin-gated
+     * by the class {@code @PreAuthorize} (non-admin {@code 403}, anonymous {@code 401}), and idempotent:
+     * recalling an already-recalled message succeeds with {@code removed = 0}.
+     *
+     * <p><b>Best-effort on push:</b> a push already delivered to a recipient's OS tray can't be un-sent;
+     * recall removes the in-app copies only (surfaced in the response/UI copy).
+     */
+    @PostMapping("/{id}/recall")
+    public AdminMessageRecallResponse recall(
+            @PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
+        return AdminMessageRecallResponse.from(adminMessageService.recall(caller.uid(), id));
     }
 }

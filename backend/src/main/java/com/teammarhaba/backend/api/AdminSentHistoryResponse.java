@@ -37,6 +37,9 @@ import java.time.Instant;
  * @param audienceRef    human-readable descriptor of the target audience (id CSV / city name(s))
  * @param recipientCount how many recipients the audience resolved to at send time (the reach / sent)
  * @param status         derived delivery status (see {@link #deriveStatus})
+ * @param recalledAt     when the campaign was recalled (TM-473), or {@code null} if it is still live —
+ *                       so the sent-history row can show a recalled message as recalled and offer/hide
+ *                       the recall control accordingly (consumed by TM-444's list rows)
  */
 public record AdminSentHistoryResponse(
         long id,
@@ -47,7 +50,8 @@ public record AdminSentHistoryResponse(
         String audienceType,
         String audienceRef,
         int recipientCount,
-        String status) {
+        String status,
+        Instant recalledAt) {
 
     /** Map a persisted {@link AdminMessage} campaign header to its sent-history wire form. */
     public static AdminSentHistoryResponse from(AdminMessage message) {
@@ -60,17 +64,22 @@ public record AdminSentHistoryResponse(
                 message.getTargetType().name(),
                 message.getTargetRef(),
                 message.getRecipientCount(),
-                deriveStatus(message));
+                deriveStatus(message),
+                message.getRecalledAt());
     }
 
     /**
-     * Derive the campaign's delivery status from the recorded reach. A header row only ever exists for
-     * a committed send, and an audience that resolves to nobody is rejected before the header is
-     * written (TM-441) — so in practice this is always {@code SENT}. It is derived defensively from the
-     * recorded {@code recipientCount} so a hypothetical zero-recipient header (never produced by the
-     * send path) reads as {@code EMPTY} rather than a misleading "SENT to nobody".
+     * Derive the campaign's delivery status. A recalled campaign (TM-473) reads as {@code RECALLED} — it
+     * takes precedence, since a recalled message is no longer delivered. Otherwise a header row only ever
+     * exists for a committed send (an audience that resolves to nobody is rejected before the header is
+     * written, TM-441), so it is {@code SENT} — derived defensively from the recorded
+     * {@code recipientCount} so a hypothetical zero-recipient header (never produced by the send path)
+     * reads as {@code EMPTY} rather than a misleading "SENT to nobody".
      */
     static String deriveStatus(AdminMessage message) {
+        if (message.isRecalled()) {
+            return "RECALLED";
+        }
         return message.getRecipientCount() > 0 ? "SENT" : "EMPTY";
     }
 }

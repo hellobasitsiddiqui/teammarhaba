@@ -551,6 +551,33 @@ export async function listSentAdminMessages({ page, size, sort } = {}) {
 }
 
 /**
+ * POST /api/v1/admin/messages/{id}/recall — recall (unsend) a message the admin previously sent
+ * (TM-473 endpoint → the recall control in admin-messages.js; TM-444 reuses this for sent-history rows).
+ * The backend marks the campaign recalled and deletes the durable in-app copies it created, so the
+ * message disappears from every recipient's in-app inbox/panel AND their notification bell (the same
+ * store). Admin bearer via {@link apiFetch}. Modelled on {@link sendAdminMessage}: JSON out, a non-2xx
+ * parsed as RFC-7807 and thrown as an {@link ApiError} — an unknown id or another admin's message is a
+ * clean 404 (recall is scoped to the sender; the message is never leaked), and it's idempotent (a second
+ * recall returns `removed: 0`). On success returns the recall summary (AdminMessageRecallResponse) so
+ * the caller can toast an honest one-line result.
+ *
+ * <p><b>Best-effort on push:</b> recall removes the in-app copies only — a push already delivered to a
+ * recipient's OS notification tray can't be un-sent (surfaced in the recall confirm copy).
+ *
+ * @param {number|string} id the admin_message campaign id to recall
+ * @returns {Promise<{id: number, recalledAt: string, recalledBy: string, removed: number}>}
+ * @throws {ApiError}
+ */
+export async function recallAdminMessage(id) {
+  const response = await apiFetch(`/api/v1/admin/messages/${encodeURIComponent(id)}/recall`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not recall the message (${response.status}).`);
+  return response.json();
+}
+
+/**
  * GET /api/v1/events — the visible-now listing (TM-393), soonest-first, in the shared page envelope
  * `{ items, page, size, totalElements, totalPages }`. Each item is an EventCard
  * (`{ id, heading, locationText, timezone, startAt, endAt, capacity, imagePath, goingCount, myState }`).
@@ -661,6 +688,7 @@ if (typeof window !== "undefined") {
     adminBroadcastPush,
     sendAdminMessage,
     listSentAdminMessages,
+    recallAdminMessage,
     listEvents,
     getEvent,
     rsvpToEvent,
