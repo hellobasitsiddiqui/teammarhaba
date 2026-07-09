@@ -234,3 +234,28 @@ export function availabilityLevel(successRatio, opts = {}) {
   const warnBelow = opts.warnBelow ?? 0.995;
   return successRatio >= warnBelow ? Level.NORMAL : Level.DEVIATION;
 }
+
+/**
+ * The latency tooltip label for one bucket — the text after the "HH:MM · " time prefix the DOM layer
+ * adds. Derived here (not inline in the renderer) so this exact copy is unit-testable.
+ *
+ * Gated on a MEASURED latency (`avgLatencyMs != null`), NOT on `hasData`. The distinction matters for a
+ * full-outage window: every probe failed, so it HAS data (hasData true, ~30 probes) but there is no
+ * latency to average (avgLatencyMs null). The old `hasData` gate took the data branch and printed
+ * `Math.round(null ?? 0)` = "0 ms avg · 30 probes" — falsely implying instant responses at the exact
+ * moment the status page matters most. Here such a window reads "no latency data" instead, consistent
+ * with its grey (NODATA) latency bar. A window with a real measured mean reads "N ms avg · N probes";
+ * a truly empty window (no probes at all) stays a plain "no data".
+ *
+ * @param {{avgLatencyMs: ?number, count: number}} bucket one entry from {@link rollup}
+ * @returns {string}
+ */
+export function latencyTooltip(bucket) {
+  const probes = `${bucket.count} probe${bucket.count === 1 ? "" : "s"}`;
+  if (bucket.avgLatencyMs === null || bucket.avgLatencyMs === undefined || !Number.isFinite(bucket.avgLatencyMs)) {
+    // Probes landed but none produced a latency (outage) → say so, with the probe count; no probes at
+    // all → the plain empty-window label.
+    return bucket.count > 0 ? `no latency data · ${probes}` : "no data";
+  }
+  return `${Math.round(bucket.avgLatencyMs)} ms avg · ${probes}`;
+}

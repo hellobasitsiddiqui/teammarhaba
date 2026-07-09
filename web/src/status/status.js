@@ -31,6 +31,7 @@ import {
   rollup,
   latencyBaseline,
   latencyLevel,
+  latencyTooltip,
   availabilityLevel,
   DAY_BUCKETS,
   BUCKET_MS,
@@ -195,10 +196,9 @@ function renderCharts() {
     buckets,
     (b) => (b.avgLatencyMs || 0) / maxLatency,
     (b) => latencyLevel(b.avgLatencyMs, baseline),
-    (b) =>
-      b.hasData
-        ? `${hhmm(b.start)} · ${Math.round(b.avgLatencyMs ?? 0)} ms avg · ${b.count} probe${b.count === 1 ? "" : "s"}`
-        : `${hhmm(b.start)} · no data`,
+    // Gate the tooltip on a MEASURED latency (in the core), not b.hasData: a full-outage window has
+    // probes but no latency to average, so it must read "no latency data" — not a false "0 ms avg".
+    (b) => `${hhmm(b.start)} · ${latencyTooltip(b)}`,
   );
 
   // Availability chart: full height = 100% success; a dip is a visibly shorter bar.
