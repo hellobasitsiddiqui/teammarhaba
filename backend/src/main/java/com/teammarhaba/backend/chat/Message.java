@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 /**
  * One posted message in a {@link Conversation} (TM-435). Immutable once written except for the
@@ -50,7 +52,15 @@ public class Message {
     @Column(name = "deep_link", updatable = false)
     private String deepLink;
 
-    /** DB-authoritative post instant ({@code DEFAULT now()}) — the in-thread order; read-only. */
+    /**
+     * DB-authoritative post instant ({@code DEFAULT now()}) — the in-thread order; read-only.
+     *
+     * <p>{@link Generated}{@code (INSERT)} so Hibernate reads the DB-assigned value straight back
+     * after the insert (mirrors {@code AdminMessage.createdAt}). Without it the just-persisted
+     * entity would carry a {@code null} {@code createdAt} until re-fetched — which the post path
+     * (TM-447) needs immediately to return the created-message DTO.
+     */
+    @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 
