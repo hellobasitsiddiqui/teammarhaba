@@ -13,6 +13,8 @@ import com.teammarhaba.backend.config.LocationRevealProperties;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
@@ -56,6 +58,7 @@ class EventReminderServiceTest {
     @Mock private UserRepository users;
     @Mock private DeviceTokenRepository deviceTokens;
     @Mock private PushNotificationService push;
+    @Mock private NotificationWriter writer;
 
     // A real reveal helper (default 24h app window, no per-city overrides) so the location gate is
     // exercised end-to-end against the actual policy rather than a mock (TM-416).
@@ -71,6 +74,7 @@ class EventReminderServiceTest {
                 deviceTokens,
                 push,
                 pushLocation,
+                writer,
                 Clock.fixed(T0, java.time.ZoneOffset.UTC));
     }
 
@@ -155,6 +159,15 @@ class EventReminderServiceTest {
         ArgumentCaptor<EventReminderSend> claimed = ArgumentCaptor.forClass(EventReminderSend.class);
         verify(markers).saveAndFlush(claimed.capture());
         assertThat(claimed.getValue().getMilestone()).isEqualTo(ReminderMilestone.T_MINUS_1H);
+
+        // The reminder is also written to the GOING attendee's durable inbox (TM-453), typed
+        // EVENT_REMINDER with an (event, milestone)-scoped idempotency key.
+        verify(writer)
+                .writeSystem(
+                        eq(NotificationType.EVENT_REMINDER),
+                        eq(List.of(1L)),
+                        any(PushMessage.class),
+                        eq("event:" + EVENT_ID + ":reminder:" + ReminderMilestone.T_MINUS_1H.name()));
     }
 
     @Test

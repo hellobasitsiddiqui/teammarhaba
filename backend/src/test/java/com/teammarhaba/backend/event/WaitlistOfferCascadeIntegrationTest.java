@@ -7,6 +7,10 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.Notification;
+import com.teammarhaba.backend.notify.NotificationRepository;
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushDelivery;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushSender;
@@ -90,6 +94,11 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
     @Autowired private PlatformTransactionManager txManager;
     @Autowired private RecordingPushSender sender;
 
+    // The real, Spring-proxied writer bean (its @Transactional(REQUIRES_NEW) must apply — the retention
+    // purge is @Modifying) plus the store, to assert the durable WAITLIST_OFFER rows (TM-453).
+    @Autowired private NotificationWriter writer;
+    @Autowired private NotificationRepository notifications;
+
     private final MutableClock clock = new MutableClock(Instant.now());
 
     /**
@@ -102,7 +111,14 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
 
     private WaitlistOfferCascadeService service() {
         return new WaitlistOfferCascadeService(
-                events, attendance, scan, notifier, bookingCutoff, new TransactionTemplate(txManager), clock);
+                events, attendance, scan, notifier, bookingCutoff, writer, new TransactionTemplate(txManager), clock);
+    }
+
+    /** The notification types in a user's durable inbox, newest-first (TM-453). */
+    private List<NotificationType> inboxTypes(long userId) {
+        return notifications.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
+                .map(Notification::getType)
+                .toList();
     }
 
     @BeforeEach
@@ -147,6 +163,10 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
         assertThat(sweepForEvent(eventId)).isEqualTo(1);
         assertThat(offerTokens(eventId)).containsExactly(tok("w1"));
         assertThat(offerStampSet(eventId)).containsExactly(w1);
+        // TM-453: the offered member also gets a durable WAITLIST_OFFER inbox row, deep-linked here.
+        assertThat(inboxTypes(w1)).containsExactly(NotificationType.WAITLIST_OFFER);
+        assertThat(notifications.findByUserIdOrderByCreatedAtDescIdDesc(w1).get(0).getDeepLink())
+                .isEqualTo("#/events/" + eventId);
 
         // Before five minutes elapse the pool does not widen (the spacing).
         clock.setTo(t0.plus(Duration.ofMinutes(4)));
@@ -243,6 +263,9 @@ class WaitlistOfferCascadeIntegrationTest extends AbstractIntegrationTest {
         assertThat(sweepForEvent(eventId)).isEqualTo(1);
         assertThat(offerStampSet(eventId)).containsExactly(optedOut); // offered (stamped) ...
         assertThat(offerTokens(eventId)).isEmpty(); // ... but not pushed (EMAIL is the opt-out)
+        // ... yet the durable WAITLIST_OFFER inbox row IS written (TM-453): the in-app bell is not a push
+        // opt-out, so an EMAIL-pref member still sees the offer they can claim.
+        assertThat(inboxTypes(optedOut)).containsExactly(NotificationType.WAITLIST_OFFER);
     }
 
     @Test

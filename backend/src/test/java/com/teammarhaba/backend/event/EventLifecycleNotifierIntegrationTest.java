@@ -7,6 +7,9 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.Notification;
+import com.teammarhaba.backend.notify.NotificationRepository;
+import com.teammarhaba.backend.notify.NotificationType;
 import com.teammarhaba.backend.notify.PushDelivery;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushSender;
@@ -49,12 +52,14 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
     @Autowired private EventAttendanceRepository attendance;
     @Autowired private UserRepository users;
     @Autowired private DeviceTokenRepository deviceTokens;
+    @Autowired private NotificationRepository notifications;
     @Autowired private RecordingPushSender sender;
 
     @BeforeEach
     void cleanSlate() {
         attendance.deleteAll();
         deviceTokens.deleteAll();
+        notifications.deleteAll();
         sender.reset();
     }
 
@@ -62,6 +67,14 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
     void leaveNoResidue() {
         attendance.deleteAll();
         deviceTokens.deleteAll();
+        notifications.deleteAll();
+    }
+
+    /** The notification types in a user's durable inbox, newest-first (TM-453). */
+    private List<NotificationType> inboxTypes(long userId) {
+        return notifications.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
+                .map(Notification::getType)
+                .toList();
     }
 
     // ------------------------------------------------------------------ material edit filter
@@ -82,6 +95,11 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         assertThat(pushes.get(0).message().title()).isEqualTo("Event updated: " + event.getHeading());
         assertThat(pushes.get(0).message().body()).contains("start time");
         assertThat(pushes.get(0).message().route()).isEqualTo("#/events/" + event.getId());
+
+        // Durable inbox (TM-453): the GOING attendee gets a persisted EVENT_UPDATED row; the waitlisted
+        // member (not a recipient) gets nothing.
+        assertThat(inboxTypes(idOf(going))).containsExactly(NotificationType.EVENT_UPDATED);
+        assertThat(inboxTypes(idOf(waitlisted))).isEmpty();
     }
 
     @Test
@@ -110,6 +128,7 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         admin.update(admin(), event.getId(), patchDescription("A tiny typo fix in the description."));
 
         assertThat(sender.deliveries()).isEmpty(); // a description tweak is not material — nobody is pushed
+        assertThat(inboxTypes(idOf(going))).isEmpty(); // ...and nothing is written to the durable inbox
     }
 
     // ------------------------------------------------------------------ cancel
@@ -138,6 +157,12 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
                         .orElseThrow()
                         .getOfferNotifiedAt())
                 .isNull();
+
+        // Durable inbox (TM-453): both GOING attendees get an EVENT_CANCELLED row; the waitlisted member
+        // (never a cancel recipient) gets nothing.
+        assertThat(inboxTypes(idOf(a))).containsExactly(NotificationType.EVENT_CANCELLED);
+        assertThat(inboxTypes(idOf(b))).containsExactly(NotificationType.EVENT_CANCELLED);
+        assertThat(inboxTypes(idOf(waitlisted))).isEmpty();
     }
 
     // ------------------------------------------------------------------ claim confirmation
@@ -158,6 +183,10 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         assertThat(pushes).extracting(Delivery::token).containsExactly("tok-claim-w1");
         assertThat(pushes.get(0).message().title()).isEqualTo("You're in ✓");
         assertThat(pushes.get(0).message().route()).isEqualTo("#/events/" + event.getId());
+
+        // Durable inbox (TM-453): just the claimant gets a persisted RSVP_CONFIRMED row.
+        assertThat(inboxTypes(idOf(w1))).containsExactly(NotificationType.RSVP_CONFIRMED);
+        assertThat(inboxTypes(idOf(a))).isEmpty(); // the member who freed the spot is not confirmed
     }
 
     @Test
@@ -170,6 +199,7 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         rsvps.claim(a, event.getId()); // idempotent double-tap on an already-GOING member
 
         assertThat(sender.deliveries()).isEmpty(); // no promotion happened, so no confirmation fires
+        assertThat(inboxTypes(idOf(a))).isEmpty(); // ...and no RSVP_CONFIRMED row is written either
     }
 
     // ------------------------------------------------------------------ fixtures
