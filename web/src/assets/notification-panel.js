@@ -301,6 +301,11 @@ export function open() {
       role: "dialog",
       "aria-modal": "true",
       "aria-label": "Notifications",
+      // A <div> is not focusable by default, so `panel.focus()` below (line ~326) would be a silent
+      // no-op — focus would stay on the bell, the aria-modal dialog would open with focus left outside
+      // it, and the `.tm-np-panel:focus` CSS would be dead (TM-559). `tabindex: -1` makes the dialog
+      // programmatically focusable (but not a Tab-stop), so opening seats focus inside it.
+      tabindex: -1,
     },
     [
       el("div", { class: "tm-np-head" }, [
