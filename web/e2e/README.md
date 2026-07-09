@@ -81,6 +81,22 @@ Overrides (all optional): `E2E_API_BASE_URL`, `E2E_WEB_BASE_URL`, `E2E_AUTH_EMUL
 Drop a new `tests/<name>.spec.mjs`. Reuse the seeded accounts + DB seam in `fixtures.mjs`; if you
 need more accounts, seed them in `global-setup.mjs`. No new workflow or infra required.
 
+## Visual-evidence capture — chat foundation (TM-564)
+
+`capture-chat-foundation.mjs` is a **standalone** screenshot harness (not part of the Playwright suite)
+for the Event Chat foundation screens (chat shell TM-438 + unread Chat-tab badge TM-439, reading the
+TM-436 read API). It boots the real app and captures the list / thread / badge / empty / loading / error
+states at a phone viewport (Pixel 5) on the default Paper look.
+
+```bash
+cd web/e2e && npm run capture:chat   # → capture-out/*.png (git-ignored)
+```
+
+It needs **no backend, emulator or Postgres**: the chat *content* screens require seeded conversations
+that no backend write-path exists for yet (message posting is TM-447), so it injects fixtures matching
+the TM-436 API contract at the network seam and drives the real `chat.js` DOM + Paper CSS — every pixel
+is production UI, only the JSON payloads are fixtures. Run under Node 20 (the version CI pins).
+
 ## Known follow-up
 
 The ticket's "assert it appears in the audit log" step is **deferred**: admin enable/disable/role
