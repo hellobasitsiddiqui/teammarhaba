@@ -39,8 +39,11 @@ public class NotificationController {
 
     /**
      * The feed order the AC fixes: newest-first, with {@code id} as a deterministic same-{@code
-     * createdAt} tiebreak — the same order as the store's {@code List} finder. No sort property is
-     * allow-listed, so the order is not caller-overridable (a {@code ?sort=} is a {@code 400}).
+     * createdAt} tiebreak — the same order as the store's {@code List} finder. The endpoint exposes no
+     * {@code sort} param (the {@code list} handler binds only {@code page}/{@code size}, no {@code
+     * Pageable}), so the order is not caller-overridable: an unknown query param such as {@code
+     * ?sort=createdAt,asc} is simply ignored (the request still {@code 200}s with this fixed
+     * newest-first order), never a {@code 400}.
      */
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 
