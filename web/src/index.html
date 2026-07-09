@@ -341,6 +341,10 @@
                 </div>
             </div>
             <span id="build-info" class="build-info" aria-label="Build version"></span>
+            <!-- Public status page link (TM-182): a quiet pointer to the standalone /status
+                 outage/uptime page, sitting next to the TM-142 build stamp. Its own footer line so it
+                 never disturbs the build/privacy/byline lines; a plain link (no auth, static page). -->
+            <p class="status-link"><a href="/status">Service status</a></p>
             <!-- TM-242: privacy disclosure. No standalone privacy-policy page exists yet, so the
                  required Firebase phone-auth line lives in this footer (the app's legal/chrome
                  surface) until a full policy page is built. Phone sign-in is a Firebase requirement:

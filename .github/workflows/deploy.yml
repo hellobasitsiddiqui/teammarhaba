@@ -99,6 +99,11 @@ jobs:
           echo "Backend URL: $URL"
           sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
           grep apiBaseUrl web/dist/assets/config.js
+          # The standalone /status page (TM-182) carries its OWN one-line config outside /assets, so it
+          # can't read the fingerprinted config.js above. Inject the same resolved URL into it the same
+          # way, so its live-/health banner points at the real backend on the deployed site.
+          sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/status/status-config.js
+          grep apiBaseUrl web/dist/status/status-config.js
 
       # Stamp the web build name into the built config.js (same seam as the backend URL above),
       # so the live first page shows which build it was deployed from (TM-142/TM-155). Uses
