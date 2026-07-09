@@ -81,8 +81,9 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # Fast PR gate for the web build tooling (TM-144). No browser/cloud — just Node, so it stays on
-  # the PR gate (unlike the e2e suite, which runs on main only). Skipped on docs-only changes (TM-151).
+  # Fast PR gate for the web build tooling (TM-144) + the browser JS parse gate (TM-584). No
+  # browser/cloud — just Node, so it stays on the PR gate (unlike the e2e suite, which runs on main
+  # only). Skipped on docs-only changes (TM-151).
   web-build:
     name: Web asset fingerprinting check
     needs: changes
@@ -96,6 +97,15 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
+
+      # Parse gate (TM-584): syntax-check every browser JS module under web/src in ES-module goal.
+      # Fails on a SyntaxError or a DUPLICATE export/declaration — the class of bug that white-
+      # screened main when TM-438 + TM-439 each added the same `export … listMyConversations` to
+      # api.js and git merged both with no conflict (fixed in TM-583). The old gate below only
+      # `node --test`s the *-core modules, so it never parsed api.js. Seconds-fast, no runtime.
+      # Runs first so a parse-level breakage fails the job immediately.
+      - name: Syntax-check browser JS modules (TM-584)
+        run: node web/tools/check-syntax.mjs
 
       - name: Test the asset fingerprinter
         # Unquoted so the shell expands the glob to the actual file(s) — portable across Node
