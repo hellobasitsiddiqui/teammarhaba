@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
@@ -71,5 +72,27 @@ public class EventChatClosePolicy {
      */
     public boolean isClosedAt(Event event, Instant now) {
         return closesAt(event).map(at -> !now.isBefore(at)).orElse(false);
+    }
+
+    /**
+     * Whether an app-wide close window is configured ({@code app.event-chat-close.default-hours} is
+     * set). When {@code false} — the shipped default — a thread can only ever close via its own
+     * per-event {@link Event#getChatCloseHours()} override or a per-city default. The close sweep
+     * (TM-578) reads this to keep never-closing events out of its candidate batch entirely: if the
+     * app default closes <em>everything</em>, every past-ended thread is a candidate; if it doesn't,
+     * only events that opt in (override or city) are.
+     */
+    public boolean appDefaultConfigured() {
+        return properties.defaultHours() != null;
+    }
+
+    /**
+     * The cities (already normalized: trimmed + lower-cased) that carry a per-city close default —
+     * i.e. whose events auto-close even with no per-event override and no app default. The close
+     * sweep's candidate query (TM-578) uses this to include those events; it is empty in the shipped
+     * config, where closing is override-only.
+     */
+    public Set<String> citiesWithCloseWindow() {
+        return properties.cityHours().keySet();
     }
 }
