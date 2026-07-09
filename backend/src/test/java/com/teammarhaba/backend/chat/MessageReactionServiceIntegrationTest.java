@@ -9,10 +9,13 @@ import com.teammarhaba.backend.api.MessageReactionSummary;
 import com.teammarhaba.backend.api.ThreadMessageResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.Event;
+import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -55,6 +58,9 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
     private MessageRepository messages;
 
     @Autowired
+    private EventRepository events;
+
+    @Autowired
     private UserRepository users;
 
     // ── fixtures ─────────────────────────────────────────────────────────────────────────────────
@@ -82,6 +88,40 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
 
     private Long postMessage(Long conversationId, Long senderId, String body) {
         return messages.save(Message.fromUser(conversationId, senderId, body)).getId();
+    }
+
+    /** An open-ended, never-close event (chat-close hours unset → app default "never close"); returns its id. */
+    private Long newOpenEvent(String heading) {
+        Instant now = Instant.now();
+        return events.save(new Event(
+                        heading,
+                        "A friendly meetup.",
+                        "Marhaba Cafe, 12 High St",
+                        "Europe/London",
+                        now.plus(Duration.ofDays(7)),
+                        now.minus(Duration.ofHours(1)),
+                        now.plus(Duration.ofDays(30)),
+                        newUser(heading + "-host"),
+                        now))
+                .getId();
+    }
+
+    /** An event that ended {@code endedAgo} ago and auto-closes its chat {@code closeHours} after end. */
+    private Long newEventEndedWithCloseWindow(String heading, Duration endedAgo, int closeHours) {
+        Instant now = Instant.now();
+        Event event = new Event(
+                heading,
+                "A finished meetup.",
+                "Marhaba Cafe, 12 High St",
+                "Europe/London",
+                now.minus(endedAgo).minus(Duration.ofHours(2)), // started before it ended
+                now.minus(Duration.ofDays(1)),
+                now.plus(Duration.ofDays(30)),
+                newUser(heading + "-host"),
+                now);
+        event.setEndAt(now.minus(endedAgo));
+        event.setChatCloseHours(closeHours);
+        return events.save(event).getId();
     }
 
     /** The reaction summary for one message as seen by a caller, read back through the thread projection. */
@@ -263,6 +303,30 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         // ...but the closed thread (and its existing reactions) stays readable — soft-close, not delete.
         assertThat(reactionsSeenBy(member, thread.getId(), message))
                 .containsExactly(new EmojiReactionCount("👍", 1, true));
+    }
+
+    @Test
+    void reactingOnAnEventThreadPastItsClosePolicyWindowIs409ButAnOpenOneIs200() {
+        // An open-ended, never-close event: its thread accepts reactions (200).
+        Long openEventId = newOpenEvent("react-open");
+        Conversation openThread = conversations.save(Conversation.forEvent(openEventId));
+        VerifiedUser openMember = member(openThread.getId(), "react-open-member", MuteState.NONE);
+        Long openMessage = postMessage(openThread.getId(), newUser("react-open-author"), "hi");
+        assertThat(service.react(openMember, openMessage, "👍").reactions())
+                .containsExactly(new EmojiReactionCount("👍", 1, true));
+
+        // An event that ended an hour ago with a 0-hour close window is read-only BY POLICY (never
+        // manually soft-closed). Reactions must freeze with 409 — the same close-policy gate the post
+        // path uses (TM-574), so a reaction and a post agree on when an event thread is frozen. The
+        // plain isClosed() flag alone (the old behaviour) would have let this through.
+        Long closedEventId = newEventEndedWithCloseWindow("react-closed", Duration.ofHours(1), 0);
+        Conversation closedThread = conversations.save(Conversation.forEvent(closedEventId));
+        VerifiedUser closedMember = member(closedThread.getId(), "react-closed-member", MuteState.NONE);
+        Long closedMessage = postMessage(closedThread.getId(), newUser("react-closed-author"), "hi");
+        assertThatThrownBy(() -> service.react(closedMember, closedMessage, "🎉"))
+                .isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> service.unreact(closedMember, closedMessage, "👍"))
+                .isInstanceOf(ConflictException.class);
     }
 
     // ── unknown / removed targets ─────────────────────────────────────────────────────────────────

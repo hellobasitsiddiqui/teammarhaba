@@ -5,14 +5,19 @@ import com.teammarhaba.backend.api.MessageReactionSummary;
 import com.teammarhaba.backend.api.ThreadMessageResponse;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.EventChatLifecycleService;
+import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,8 +45,12 @@ import org.springframework.transaction.annotation.Transactional;
  *       (TM-576) closes an existence oracle: over these message-scoped endpoints a caller must not be
  *       able to tell a real message they simply can't see (once {@code 403}) apart from one that never
  *       existed ({@code 404}) by walking sequential message ids;
- *   <li>the thread is soft-closed → {@code 409} ({@link ConflictException}) — reactions are frozen with
- *       the rest of the thread, but history (including existing reactions) stays readable.
+ *   <li>the thread is closed → {@code 409} ({@link ConflictException}) — reactions are frozen with the
+ *       rest of the thread, but history (including existing reactions) stays readable. For an {@code
+ *       EVENT_GROUP} thread "closed" is TM-446's {@link EventChatLifecycleService#isThreadReadOnly}
+ *       (manually soft-closed <em>or</em> past the per-event close-time policy), mirroring the post
+ *       path (TM-574) so a reaction and a post freeze on exactly the same window; a non-event
+ *       (admin-broadcast) thread has no close policy and falls back to the plain soft-close flag.
  * </ul>
  * A {@link MuteState#READ_ONLY} member <em>may</em> react: the gate is "non-removed", and a reaction
  * is a read-side signal, not a posted message.
@@ -63,19 +72,45 @@ public class MessageReactionService {
     private final MessageRepository messages;
     private final ConversationRepository conversations;
     private final ConversationMemberRepository members;
+    private final EventRepository events;
+    private final EventChatLifecycleService lifecycle;
     private final UserService users;
+    private final Clock clock;
 
+    /** Spring-wired constructor — real wall clock. */
+    @Autowired
     public MessageReactionService(
             MessageReactionRepository reactions,
             MessageRepository messages,
             ConversationRepository conversations,
             ConversationMemberRepository members,
+            EventRepository events,
+            EventChatLifecycleService lifecycle,
             UserService users) {
+        this(reactions, messages, conversations, members, events, lifecycle, users, Clock.systemUTC());
+    }
+
+    /**
+     * Test-visible constructor: inject a fixed {@link Clock} so the event close-policy branch of {@link
+     * #requireOpenThread} can be driven deterministically (mirrors {@code MessagePostService}).
+     */
+    MessageReactionService(
+            MessageReactionRepository reactions,
+            MessageRepository messages,
+            ConversationRepository conversations,
+            ConversationMemberRepository members,
+            EventRepository events,
+            EventChatLifecycleService lifecycle,
+            UserService users,
+            Clock clock) {
         this.reactions = reactions;
         this.messages = messages;
         this.conversations = conversations;
         this.members = members;
+        this.events = events;
+        this.lifecycle = lifecycle;
         this.users = users;
+        this.clock = clock;
     }
 
     /**
@@ -202,11 +237,30 @@ public class MessageReactionService {
         }
     }
 
-    /** Reactions may only change while the thread is open; a soft-closed thread is frozen ({@code 409}). */
+    /**
+     * Reactions may only change while the thread is open; a frozen thread is a {@code 409}. This
+     * mirrors the post path ({@code MessagePostService}) exactly (TM-574): for an {@code EVENT_GROUP}
+     * thread it resolves the backing event and gates on TM-446's {@link
+     * EventChatLifecycleService#isThreadReadOnly} — the single resolver of "manually soft-closed, or
+     * past the per-event close-time policy" — so a reaction and a post freeze on the same window (a
+     * soft-deleted / missing event has no live chat and reads as closed). A non-event (admin-broadcast)
+     * thread has no close policy, so it falls back to the plain {@link Conversation#isClosed()} flag.
+     */
     private void requireOpenThread(Long conversationId) {
-        boolean closed = conversations.findById(conversationId)
-                .map(Conversation::isClosed)
-                .orElse(false); // the message resolved, so its thread exists; be defensive anyway.
+        Conversation conversation = conversations.findById(conversationId).orElse(null);
+        if (conversation == null) {
+            return; // the message resolved, so its thread exists; be defensive anyway.
+        }
+        Long eventId = conversation.getEventId();
+        boolean closed;
+        if (eventId != null) {
+            Instant now = clock.instant();
+            closed = events.findById(eventId)
+                    .map(event -> lifecycle.isThreadReadOnly(event, now))
+                    .orElse(true); // soft-deleted / missing event → no live chat
+        } else {
+            closed = conversation.isClosed();
+        }
         if (closed) {
             throw new ConflictException("This thread is closed; reactions can no longer be changed.");
         }
