@@ -1,45 +1,42 @@
-// Event group chat — pure logic core (TM-515 / TM-433).
+// Chat section — pure logic core (TM-438, reads the F2 conversation API / TM-436).
 //
 // The framework-free web SPA is the single source for all four surfaces (web / mobile-web / Android
-// WebView / iOS WebView). Following the codebase's established core/renderer split (tabbar-core.js,
-// events-core.js, notifications-core.js, components-core.js — see AGENTIC-LESSONS "extract the pure
-// logic to test it"), this module holds ONLY the pure data + rules the Chat screens need — the seed
-// conversations, thread lookup, and the read-receipt state derivation — with NO DOM, Firebase or
-// Capacitor imports, so it is import-safe in a plain Node test (`node --test web/tools/*.test.mjs`,
-// the CI web-build gate). The DOM-mounting half lives in `chat.js`; the styling lives in styles.css.
+// WebView / iOS WebView). Following the codebase's established core/renderer split (events-core.js,
+// notifications-core.js, tabbar-core.js — see AGENTIC-LESSONS "extract the pure logic to test it"),
+// this module holds ONLY the pure data transforms the Chat screens need — mapping the backend's
+// conversation read API (TM-436) response shapes into the small view-models the DOM layer renders,
+// plus the read-receipt derivation kept from the wireframe work. It has NO DOM, Firebase or Capacitor
+// imports, so it is import-safe in a plain Node test (`node --test web/tools/*.test.mjs`, the CI
+// web-build gate). The DOM-mounting half lives in `chat.js`; the styling lives in styles.css.
 //
-// WHY seed data (not a backend): the Event group chat backend is a later epic (TM-433 is not yet
-// built). TM-515 is the wireframe REFRESH — bringing the live Chat list + thread in line with the
-// approved paper wireframes (paper-chat-list / paper-chat-thread / paper-chat-empty) at the
-// production default theme, built from the shared component library. So this module reproduces the
-// exact wireframe conversations as static seed content; when TM-433 lands, the same DOM shell reads
-// real messages from the API in place of `CONVERSATIONS` with no change to the screen layout.
+// WHAT CHANGED (TM-438): the earlier TM-515 wireframe refresh drove these screens off static SEED
+// conversations while the backend was unbuilt. TM-436 landed the real read API, so this module now
+// adapts the live API instead — exactly the swap TM-515's own comments predicted ("when the backend
+// lands, the same DOM shell reads real messages from the API in place of the seed"). The list is now
+// UNIFIED: event group chats (`EVENT_GROUP`) and admin broadcasts (`ADMIN_BROADCAST`) come back in one
+// feed, each carrying a `type` we turn into a display badge so the two are distinguishable in one list.
 //
-// READ-RECEIPT SEMANTICS (TM-433, surfaced with the TM-511 triple-tick component):
-//   • sent  → ✓    delivered to the server, read by nobody yet
-//   • read  → ✓✓   read by at least one, but not all, group members
-//   • group → ✓✓✓  read by EVERYONE in the group (the whole-group-read state)
-// The screen derives the tick state from each out-going message's `readBy` count against the group's
-// member count via `receiptState()`, rather than hard-coding a glyph — so the meaning is the data,
-// and it survives the grayscale sketch theme (the tick COUNT carries it, not colour).
+// API shapes consumed (see web/src/api-docs/openapi.json):
+//   • ConversationSummaryResponse — { id, type, title, eventId, lastMessagePreview, lastMessageAt,
+//                                     lastActiveAt, unreadCount }  → toConversationRow()
+//   • ConversationMessageResponse — { id, senderId, body, deepLink, system, reactions[], createdAt }
+//                                    → toThreadMessage()
+// Both arrive inside the shared page envelope `{ items, page, size, totalElements, totalPages }`, so
+// the DOM layer passes `data.items` straight into toConversationRows() / toThreadMessages().
 
 /**
- * The five reaction emoji the long-press picker offers, plus the "＋ more" affordance — verbatim from
- * the paper-reaction-picker wireframe (👍 ❤️ 😂 🎉 🙌 ＋) and the HANDOFF "chat reactions only" set.
- * Exported so the picker DOM and its test share one source of truth.
+ * The five reaction emoji the (future) reaction picker offers. Kept here as the single source of truth
+ * shared by any reaction UI and its tests. Reactions themselves are read-only in TM-438 — the API
+ * returns a per-message `reactions` array we DISPLAY; adding/removing a reaction is a later ticket.
  */
 export const REACTION_EMOJIS = Object.freeze(["👍", "❤️", "😂", "🎉", "🙌"]);
 
 /**
- * The inline reaction-pill data produced when the picker's emoji is chosen for a message (TM-536).
- * The picker is single-select: picking an emoji sets a FRESH reaction (count 1) that REPLACES any
- * prior pill on that message — multi-user aggregation (a growing count, who-reacted) is a later
- * TM-433 backend concern, not something the local wireframe can know. Extracted from the DOM layer's
- * `setReaction` (chat.js) so this rule — "a fresh react is `{emoji, count: 1}`" — has a single,
- * unit-tested source of truth (the same core/renderer split the read-receipt ladder uses above),
- * closing the gap where a regression in the pick→apply step would have gone undetected.
+ * The inline reaction-pill data produced when a picker emoji is chosen for a message. A fresh react is
+ * always `{ emoji, count: 1 }` (single-select, replaces any prior pill). Kept as a pure, unit-tested
+ * rule so a future reactions ticket wires the DOM to one tested source rather than re-deriving it.
  * @param {string} emoji the chosen glyph (one of REACTION_EMOJIS).
- * @returns {{emoji: string, count: number}} the reaction pill to render on the message.
+ * @returns {{emoji: string, count: number}}
  */
 export function pickReaction(emoji) {
   return { emoji: String(emoji ?? ""), count: 1 };
@@ -47,7 +44,8 @@ export function pickReaction(emoji) {
 
 /**
  * Derive the read-receipt tick state for an out-going message from how many group members have read
- * it. This is the TM-433 delivery ladder made a pure function so it can be unit-tested without a DOM:
+ * it (the delivery ladder, kept as a pure util for a future ticket that surfaces receipts once the
+ * API carries read counts):
  *   readBy <= 0            → "sent"   (✓   — delivered, nobody has read it)
  *   0 < readBy < members   → "read"   (✓✓  — read by some, not all)
  *   readBy >= members      → "group"  (✓✓✓ — read by everyone: whole-group-read)
@@ -64,135 +62,162 @@ export function receiptState(readBy, members) {
   return "read";
 }
 
-// The seed conversations, in the wireframe's order. Each conversation is one event's group chat:
-//   id        — stable slug (also the #/chat/{id} thread route segment)
-//   name      — the group/event name (paper-chat-list `.nm`, paper-chat-thread `<h1>`)
-//   avatar    — the list avatar glyph (an emoji or a name initial), per the wireframe
-//   going     — the "N going" member count shown under the thread title + used for receiptState()
-//   unread    — the chat-list unread count badge (0 = no badge)
-//   preview   — the last-message preview for the list row: { text, self, receipt }
-//               (self:true rows show a leading tick — the wireframe's "✓✓ You: …" / "✓ …")
-//   messages  — the thread messages (empty array → the paper-chat-empty state)
-//
-// Message shape:
-//   { from: "them"|"me", who?: string, text: string, at?: string,
-//     readBy?: number,               // out-going only → drives receiptState() against `going`
-//     reaction?: { emoji, count } }  // an inline reaction pill (paper-chat-thread `.react`)
-const CONVERSATIONS = Object.freeze([
-  {
-    id: "sunday-dog-walk",
-    name: "Sunday Dog Walk",
-    avatar: "🐕",
-    going: 12,
-    unread: 2,
-    preview: { text: "Sarah: see you at the lake! ☀️", self: false, receipt: null },
-    // The paper-chat-thread wireframe, extended so the full read-receipt ladder (sent/read/group)
-    // renders per TM-433 semantics with the TM-511 component. The two out-going messages the mock
-    // showed (09:58, 10:01) keep their copy + reactions; the mock predates the triple-tick, so the
-    // oldest out-message — long since seen by all 12 — is now correctly whole-group-read (✓✓✓), and a
-    // just-sent trailing message demonstrates the delivered-not-read (✓) end of the ladder.
-    day: "Today",
-    messages: [
-      { from: "them", who: "Sarah", text: "Morning! Meeting at the main car park ☀️", reaction: { emoji: "👍", count: 3 } },
-      { from: "them", who: "Mike", text: "Perfect — I'll bring treats for the dogs 🦴" },
-      { from: "me", text: "See you all at 10!", at: "09:58", readBy: 12, reaction: { emoji: "❤️", count: 2 } },
-      { from: "them", who: "Sarah", text: "Can't wait 🐶" },
-      { from: "me", text: "On my way now", at: "10:01", readBy: 7 },
-      { from: "me", text: "Anyone want a coffee after? ☕", at: "10:03", readBy: 0 },
-    ],
-  },
-  {
-    id: "coffee-code",
-    name: "Coffee & Code",
-    avatar: "C",
-    going: 8,
-    unread: 0,
-    // A self (You:) preview read by a recipient → the list shows a two-tick prefix (✓✓).
-    preview: { text: "You: I'll bring the laptop", self: true, receipt: "read" },
-    day: "Today",
-    messages: [
-      { from: "them", who: "Priya", text: "Table booked for 6 — see you there" },
-      { from: "me", text: "I'll bring the laptop", at: "08:40", readBy: 5 },
-    ],
-  },
-  {
-    id: "bouldering-social",
-    name: "Bouldering Social",
-    avatar: "B",
-    going: 9,
-    unread: 5,
-    preview: { text: "Mike: who's driving on Thursday?", self: false, receipt: null },
-    day: "Yesterday",
-    messages: [
-      { from: "them", who: "Mike", text: "Who's driving on Thursday?" },
-    ],
-  },
-  {
-    id: "marhaba-team",
-    name: "Marhaba Team",
-    avatar: "M",
-    going: 20,
-    unread: 0,
-    // A self preview delivered but not yet read → a single-tick prefix (✓).
-    preview: { text: "Announcement: new features live", self: true, receipt: "sent" },
-    day: "Monday",
-    messages: [
-      { from: "me", text: "Announcement: new features live", at: "Mon", readBy: 0 },
-    ],
-  },
-  {
-    id: "park-picnic",
-    name: "Park Picnic",
-    avatar: "P",
-    going: 6,
-    unread: 0,
-    preview: { text: "You joined the event — say hi 👋", self: false, receipt: null },
-    day: "Today",
-    // No messages yet → the paper-chat-empty "No messages yet / Be the first to say hi 👋" state.
-    messages: [],
-  },
-]);
+/* ─────────────────────────────── Conversation type badge ───────────────────────────────────────
+ * The unified list mixes event group chats and admin broadcasts, so each row needs a small badge that
+ * says which kind it is. `key` drives the CSS accent (`.tm-chat-type--event` / `--admin`); `label` is
+ * the human text. An unknown/absent type falls back to the common event case rather than throwing.
+ * ---------------------------------------------------------------------------------------------- */
 
-/** The chat-list conversations, in display order (newest-activity first, as the wireframe shows). */
-export function listConversations() {
-  return CONVERSATIONS;
+/** Map a backend conversation `type` to its display badge. */
+export function conversationBadge(type) {
+  if (type === "ADMIN_BROADCAST") return { key: "admin", label: "Admin" };
+  return { key: "event", label: "Event" };
 }
 
 /**
- * Look up one conversation by its id (the #/chat/{id} route segment).
- * @param {string} id
- * @returns {object|null} the conversation, or null when the id is unknown.
+ * The avatar glyph for a list row: admin broadcasts get a megaphone (they have no per-event identity);
+ * event chats get their title's first letter (the `avatar()` component upper-cases a single letter, or
+ * passes an emoji straight through). Falls back to a neutral chat glyph when there's no title.
+ * @param {{type?: string, title?: string}} summary
+ * @returns {string}
  */
-export function getConversation(id) {
-  if (!id) return null;
-  return CONVERSATIONS.find((c) => c.id === id) || null;
+export function avatarGlyph(summary) {
+  if (summary?.type === "ADMIN_BROADCAST") return "📣";
+  const title = String(summary?.title ?? "").trim();
+  return title ? title[0] : "💬";
 }
 
 /**
- * The thread's messages, each enriched with the derived receipt state for out-going messages so the
- * DOM layer stays dumb (it just renders `msg.receipt`). Returns [] for an empty/unknown thread.
- * @param {string} id conversation id.
- * @returns {Array<object>} messages with `receipt` set on `from === "me"` entries.
+ * Format an ISO instant into a compact list/message time label, in the viewer's LOCAL time:
+ *   • same calendar day  → "HH:MM"        (e.g. "14:05")
+ *   • same calendar year → "D Mon"        (e.g. "3 Jul")
+ *   • otherwise          → "D Mon YYYY"   (e.g. "3 Jul 2025")
+ * A missing/unparseable instant returns "" so the DOM simply omits the stamp.
+ * @param {string} iso an ISO-8601 timestamp (or nullish).
+ * @param {Date} [now] the reference "now" (injectable for deterministic tests).
+ * @returns {string}
  */
-export function threadMessages(id) {
-  const conv = getConversation(id);
-  if (!conv) return [];
-  return conv.messages.map((m) =>
-    m.from === "me" ? { ...m, receipt: receiptState(m.readBy, conv.going) } : { ...m },
+export function formatTimeLabel(iso, now = new Date()) {
+  if (!iso) return "";
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const sameDay =
+    t.getFullYear() === now.getFullYear() &&
+    t.getMonth() === now.getMonth() &&
+    t.getDate() === now.getDate();
+  if (sameDay) {
+    return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+  }
+  const dayMonth = `${t.getDate()} ${months[t.getMonth()]}`;
+  return t.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${t.getFullYear()}`;
+}
+
+/** Epoch-ms of an ISO instant for ordering, or 0 when absent/unparseable (sorts oldest). */
+function epoch(iso) {
+  if (!iso) return 0;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/* ─────────────────────────────── Conversation list adapters ───────────────────────────────────── */
+
+/**
+ * Map one ConversationSummaryResponse to the row view-model the list renders. Everything the DOM needs
+ * is pre-derived here (badge, avatar glyph, time label, clamped unread) so chat.js stays a dumb shell.
+ * @param {Object} summary a ConversationSummaryResponse.
+ * @param {Date} [now] reference "now" for the time label.
+ * @returns {{id: string, title: string, type: {key: string, label: string}, preview: string,
+ *            unread: number, timeLabel: string, sortAt: number, avatar: string}}
+ */
+export function toConversationRow(summary, now = new Date()) {
+  const s = summary || {};
+  const at = s.lastMessageAt || s.lastActiveAt || null;
+  return {
+    id: String(s.id ?? ""),
+    title: String(s.title ?? "").trim() || "Conversation",
+    type: conversationBadge(s.type),
+    preview: String(s.lastMessagePreview ?? ""),
+    unread: Math.max(0, Math.trunc(Number(s.unreadCount) || 0)),
+    timeLabel: formatTimeLabel(at, now),
+    sortAt: epoch(at),
+    avatar: avatarGlyph(s),
+  };
+}
+
+/**
+ * Order conversation rows for the unified list: newest activity first, so event chats and admin
+ * broadcasts interleave by recency (the "unified" requirement). Stable for equal timestamps. Returns a
+ * NEW array — never mutates the input.
+ * @param {Array<{sortAt: number}>} rows
+ * @returns {Array} the rows, newest-first.
+ */
+export function sortConversations(rows) {
+  return [...(rows || [])].sort((a, b) => (b?.sortAt || 0) - (a?.sortAt || 0));
+}
+
+/**
+ * The end-to-end list adapter: map every API summary to a row, then order newest-first. This is what
+ * the DOM layer calls with `data.items` from GET /api/v1/me/conversations.
+ * @param {Array<Object>} items ConversationSummaryResponse[] (the page envelope's `items`).
+ * @param {Date} [now]
+ * @returns {Array} ordered row view-models.
+ */
+export function toConversationRows(items, now = new Date()) {
+  return sortConversations((Array.isArray(items) ? items : []).map((s) => toConversationRow(s, now)));
+}
+
+/** Total unread across a set of conversation rows (or raw summaries) — a single tested reducer. */
+export function totalUnread(rowsOrItems) {
+  return (Array.isArray(rowsOrItems) ? rowsOrItems : []).reduce(
+    (sum, c) => sum + Math.max(0, Math.trunc(Number(c?.unread ?? c?.unreadCount) || 0)),
+    0,
   );
 }
 
-/** Whether a conversation has any messages (false → render the empty state). */
-export function hasMessages(id) {
-  const conv = getConversation(id);
-  return Boolean(conv && conv.messages.length > 0);
+/* ─────────────────────────────── Thread message adapters ──────────────────────────────────────── */
+
+/**
+ * Map one ConversationMessageResponse to the message view-model the thread renders. The read API does
+ * not expose the caller's own numeric id (GET /api/v1/me has no id), so TM-438 cannot mark a message
+ * as "mine" / draw out-going ticks — it renders a flat, chronological message list. `system` messages
+ * (e.g. "You joined the event") render as a centred notice rather than a bubble. Reactions are carried
+ * through for read-only display.
+ * @param {Object} msg a ConversationMessageResponse.
+ * @param {Date} [now]
+ * @returns {{id: string, body: string, system: boolean, deepLink: (string|null),
+ *            reactions: Array<{emoji: string, count: number, mine: boolean}>, timeLabel: string,
+ *            sortAt: number}}
+ */
+export function toThreadMessage(msg, now = new Date()) {
+  const m = msg || {};
+  const reactions = (Array.isArray(m.reactions) ? m.reactions : [])
+    .filter((r) => r && r.emoji)
+    .map((r) => ({
+      emoji: String(r.emoji),
+      count: Math.max(0, Math.trunc(Number(r.count) || 0)),
+      mine: Boolean(r.mine),
+    }));
+  return {
+    id: String(m.id ?? ""),
+    body: String(m.body ?? ""),
+    system: Boolean(m.system),
+    deepLink: m.deepLink ? String(m.deepLink) : null,
+    reactions,
+    timeLabel: formatTimeLabel(m.createdAt, now),
+    sortAt: epoch(m.createdAt),
+  };
 }
 
 /**
- * Total unread across all conversations — the number the Chat tab badge would show (TM-439 owns the
- * badge wiring; exported here so the count has a single tested source when that lands).
- * @returns {number}
+ * The end-to-end thread adapter: map every API message, then order OLDEST-first (chat reads top→bottom,
+ * newest at the foot) regardless of the server's page order. Returns a new array.
+ * @param {Array<Object>} items ConversationMessageResponse[] (the page envelope's `items`).
+ * @param {Date} [now]
+ * @returns {Array} ordered message view-models.
  */
-export function totalUnread() {
-  return CONVERSATIONS.reduce((sum, c) => sum + (Number(c.unread) || 0), 0);
+export function toThreadMessages(items, now = new Date()) {
+  return (Array.isArray(items) ? items : [])
+    .map((m) => toThreadMessage(m, now))
+    .sort((a, b) => a.sortAt - b.sortAt);
 }

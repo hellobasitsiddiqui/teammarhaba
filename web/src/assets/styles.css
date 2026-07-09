@@ -3789,7 +3789,32 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .tm-chat-row .tm-c-avatar { width: 46px; height: 46px; font-size: var(--fs-4); flex: 0 0 auto; }
 
 .tm-chat-row-mid { flex: 1; min-width: 0; }
-.tm-chat-row-name { font-size: var(--fs-4); line-height: 1.2; }
+/* Name line holds the conversation title + its event/admin type badge (TM-438). */
+.tm-chat-row-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--fs-4);
+    line-height: 1.2;
+}
+.tm-chat-row-name-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The unified-list type badge (TM-438): a compact tag, tinted per conversation kind so event chats and
+   admin broadcasts read apart at a glance. Meaning is carried by the LABEL text (not colour alone), so
+   it survives the grayscale sketch theme. */
+.tm-chat-type {
+    flex: 0 0 auto;
+    font-size: var(--fs-1);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.tm-chat-type--event { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.tm-chat-type--admin {
+    color: var(--muted);
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
 .tm-chat-row-preview {
     display: flex;
     align-items: center;
@@ -3898,6 +3923,34 @@ button.tm-chat-bub { cursor: pointer; }
     color: var(--muted);
 }
 .tm-chat-reaction { margin: var(--space-1) 0 0 var(--space-2); }
+
+/* A centred system / admin notice in a thread (ConversationMessageResponse.system, TM-438) — e.g.
+   "You joined the event". Not a bubble: a quiet, full-width, centred line so it reads as chrome. */
+.tm-chat-system {
+    align-self: center;
+    max-width: 88%;
+    margin: var(--space-2) auto;
+    text-align: center;
+}
+.tm-chat-system-text {
+    display: inline-block;
+    padding: var(--space-1) var(--space-3);
+    border-radius: 999px;
+    background: var(--surface-sunken, var(--accent-soft));
+    color: var(--muted);
+    font-size: var(--fs-1);
+}
+
+/* Loading / error one-line states for the list + thread (TM-438) — centred, roomy, and retryable. */
+.tm-chat-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-3);
+    text-align: center;
+}
+.tm-chat-state-text { margin: 0; }
 
 /* ── Chat empty state (paper-chat-empty) ────────────────────────────────────────────────────── */
 .tm-chat-empty {

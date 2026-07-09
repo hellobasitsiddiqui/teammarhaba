@@ -437,6 +437,83 @@ export async function markNotificationRead(id) {
   return response.json();
 }
 
+/* ─────────────────────────────── Conversations (chat) — read API, F2 / TM-436 ──────────────────
+ * The Chat section (TM-438) reads three endpoints: the caller's conversation list, one thread's
+ * messages, and a mark-read POST fired when a thread is opened. All three use the shared page
+ * envelope `{ items, page, size, totalElements, totalPages }` for the GETs (zero-based `page`), the
+ * exact same shape the notifications + events feeds use, so the view consumes `data.items` uniformly.
+ * Writing (posting a message) is a later ticket (TM-447) — these are read-only.
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * GET /api/v1/me/conversations — the caller's conversations (event group chats + admin broadcasts),
+ * newest-activity first, in the shared page envelope. Each item is a ConversationSummaryResponse
+ * (`{ id, type: "EVENT_GROUP"|"ADMIN_BROADCAST", title, eventId, lastMessagePreview, lastMessageAt,
+ * lastActiveAt, unreadCount }`). The unified chat LIST (TM-438) renders these with a per-type badge;
+ * a 401 will already have refreshed/redirected via {@link apiFetch}.
+ * @param {{page?: number, size?: number}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function listMyConversations({ page, size } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  const query = params.toString();
+  const response = await apiFetch(`/api/v1/me/conversations${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/conversations failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * GET /api/v1/conversations/{id}/messages — one thread's messages, in the shared page envelope. Each
+ * item is a ConversationMessageResponse (`{ id, senderId, body, deepLink, system, reactions[],
+ * createdAt }`). Read by the thread view (TM-438); a 401 will already have refreshed/redirected via
+ * {@link apiFetch}.
+ * @param {number|string} id the conversation id.
+ * @param {{page?: number, size?: number}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getConversationMessages(id, { page, size } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  const query = params.toString();
+  const response = await apiFetch(
+    `/api/v1/conversations/${encodeURIComponent(id)}/messages${query ? `?${query}` : ""}`,
+    { headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/conversations/${id}/messages failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/conversations/{id}/read — opening a thread marks it read (clears its unread count).
+ * Idempotent; returns a MarkReadResponse (`{ conversationId, lastReadAt, unreadCount }`). The thread
+ * view (TM-438) fires this on open, fire-and-forget. A 401 will already have refreshed/redirected via
+ * {@link apiFetch}.
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<Object>} the MarkReadResponse.
+ * @throws {Error} on a non-2xx response.
+ */
+export async function markConversationRead(id) {
+  const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/read`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/conversations/${id}/read failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 /**
  * GET /api/v1/admin/users/push-routes — the deep-link route allow-list (TM-360): the app hash routes
  * a broadcast/test-push may deep-link to. This is the single source of truth the compose picker
@@ -709,6 +786,9 @@ if (typeof window !== "undefined") {
     markNotificationsSeen,
     listNotifications,
     markNotificationRead,
+    listMyConversations,
+    getConversationMessages,
+    markConversationRead,
     getPushRoutes,
     adminBroadcastPush,
     sendAdminMessage,
