@@ -1,6 +1,9 @@
 package com.teammarhaba.backend.notify;
 
+import java.time.Instant;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -29,11 +32,31 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     /** The user's feed, newest-first ({@code id} breaks a same-{@code createdAt} tie deterministically). */
     List<Notification> findByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 
+    /**
+     * The user's feed as a bounded {@link Page} — what the feed API (TM-454) serves. The caller-supplied
+     * {@link Pageable} carries the (fixed, newest-first) sort and the page window; the same
+     * {@code (user_id, created_at DESC)} index that backs the {@code List} finder serves this too.
+     */
+    Page<Notification> findByUserId(Long userId, Pageable pageable);
+
     /** Unseen count for the bell badge ({@code seen_at is null}). */
     long countByUserIdAndSeenAtIsNull(Long userId);
 
     /** Unread count ({@code read_at is null}). */
     long countByUserIdAndReadAtIsNull(Long userId);
+
+    /**
+     * Mark <em>every</em> currently-unseen notification for the user as seen in one write — the
+     * bulk "opening the bell clears the badge" transition (TM-454). Returns the number of rows
+     * stamped. Scoped to {@code seen_at is null} so it only ever <b>sets</b> the timestamp on
+     * unseen rows and never rewrites an already-seen one, preserving the same one-way, first-moment-
+     * wins semantics as {@link Notification#markSeen(java.time.Instant)}. A single bulk update rather
+     * than a load-mutate-save loop so the whole panel clears with one statement. Requires an active
+     * transaction (the feed service provides one).
+     */
+    @Modifying
+    @Query("update Notification n set n.seenAt = :seenAt where n.userId = :userId and n.seenAt is null")
+    int markAllSeenForUser(@Param("userId") Long userId, @Param("seenAt") Instant seenAt);
 
     /**
      * Trim a user's inbox to the retention policy: delete their non-sticky notifications beyond the
