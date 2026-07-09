@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.event;
 
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushRoutes;
 import java.time.Clock;
@@ -21,6 +23,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * Recipients are resolved fresh at send time and pushed through the shared {@link
  * EventAttendeeNotifier} rails (people via {@code User}, {@code notificationPref} honoured, tokens
  * de-duplicated), so the opt-out/suspended/soft-deleted handling matches reminders and broadcast.
+ *
+ * <p><b>Durable inbox (TM-453).</b> Alongside each push, the same lifecycle/claim event is written to
+ * the notification store via {@link NotificationWriter} so it survives as a bell/panel row after the
+ * transient push is gone. That write targets every affected user <em>regardless of push pref</em> (the
+ * in-app inbox is not a push opt-out) and is idempotent per source event via a versioned
+ * {@code sourceRef}, so a re-fired listener never doubles a user's inbox.
  *
  * <h2>Edit — material changes only</h2>
  *
@@ -73,6 +81,7 @@ public class EventLifecycleNotifier {
     private final EventAttendeeNotifier notifier;
     private final WaitlistOfferCascadeService cascade;
     private final EventPushLocation pushLocation;
+    private final NotificationWriter writer;
     private final Clock clock;
 
     @Autowired
@@ -81,8 +90,9 @@ public class EventLifecycleNotifier {
             EventRepository events,
             EventAttendeeNotifier notifier,
             WaitlistOfferCascadeService cascade,
-            EventPushLocation pushLocation) {
-        this(attendance, events, notifier, cascade, pushLocation, Clock.systemUTC());
+            EventPushLocation pushLocation,
+            NotificationWriter writer) {
+        this(attendance, events, notifier, cascade, pushLocation, writer, Clock.systemUTC());
     }
 
     /** Test seam: inject a fixed {@link Clock} so the location-reveal boundary is deterministic. */
@@ -92,12 +102,14 @@ public class EventLifecycleNotifier {
             EventAttendeeNotifier notifier,
             WaitlistOfferCascadeService cascade,
             EventPushLocation pushLocation,
+            NotificationWriter writer,
             Clock clock) {
         this.attendance = attendance;
         this.events = events;
         this.notifier = notifier;
         this.cascade = cascade;
         this.pushLocation = pushLocation;
+        this.writer = writer;
         this.clock = clock;
     }
 
@@ -110,22 +122,37 @@ public class EventLifecycleNotifier {
             }
             case UPDATED -> {
                 if (isMaterial(event.changedFields())) {
-                    pushToGoing(event.eventId(), updatedMessage(event));
+                    // Load the event once, post-commit: its @Version pins THIS edit in the persisted
+                    // notification's sourceRef (so a later edit is a distinct inbox row, not a
+                    // suppressed duplicate), and it feeds the reveal-gated location copy.
+                    Event current = events.findById(event.eventId()).orElse(null);
+                    pushAndPersistToGoing(
+                            event.eventId(),
+                            updatedMessage(event, current),
+                            NotificationType.EVENT_UPDATED,
+                            updatedSourceRef(event.eventId(), current));
                 } else {
                     log.debug("Event {} updated with no material change; not notifying.", event.eventId());
                 }
             }
             case CANCELLED -> {
                 cascade.killCascade(event.eventId()); // stop any running offer cascade
-                pushToGoing(event.eventId(), cancelledMessage(event.eventId(), event.heading()));
+                pushAndPersistToGoing(
+                        event.eventId(),
+                        cancelledMessage(event.eventId(), event.heading()),
+                        NotificationType.EVENT_CANCELLED,
+                        "event:" + event.eventId() + ":cancelled");
             }
         }
     }
 
-    /** The claimant's "You're in ✓" confirmation, post-commit. */
+    /** The claimant's "You're in ✓" confirmation, post-commit: transient push + durable inbox row. */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onClaimed(EventClaimedEvent event) {
-        notifier.pushToUser(event.userId(), claimedMessage(event.eventId(), event.heading()));
+        PushMessage message = claimedMessage(event.eventId(), event.heading());
+        notifier.pushToUser(event.userId(), message);
+        writer.writeSystemToUser(
+                NotificationType.RSVP_CONFIRMED, event.userId(), message, "event:" + event.eventId() + ":rsvp");
     }
 
     /** A material change touches at least one {@link #MATERIAL_FIELDS} entry. */
@@ -133,8 +160,15 @@ public class EventLifecycleNotifier {
         return changedFields.stream().anyMatch(MATERIAL_FIELDS::contains);
     }
 
-    /** Resolve the event's current GOING attendees and push {@code message} to them (no-op if none). */
-    private void pushToGoing(long eventId, PushMessage message) {
+    /**
+     * Resolve the event's current GOING attendees, push {@code message} to them, and persist the
+     * matching durable inbox row for each (no-op if there are none). The push goes through the shared
+     * rails (which drop push-opted-out attendees); the persisted notification is written for every
+     * affected user regardless of push pref — the bell shows it in-app either way (see
+     * {@link NotificationWriter}). Both re-resolve GOING from the same query, so the two stay in step.
+     */
+    private void pushAndPersistToGoing(
+            long eventId, PushMessage message, NotificationType type, String sourceRef) {
         List<Long> going = attendance.findByEventIdAndState(eventId, AttendanceState.GOING).stream()
                 .map(EventAttendance::getUserId)
                 .toList();
@@ -142,9 +176,19 @@ public class EventLifecycleNotifier {
             return;
         }
         notifier.pushToUsers(going, message);
+        writer.writeSystem(type, going, message, sourceRef);
     }
 
-    private PushMessage updatedMessage(EventLifecycleEvent lifecycle) {
+    /**
+     * The idempotency key for an {@code EVENT_UPDATED} inbox row: the event id plus its post-commit
+     * {@code @Version} so each distinct edit is its own row. If the event has since vanished
+     * (soft-deleted between commit and this listener), we fall back to an un-versioned key.
+     */
+    private static String updatedSourceRef(long eventId, Event current) {
+        return "event:" + eventId + ":updated:v" + (current != null ? current.getVersion() : "x");
+    }
+
+    private PushMessage updatedMessage(EventLifecycleEvent lifecycle, Event current) {
         Set<String> changedFields = lifecycle.changedFields();
         boolean timeChanged = changedFields.contains("startAt") || changedFields.contains("timezone");
         boolean placeChanged = changedFields.contains("locationText");
@@ -162,11 +206,8 @@ public class EventLifecycleNotifier {
         // (or if the event has since been removed) we withhold the address and just point at the app,
         // exactly as the public events API withholds it; the client applies the policy when rendering.
         String tail = " — tap for details.";
-        if (placeChanged) {
-            Event current = events.findById(lifecycle.eventId()).orElse(null);
-            if (current != null && pushLocation.isRevealed(current, clock.instant())) {
-                tail = " — now at " + current.getLocationText() + ". Tap for details.";
-            }
+        if (placeChanged && current != null && pushLocation.isRevealed(current, clock.instant())) {
+            tail = " — now at " + current.getLocationText() + ". Tap for details.";
         }
         return new PushMessage(
                 "Event updated: " + lifecycle.heading(), what + tail, PushRoutes.eventDetail(lifecycle.eventId()));

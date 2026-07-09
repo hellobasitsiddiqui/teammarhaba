@@ -2,6 +2,8 @@ package com.teammarhaba.backend.event;
 
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
 import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
@@ -105,6 +107,7 @@ public class EventReminderService {
     private final DeviceTokenRepository deviceTokens;
     private final PushNotificationService push;
     private final EventPushLocation pushLocation;
+    private final NotificationWriter writer;
     private final Clock clock;
 
     @Autowired
@@ -115,8 +118,9 @@ public class EventReminderService {
             UserRepository users,
             DeviceTokenRepository deviceTokens,
             PushNotificationService push,
-            EventPushLocation pushLocation) {
-        this(events, attendance, markers, users, deviceTokens, push, pushLocation, Clock.systemUTC());
+            EventPushLocation pushLocation,
+            NotificationWriter writer) {
+        this(events, attendance, markers, users, deviceTokens, push, pushLocation, writer, Clock.systemUTC());
     }
 
     /** Test seam: inject a fixed/advanceable {@link Clock} (house pattern, as {@code BroadcastService}). */
@@ -128,6 +132,7 @@ public class EventReminderService {
             DeviceTokenRepository deviceTokens,
             PushNotificationService push,
             EventPushLocation pushLocation,
+            NotificationWriter writer,
             Clock clock) {
         this.events = events;
         this.attendance = attendance;
@@ -136,6 +141,7 @@ public class EventReminderService {
         this.deviceTokens = deviceTokens;
         this.push = push;
         this.pushLocation = pushLocation;
+        this.writer = writer;
         this.clock = clock;
     }
 
@@ -248,6 +254,18 @@ public class EventReminderService {
             return new PushFanout(0, 0, 0, 0);
         }
 
+        PushMessage message = message(event, milestone, now);
+
+        // Durable inbox first (TM-453): write the reminder as a bell/panel row for EVERY GOING attendee
+        // — the writer resolves through User (dropping tombstoned/suspended) but applies no push-pref
+        // filter, so an EMAIL-pref attendee (skipped by the push below) still sees it in-app. Idempotent
+        // per (event, milestone) via the sourceRef, inheriting the claim row's at-most-once guarantee.
+        writer.writeSystem(
+                NotificationType.EVENT_REMINDER,
+                going.stream().map(EventAttendance::getUserId).toList(),
+                message,
+                "event:" + event.getId() + ":reminder:" + milestone.name());
+
         // Resolve people THROUGH UserRepository (one batch read): the entity's @SQLRestriction drops
         // soft-deleted accounts even though their attendance + device_tokens rows survive a tombstone.
         Map<Long, User> byId =
@@ -269,7 +287,7 @@ public class EventReminderService {
         if (tokens.isEmpty()) {
             return new PushFanout(0, 0, 0, 0);
         }
-        return push.sendToTokens(tokens, message(event, milestone, now));
+        return push.sendToTokens(tokens, message);
     }
 
     /** Push-eligible == the pref opted into push; EMAIL (the default) is the opt-out — as broadcast. */

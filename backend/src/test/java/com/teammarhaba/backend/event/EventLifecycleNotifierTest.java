@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.config.LocationRevealProperties;
 import com.teammarhaba.backend.event.EventLifecycleEvent.Kind;
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import java.time.Clock;
 import java.time.Duration;
@@ -43,6 +46,7 @@ class EventLifecycleNotifierTest {
     @Mock private EventRepository events;
     @Mock private EventAttendeeNotifier notifier;
     @Mock private WaitlistOfferCascadeService cascade;
+    @Mock private NotificationWriter writer;
 
     // Real reveal helper (default 24h window) + fixed clock so the reveal boundary is deterministic.
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -50,7 +54,7 @@ class EventLifecycleNotifierTest {
             new EventPushLocation(new LocationRevealPolicy(new LocationRevealProperties(null, Map.of())));
 
     private EventLifecycleNotifier notifierUnderTest() {
-        return new EventLifecycleNotifier(attendance, events, notifier, cascade, pushLocation, clock);
+        return new EventLifecycleNotifier(attendance, events, notifier, cascade, pushLocation, writer, clock);
     }
 
     /** An event starting at {@code startAt} with the given venue (default 24h reveal, no override). */
@@ -95,6 +99,15 @@ class EventLifecycleNotifierTest {
         assertThat(message.getValue().title()).isEqualTo("Event updated: " + HEADING);
         assertThat(message.getValue().body()).contains("start time");
         assertThat(message.getValue().route()).isEqualTo("#/events/" + EVENT_ID);
+
+        // ...and the same edit is written to the durable inbox for those same GOING attendees (TM-453),
+        // typed EVENT_UPDATED with an event-scoped, versioned idempotency key.
+        verify(writer)
+                .writeSystem(
+                        eq(NotificationType.EVENT_UPDATED),
+                        eq(List.of(1L, 2L)),
+                        any(PushMessage.class),
+                        startsWith("event:" + EVENT_ID + ":updated"));
     }
 
     @Test
@@ -177,8 +190,8 @@ class EventLifecycleNotifierTest {
         notifierUnderTest.onLifecycle(updated(Set.of("mapUrl", "onlineUrl")));
         notifierUnderTest.onLifecycle(updated(Set.of())); // (belt-and-braces; the admin service never emits this)
 
-        // No recipients ever resolved, nothing pushed — a non-material edit is fully silent.
-        verifyNoInteractions(notifier, cascade, attendance, events);
+        // No recipients ever resolved, nothing pushed, nothing written — a non-material edit is silent.
+        verifyNoInteractions(notifier, cascade, attendance, events, writer);
     }
 
     @Test
@@ -198,7 +211,7 @@ class EventLifecycleNotifierTest {
     void createNotifiesNobodyAndTouchesNothing() {
         notifierUnderTest().onLifecycle(new EventLifecycleEvent(EVENT_ID, HEADING, Kind.CREATED));
 
-        verifyNoInteractions(notifier, cascade, attendance, events);
+        verifyNoInteractions(notifier, cascade, attendance, events, writer);
     }
 
     @Test
@@ -212,6 +225,14 @@ class EventLifecycleNotifierTest {
         verify(notifier).pushToUsers(anyCollection(), message.capture());
         assertThat(message.getValue().title()).isEqualTo("Event cancelled: " + HEADING);
         assertThat(message.getValue().body()).contains("called off");
+
+        // The cancellation is also written to the durable inbox for the GOING attendees (TM-453).
+        verify(writer)
+                .writeSystem(
+                        eq(NotificationType.EVENT_CANCELLED),
+                        eq(List.of(1L, 2L)),
+                        any(PushMessage.class),
+                        eq("event:" + EVENT_ID + ":cancelled"));
     }
 
     @Test
@@ -222,5 +243,13 @@ class EventLifecycleNotifierTest {
         verify(notifier).pushToUser(eq(7L), message.capture());
         assertThat(message.getValue().title()).isEqualTo("You're in ✓");
         assertThat(message.getValue().route()).isEqualTo("#/events/" + EVENT_ID);
+
+        // The confirmation is written to just the claimant's durable inbox, typed RSVP_CONFIRMED.
+        verify(writer)
+                .writeSystemToUser(
+                        eq(NotificationType.RSVP_CONFIRMED),
+                        eq(7L),
+                        any(PushMessage.class),
+                        eq("event:" + EVENT_ID + ":rsvp"));
     }
 }

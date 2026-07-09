@@ -59,6 +59,15 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     int markAllSeenForUser(@Param("userId") Long userId, @Param("seenAt") Instant seenAt);
 
     /**
+     * Whether a notification already exists for this user, type and source-event key — the idempotency
+     * probe the writers ({@link NotificationWriter}, TM-453) use to guarantee "no duplicate per source
+     * event". {@code sourceRef} encodes the originating event uniquely (e.g. {@code event:42:updated:v7},
+     * {@code event:42:reminder:T_MINUS_1H}), so a re-fired listener or a redelivered/ retried source
+     * event never writes a second inbox row for the same person.
+     */
+    boolean existsByUserIdAndTypeAndSourceRef(Long userId, NotificationType type, String sourceRef);
+
+    /**
      * Trim a user's inbox to the retention policy: delete their non-sticky notifications beyond the
      * newest {@code keep}, leaving <em>every</em> sticky one untouched. Returns the number of rows
      * removed. Native SQL because the keep-window is an ordered {@code LIMIT} subselect on the same

@@ -6,6 +6,10 @@ import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.Notification;
+import com.teammarhaba.backend.notify.NotificationRepository;
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushDelivery;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService;
@@ -62,11 +66,16 @@ class EventReminderIntegrationTest extends AbstractIntegrationTest {
     @Autowired private RecordingPushSender sender;
     @Autowired private JdbcTemplate jdbc;
 
+    // The real, Spring-proxied writer bean (so its @Transactional(REQUIRES_NEW) actually applies — the
+    // @Modifying retention purge needs a live transaction) plus the store to read back the inbox rows.
+    @Autowired private NotificationWriter writer;
+    @Autowired private NotificationRepository notifications;
+
     private final MutableClock clock = new MutableClock(Instant.now());
 
     private EventReminderService service() {
         return new EventReminderService(
-                events, attendance, markers, users, deviceTokens, pushService, pushLocation, clock);
+                events, attendance, markers, users, deviceTokens, pushService, pushLocation, writer, clock);
     }
 
     @BeforeEach
@@ -86,6 +95,13 @@ class EventReminderIntegrationTest extends AbstractIntegrationTest {
         attendance.deleteAll();
         events.deleteAll();
         deviceTokens.deleteAll();
+        notifications.deleteAll();
+    }
+
+    private List<NotificationType> inboxTypes(long userId) {
+        return notifications.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
+                .map(Notification::getType)
+                .toList();
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -168,6 +184,15 @@ class EventReminderIntegrationTest extends AbstractIntegrationTest {
         assertThat(claims.get(0).getTargeted()).isEqualTo(2);
         assertThat(claims.get(0).getDelivered()).isEqualTo(2);
         assertThat(claims.get(0).getSentAt()).isNotNull(); // DB-authoritative claim instant
+
+        // Durable inbox (TM-453): BOTH GOING attendees get a persisted EVENT_REMINDER row — including the
+        // EMAIL-pref one the push skipped, because the in-app bell is not a push opt-out. The waitlisted
+        // member (no slot) gets nothing. The stored row carries the event deep-link.
+        assertThat(inboxTypes(eligible)).containsExactly(NotificationType.EVENT_REMINDER);
+        assertThat(inboxTypes(optedOut)).containsExactly(NotificationType.EVENT_REMINDER);
+        assertThat(inboxTypes(waitlisted)).isEmpty();
+        assertThat(notifications.findByUserIdOrderByCreatedAtDescIdDesc(eligible).get(0).getDeepLink())
+                .isEqualTo("#/events/" + event.getId());
     }
 
     @Test
@@ -192,6 +217,8 @@ class EventReminderIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(sender.tokens()).hasSize(1);
         assertThat(markerMilestones(event.getId())).containsExactly(ReminderMilestone.T_MINUS_1H);
+        // Idempotent inbox too: the repeat ticks and "restarted" instance never wrote a second row.
+        assertThat(inboxTypes(eligible)).containsExactly(NotificationType.EVENT_REMINDER);
     }
 
     @Test

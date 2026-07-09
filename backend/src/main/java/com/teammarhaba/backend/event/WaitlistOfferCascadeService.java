@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.event;
 
+import com.teammarhaba.backend.notify.NotificationType;
+import com.teammarhaba.backend.notify.NotificationWriter;
 import com.teammarhaba.backend.notify.PushMessage;
 import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
 import com.teammarhaba.backend.notify.PushRoutes;
@@ -93,6 +95,7 @@ public class WaitlistOfferCascadeService {
     private final OfferCascadeScanRepository scan;
     private final EventAttendeeNotifier notifier;
     private final BookingCutoffPolicy bookingCutoff;
+    private final NotificationWriter writer;
     private final TransactionTemplate tx;
     private final Clock clock;
 
@@ -103,8 +106,17 @@ public class WaitlistOfferCascadeService {
             OfferCascadeScanRepository scan,
             EventAttendeeNotifier notifier,
             BookingCutoffPolicy bookingCutoff,
+            NotificationWriter writer,
             PlatformTransactionManager txManager) {
-        this(events, attendance, scan, notifier, bookingCutoff, new TransactionTemplate(txManager), Clock.systemUTC());
+        this(
+                events,
+                attendance,
+                scan,
+                notifier,
+                bookingCutoff,
+                writer,
+                new TransactionTemplate(txManager),
+                Clock.systemUTC());
     }
 
     /** Test seam: inject an advanceable {@link Clock} and an explicit template (house pattern, TM-394). */
@@ -114,6 +126,7 @@ public class WaitlistOfferCascadeService {
             OfferCascadeScanRepository scan,
             EventAttendeeNotifier notifier,
             BookingCutoffPolicy bookingCutoff,
+            NotificationWriter writer,
             TransactionTemplate tx,
             Clock clock) {
         this.events = events;
@@ -121,6 +134,7 @@ public class WaitlistOfferCascadeService {
         this.scan = scan;
         this.notifier = notifier;
         this.bookingCutoff = bookingCutoff;
+        this.writer = writer;
         this.tx = tx;
         this.clock = clock;
     }
@@ -165,8 +179,17 @@ public class WaitlistOfferCascadeService {
         if (batch == null || batch.userIds().isEmpty()) {
             return 0;
         }
-        PushFanout fanout =
-                notifier.pushToUsers(batch.userIds(), offerMessage(batch.eventId(), batch.heading()));
+        PushMessage message = offerMessage(batch.eventId(), batch.heading());
+        PushFanout fanout = notifier.pushToUsers(batch.userIds(), message);
+        // Durable inbox row per offered member (TM-453), written after the stamps committed. The
+        // persisted offer_notified_at stamp already makes each member offered at most once per episode,
+        // so keying the sourceRef by (event, this episode's offer instant) makes the write idempotent and
+        // still lets a genuinely new later episode notify again. Pref-independent (bell shows it in-app).
+        writer.writeSystem(
+                NotificationType.WAITLIST_OFFER,
+                batch.userIds(),
+                message,
+                "event:" + batch.eventId() + ":offer:" + batch.offerAt().toEpochMilli());
         log.info(
                 "Offer cascade widened event {} to {} waitlisted member(s): {}",
                 batch.eventId(),
@@ -236,7 +259,7 @@ public class WaitlistOfferCascadeService {
             attendance.save(member);
             offered.add(member.getUserId());
         }
-        return new OfferBatch(eventId, event.getHeading(), offered);
+        return new OfferBatch(eventId, event.getHeading(), offered, now);
     }
 
     /** The offer push: title + who-first line + the event-detail deep link (allow-listed, TM-290). */
@@ -247,6 +270,10 @@ public class WaitlistOfferCascadeService {
                 PushRoutes.eventDetail(eventId));
     }
 
-    /** The stamped-but-not-yet-pushed result of one locked pass: who to push, and the message inputs. */
-    private record OfferBatch(long eventId, String heading, List<Long> userIds) {}
+    /**
+     * The stamped-but-not-yet-pushed result of one locked pass: who to push, the message inputs, and
+     * the instant they were stamped ({@code offerAt}) — the episode key that makes the persisted
+     * notification idempotent per offer (TM-453).
+     */
+    private record OfferBatch(long eventId, String heading, List<Long> userIds, Instant offerAt) {}
 }
