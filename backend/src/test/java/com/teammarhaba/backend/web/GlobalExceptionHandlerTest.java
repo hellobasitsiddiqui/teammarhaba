@@ -140,6 +140,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.ConversationMembershipService conversationMembershipService;
 
+    // ConversationController's edit/delete-own-message (TM-467) needs a MessageAuthorService — supply it
+    // so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.MessageAuthorService messageAuthorService;
+
     // ConversationTypingController (TM-465) needs a TypingSignalService — supply it so the web slice can
     // load. Its other collaborators (ConversationReadService, ChatStreamService) are already mocked above.
     @MockitoBean

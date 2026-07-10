@@ -383,15 +383,22 @@ export function toQuotedPreview(replyTo) {
  * through for read-only display; `replyTo` (TM-466) is the quoted-parent preview, or null for a non-reply.
  *
  * <p>TM-463: `readReceipt` is carried through (normalised, or null). Because the backend only attaches it
- * to the caller's OWN messages, a non-null `readReceipt` is now the authoritative "this message is mine"
+ * to the caller's OWN messages, a non-null `readReceipt` is one authoritative "this message is mine"
  * signal — letting the thread draw a loaded (not just in-session) own message as out-going.
+ *
+ * <p>TM-589 / TM-467: `mine` is the server-computed own-message flag (true only when the verified caller
+ * authored it). It's the direct "is this mine" signal the edit/delete affordances (TM-467) gate on —
+ * more robust than inferring ownership from a read receipt's presence. It's null on the caller-independent
+ * SSE broadcast frame (which can't resolve "mine"), coerced here to a strict boolean (`=== true`), so only
+ * a concrete server `true` marks a message own. `edited` / `editedAt` (TM-467) drive the "edited" tag: the
+ * backend stamps `editedAt` when an author edits, and a non-null value renders the tag.
  * @param {Object} msg a ConversationMessageResponse.
  * @param {Date} [now]
- * @returns {{id: string, body: string, system: boolean, deepLink: (string|null),
+ * @returns {{id: string, body: string, system: boolean, mine: boolean, deepLink: (string|null),
  *            cta: ({href: string, label: string}|null),
  *            reactions: Array<{emoji: string, count: number, mine: boolean}>,
  *            replyTo: (?{id: string, system: boolean, available: boolean, excerpt: string}),
- *            timeLabel: string, sortAt: number,
+ *            timeLabel: string, sortAt: number, edited: boolean, editedAt: (string|null),
  *            readReceipt: ({count: number, readerIds: string[]}|null)}}
  */
 export function toThreadMessage(msg, now = new Date()) {
@@ -402,12 +409,18 @@ export function toThreadMessage(msg, now = new Date()) {
     id: String(m.id ?? ""),
     body: String(m.body ?? ""),
     system: Boolean(m.system),
+    // TM-589: the server-computed own flag (strictly true only when the caller authored it); null on the
+    // caller-independent broadcast frame → false here. Drives own-vs-other alignment + edit/delete gating.
+    mine: m.mine === true,
     deepLink,
     cta: deepLinkCta(deepLink),
     reactions,
     replyTo: toQuotedPreview(m.replyTo),
     timeLabel: formatTimeLabel(m.createdAt, now),
     sortAt: epoch(m.createdAt),
+    // TM-467: a non-null editedAt means the author edited the body → render the "edited" tag.
+    edited: Boolean(m.editedAt),
+    editedAt: m.editedAt ? String(m.editedAt) : null,
     readReceipt: normaliseReceipt(m.readReceipt),
   };
 }
@@ -555,6 +568,8 @@ export function pendingMessage(body, { localId = "pending", now = new Date(), re
     id: String(localId),
     body: String(body ?? ""),
     system: false,
+    // A pending echo is definitionally the caller's own message (they're the one sending it) — TM-589.
+    mine: true,
     deepLink: null,
     cta: null,
     reactions: [],
@@ -562,6 +577,9 @@ export function pendingMessage(body, { localId = "pending", now = new Date(), re
     timeLabel: formatTimeLabel(now.toISOString(), now),
     sortAt: now.getTime(),
     pending: true,
+    // A brand-new echo hasn't been edited; the "edited" tag only appears after an author edit (TM-467).
+    edited: false,
+    editedAt: null,
     // No receipt on an unconfirmed echo; the server's confirmed message carries the real one (TM-463).
     readReceipt: null,
   };
@@ -591,7 +609,87 @@ export function threadSignature(messages) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) return "0";
   const last = list[list.length - 1];
-  return `${list.length}:${last.id}:${last.sortAt}`;
+  // Fold in each message's edited-at so an in-place edit (no new row, so count/last-id/last-sortAt are
+  // all unchanged) still changes the signature — otherwise a poll after someone else edited a message
+  // would see "nothing new" and never repaint the corrected body (TM-467).
+  const edits = list.reduce((acc, m) => acc + (m.editedAt ? `,${m.id}@${m.editedAt}` : ""), "");
+  return `${list.length}:${last.id}:${last.sortAt}${edits}`;
+}
+
+/* ─────────────────────────────── Author edit / delete own message (TM-467) ──────────────────────────
+ * The pure maths behind editing and deleting the caller's OWN message. chat.js is the DOM shell + the
+ * PATCH/DELETE endpoint calls (api.js); every DECISION lives here as a node-tested rule:
+ *   • canEditWithinWindow — is a message still inside the ~5-minute edit window? (drives whether the edit
+ *       affordance is offered — a best-effort client hint; the backend re-checks authoritatively);
+ *   • applyMessageEdit    — fold a confirmed / live-broadcast edit (new body + editedAt) into the loaded
+ *       list, in place BY ID, preserving that message's reactions / receipt / reply quote;
+ *   • removeMessageById   — drop a deleted message from the loaded list BY ID (author delete + moderation
+ *       both soft-delete, so the message simply leaves the timeline).
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The author edit window (mirrors the backend's MessageAuthorService.EDIT_WINDOW — ~5 minutes). */
+export const EDIT_WINDOW_MS = 5 * 60 * 1000;
+
+/** The short tag rendered on an edited message (TM-467) — kept here so the DOM + its tests share one string. */
+export const EDITED_TAG = "edited";
+
+/**
+ * Whether a message is still within the edit window (TM-467), so the edit affordance should be offered.
+ * A best-effort CLIENT hint — the backend enforces the same ~5-minute cutoff authoritatively against the
+ * DB-authoritative created_at, so a stale hint at most shows an edit control that the PATCH then rejects
+ * with a 409 (never lets a real out-of-window edit through). Inclusive at the boundary, matching the
+ * server. An absent / unparseable timestamp is treated as out-of-window (no edit offered).
+ * @param {string|number} createdAt the message's post instant (ISO string or epoch-ms).
+ * @param {number} [now] epoch-ms now (injectable for deterministic tests).
+ * @param {number} [windowMs] the window length (defaults to EDIT_WINDOW_MS).
+ * @returns {boolean}
+ */
+export function canEditWithinWindow(createdAt, now = Date.now(), windowMs = EDIT_WINDOW_MS) {
+  const t = typeof createdAt === "number" ? createdAt : Date.parse(createdAt);
+  if (!Number.isFinite(t)) return false;
+  const ref = typeof now === "number" ? now : Number(now) || Date.now();
+  return ref - t <= windowMs;
+}
+
+/**
+ * Fold an edit into an oldest-first message list: find the message by id and replace ONLY its body +
+ * editedAt (marking it `edited`), preserving everything else on the row (reactions, receipt, reply quote,
+ * order). Returns a NEW array; the untouched messages keep their identity, only the edited one is a fresh
+ * object. Used by both the author's own optimistic reconcile and a live `message-edited` broadcast — an
+ * edit is a PATCH, never a whole-row replace (which is why it can't reuse {@link upsertMessage}, whose
+ * broadcast frame carries empty reactions and would clobber the chips). A missing/blank id, or an id not
+ * in the list, is a harmless no-op (returns a copy).
+ * @param {Array<{id: string}>} messages the loaded thread.
+ * @param {{id: (string|number), body?: string, editedAt?: (string|null)}} patch the edit to apply.
+ * @returns {Array}
+ */
+export function applyMessageEdit(messages, patch) {
+  const list = Array.isArray(messages) ? messages : [];
+  const id = String(patch?.id ?? "");
+  if (!id) return list.slice();
+  return list.map((m) => (m.id === id
+    ? {
+        ...m,
+        body: patch.body != null ? String(patch.body) : m.body,
+        editedAt: patch.editedAt != null ? String(patch.editedAt) : (m.editedAt || null),
+        edited: true,
+      }
+    : m));
+}
+
+/**
+ * Drop a message from an oldest-first list BY ID — the timeline effect of a soft-delete (author delete
+ * TM-467, or admin moderation): the message simply leaves the thread (the read filters deleted rows out).
+ * Returns a NEW array; a blank/absent id or one not present is a harmless no-op.
+ * @param {Array<{id: string}>} messages the loaded thread.
+ * @param {string|number} id the message id to remove.
+ * @returns {Array}
+ */
+export function removeMessageById(messages, id) {
+  const target = String(id ?? "");
+  const list = Array.isArray(messages) ? messages : [];
+  if (!target) return list.slice();
+  return list.filter((m) => m.id !== target);
 }
 
 /* ─────────────────────────────── Live transport — SSE frame parser (TM-464) ─────────────────────

@@ -48,6 +48,11 @@ import {
   applyTypingEvent,
   pruneTypists,
   typingLabel,
+  EDIT_WINDOW_MS,
+  EDITED_TAG,
+  canEditWithinWindow,
+  applyMessageEdit,
+  removeMessageById,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -737,4 +742,98 @@ test("typingLabel: a typist whose signal expired is dropped from the label", () 
   ];
   // At now=200, Amina expired → only Bilal remains.
   assert.equal(typingLabel(list, 200), "Bilal is typing…");
+});
+
+/* ─────────────────────────────── author edit / delete own message (TM-467) ─────────────────────── */
+
+test("toThreadMessage: carries the server `mine` flag (strictly true) + the `edited`/`editedAt` tag", () => {
+  // mine is strict: only a concrete server `true` marks a message own; false/absent/null → not mine.
+  assert.equal(toThreadMessage({ id: 1, body: "hi", mine: true }).mine, true);
+  assert.equal(toThreadMessage({ id: 1, body: "hi", mine: false }).mine, false);
+  assert.equal(toThreadMessage({ id: 1, body: "hi" }).mine, false); // absent (e.g. broadcast frame)
+  assert.equal(toThreadMessage({ id: 1, body: "hi", mine: null }).mine, false);
+
+  // edited/editedAt drive the "edited" tag: a non-null editedAt → edited true, carried through as a string.
+  const notEdited = toThreadMessage({ id: 2, body: "hi", createdAt: "2026-07-10T10:00:00Z" });
+  assert.equal(notEdited.edited, false);
+  assert.equal(notEdited.editedAt, null);
+  const edited = toThreadMessage({ id: 2, body: "hi (fixed)", createdAt: "2026-07-10T10:00:00Z", editedAt: "2026-07-10T10:02:00Z" });
+  assert.equal(edited.edited, true);
+  assert.equal(edited.editedAt, "2026-07-10T10:02:00Z");
+});
+
+test("pendingMessage: an optimistic echo is `mine` and not yet edited", () => {
+  const p = pendingMessage("sending this", { localId: "pending-x" });
+  assert.equal(p.mine, true);
+  assert.equal(p.edited, false);
+  assert.equal(p.editedAt, null);
+  assert.equal(p.pending, true);
+});
+
+test("canEditWithinWindow: allowed up to (and including) EDIT_WINDOW_MS after posting, then locked", () => {
+  const created = Date.parse("2026-07-10T10:00:00Z");
+  assert.equal(canEditWithinWindow(created, created), true); // just posted
+  assert.equal(canEditWithinWindow(created, created + EDIT_WINDOW_MS - 1), true); // inside the window
+  assert.equal(canEditWithinWindow(created, created + EDIT_WINDOW_MS), true); // exactly at the edge (inclusive)
+  assert.equal(canEditWithinWindow(created, created + EDIT_WINDOW_MS + 1), false); // one ms past → locked
+  // Accepts an ISO string too; an absent/garbage timestamp is treated as out-of-window (no edit offered).
+  assert.equal(canEditWithinWindow("2026-07-10T10:00:00Z", created + 1000), true);
+  assert.equal(canEditWithinWindow(null, created), false);
+  assert.equal(canEditWithinWindow("not-a-date", created), false);
+});
+
+test("EDIT_WINDOW_MS is the 5-minute window; EDITED_TAG is the shared 'edited' string", () => {
+  assert.equal(EDIT_WINDOW_MS, 5 * 60 * 1000);
+  assert.equal(EDITED_TAG, "edited");
+});
+
+test("applyMessageEdit: patches ONLY body+editedAt by id, preserving reactions/order, non-mutating", () => {
+  const chips = [{ emoji: "👍", count: 2, mine: true }];
+  const before = [
+    { id: "1", body: "first", sortAt: 1, editedAt: null, edited: false, reactions: [] },
+    { id: "2", body: "typo heer", sortAt: 2, editedAt: null, edited: false, reactions: chips, readReceipt: { count: 1, readerIds: ["9"] } },
+  ];
+  const after = applyMessageEdit(before, { id: "2", body: "typo here", editedAt: "2026-07-10T10:05:00Z" });
+  // The edited row's body + editedAt + edited flip; everything else on it is preserved (reactions, receipt).
+  assert.equal(after[1].body, "typo here");
+  assert.equal(after[1].editedAt, "2026-07-10T10:05:00Z");
+  assert.equal(after[1].edited, true);
+  assert.deepEqual(after[1].reactions, chips);
+  assert.deepEqual(after[1].readReceipt, { count: 1, readerIds: ["9"] });
+  // Order preserved; the OTHER row is untouched (same reference — only the edited one is a new object).
+  assert.equal(after[0], before[0]);
+  assert.equal(after.length, 2);
+  // Non-mutating: the input's row is unchanged.
+  assert.equal(before[1].body, "typo heer");
+  assert.equal(before[1].edited, false);
+  // A missing id is a harmless no-op copy.
+  assert.deepEqual(applyMessageEdit(before, { id: "999", body: "x" }).map((m) => m.body), ["first", "typo heer"]);
+  assert.deepEqual(applyMessageEdit(before, {}).map((m) => m.body), ["first", "typo heer"]);
+});
+
+test("removeMessageById: drops a message by id (the soft-delete timeline effect), non-mutating no-op otherwise", () => {
+  const before = [
+    { id: "1", body: "keep" },
+    { id: "2", body: "gone" },
+    { id: "3", body: "keep too" },
+  ];
+  assert.deepEqual(removeMessageById(before, "2").map((m) => m.id), ["1", "3"]);
+  assert.deepEqual(removeMessageById(before, 2).map((m) => m.id), ["1", "3"]); // coerces a numeric id
+  // A missing / blank id leaves the list intact (a copy).
+  assert.deepEqual(removeMessageById(before, "999").map((m) => m.id), ["1", "2", "3"]);
+  assert.deepEqual(removeMessageById(before, "").map((m) => m.id), ["1", "2", "3"]);
+  assert.equal(before.length, 3); // non-mutating
+});
+
+test("threadSignature: an in-place edit (same count/last-id/last-sortAt) still changes the signature", () => {
+  const base = [
+    { id: "1", sortAt: 1, editedAt: null },
+    { id: "2", sortAt: 2, editedAt: null },
+  ];
+  const editedInPlace = [
+    { id: "1", sortAt: 1, editedAt: null },
+    { id: "2", sortAt: 2, editedAt: "2026-07-10T10:05:00Z" },
+  ];
+  // Count + last id + last sortAt are identical, but the edit must be detectable so a poll repaints it.
+  assert.notEqual(threadSignature(base), threadSignature(editedInPlace));
 });

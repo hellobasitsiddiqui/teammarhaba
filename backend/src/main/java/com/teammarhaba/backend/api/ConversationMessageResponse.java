@@ -54,9 +54,12 @@ import java.util.List;
  * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
  * @param mine        server-computed: {@code senderId == the verified caller's id} (TM-589) — drives
  *                    own-vs-other alignment; {@code null} only on the caller-independent broadcast frame
- * @param body        the message text
+ * @param body        the message text (the CURRENT text — an author edit (TM-467) rewrites it in place)
  * @param deepLink    optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
  * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
+ * @param editedAt    when the author last edited the body (TM-467), or {@code null} if never edited —
+ *                    a non-null value drives the client's "edited" tag; it never reorders the message
+ *                    (order stays keyed on {@code createdAt})
  * @param reactions   the message's reaction summary, oldest-reacted emoji first; empty if none
  * @param readReceipt read receipt for the caller's OWN message (count + reader ids); {@code null} if not theirs
  * @param replyTo     the quoted parent snippet when this is a reply (TM-466); {@code null} otherwise
@@ -69,6 +72,7 @@ public record ConversationMessageResponse(
         String body,
         String deepLink,
         Instant createdAt,
+        Instant editedAt,
         List<EmojiReactionCount> reactions,
         MessageReadReceipt readReceipt,
         QuotedMessage replyTo) {
@@ -97,6 +101,7 @@ public record ConversationMessageResponse(
                 message.getBody(),
                 message.getDeepLink(),
                 message.getCreatedAt(),
+                message.getEditedAt(),
                 reactions,
                 readReceipt,
                 replyTo);

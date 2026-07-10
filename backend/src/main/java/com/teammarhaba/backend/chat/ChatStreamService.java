@@ -99,6 +99,28 @@ public class ChatStreamService {
     public static final String EVENT_MESSAGE = "message";
 
     /**
+     * The SSE event name carrying an <b>edited</b> chat message (TM-467) — the author rewrote the body.
+     * The payload is the edited {@link com.teammarhaba.backend.api.ConversationMessageResponse}, but a
+     * connected client treats it as a PATCH (it applies only the new {@code body} + {@code editedAt} to
+     * the message it already holds, preserving that message's reactions / receipt / reply quote) rather
+     * than as a fresh bubble — which is why it rides its own event name instead of {@link #EVENT_MESSAGE}
+     * (whose consumer upserts a whole row and would otherwise clobber those side-channels on an edit).
+     * Like every live frame it is a pure latency optimisation: a client that misses it re-syncs the new
+     * body over the read API on its next poll / reconnect.
+     */
+    public static final String EVENT_MESSAGE_EDITED = "message-edited";
+
+    /**
+     * The SSE event name carrying a <b>deleted</b> chat message (TM-467) — the author removed their own
+     * message (a soft-delete, so it drops out of the timeline). The payload is a small
+     * {@link com.teammarhaba.backend.api.RemovedMessageResponse} ({@code messageId} + {@code
+     * conversationId}); a connected client drops that message from its open thread by id. Best-effort
+     * like every live frame — a client that misses it simply stops seeing the message on its next
+     * re-sync (the read filters {@code deleted_at IS NULL}).
+     */
+    public static final String EVENT_MESSAGE_DELETED = "message-deleted";
+
+    /**
      * The SSE event name carrying a transient <b>typing indicator</b> (TM-465) — an ephemeral "X is
      * typing…" signal fanned out to the thread's other connected members. Unlike {@link #EVENT_MESSAGE}
      * it is <b>never persisted</b>: it rides the live socket only, expires client-side, and re-sync over

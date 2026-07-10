@@ -1,0 +1,19 @@
+-- V34__message_edited_at — author self-service edit marker (TM-467, epic Event Chat)
+--
+-- Adds the single column the "edit your own message" feature needs: `edited_at`, the instant the
+-- author last changed the body. NULL = never edited (the overwhelming common case); non-NULL = the
+-- message was edited by its author, so the read API surfaces an "edited" marker and the client renders
+-- the tag.
+--
+-- This is the ONLY new schema this ticket adds. The author DELETE reuses the existing moderation
+-- soft-delete column (`deleted_at`, V27) — an author removing their own message stamps the same
+-- one-way soft-delete an admin moderation removal does (TM-449), so it drops out of every timeline
+-- read (which all filter `deleted_at IS NULL`) with no new column. The author gate + the ~5-minute
+-- edit window are enforced in the service, not here.
+--
+-- Flyway owns this DDL; Hibernate runs validate-only, so the Message entity's new `editedAt` field
+-- must match this column exactly (nullable TIMESTAMPTZ). The body itself stays in the existing
+-- `message.body` column — an edit overwrites it in place (the entity's `body` mapping becomes
+-- updatable to allow that), so no history column is added: an edit replaces the text, it doesn't
+-- version it (the AC is "fix a typo / take something back", not an edit trail).
+ALTER TABLE message ADD COLUMN edited_at TIMESTAMPTZ;

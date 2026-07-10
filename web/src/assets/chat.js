@@ -41,6 +41,8 @@ import {
   getConversationMessages,
   markConversationRead,
   postConversationMessage,
+  editConversationMessage,
+  deleteConversationMessage,
   signalTyping,
   openConversationStream,
   muteConversation,
@@ -88,6 +90,10 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   // Reactions (TM-462): in-flight `${messageId}:${emoji}` keys, so a rapid double-tap on the same chip
   // is ignored while its react/un-react round-trip is pending (the optimistic paint already reflects it).
   reacting: new Set(),
+  // Edit own message (TM-467): `editingId` is the id of the message whose inline editor is open (null =
+  // none), `editDraft` its in-progress text (kept off the DOM so a background repaint doesn't lose it),
+  // `savingEdit` guards a double-submit + pauses the poll while an edit is in flight (like `sending`).
+  editingId: null, editDraft: "", savingEdit: false,
   // Typing indicators (TM-465): `typists` is the live "who's typing" list folded from received `typing`
   // SSE events (each { userId, name, expiresAt }, expired by the ticker); `typingEl` is the persistent
   // indicator line under the body; `typingTimer` is the 1s expiry ticker; `lastTypingSentAt` debounces
@@ -427,6 +433,9 @@ async function renderThread(view, id) {
   thread.composerInput = null;
   thread.replyPreviewEl = null;
   thread.reacting = new Set(); // no in-flight reaction toggles carried across a thread open (TM-462)
+  thread.editingId = null; // no inline edit carried across a thread open (TM-467)
+  thread.editDraft = "";
+  thread.savingEdit = false;
   thread.typists = []; // no typists carried across a thread open (TM-465)
   thread.lastTypingSentAt = 0; // fresh debounce window for our own outgoing typing signal
 
@@ -476,6 +485,29 @@ function openLiveThread(id, token) {
       // De-dupe by id: upsertMessage replaces any existing copy, so an own-echo, a replay, or a
       // poll-fetched duplicate never renders twice. Then repaint from the one source of truth.
       thread.messages = core.upsertMessage(thread.messages, m);
+      repaintBody();
+    },
+    // Live edit (TM-467): an author reworded a message — apply it as a body/editedAt PATCH to the copy we
+    // already hold (preserving its reactions / receipt / reply quote), never a whole-row replace. Skip if
+    // we're mid-edit on that same message (our own optimistic edit already reflects it).
+    onEdited: (raw) => {
+      if (token !== renderToken || thread.id !== String(id)) return; // drop late/other-thread frames
+      const patchId = String(raw?.id ?? "");
+      if (!patchId || thread.editingId === patchId) return;
+      thread.messages = core.applyMessageEdit(thread.messages, {
+        id: patchId, body: raw?.body, editedAt: raw?.editedAt,
+      });
+      repaintBody();
+    },
+    // Live delete (TM-467): an author took a message back — drop it from the open thread by id. If we were
+    // editing that message, close the editor too so it doesn't dangle over a now-gone message.
+    onDeleted: (raw) => {
+      if (token !== renderToken || thread.id !== String(id)) return; // drop late/other-thread frames
+      const goneId = String(raw?.messageId ?? raw?.id ?? "");
+      if (!goneId) return;
+      if (thread.editingId === goneId) { thread.editingId = null; thread.editDraft = ""; }
+      thread.mineIds.delete(goneId);
+      thread.messages = core.removeMessageById(thread.messages, goneId);
       repaintBody();
     },
     // Typing indicator (TM-465): fold each received `typing` signal into the typist list (keyed + expiring
@@ -573,11 +605,13 @@ function repaintBody() {
     body.append(emptyThread());
     return;
   }
-  // A message renders out-going when it's a pending echo, one we posted this session (`mineIds`), OR the
-  // server attached a read receipt to it — which it only does for the caller's OWN messages (TM-463), so
-  // that presence is an authoritative "mine" signal for messages loaded from history (not just this session).
+  // A message renders out-going when it's a pending echo, one we posted this session (`mineIds`), the
+  // server flagged it `mine` (TM-589 — the direct own-message signal), OR it carries a read receipt
+  // (which the server only attaches to the caller's OWN messages, TM-463). Any of these is an authoritative
+  // "mine" signal for a loaded message (not just this session); it also gates the edit/delete affordances.
   for (const m of all) {
-    body.append(messageRow(m, Boolean(m.pending) || thread.mineIds.has(m.id) || Boolean(m.readReceipt)));
+    const mine = Boolean(m.pending) || thread.mineIds.has(m.id) || Boolean(m.mine) || Boolean(m.readReceipt);
+    body.append(messageRow(m, mine));
   }
   if (atBottom) requestAnimationFrame(() => { body.scrollTop = body.scrollHeight; });
 }
@@ -778,7 +812,9 @@ async function pollThread(id) {
   id = String(id);
   const onThread = typeof location === "undefined" || location.hash.startsWith("#/chat/");
   if (thread.id !== id || !onThread) return stopThreadPoll();
-  if (thread.sending) return;
+  // Pause while a send OR an inline edit (TM-467) is in flight/open, so the poll's repaint can't race the
+  // optimistic echo or clobber the open editor's in-progress text.
+  if (thread.sending || thread.savingEdit || thread.editingId) return;
   let data;
   try {
     data = await getConversationMessages(id);
@@ -868,9 +904,25 @@ function messageRow(m, mine = false) {
   // Reply / quote (TM-466): render the quoted parent above the body — tap it to scroll to the original;
   // a removed original shows "message unavailable" (core already substitutes the copy) and isn't tappable.
   if (m.replyTo) row.append(quoteBlock(m.replyTo));
+
+  // Edit own message (TM-467): while this message's inline editor is open, the bubble is replaced by an
+  // edit box (save / cancel). Everything else (stamp, reactions, affordances) is suppressed until the
+  // edit resolves, so the row is unambiguously "you're editing this".
+  if (thread.editingId === m.id && !m.pending) {
+    row.append(messageEditor(m));
+    return row;
+  }
+
   row.append(el("div", { class: "tm-chat-bub", text: m.body }));
-  if (m.pending) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
-  else if (m.timeLabel) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: m.timeLabel })]));
+  // Stamp line: the time label plus — new in TM-467 — an "edited" tag when the author has edited it.
+  if (m.pending) {
+    row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
+  } else if (m.timeLabel || m.edited) {
+    row.append(el("div", { class: "tm-chat-stamp", "data-testid": "chat-stamp" }, [
+      m.timeLabel ? el("span", { text: m.timeLabel }) : null,
+      m.edited ? el("span", { class: "tm-chat-edited", "data-testid": "chat-edited", title: "Edited", text: core.EDITED_TAG }) : null,
+    ]));
+  }
   if (m.cta) row.append(messageCta(m.cta)); // an in-app deep-link on a normal message → same CTA affordance
   // Reactions (TM-462): the chip row + the interactive react affordance. A confirmed message in a thread
   // the caller can post to gets toggleable chips + a "react" button that opens the emoji picker; a pending
@@ -890,7 +942,169 @@ function messageRow(m, mine = false) {
       "data-testid": "chat-reply", onClick: () => beginReply(m),
     }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]));
   }
+  // Edit / delete affordances (TM-467): only on the caller's OWN confirmed, non-system message. Delete is
+  // offered anytime (an author can always take a message back); edit only while still inside the ~5-minute
+  // window (a best-effort client hint via core.canEditWithinWindow — the backend re-checks and returns a
+  // 409 if it's actually past the window, so the gate is never trusted from the client alone).
+  if (mine && !m.pending && m.id && !m.system) {
+    row.append(ownMessageActions(m));
+  }
   return row;
+}
+
+/**
+ * The edit + delete controls for the caller's OWN message (TM-467). Edit opens the inline editor and is
+ * shown only within the edit window (client hint); delete confirms then soft-deletes. Both are real
+ * buttons (keyboard + screen-reader accessible).
+ */
+function ownMessageActions(m) {
+  const actions = el("div", { class: "tm-chat-own-actions", "data-testid": "chat-own-actions" });
+  if (core.canEditWithinWindow(m.sortAt)) {
+    actions.append(el("button", {
+      class: "tm-chat-edit-btn", type: "button", "aria-label": "Edit message",
+      title: "Edit", "data-testid": "chat-edit", onClick: () => beginEdit(m),
+    }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "✎" })]));
+  }
+  actions.append(el("button", {
+    class: "tm-chat-delete-btn", type: "button", "aria-label": "Delete message",
+    title: "Delete", "data-testid": "chat-delete", onClick: () => deleteOwnMessage(m),
+  }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "🗑" })]));
+  return actions;
+}
+
+/**
+ * The inline editor shown in place of a message's bubble while it's being edited (TM-467): a seeded text
+ * input plus Save / Cancel. The draft lives in `thread.editDraft` (not just the DOM) so a background
+ * repaint — a live frame, or the resumed poll — re-seeds it rather than losing typed text. Enter saves,
+ * Escape cancels; Save is disabled while the draft is blank / unchanged / too long, matching the backend
+ * rule (validateDraft). Focus lands in the input.
+ */
+function messageEditor(m) {
+  const input = el("input", {
+    class: "tm-chat-edit-input", type: "text", value: thread.editDraft,
+    maxlength: String(core.MAX_MESSAGE_LENGTH), "aria-label": "Edit your message",
+    autocomplete: "off", "data-testid": "chat-edit-input",
+  });
+  const saveBtn = el("button", {
+    class: "tm-btn tm-chat-edit-save", type: "button", "data-testid": "chat-edit-save",
+    text: "Save",
+  });
+  const cancelBtn = el("button", {
+    class: "tm-btn tm-btn--ghost tm-chat-edit-cancel", type: "button",
+    "data-testid": "chat-edit-cancel", text: "Cancel", onClick: cancelEdit,
+  });
+  const syncSave = () => {
+    const draft = core.validateDraft(input.value);
+    // Nothing to save if the text is blank / too long, or unchanged from the original.
+    saveBtn.disabled = !draft.canSend || draft.value === m.body;
+  };
+  input.addEventListener("input", () => { thread.editDraft = input.value; syncSave(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); if (!saveBtn.disabled) saveEdit(m); }
+    else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+  });
+  saveBtn.addEventListener("click", () => saveEdit(m));
+  syncSave();
+  // Focus after mount so the caret lands in the box (deferred so it's in the DOM first).
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => input.focus());
+  return el("div", { class: "tm-chat-edit", "data-testid": "chat-edit-form" }, [
+    input,
+    el("div", { class: "tm-chat-edit-actions" }, [cancelBtn, saveBtn]),
+  ]);
+}
+
+/**
+ * Open the inline editor for the caller's own message (TM-467): seed the draft with its current body and
+ * repaint so the editor renders in place. A no-op for a message with no id (an unconfirmed echo).
+ */
+function beginEdit(m) {
+  if (!m || !m.id) return;
+  thread.editingId = m.id;
+  thread.editDraft = m.body;
+  repaintBody();
+}
+
+/** Cancel the in-progress edit (TM-467): drop the draft + editor and repaint the message as it was. */
+function cancelEdit() {
+  thread.editingId = null;
+  thread.editDraft = "";
+  repaintBody();
+}
+
+/**
+ * Save an inline edit (TM-467): validate, apply the new body optimistically (so it updates instantly),
+ * PATCH it, then RECONCILE with the server's confirmed body/editedAt — or ROLL BACK to the original on
+ * failure (surfacing the honest reason: 403 not yours / 409 closed-or-window-passed / 404 gone). Guards a
+ * double-save via `thread.savingEdit`, and drops the reconcile if the caller navigated away mid-flight.
+ */
+async function saveEdit(m) {
+  if (thread.savingEdit) return;
+  const threadId = thread.id;
+  const draft = core.validateDraft(thread.editDraft);
+  if (!draft.canSend) return;
+  if (draft.value === m.body) { cancelEdit(); return; } // nothing changed — just close the editor
+
+  const prev = thread.messages.find((x) => x.id === m.id);
+  const snapshot = prev ? { ...prev } : null; // for rollback on failure
+
+  thread.savingEdit = true;
+  thread.editingId = null; // close the editor immediately; the optimistic body renders in the bubble
+  thread.editDraft = "";
+  thread.messages = core.applyMessageEdit(thread.messages, {
+    id: m.id, body: draft.value, editedAt: new Date().toISOString(),
+  });
+  repaintBody();
+
+  try {
+    const saved = await editConversationMessage(threadId, m.id, draft.value);
+    if (thread.id !== threadId) return; // navigated away mid-edit — drop the reconcile
+    thread.messages = core.applyMessageEdit(thread.messages, {
+      id: m.id, body: saved?.body, editedAt: saved?.editedAt,
+    });
+    repaintBody();
+  } catch (err) {
+    if (thread.id === threadId && snapshot) {
+      thread.messages = core.upsertMessage(thread.messages, snapshot); // restore the original body
+      repaintBody();
+    }
+    toast(err?.message || "Couldn't edit your message. Please try again.", { type: "error" });
+    console.warn("[chat] edit failed:", err?.status ?? "", err?.message ?? err);
+  } finally {
+    if (thread.id === threadId) thread.savingEdit = false;
+  }
+}
+
+/**
+ * Delete the caller's own message (TM-467): confirm, then remove it optimistically (it drops from the
+ * timeline immediately) and DELETE it. On failure, restore it and surface the honest reason. Allowed
+ * anytime, so there's no window / closed-thread guard here — the backend soft-delete accepts it.
+ */
+async function deleteOwnMessage(m) {
+  if (!m || !m.id) return;
+  const threadId = thread.id;
+  const ok = typeof window === "undefined" || typeof window.confirm !== "function"
+    ? true
+    : window.confirm("Delete this message? This can't be undone.");
+  if (!ok) return;
+
+  const snapshot = thread.messages.find((x) => x.id === m.id);
+  const restore = snapshot ? { ...snapshot } : null;
+  if (thread.editingId === m.id) { thread.editingId = null; thread.editDraft = ""; }
+  thread.mineIds.delete(m.id);
+  thread.messages = core.removeMessageById(thread.messages, m.id); // optimistic drop
+  repaintBody();
+
+  try {
+    await deleteConversationMessage(threadId, m.id);
+  } catch (err) {
+    if (thread.id === threadId && restore) {
+      thread.mineIds.add(m.id); // it's still ours — keep it out-going after the restore
+      thread.messages = core.upsertMessage(thread.messages, restore);
+      repaintBody();
+    }
+    toast(err?.message || "Couldn't delete your message. Please try again.", { type: "error" });
+    console.warn("[chat] delete failed:", err?.status ?? "", err?.message ?? err);
+  }
 }
 
 /* ─────────────────────────────── Reactions (react button + picker — TM-462) ──────────────────────
