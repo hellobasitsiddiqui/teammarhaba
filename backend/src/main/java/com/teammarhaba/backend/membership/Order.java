@@ -1,0 +1,130 @@
+package com.teammarhaba.backend.membership;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import java.time.Instant;
+
+/**
+ * A checkout order (TM-477): the durable record of one (user, event) commitment — what it cost and where
+ * it stands. Created when RSVP goes through checkout: {@code FREE}/{@code INCLUDED} land a £0
+ * {@link OrderStatus#CONFIRMED} order (frictionless), {@code PAY} lands a {@link OrderStatus#PENDING}
+ * order for the Revolut path (TM-478) to settle. An in-window cancel reverses it to
+ * {@link OrderStatus#CANCELLED} (or {@link OrderStatus#REFUND_DUE} when money was taken).
+ *
+ * <p>Schema is owned by Flyway ({@code V36__create_orders}); Hibernate runs validate-only, so this
+ * mapping must match the table exactly. The table is named {@code orders} (not the SQL-reserved word
+ * {@code order}). {@code userId}/{@code eventId} are plain FK ids, not JPA associations — the same
+ * decoupling-from-{@code @SQLRestriction} convention as {@link Membership} and {@code EventAttendance}.
+ *
+ * <p><strong>Idempotency.</strong> The DB enforces {@code UNIQUE (user_id, event_id)} — one order per
+ * (user, event). A repeat checkout returns the existing row rather than inserting a duplicate, and a
+ * first-request race collapses to a single order (the loser trips the constraint and re-reads the
+ * winner). {@code @Version} gives the usual optimistic-lock 409 so two concurrent cancels can't both
+ * reverse the same order.
+ */
+@Entity
+@Table(name = "orders")
+public class Order {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private Long userId;
+
+    @Column(name = "event_id", nullable = false, updatable = false)
+    private Long eventId;
+
+    /** What the commitment cost in pence (minor units, GBP); {@code 0} for FREE/INCLUDED. Never negative. */
+    @Column(name = "amount_pence", nullable = false, updatable = false)
+    private int amountPence;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private OrderStatus status;
+
+    /** DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity. */
+    @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
+    private Instant createdAt;
+
+    /** App-managed: set on insert and bumped on every {@linkplain #reverse status change}. */
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /** Optimistic-lock counter; Hibernate bumps it on update and rejects stale writes. */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
+    /** Required by JPA. */
+    protected Order() {
+    }
+
+    /**
+     * A new order for {@code userId} on {@code eventId} at {@code amountPence}, in the given starting
+     * {@code status} ({@link OrderStatus#CONFIRMED} for free/included, {@link OrderStatus#PENDING} for
+     * pay). {@code now} stamps {@code updated_at}; {@code created_at} is filled by the DB default.
+     */
+    public Order(Long userId, Long eventId, int amountPence, OrderStatus status, Instant now) {
+        this.userId = userId;
+        this.eventId = eventId;
+        this.amountPence = amountPence;
+        this.status = status;
+        this.updatedAt = now;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public Long getEventId() {
+        return eventId;
+    }
+
+    public int getAmountPence() {
+        return amountPence;
+    }
+
+    public OrderStatus getStatus() {
+        return status;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    /** {@code true} while this order can still be reversed — it has not already been cancelled/refunded. */
+    public boolean isReversible() {
+        return status == OrderStatus.PENDING || status == OrderStatus.CONFIRMED;
+    }
+
+    /**
+     * Reverse this order on an in-window cancel (TM-477): a settled order where real money was captured
+     * ({@code CONFIRMED} with a non-zero amount) moves to {@link OrderStatus#REFUND_DUE} — the money
+     * refund itself is TM-478's job — while a £0 order or a still-{@code PENDING} pay order (no charge
+     * captured) simply moves to {@link OrderStatus#CANCELLED}. Any first-event credit is returned by the
+     * caller ({@code CheckoutService}) in the same transaction; this only flips the order's own state.
+     */
+    public void reverse(Instant when) {
+        this.status = (status == OrderStatus.CONFIRMED && amountPence > 0)
+                ? OrderStatus.REFUND_DUE
+                : OrderStatus.CANCELLED;
+        this.updatedAt = when;
+    }
+}

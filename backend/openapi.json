@@ -428,6 +428,37 @@
         },
         "type" : "object"
       },
+      "CheckoutCancelResult" : {
+        "properties" : {
+          "cancel" : {
+            "$ref" : "#/components/schemas/CancelResult"
+          },
+          "creditReturned" : {
+            "type" : "boolean"
+          },
+          "order" : {
+            "$ref" : "#/components/schemas/OrderView"
+          },
+          "reversed" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "CheckoutResult" : {
+        "properties" : {
+          "order" : {
+            "$ref" : "#/components/schemas/OrderView"
+          },
+          "paymentRequired" : {
+            "type" : "boolean"
+          },
+          "rsvp" : {
+            "$ref" : "#/components/schemas/RsvpResult"
+          }
+        },
+        "type" : "object"
+      },
       "ConversationMembershipResponse" : {
         "properties" : {
           "conversationId" : {
@@ -1277,6 +1308,27 @@
           }
         },
         "required" : [ "age", "location", "name" ],
+        "type" : "object"
+      },
+      "OrderView" : {
+        "properties" : {
+          "amountPence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "eventId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "CONFIRMED", "CANCELLED", "REFUND_DUE" ],
+            "type" : "string"
+          }
+        },
         "type" : "object"
       },
       "PageResponseAdminSentHistoryResponse" : {
@@ -3027,6 +3079,60 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/EventDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/checkout" : {
+      "post" : {
+        "operationId" : "checkout",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CheckoutResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/checkout/cancel" : {
+      "post" : {
+        "operationId" : "cancelCheckout",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CheckoutCancelResult"
                 }
               }
             },
