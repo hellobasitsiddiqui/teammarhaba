@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.auth.EmailCodeException;
 import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
+import com.teammarhaba.backend.membership.UpgradeRequiredException;
 import com.teammarhaba.backend.notify.BroadcastCooldownException;
 import java.util.List;
 import java.util.Map;
@@ -152,6 +153,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
         return Problems.forbidden("You do not have permission to access this resource.");
+    }
+
+    /**
+     * A checkout blocked because the caller's tier is too low to attend and no per-event charge unlocks it
+     * (TM-477) -> 403 with the honest "upgrade to attend" copy. Distinct from the generic access-denied
+     * above: it carries a user-facing {@code detail} the checkout screen shows, so it is mapped explicitly
+     * rather than collapsing to the fixed authorization message.
+     */
+    @ExceptionHandler(UpgradeRequiredException.class)
+    public ProblemDetail handleUpgradeRequired(UpgradeRequiredException ex) {
+        return Problems.forbidden(ex.getMessage());
     }
 
     /**

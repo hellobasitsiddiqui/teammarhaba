@@ -9,6 +9,9 @@ import com.teammarhaba.backend.event.EventDetail;
 import com.teammarhaba.backend.event.EventQueryService;
 import com.teammarhaba.backend.event.EventRsvpService;
 import com.teammarhaba.backend.event.RsvpResult;
+import com.teammarhaba.backend.membership.CheckoutCancelResult;
+import com.teammarhaba.backend.membership.CheckoutResult;
+import com.teammarhaba.backend.membership.CheckoutService;
 import com.teammarhaba.backend.membership.Entitlement;
 import com.teammarhaba.backend.membership.EntitlementService;
 import java.util.Set;
@@ -44,6 +47,14 @@ import org.springframework.web.bind.annotation.RestController;
  *       (TM-476): {@code decision} ({@code FREE|INCLUDED|PAY|UPGRADE}), {@code amountPence} and a
  *       {@code reason} code. The authoritative source the checkout screen (TM-479) consumes so that
  *       the price shown and what RSVP charges always agree.</li>
+ *   <li>{@code POST /events/{id}/checkout} — RSVP checkout (TM-477): resolves the entitlement then
+ *       records an order. {@code FREE}/{@code INCLUDED} confirm frictionlessly (£0 order, RSVP lands;
+ *       first-event credit consumed on commitment); {@code PAY} records a {@code PENDING} order and
+ *       returns {@code paymentRequired} (settled later by TM-478); {@code UPGRADE} is a {@code 403}.
+ *       Idempotent per (user, event).</li>
+ *   <li>{@code POST /events/{id}/checkout/cancel} — reverse a checkout (TM-477): leaves the event and,
+ *       inside the cancellation window, returns the first-event credit and marks the order
+ *       cancelled/refundable; outside it, the credit/charge is forfeited.</li>
  * </ul>
  *
  * <p>Hidden events (cancelled / outside the window / soft-deleted) are a {@code 404} on every
@@ -58,11 +69,17 @@ public class EventController {
     private final EventQueryService queries;
     private final EventRsvpService rsvps;
     private final EntitlementService entitlements;
+    private final CheckoutService checkout;
 
-    EventController(EventQueryService queries, EventRsvpService rsvps, EntitlementService entitlements) {
+    EventController(
+            EventQueryService queries,
+            EventRsvpService rsvps,
+            EntitlementService entitlements,
+            CheckoutService checkout) {
         this.queries = queries;
         this.rsvps = rsvps;
         this.entitlements = entitlements;
+        this.checkout = checkout;
     }
 
     /** The visible-now listing, soonest-first. Order is fixed — only page/size are caller-tunable. */
@@ -121,5 +138,31 @@ public class EventController {
     @GetMapping("/events/{id}/entitlement")
     Entitlement entitlement(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
         return entitlements.resolve(caller, id);
+    }
+
+    /**
+     * Check out an RSVP (TM-477): resolve the caller's entitlement, then record an order and confirm.
+     * {@code FREE}/{@code INCLUDED} are frictionless — a £0 {@code CONFIRMED} order and the RSVP lands
+     * (on a first-event {@code FREE} the credit is consumed on commitment); {@code PAY} records a
+     * {@code PENDING} order and returns {@code paymentRequired} (the charge is stubbed — the Revolut
+     * settle is TM-478), leaving the RSVP unconfirmed until payment; an {@code UPGRADE} entitlement is a
+     * {@code 403}. Idempotent per (user, event) — a repeat returns the existing order, never a duplicate.
+     * A hidden event is a {@code 404}, exactly as the other routes.
+     */
+    @PostMapping("/events/{id}/checkout")
+    CheckoutResult checkout(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return checkout.checkout(caller, id);
+    }
+
+    /**
+     * Cancel a checkout (TM-477): always leaves the event, and — inside the cancellation window (per-event,
+     * default 24h before start, the same TM-414 window as {@code DELETE /rsvp}) — reverses the commitment,
+     * returning the first-event credit (if this event consumed it) and moving the order to
+     * {@code CANCELLED}/{@code REFUND_DUE} (the money refund itself is TM-478). Missing the window forfeits
+     * the credit/charge even though the caller leaves. Idempotent. A {@code 409} once the event has started.
+     */
+    @PostMapping("/events/{id}/checkout/cancel")
+    CheckoutCancelResult cancelCheckout(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return checkout.cancel(caller, id);
     }
 }

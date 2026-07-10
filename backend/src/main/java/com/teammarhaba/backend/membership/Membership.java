@@ -58,6 +58,18 @@ public class Membership {
     @Column(name = "first_event_credit_used", nullable = false)
     private boolean firstEventCreditUsed = false;
 
+    /**
+     * Which event consumed the first-event credit (TM-477); {@code null} while the credit is available or
+     * after a reversal. Recorded on commitment alongside {@link #firstEventCreditUsed} so an in-window
+     * cancel of <em>exactly</em> that event can return the credit — and only that event's cancel does.
+     */
+    @Column(name = "first_event_credit_event_id")
+    private Long firstEventCreditEventId;
+
+    /** When the first-event credit was consumed (TM-477); {@code null} while available / after reversal. */
+    @Column(name = "first_event_credit_consumed_at")
+    private Instant firstEventCreditConsumedAt;
+
     /** DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity. */
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
@@ -100,6 +112,42 @@ public class Membership {
     /** Whether the account's first-event freebie has been spent ({@code false} = still available). */
     public boolean isFirstEventCreditUsed() {
         return firstEventCreditUsed;
+    }
+
+    /** The event that consumed the first-event credit, or {@code null} if it is available/reversed. */
+    public Long getFirstEventCreditEventId() {
+        return firstEventCreditEventId;
+    }
+
+    /** When the first-event credit was consumed, or {@code null} if it is available/reversed. */
+    public Instant getFirstEventCreditConsumedAt() {
+        return firstEventCreditConsumedAt;
+    }
+
+    /**
+     * Spend this account's one first-event credit on {@code eventId} (TM-477), recording which event
+     * consumed it and when. Called by checkout on commitment, atomically with the order write, so a race
+     * can never double-spend the credit. Idempotent guard is the caller's job: only invoked on a
+     * {@code FIRST_EVENT_FREE} entitlement, and the {@code UNIQUE (user_id, event_id)} order constraint
+     * plus the caller's user-row lock ensure a given (user, event) checkout runs its consume exactly once.
+     */
+    public void consumeFirstEventCredit(Long eventId, Instant when) {
+        this.firstEventCreditUsed = true;
+        this.firstEventCreditEventId = eventId;
+        this.firstEventCreditConsumedAt = when;
+        this.updatedAt = when;
+    }
+
+    /**
+     * Return the first-event credit (TM-477) — the reverse of {@link #consumeFirstEventCredit}: clears the
+     * used flag and the consumed-event pointer so the freebie is available again. Called by checkout when
+     * the event that consumed it is cancelled inside the cancellation window.
+     */
+    public void reverseFirstEventCredit(Instant when) {
+        this.firstEventCreditUsed = false;
+        this.firstEventCreditEventId = null;
+        this.firstEventCreditConsumedAt = null;
+        this.updatedAt = when;
     }
 
     public Instant getCreatedAt() {

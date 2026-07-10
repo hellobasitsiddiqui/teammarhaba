@@ -1,0 +1,16 @@
+package com.teammarhaba.backend.membership;
+
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+/**
+ * Data access for {@link Order} (TM-477). The (user, event) pair is the natural lookup key — the table's
+ * {@code UNIQUE (user_id, event_id)} makes it at most one row — so {@link #findByUserIdAndEventId} backs
+ * both the idempotency check (a repeat checkout returns the existing order) and the cancel/reverse path
+ * (find the order to reverse). The unique constraint is also what collapses a concurrent first-checkout
+ * race to a single order (the loser re-reads the winner), mirroring the TM-597 enrol pattern.
+ */
+public interface OrderRepository extends JpaRepository<Order, Long> {
+
+    Optional<Order> findByUserIdAndEventId(Long userId, Long eventId);
+}
