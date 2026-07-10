@@ -9,9 +9,10 @@
 //
 // WHAT LIVES HERE (all pure functions of their inputs):
 //   • resolvePriceState(): (MembershipResponse, event) → the single price state the checkout screen
-//     renders — one of Free / Included / £5 (or the premium price) / Upgrade to attend (AC 1), derived
-//     from the caller's membership tier + first-event credit and the event's price/premium fields
-//     (TM-475: `pricePence` in minor units GBP, `premium` boolean);
+//     renders — one of Free / Included / £5 (or the premium price) to Pay (AC 1), derived from the
+//     caller's membership tier + first-event credit and the event's price/premium fields (TM-475:
+//     `pricePence` in minor units GBP, `premium` boolean). Since TM-618 it never returns the reserved
+//     UPGRADE state: a Monthly member on a premium event PAYs the premium price, matching the backend;
 //   • checkoutPayload(): (event, priceState) → the request body the RSVP/checkout action sends — a
 //     no-charge confirm for Free/Included, a charge for Pay, an upgrade intent for Upgrade (AC 2);
 //   • formatPrice(): pence (minor units) → a "£5" / "£2.50" display string, the house money convention
@@ -46,7 +47,10 @@ export const PRICE_KIND = Object.freeze({
   FREE: "FREE", // no charge — the event is free, or their first-event credit covers it
   INCLUDED: "INCLUDED", // no charge — their membership tier already covers it
   PAY: "PAY", // must pay the event's price (£5 default, or the premium price)
-  UPGRADE: "UPGRADE", // tier too low for a premium event — must upgrade to attend
+  // Reserved contract value only — since TM-618 no resolvePriceState branch produces UPGRADE (a Monthly
+  // member on a premium event now PAYs the premium price, matching the TM-476 backend, which likewise
+  // yields no UPGRADE). Kept for wire/contract compatibility, mirroring the backend EntitlementDecision.
+  UPGRADE: "UPGRADE",
 });
 
 /**
@@ -54,7 +58,9 @@ export const PRICE_KIND = Object.freeze({
  *   • CONFIRM — Free / Included: a single confirm, no payment;
  *   • PAY     — a card step (wired to the Revolut widget in TM-478; a disabled "coming soon" mount
  *               point until then);
- *   • UPGRADE — send the user to membership/tier management to upgrade before they can attend.
+ *   • UPGRADE — reserved: send the user to membership/tier management to upgrade before they can attend.
+ *               No resolvePriceState result carries this mode since TM-618 (Monthly-on-premium now PAYs,
+ *               matching the backend), so checkoutPayload keeps the branch only for contract compatibility.
  */
 export const CHECKOUT_MODE = Object.freeze({
   CONFIRM: "CONFIRM",
@@ -112,13 +118,16 @@ function priceState(kind, label, detail, amountPence, checkout) {
  * Precedence (first match wins):
  *   1. A genuinely free event (admin priced it at £0) — free for everyone, consumes no credit.
  *   2. Tier coverage → "Included": Diamond covers every event; Monthly covers standard (non-premium).
- *   3. Monthly on a PREMIUM event → "Upgrade to attend" (the tier does not cover premium — AC 1).
- *   4. A pay-per-event caller whose first-event credit is still available, on a STANDARD event → "Free"
+ *   3. A pay-per-event caller whose first-event credit is still available, on a STANDARD event → "Free"
  *      (their first is on us). Premium events are NEVER free (product decision 2026-07-10): the credit is
  *      standard-only, so a credit + a premium event skips this and falls through to Pay — matching the
  *      authoritative TM-476 backend resolver (EntitlementResolver).
- *   5. Otherwise (pay-per-event, no credit — or a premium event no credit can cover) → "Pay" the event's
- *      price (£5 default, or the premium price the admin set).
+ *   4. Otherwise → "Pay" the event's price (£5 default, or the premium price the admin set). This covers
+ *      pay-per-event with no credit AND — since TM-618 — a MONTHLY member on a PREMIUM event: Monthly does
+ *      not cover premium, so they PAY the premium price rather than being shown "Upgrade to attend". That
+ *      matches the backend EntitlementResolver rule "any tier below Diamond PAYs for a premium event", so
+ *      the checkout screen and the server can never disagree. No branch yields UPGRADE any more (the
+ *      backend produces none either); UPGRADE stays a reserved contract value only.
  *
  * @param {{tier?: string, firstEventCreditAvailable?: boolean}} [membership] the MembershipResponse
  *   from GET /api/v1/me/membership (TM-474). Read defensively — a partial/absent object is treated as
@@ -158,18 +167,14 @@ export function resolvePriceState(membership, event) {
     );
   }
 
-  // 3. Monthly on a premium event → not covered; the caller must upgrade to attend (AC 1).
-  if (tier === TIER.MONTHLY && premium) {
-    return priceState(
-      PRICE_KIND.UPGRADE,
-      "Upgrade to attend",
-      "This is a premium event — upgrade your membership to attend.",
-      null,
-      CHECKOUT_MODE.UPGRADE,
-    );
-  }
+  // A MONTHLY member on a PREMIUM event is intentionally NOT handled here: before TM-618 this branch
+  // returned "Upgrade to attend", but the authoritative TM-476 backend EntitlementResolver maps any tier
+  // below Diamond on a premium event to PAY the premium price (product decision 2026-07-10). We therefore
+  // let a Monthly-on-premium caller fall through to the Pay branch below so the client charge matches what
+  // the backend would charge; the `&& !premium` guard on the credit branch keeps that from short-circuiting
+  // to Free. No branch produces UPGRADE any more — it mirrors the backend, which yields none either.
 
-  // 4. Pay-per-event with a first-event credit still available, on a STANDARD event → their first event
+  // 3. Pay-per-event with a first-event credit still available, on a STANDARD event → their first event
   // is on us. Premium events are NEVER free (product decision 2026-07-10): the first-event credit is
   // standard-only and does NOT apply to a premium event, so the `&& !premium` guard makes a credit-holding
   // caller on a PREMIUM event fall through to the Pay branch below (the admin-set premium price) rather
@@ -180,7 +185,8 @@ export function resolvePriceState(membership, event) {
     return priceState(PRICE_KIND.FREE, "Free", "Your first event is on us.", null, CHECKOUT_MODE.CONFIRM);
   }
 
-  // 5. Pay-per-event, no credit → pay the event's price (£5 default, or the premium price).
+  // 4. Pay the event's price (£5 default, or the premium price). Reached by a pay-per-event caller with no
+  // credit AND by a MONTHLY member on a premium event (Monthly does not cover premium — see the note above).
   return priceState(
     PRICE_KIND.PAY,
     formatPrice(pricePence),

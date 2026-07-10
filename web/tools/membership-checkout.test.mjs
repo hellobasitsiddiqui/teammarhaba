@@ -133,12 +133,44 @@ test("Premium is never free — a PAY_PER_EVENT caller WITH a first-event credit
   assert.match(s.detail, /premium/i);
 });
 
-test("Upgrade to attend — a Monthly member hits a premium event they must upgrade for", () => {
+test("Monthly + premium — a Monthly member PAYS the premium price (matches the backend, not Upgrade) — TM-618", () => {
+  // TM-618 regression guard. Before the fix the client returned UPGRADE ("Upgrade to attend") here, but the
+  // authoritative TM-476 backend EntitlementResolver maps ANY tier below Diamond on a premium event to PAY
+  // the premium price (product decision 2026-07-10) — Monthly does NOT cover premium. The client now agrees:
+  // Monthly + premium → PAY the admin-set premium price, so the checkout screen and the server can't diverge.
   const s = resolvePriceState({ tier: TIER.MONTHLY }, { id: 6, pricePence: 2000, premium: true });
-  assert.equal(s.kind, PRICE_KIND.UPGRADE);
-  assert.equal(s.label, "Upgrade to attend");
-  assert.equal(s.amountPence, null);
-  assert.equal(s.checkout, CHECKOUT_MODE.UPGRADE);
+  assert.equal(s.kind, PRICE_KIND.PAY);
+  assert.notEqual(s.kind, PRICE_KIND.UPGRADE);
+  assert.equal(s.label, "£20");
+  assert.equal(s.amountPence, 2000);
+  assert.equal(s.checkout, CHECKOUT_MODE.PAY);
+  assert.notEqual(s.checkout, CHECKOUT_MODE.UPGRADE);
+  assert.match(s.detail, /premium/i);
+});
+
+test("no resolvePriceState branch yields UPGRADE any more (mirrors the backend, which produces none either) — TM-618", () => {
+  // The client used to return UPGRADE for Monthly+premium; it now PAYs, matching the TM-476 backend resolver
+  // (whose UPGRADE decision is likewise reserved-but-never-produced). Sweep the representative tier ×
+  // standard/premium × credit combinations and assert none resolves to the UPGRADE price state / checkout mode.
+  const events = [
+    { id: 1, pricePence: 500, premium: false }, // standard
+    { id: 2, pricePence: 2500, premium: true }, // premium
+    { id: 3, pricePence: 0, premium: false }, // genuinely free
+  ];
+  const memberships = [
+    { tier: TIER.PAY_PER_EVENT, firstEventCreditAvailable: true },
+    { tier: TIER.PAY_PER_EVENT, firstEventCreditAvailable: false },
+    { tier: TIER.MONTHLY },
+    { tier: TIER.DIAMOND },
+    undefined, // absent membership → fresh pay-per-event caller
+  ];
+  for (const m of memberships) {
+    for (const e of events) {
+      const s = resolvePriceState(m, e);
+      assert.notEqual(s.kind, PRICE_KIND.UPGRADE, `tier ${m?.tier} × premium ${e.premium}`);
+      assert.notEqual(s.checkout, CHECKOUT_MODE.UPGRADE, `tier ${m?.tier} × premium ${e.premium}`);
+    }
+  }
 });
 
 // --- defensive resolution ----------------------------------------------------------------------
@@ -182,8 +214,11 @@ test("checkoutPayload — Pay carries the exact charge in pence + currency", () 
   });
 });
 
-test("checkoutPayload — Upgrade is an upgrade intent with no event charge", () => {
-  const upgradeState = resolvePriceState({ tier: TIER.MONTHLY }, { id: 13, pricePence: 2000, premium: true });
+test("checkoutPayload — the reserved Upgrade mode is an upgrade intent with no event charge", () => {
+  // Since TM-618 no resolvePriceState input produces UPGRADE (Monthly+premium is now PAY, matching the
+  // backend), so the state is constructed directly here. UPGRADE remains a reserved checkout mode in the
+  // contract, and checkoutPayload must still map it to a bare upgrade intent (no eventId, no charge).
+  const upgradeState = { kind: PRICE_KIND.UPGRADE, checkout: CHECKOUT_MODE.UPGRADE, amountPence: null };
   assert.deepEqual(checkoutPayload({ id: 13 }, upgradeState), { action: "UPGRADE" });
 });
 
