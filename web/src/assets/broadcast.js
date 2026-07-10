@@ -125,6 +125,35 @@ export function routeOptionsFrom(payload, fallback = []) {
 }
 
 /**
+ * A friendly label for a deep-link route that has NO curated entry in a caller's ROUTE_LABELS map
+ * (TM-617). Both admin route pickers (admin.js / admin-messages.js) previously fell back to the raw
+ * hash token, so a backend route added without a matching label rendered as a bare "#/…" in the
+ * dropdown — readable to a developer, opaque to the admin, and a silent trap. This humanises the token
+ * instead: "#/event-detail" → "Event detail". It's the SHARED fallback both `routeLabel`s now use, so
+ * the two curated maps can stay per-page while the unlabeled-route behaviour is fixed once, here, and
+ * unit-tested (routeLabel itself lives in the browser-only admin files and can't be tested directly).
+ *
+ * Rules (defensive — any input yields a human string): drop a leading "#" then "/", treat "/", "-" and
+ * "_" as word breaks, collapse whitespace, and sentence-case the first letter (matching curated labels
+ * like "Admin console" / "Sign in", which capitalise only the first word). A token that humanises to
+ * nothing — "#/", "" or a non-string — falls back to "App home", the app's default landing, so the
+ * result is NEVER a raw token and never blank.
+ *
+ * @param {unknown} route the raw route token, e.g. "#/event-detail".
+ * @returns {string} a readable label, e.g. "Event detail".
+ */
+export function humanizeRoute(route) {
+  const slug = String(route ?? "")
+    .replace(/^#/, "") // drop a leading hash …
+    .replace(/^\//, "") // … then a leading slash → "event-detail" / "events/detail"
+    .replace(/[/_-]+/g, " ") // path + word separators become spaces
+    .trim()
+    .replace(/\s+/g, " "); // collapse any run of whitespace to a single space
+  if (slug === "") return "App home"; // "#/", "" or garbage → the app's default screen, never a token
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
+/**
  * An honest one-line summary of a broadcast result for the success toast. Post-TM-364 the response
  * carries the WHY behind every skip — `skippedOptedOut` / `skippedDisabled` / `skippedNotFound`
  * (BroadcastPushResponse) — so we no longer have to fold everything into a bare "no device" count: we

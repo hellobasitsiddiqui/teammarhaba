@@ -32,6 +32,9 @@ import {
   NO_ROUTE,
   validateBroadcast,
   routeOptionsFrom,
+  // TM-617: the shared friendly fallback for a route with no curated label below, so an unmapped
+  // route reads as "Event detail" rather than a raw "#/event-detail" token in the picker.
+  humanizeRoute,
   summariseBroadcast,
   // TM-372: the display-identity fallback chain (displayName → email → masked auth phone →
   // uid-prefix → "User #id"), so phone-only accounts never render as blank, unfindable rows.
@@ -413,8 +416,8 @@ async function loadActivity(user) {
 // ---- broadcast compose (TM-365) -----------------------------------------------------------
 
 // Human-readable labels for the deep-link routes in the picker, so the admin sees "Home" rather than
-// the raw "#/home". Any route not in this map falls back to its raw value (still a valid, safe option),
-// so a newly-added backend route shows up immediately — just without a pretty label until added here.
+// the raw "#/home". A newly-added backend route with no entry here still shows up immediately, but now
+// as a humanised label (TM-617) — "Event detail", not a raw "#/event-detail" token.
 const ROUTE_LABELS = Object.freeze({
   "#/home": "Home",
   "#/profile": "Profile",
@@ -425,7 +428,7 @@ const ROUTE_LABELS = Object.freeze({
 });
 
 function routeLabel(route) {
-  return ROUTE_LABELS[route] || route;
+  return ROUTE_LABELS[route] || humanizeRoute(route);
 }
 
 /** The current compose draft, read straight off the live inputs (the inputs are the source of truth). */
