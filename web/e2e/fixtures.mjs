@@ -76,6 +76,17 @@ export const EVENT_FILLER = { email: "e2e-event-filler@teammarhaba.test", passwo
 /** The events-journey accounts as one list, in a stable order (seeded by global-setup). */
 export const EVENT_ACCOUNTS = [EVENT_GOER, EVENT_WAITER, EVENT_FILLER];
 
+/**
+ * Chat-foundation account (TM-587). A seeded, un-gated account whose chat is populated — via the
+ * profile-gated seed endpoint (POST /api/v1/test/chat/seed, see chat-seed.mjs) — with a couple of
+ * event group threads + an admin "from TeamMarhaba" channel, each with messages + unread state. This
+ * lets chat-foundation.spec.mjs render + assert the populated conversation list / an open thread / the
+ * unread Chat-tab badge against a LIVE backend, closing the TM-564 evidence gap (which had to use
+ * route mocks because no write/seed path existed). Provisioned onboarded + terms-accepted in
+ * global-setup so it lands straight in the app; the chat rows themselves are seeded per run by the spec.
+ */
+export const CHAT_SEED = { email: "e2e-chat-seed@teammarhaba.test", password: "e2e-chat-seed-pw-123456" };
+
 /** Connection for the persisted-state assertion (same Postgres the stack uses). */
 export const dbConfig = {
   host: process.env.DB_HOST || "127.0.0.1",

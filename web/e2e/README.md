@@ -81,21 +81,54 @@ Overrides (all optional): `E2E_API_BASE_URL`, `E2E_WEB_BASE_URL`, `E2E_AUTH_EMUL
 Drop a new `tests/<name>.spec.mjs`. Reuse the seeded accounts + DB seam in `fixtures.mjs`; if you
 need more accounts, seed them in `global-setup.mjs`. No new workflow or infra required.
 
-## Visual-evidence capture — chat foundation (TM-564)
+## Seeding a test user's chat (TM-587)
 
-`capture-chat-foundation.mjs` is a **standalone** screenshot harness (not part of the Playwright suite)
-for the Event Chat foundation screens (chat shell TM-438 + unread Chat-tab badge TM-439, reading the
-TM-436 read API). It boots the real app and captures the list / thread / badge / empty / loading / error
-states at a phone viewport (Pixel 5) on the default Paper look.
+The Event Chat foundation screens (list TM-438, thread TM-448, unread Chat-tab badge TM-439) need
+SEEDED conversations + messages to render anything. Now that posting (TM-447), the admin-broadcast
+bridge (TM-588) and the event-chat lifecycle (TM-446) all exist, a **profile-gated, non-prod-only seed
+endpoint** populates a signed-in caller's chat in one call:
 
-```bash
-cd web/e2e && npm run capture:chat   # → capture-out/*.png (git-ignored)
+```
+POST /api/v1/test/chat/seed        # identity = the caller's Bearer token; seeds THAT account's chat
+→ { alreadySeeded, eventThreads: 2, adminThreads: 1, unreadTotal: 10 }
 ```
 
-It needs **no backend, emulator or Postgres**: the chat *content* screens require seeded conversations
-that no backend write-path exists for yet (message posting is TM-447), so it injects fixtures matching
-the TM-436 API contract at the network seam and drives the real `chat.js` DOM + Paper CSS — every pixel
-is production UI, only the JSON payloads are fixtures. Run under Node 20 (the version CI pins).
+It creates two event group threads (`Sunday Morning Dog Walk` fully unread, `Riverside 5k Run Club`
+read) + an admin `TeamMarhaba` channel (unread), each with real messages, via the same lifecycle /
+factory paths production uses — so the read API renders production data, only its rows are seeded. It is
+**idempotent** (a re-seed is a no-op), so it's safe on every run / CI retry.
+
+**It cannot exist in prod.** The endpoint + service are gated by `app.test-seed.enabled` (base default
+`false`; only the `dev` + `test` profiles set it `true`) **and** `@Profile("!prod")`, and are `@Hidden`
+from the OpenAPI spec. `ChatSeedDisabledIntegrationTest` proves the beans vanish when the flag is off.
+
+The browser-e2e backend runs on the `dev` profile (see `.github/workflows/e2e.yml`), so the endpoint is
+available there. `chat-seed.mjs` wraps it (mint an emulator token → POST); `tests/chat-foundation.spec.mjs`
+uses it to render + assert the populated list / an open thread / the unread badge against a **live
+backend** (no route mocks) at the Pixel 5 viewport, with named screenshots for the TM-564 evidence.
+
+## Visual-evidence capture — chat foundation (TM-564, live TM-587)
+
+`capture-chat-foundation.mjs` is a **standalone** screenshot harness (not part of the Playwright suite)
+for the Event Chat foundation screens at a phone viewport (Pixel 5) on the default Paper look. It runs
+in one of two modes:
+
+```bash
+cd web/e2e
+npm run capture:chat                    # MOCK mode (default) — no stack needed
+CAPTURE_LIVE=1 npm run capture:chat     # LIVE mode — needs the running stack (below)
+```
+
+- **MOCK mode (default)** needs **no backend, emulator or Postgres**: it injects fixtures matching the
+  TM-436 API contract at the network seam and drives the real `chat.js` DOM + Paper CSS — every pixel is
+  production UI, only the JSON payloads are fixtures. It also captures the empty / loading / error edge
+  states (which need no live data).
+- **LIVE mode (`CAPTURE_LIVE=1`, TM-587)** closes the route-mock gap TM-564 flagged: with the same stack
+  the Playwright suite uses (backend on `dev` + Auth emulator + Postgres — see *Run locally* above), it
+  seeds the `CHAT_SEED` account via the seed endpoint, signs in through the real login UI, and captures
+  the populated list / thread / badge from the **live backend** — no mocks.
+
+Run under Node 20 (the version CI pins).
 
 ## Known follow-up
 

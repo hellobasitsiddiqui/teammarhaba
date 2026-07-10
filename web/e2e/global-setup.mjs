@@ -10,6 +10,7 @@ import {
   TARGET,
   BROADCAST_RECIPIENTS,
   EVENT_ACCOUNTS,
+  CHAT_SEED,
   PROJECT_ID,
   API_BASE_URL,
   AUTH_EMULATOR_HOST,
@@ -170,8 +171,14 @@ export default async function globalSetup() {
     await provisionInBackend(account);
   }
 
+  // Chat-foundation account (TM-587): provisioned onboarded + terms-accepted so it lands straight in
+  // the app. Its chat is populated PER RUN by chat-foundation.spec.mjs via the seed endpoint (which
+  // needs the account's own token), not here — mirroring how the events spec creates its events per run.
+  await ensureUser(auth, CHAT_SEED);
+  await provisionInBackend(CHAT_SEED);
+
   console.log(
     `[e2e] seeded admin + target + ${BROADCAST_RECIPIENTS.length} broadcast recipients + ` +
-      `${EVENT_ACCOUNTS.length} events-journey accounts and provisioned them in the backend`,
+      `${EVENT_ACCOUNTS.length} events-journey accounts + 1 chat-foundation account and provisioned them in the backend`,
   );
 }

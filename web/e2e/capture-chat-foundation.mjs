@@ -1,26 +1,28 @@
-// Chat foundation — visual evidence capture (TM-564).
+// Chat foundation — visual evidence capture (TM-564, live seeding TM-587).
 //
-// A SELF-CONTAINED screenshot harness for the Event Chat foundation screens (the chat section shell
-// TM-438 + the unread Chat-tab badge TM-439, reading the TM-436 conversation API). It produces named,
-// viewable PNGs at a phone viewport (Pixel 5, mobile-web) on the default Paper look, for the cross-
-// surface visual-evidence ticket TM-564.
+// A screenshot harness for the Event Chat foundation screens (the chat section shell TM-438 + the
+// unread Chat-tab badge TM-439, reading the TM-436 conversation API). It produces named, viewable PNGs
+// at a phone viewport (Pixel 5, mobile-web) on the default Paper look, for the visual-evidence ticket
+// TM-564. It runs in ONE of TWO modes:
 //
-// WHY THIS IS SEPARATE FROM THE PLAYWRIGHT SUITE. The real tests/ specs sign in through the Firebase
-// Auth emulator and hit a live backend + Postgres. But the chat *content* screens need SEEDED
-// conversations to render anything, and the backend has no conversation-WRITE path yet (message posting
-// is a later ticket, TM-447), so a live backend returns an EMPTY list. To show a populated list / thread
-// / unread badge we therefore inject fixtures at the network seam that match the TM-436 read-API
-// contract exactly (ConversationSummaryResponse / ConversationMessageResponse in the shared page
-// envelope — see web/src/assets/chat-core.js), driving the REAL chat.js / chat-tab-badge.js DOM + the
-// real Paper CSS. So every pixel here is the production UI; only the JSON payloads are fixtures.
+//   • MOCK mode (default, zero-setup — `node capture-chat-foundation.mjs`). No backend, emulator or
+//     Postgres required: it boots the real web app (index.html via serve.mjs, which it spawns), settles
+//     to the signed-out gate, then — with the conversation endpoints ROUTE-MOCKED — un-hides the
+//     #chat-view + the bottom tab bar and drives the app's own QA seams (window.tmChat.enterChat /
+//     window.tmChatTabBadge.update). getIdToken() returns null when signed-out (auth.js), so the mocked
+//     fetch resolves without any auth. Every pixel is the production UI; only the JSON payloads are
+//     fixtures shaped to the TM-436 read-API contract. This mode ALSO captures the empty / loading /
+//     error edge states, which need no live data.
 //
-// HOW IT WORKS. It boots the real web app (index.html via serve.mjs, which it spawns), lets the SPA
-// settle to the signed-out gate, then — with the conversation endpoints route-mocked — un-hides the
-// #chat-view + the bottom tab bar and calls the app's own QA seams (window.tmChat.enterChat /
-// window.tmChatTabBadge.update). getIdToken() returns null when signed-out (auth.js), so the mocked
-// fetch resolves without any auth. No backend, emulator or Postgres required — `node capture-...mjs`.
+//   • LIVE mode (CAPTURE_LIVE=1). The route-mock gap that TM-564 flagged is now closed: TM-587 adds a
+//     profile-gated, non-prod seed endpoint (POST /api/v1/test/chat/seed). In live mode this harness
+//     seeds the CHAT_SEED account's chat via that endpoint, signs in through the real login UI (Firebase
+//     Auth emulator), and captures the populated list / thread / badge from a LIVE backend + Postgres —
+//     NO route mocks. Requires the same running stack as the Playwright suite (backend on the dev
+//     profile + the Auth emulator + Postgres — see e2e README / .github/workflows/e2e.yml).
 //
-// Run (Node 20, the version CI pins):  npm run capture:chat   (from web/e2e)
+// Run (Node 20, the version CI pins):  npm run capture:chat        (mock, zero-setup)
+//                                       CAPTURE_LIVE=1 npm run capture:chat   (live, needs the stack)
 // Output: capture-out/*.png (git-ignored).
 
 import { chromium, devices } from "@playwright/test";
@@ -28,6 +30,11 @@ import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { CHAT_SEED } from "./fixtures.mjs";
+import { seedChat } from "./chat-seed.mjs";
+
+// LIVE mode (TM-587): render the populated shots from a real seeded backend instead of route mocks.
+const LIVE = /^(1|true|yes)$/i.test(process.env.CAPTURE_LIVE || "");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "capture-out");
@@ -152,6 +159,14 @@ async function main() {
       await new Promise((r) => setTimeout(r, 250));
     }
 
+    // LIVE mode (TM-587): capture the populated list / thread / badge from a real seeded backend, then
+    // stop (the empty/loading/error edge states below are the mock-mode's job — they need no live data).
+    if (LIVE) {
+      await captureLive(context);
+      console.log(`\nAll shots written to ${OUT}`);
+      return;
+    }
+
     // 1) Populated unified LIST — event + admin threads, type badges, per-row unread pills.
     {
       const page = await context.newPage();
@@ -266,6 +281,76 @@ async function main() {
     await browser.close();
     stopServer();
   }
+}
+
+// ── LIVE mode (TM-587) ─────────────────────────────────────────────────────────────────────────
+// Seed the CHAT_SEED account's chat via the real endpoint, sign in through the real login UI, and
+// capture the populated list / event thread / admin thread / unread badge from the LIVE backend — no
+// route mocks. Produces the same named shots as mock mode (01–05) but every byte is real.
+
+/** Suppress the first-run product tour so its backdrop can't cover the chat surface (as the specs do). */
+async function suppressTour(page) {
+  await page.addInitScript(() => {
+    const orig = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (k) {
+      return typeof k === "string" && k.startsWith("tm.tour.")
+        ? JSON.stringify({ done: true })
+        : orig.call(this, k);
+    };
+  });
+}
+
+/** Sign in a seeded, un-gated account via the email+password ("Try another way") flow — the real path. */
+async function signInLive(page, account) {
+  await page.goto(`${BASE}/#/login`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#auth-signed-out", { state: "visible", timeout: 30_000 });
+  await page.fill("#email", account.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", account.password);
+  await page.click("#signin-btn");
+  await page.waitForSelector("#auth-signed-in", { state: "visible", timeout: 30_000 });
+}
+
+async function captureLive(context) {
+  // Populate the account's chat via the real, non-prod seed endpoint (TM-587): two event group threads
+  // + an admin "from TeamMarhaba" channel, with messages + unread state. Idempotent across re-runs.
+  const seeded = await seedChat(CHAT_SEED);
+  console.log(
+    `  seeded chat: ${seeded.eventThreads} event + ${seeded.adminThreads} admin threads, unread ${seeded.unreadTotal}`,
+  );
+
+  const page = await context.newPage();
+  await suppressTour(page);
+  await signInLive(page, CHAT_SEED);
+
+  // 1) Populated LIST + the unread Chat-tab BADGE (captured BEFORE opening any thread, since opening
+  // marks it read and decrements the live total).
+  await page.locator("#tab-chat").click();
+  await page.waitForSelector('[data-testid="chat-row"]', { timeout: 15_000 });
+  await shot(page, "01-chat-list-populated");
+  await page.waitForFunction(() => {
+    const b = document.getElementById("tab-chat-badge");
+    return b && !b.hidden && b.textContent.trim().length > 0;
+  }, { timeout: 15_000 });
+  await shot(page, "04-chat-tab-unread-badge");
+  await settle(page);
+  const bar = await page.$("#app-tabbar");
+  if (bar) await bar.screenshot({ path: join(OUT, "05-chat-tab-badge-closeup.png") });
+  console.log("  ✓ 05-chat-tab-badge-closeup.png");
+
+  // 2) The EVENT thread — real messages + the "You joined …" system notice.
+  await page.locator('[data-testid="chat-row"]', { hasText: "Sunday Morning Dog Walk" }).click();
+  await page.waitForSelector('[data-testid="chat-system"]', { timeout: 15_000 });
+  await shot(page, "02-chat-thread-event");
+
+  // 3) The ADMIN "from TeamMarhaba" thread — the system-voice notices.
+  await page.locator(".tm-chat-back").click();
+  await page.waitForSelector('[data-testid="chat-row"]', { timeout: 15_000 });
+  await page.locator('[data-testid="chat-row"]', { hasText: "TeamMarhaba" }).click();
+  await page.waitForSelector('[data-testid="chat-system"]', { timeout: 15_000 });
+  await shot(page, "03-chat-thread-admin-teammarhaba");
+
+  await page.close();
 }
 
 main().catch((err) => {
