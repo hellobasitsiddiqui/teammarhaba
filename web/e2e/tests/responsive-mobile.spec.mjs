@@ -206,20 +206,28 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
   });
 
-  test("opening a chat thread shows the read-only thread view: back-to-list chrome, no composer (TM-438)", async ({
+  test("opening a chat thread shows the member thread view: back-to-list chrome + a message composer (TM-448)", async ({
     page,
   }) => {
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
-    // Deep-link into a thread route. Whatever the backend returns for this id (messages, an empty
-    // thread, or not-a-member), the shell always renders its thread chrome: a back-to-list control and
-    // the Chat tab lit. Message posting is a later ticket (TM-447), so there is NO composer here.
+    // Deep-link into a member thread. The shell renders its thread chrome — a back-to-list control and
+    // the Chat tab lit — AND, since TM-448 shipped in-thread posting (with TM-464 live SSE layered on
+    // top), a working message composer: an input + a send button. On a COLD deep-link the conversation
+    // type isn't in the list cache, so composeAvailability() defaults the box to ENABLED (chat-core.js /
+    // chat.js buildComposer). The disabled/read-only composer is kept only where a thread is genuinely
+    // one-way — an ADMIN_BROADCAST announcement — which composeAvailability's unit tests cover
+    // (web/tools/chat-core.test.mjs). This migrates the stale TM-438 "no composer" assertion (the thread
+    // view was read-only before TM-448) to the current composer-bearing thread.
     await page.evaluate(() => (window.location.hash = "#/chat/1"));
     await expect(page.locator("#chat-view")).toBeVisible();
     await expect(page.locator(".tm-chat-back")).toBeVisible();
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
-    await expect(page.locator('[data-testid="chat-composer"]')).toHaveCount(0);
+    // The composer is present and usable (TM-448): the input + the send button both render.
+    await expect(page.locator('[data-testid="chat-composer"]')).toBeVisible();
+    await expect(page.locator('[data-testid="chat-input"]')).toBeVisible();
+    await expect(page.locator('[data-testid="chat-send"]')).toBeVisible();
 
     // Back returns to the unified conversation list.
     await page.locator(".tm-chat-back").click();

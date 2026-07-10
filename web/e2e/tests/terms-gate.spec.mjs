@@ -45,17 +45,33 @@ async function signInFreshUser(page, email) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
-/** Clear the first-login profile gate so we land on the SECOND gate (terms). */
+/** Clear the first-login profile gate so we land on the SECOND gate (terms).
+ *
+ *  Robust against the onboarding gate's async prefill (TM-590): onboarding.js `load()` fires a mount
+ *  GET /api/v1/me and pre-fills the form from it. For a brand-new user that prefill is BLANK, so a value
+ *  typed BEFORE the response lands is clobbered back to empty — the same async-populate clobber the
+ *  edit-profile spec documents (TM-198). The submit then no-ops on empty-field validation and NO POST
+ *  fires, so the old `waitForResponse(POST /api/v1/me/onboarding)` hung to the 60s test timeout.
+ *  Golden-path only dodged this because a full-page screenshot between the form appearing and the fill
+ *  gave the prefill time to land first.
+ *
+ *  Fix: wait on the app OUTCOME — the onboarding gate LIFTING — instead of a specific POST, and retry the
+ *  fill+submit so a late prefill that clears the fields can't strand the test. Deterministic regardless
+ *  of prefill timing. */
 async function completeOnboarding(page) {
   await expect(page.locator("#onboarding-form")).toBeVisible();
-  await page.fill("#onboarding-name", "Terms Tester");
-  await page.fill("#onboarding-location", `Termsville-${Date.now()}`);
-  await page.fill("#onboarding-age", "30");
-  const saved = page.waitForResponse(
-    (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
-  );
-  await page.click("#onboarding-form button[type=submit]");
-  await saved;
+  await expect(async () => {
+    // Already through (a prior iteration's submit landed)? Nothing left to do.
+    if (await page.locator("#onboarding-view").isHidden()) return;
+    await page.fill("#onboarding-name", "Terms Tester");
+    await page.fill("#onboarding-location", `Termsville-${Date.now()}`);
+    await page.fill("#onboarding-age", "30");
+    await page.click("#onboarding-form button[type=submit]");
+    // The gate lifts once the POST succeeds (the router re-guards → the terms gate). If a late prefill
+    // wiped the fields the submit no-ops and the gate stays up, so this times out and the outer retry
+    // re-fills (the prefill has since landed, so the values now stick).
+    await expect(page.locator("#onboarding-view")).toBeHidden({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 test("@terms a brand-new user is terms-gated, accepts, and then enters the app", async ({ page }) => {
