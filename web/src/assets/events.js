@@ -418,7 +418,7 @@ function whenSection(when) {
     kids.push(
       el("p", {
         class: "tm-muted tm-event-when-local",
-        text: `Event local time: ${when.eventLocalTime} ${when.eventLocalTz} (${when.eventTz})`,
+        text: `Event local time: ${when.eventLocalTime} ${when.eventLocalTz} (${when.eventTzCity})`,
       }),
     );
   }
