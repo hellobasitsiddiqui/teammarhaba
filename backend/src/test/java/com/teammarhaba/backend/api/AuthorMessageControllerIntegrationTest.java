@@ -19,7 +19,6 @@ import com.teammarhaba.backend.chat.ConversationRepository;
 import com.teammarhaba.backend.chat.MemberRole;
 import com.teammarhaba.backend.chat.Message;
 import com.teammarhaba.backend.chat.MessageRepository;
-import com.teammarhaba.backend.chat.MuteState;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
