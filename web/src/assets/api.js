@@ -1134,6 +1134,27 @@ export async function getEvent(id) {
 }
 
 /**
+ * GET /api/v1/events/{id}/entitlement — the AUTHORITATIVE per-event membership entitlement for the
+ * caller (TM-476). The backend resolves the caller's tier + first-event credit against the event's
+ * price/premium into one decision + charge, so the checkout screen (TM-479) and RSVP agree instead of
+ * re-deriving the rule client-side. Returns `{ decision, amountPence, reason }`:
+ *   • `decision` — one of `FREE | INCLUDED | PAY | UPGRADE`;
+ *   • `amountPence` — the charge in pence (0 for FREE/INCLUDED, the event's price for PAY);
+ *   • `reason` — a stable machine code (e.g. `FIRST_EVENT_FREE`, `INCLUDED_DIAMOND`, `PAY_PREMIUM`).
+ * A hidden/cancelled/finished event is a 404. Identity comes from the Bearer token, never the body.
+ * @param {number|string} eventId
+ * @returns {Promise<{decision: string, amountPence: number, reason: string}>}
+ * @throws {ApiError}
+ */
+export async function getEventEntitlement(eventId) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(eventId)}/entitlement`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not load pricing for this event (${response.status}).`);
+  return response.json();
+}
+
+/**
  * POST /api/v1/events/{id}/rsvp — RSVP (idempotent). Returns the RsvpResult
  * `{ state: "GOING"|"WAITLISTED", goingCount, waitlistedCount }` telling the caller where they
  * landed. On a rejected command (e.g. a 409 booking-cutoff / one-active-event / age-band conflict,
@@ -1226,6 +1247,7 @@ if (typeof window !== "undefined") {
     getAdminMessage,
     listEvents,
     getEvent,
+    getEventEntitlement,
     rsvpToEvent,
     cancelEventRsvp,
     claimEventSpot,

@@ -9,6 +9,8 @@ import com.teammarhaba.backend.event.EventDetail;
 import com.teammarhaba.backend.event.EventQueryService;
 import com.teammarhaba.backend.event.EventRsvpService;
 import com.teammarhaba.backend.event.RsvpResult;
+import com.teammarhaba.backend.membership.Entitlement;
+import com.teammarhaba.backend.membership.EntitlementService;
 import java.util.Set;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -38,6 +40,10 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code POST /events/{id}/claim} — a waitlisted member claims an open spot:
  *       first-claim-wins under the same event lock as RSVP; losing the race is a {@code 409} with
  *       honest copy.</li>
+ *   <li>{@code GET /events/{id}/entitlement} — the caller's membership entitlement to this event
+ *       (TM-476): {@code decision} ({@code FREE|INCLUDED|PAY|UPGRADE}), {@code amountPence} and a
+ *       {@code reason} code. The authoritative source the checkout screen (TM-479) consumes so that
+ *       the price shown and what RSVP charges always agree.</li>
  * </ul>
  *
  * <p>Hidden events (cancelled / outside the window / soft-deleted) are a {@code 404} on every
@@ -51,10 +57,12 @@ public class EventController {
 
     private final EventQueryService queries;
     private final EventRsvpService rsvps;
+    private final EntitlementService entitlements;
 
-    EventController(EventQueryService queries, EventRsvpService rsvps) {
+    EventController(EventQueryService queries, EventRsvpService rsvps, EntitlementService entitlements) {
         this.queries = queries;
         this.rsvps = rsvps;
+        this.entitlements = entitlements;
     }
 
     /** The visible-now listing, soonest-first. Order is fixed — only page/size are caller-tunable. */
@@ -100,5 +108,18 @@ public class EventController {
     @PostMapping("/events/{id}/claim")
     RsvpResult claim(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
         return rsvps.claim(caller, id);
+    }
+
+    /**
+     * The caller's membership entitlement to this event (TM-476): whether it is {@code FREE}
+     * (first-event credit / a genuinely free event), {@code INCLUDED} (their tier covers it), or
+     * {@code PAY} the returned {@code amountPence} (standard or premium price), with a {@code reason}
+     * code. The account is JIT-enrolled onto {@code PAY_PER_EVENT} on first sight (TM-474). A hidden
+     * event is a {@code 404}, exactly as the detail route. This resolver is authoritative — the checkout
+     * screen (TM-479) consumes it instead of re-deriving the rule client-side, so display and RSVP agree.
+     */
+    @GetMapping("/events/{id}/entitlement")
+    Entitlement entitlement(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return entitlements.resolve(caller, id);
     }
 }
