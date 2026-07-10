@@ -14,6 +14,7 @@ import {
   formatDateLong,
   formatTime,
   describeWhen,
+  zoneCityLabel,
   countdownText,
   myStateChip,
   goingBadge,
@@ -78,6 +79,16 @@ test("describeWhen: viewer-local time, and an event-local line only when the zon
   const cross = describeWhen("2026-07-05T17:00:00Z", null, "America/New_York", { viewerTz: "Europe/London" });
   assert.equal(cross.showEventLocal, true, "different zone → surface the event-local time");
   assert.equal(cross.eventLocalTime, "13:00");
+  // TM-613: the event's zone is shown as a friendly place, never the raw IANA id ("America/New_York").
+  assert.equal(cross.eventTzCity, "New York");
+});
+
+test("zoneCityLabel: friendly place from an IANA id — last segment, underscores → spaces", () => {
+  assert.equal(zoneCityLabel("America/New_York"), "New York");
+  assert.equal(zoneCityLabel("Europe/London"), "London");
+  assert.equal(zoneCityLabel("America/Argentina/Buenos_Aires"), "Buenos Aires");
+  assert.equal(zoneCityLabel(""), "");
+  assert.equal(zoneCityLabel(null), "");
 });
 
 test("describeWhen: same-day end → a time range; invalid start → empty", () => {

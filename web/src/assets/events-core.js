@@ -122,6 +122,19 @@ export function tzLabel(iso, { tz, locale = DEFAULT_LOCALE } = {}) {
   }
 }
 
+/**
+ * A human-friendly place label for an IANA timezone id — the last "/"-separated segment with
+ * underscores turned into spaces, e.g. "America/New_York" → "New York", "Europe/London" → "London",
+ * "America/Argentina/Buenos_Aires" → "Buenos Aires". "" when there's nothing usable. We surface this
+ * (not the raw id) beside the event-local time so a cross-timezone viewer sees a place rather than a
+ * machine id with an underscore (TM-613).
+ */
+export function zoneCityLabel(tz) {
+  if (!tz) return "";
+  const last = String(tz).split("/").pop() || "";
+  return last.replace(/_/g, " ").trim();
+}
+
 /** Do two IANA ids refer to the same zone? Loose compare (case-insensitive, trims). */
 function sameZone(a, b) {
   if (!a || !b) return false;
@@ -134,7 +147,7 @@ function sameZone(a, b) {
  * timezone differs from the viewer's, we also expose an event-local line so a cross-timezone viewer
  * isn't caught out ("Event local time: 13:00 GMT-4").
  *
- * @returns {{date, time, tz, hasEnd, showEventLocal, eventLocalTime, eventLocalTz, eventTz}}
+ * @returns {{date, time, tz, hasEnd, showEventLocal, eventLocalTime, eventLocalTz, eventTzCity}}
  */
 export function describeWhen(startAt, endAt, eventTz, { viewerTz, locale = DEFAULT_LOCALE } = {}) {
   const vtz = viewerTz || viewerTimeZone() || undefined;
@@ -162,7 +175,7 @@ export function describeWhen(startAt, endAt, eventTz, { viewerTz, locale = DEFAU
     showEventLocal,
     eventLocalTime: showEventLocal ? formatTime(startAt, { tz: eventTz, locale }) : "",
     eventLocalTz: showEventLocal ? tzLabel(startAt, { tz: eventTz, locale }) : "",
-    eventTz: eventTz || "",
+    eventTzCity: showEventLocal ? zoneCityLabel(eventTz) : "",
   };
 }
 
