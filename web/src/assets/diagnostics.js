@@ -137,6 +137,17 @@ function buildGpsCard() {
 
 // ---- Push / FCM section ---------------------------------------------------------------------------
 
+// Human-readable copy for each native push-permission state (the `receive` value Capacitor's
+// PushNotifications.checkPermissions() reports: "granted" / "denied" / "prompt" /
+// "prompt-with-rationale"). Mirrors GPS_STATUS_TEXT above so both readouts on this screen speak the
+// same humanized language instead of leaking the raw plugin token to QA (TM-615).
+const PUSH_PERMISSION_TEXT = {
+  granted: "Granted — this device can receive push.",
+  denied: "Denied — push notifications are blocked for this app.",
+  prompt: "Not yet asked — the permission prompt hasn't been shown.",
+  "prompt-with-rationale": "Not yet asked — the OS suggests showing a rationale before prompting.",
+};
+
 /**
  * The native push permission state, if the plugin exposes it synchronously, else a placeholder. We
  * keep this best-effort and non-throwing: checkPermissions() is async on the real plugin, so the
@@ -197,7 +208,10 @@ async function refreshPush(win = globalThis) {
   if (plugin && typeof plugin.checkPermissions === "function") {
     try {
       const perm = await plugin.checkPermissions();
-      permEl.textContent = (perm && perm.receive) || "unknown";
+      const receive = (perm && perm.receive) || "";
+      // Humanize like the GPS status above; fall back to the raw token in parens for any state the
+      // map doesn't know, so a new plugin value is still legible rather than swallowed.
+      permEl.textContent = PUSH_PERMISSION_TEXT[receive] || (receive ? `Unknown (${receive})` : "unknown");
     } catch (err) {
       permEl.textContent = `unknown (${String((err && err.message) || err || "")})`;
     }
