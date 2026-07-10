@@ -423,3 +423,67 @@ export function threadSignature(messages) {
   const last = list[list.length - 1];
   return `${list.length}:${last.id}:${last.sortAt}`;
 }
+
+/* ─────────────────────────────── Live transport — SSE frame parser (TM-464) ─────────────────────
+ * The live chat stream (GET /api/v1/conversations/{id}/stream) is a Server-Sent-Events response the
+ * client consumes as a byte stream. This is the PURE half of the client: it turns raw stream text
+ * into dispatchable events, with NO fetch/DOM, so it is unit-testable in plain Node exactly like the
+ * adapters above. api.js owns the network read + auth and feeds chunks into a parser instance; chat.js
+ * turns the parsed `message` events into new bubbles.
+ *
+ * SSE wire format (https://html.spec.whatwg.org/multipage/server-sent-events.html): events are
+ * separated by a BLANK line; within an event, `field:value` lines carry `event:` (the type, default
+ * "message"), one or more `data:` lines (joined with "\n"), `id:`, `retry:`. A line starting with ":"
+ * is a comment (our `:keep-alive` heartbeat) and is ignored. A leading space after the colon is
+ * stripped. We tolerate CRLF or LF line endings.
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Create a stateful parser for one SSE connection. Feed it decoded text chunks (which may split an
+ * event across reads); it buffers the remainder and returns the events that completed in this chunk.
+ * Each event is `{ event, data, id }`; a comment-only frame (heartbeat) yields nothing.
+ * @returns {{push: (chunk: string) => Array<{event: string, data: string, id: (string|undefined)}>}}
+ */
+export function createSseParser() {
+  let buffer = "";
+  return {
+    push(chunk) {
+      // Normalise line endings so an event boundary is always exactly "\n\n" regardless of CRLF.
+      buffer = (buffer + String(chunk ?? "")).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const events = [];
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const event = parseSseFrame(frame);
+        if (event) events.push(event);
+      }
+      return events;
+    },
+  };
+}
+
+/**
+ * Parse one raw SSE frame (the text between blank-line boundaries) into an event, or `null` when the
+ * frame carries no `data` (a pure comment/heartbeat, or a stray blank). Exported for direct testing.
+ * @param {string} frame the raw field lines of a single event.
+ * @returns {{event: string, data: string, id: (string|undefined)}|null}
+ */
+export function parseSseFrame(frame) {
+  let event = "message"; // the SSE default event type when no `event:` field is present
+  let id;
+  const dataLines = [];
+  for (const line of String(frame ?? "").split("\n")) {
+    if (line === "" || line.startsWith(":")) continue; // blank or comment (`:keep-alive`) — skip
+    const colon = line.indexOf(":");
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? "" : line.slice(colon + 1);
+    if (value.startsWith(" ")) value = value.slice(1); // spec: strip a single leading space after the colon
+    if (field === "event") event = value;
+    else if (field === "data") dataLines.push(value);
+    else if (field === "id") id = value;
+    // `retry:` and any unknown field are ignored — we don't drive reconnection timing from the server.
+  }
+  if (dataLines.length === 0) return null; // no payload -> not a dispatchable event
+  return { event, data: dataLines.join("\n"), id };
+}

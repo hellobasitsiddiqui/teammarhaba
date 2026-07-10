@@ -30,10 +30,16 @@ import org.springframework.transaction.annotation.Transactional;
  *       {@link EventChatLifecycleService#isThreadReadOnly}, which it <em>consumes</em> rather than
  *       re-deriving the close window here;</li>
  *   <li>the push fan-out hook (TM-437) — so every other active member hears about the message without
- *       the app open. This service no longer calls the notifier in-line; it publishes a
- *       {@link MessageCreatedEvent} which {@link MessageCreatedPushListener} consumes
- *       <em>after commit</em> (TM-579), so a rolled-back post never pushes and the FCM call never holds
- *       the write connection.</li>
+ *       the app open (the offline / store-and-forward path). This service no longer calls the notifier
+ *       in-line; it publishes a {@link MessageCreatedEvent} which {@link MessageCreatedPushListener}
+ *       consumes <em>after commit</em> (TM-579), so a rolled-back post never pushes and the FCM call
+ *       never holds the write connection.</li>
+ *   <li>the live transport hook (TM-464) — the same {@link MessageCreatedEvent} is consumed
+ *       <em>after commit</em> by {@link MessageCreatedStreamListener}, which broadcasts the created
+ *       message over {@link ChatStreamService#broadcast} to every member currently connected to the
+ *       thread's SSE stream, so an open app renders it instantly (the live-while-online path). Firing
+ *       it off the same post-commit event (rather than in-line) means a rolled-back post broadcasts
+ *       nothing live either, exactly like the push.</li>
  * </ul>
  *
  * <p><b>Identity is always the verified caller.</b> The acting member is resolved from the
@@ -63,12 +69,13 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>Ordering.</b> In the write transaction: persist the message (flushed so the DB-authoritative
  * {@code createdAt} reads straight back), record one {@link AuditAction#EVENT_CHAT_MESSAGE_POSTED}
- * audit row, then <em>publish</em> a {@link MessageCreatedEvent}. The push fan-out itself is not run
- * here — {@link MessageCreatedPushListener} fires it {@code AFTER_COMMIT} (TM-579). Publishing rather
- * than pushing in-line is what makes the fan-out honour {@link NewMessageNotifier}'s contract ("invoke
- * after commit"): if the commit fails after the message row was written, the listener never runs, so no
- * recipient is pushed about a rolled-back message; and because the push runs post-commit it no longer
- * holds the write connection open across the FCM network call.
+ * audit row, then <em>publish</em> a {@link MessageCreatedEvent}. Neither fan-out is run here — the
+ * push ({@link MessageCreatedPushListener}) and the live SSE broadcast
+ * ({@link MessageCreatedStreamListener}) both fire {@code AFTER_COMMIT} (TM-579 / TM-464). Publishing
+ * rather than pushing/broadcasting in-line is what makes both fan-outs honour the "after commit"
+ * contract: if the commit fails after the message row was written, neither listener runs, so no
+ * recipient is pushed <em>and</em> no connected member is broadcast to about a rolled-back message; and
+ * because both run post-commit they no longer hold the write connection open across their network calls.
  */
 @Service
 public class MessagePostService {
@@ -163,12 +170,17 @@ public class MessagePostService {
                 conversationId.toString(),
                 Map.of("messageId", saved.getId()));
 
-        // Announce the message in-transaction; MessageCreatedPushListener fans the TM-437 push out
-        // AFTER_COMMIT (TM-579), so a rolled-back post never pushes and the FCM call never holds the
-        // write connection.
+        // Announce the message in-transaction; both fan-outs consume this AFTER_COMMIT:
+        //   • MessageCreatedPushListener fans the TM-437 push out to OTHER active members (offline path);
+        //   • MessageCreatedStreamListener broadcasts it over SSE to members CONNECTED to this thread's
+        //     stream (TM-464, the live-while-online path).
+        // Publishing (rather than pushing/broadcasting in-line) means a rolled-back post fires NEITHER, so
+        // nobody is ever notified — by push or live — about a message that then disappears (TM-579).
         publisher.publishEvent(new MessageCreatedEvent(saved));
 
-        // A freshly posted message carries no reactions yet.
+        // A freshly posted message carries no reactions yet — this is the exact DTO the poster gets back
+        // (the live-broadcast payload is rebuilt identically in the stream listener from the same message,
+        // so the wire shape can never diverge between the two paths).
         return ConversationMessageResponse.from(saved, List.of());
     }
 

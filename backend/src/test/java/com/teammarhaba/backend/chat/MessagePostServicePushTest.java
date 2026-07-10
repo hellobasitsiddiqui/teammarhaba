@@ -2,6 +2,11 @@ package com.teammarhaba.backend.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
@@ -25,6 +30,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -42,6 +48,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       message row <em>and</em> sends no push (the {@code AFTER_COMMIT} listener never ran).</li>
  * </ul>
  *
+ * <p>The same post-commit gate is proven for the <b>live SSE broadcast</b> (TM-464): its listener
+ * ({@link MessageCreatedStreamListener}) also rides the {@link MessageCreatedEvent}, so a committed post
+ * broadcasts and a rolled-back one does not. We spy the {@link ChatStreamService} bean (no stream is
+ * connected in this fixture, so the real {@code broadcast} is a harmless no-op returning 0) and assert
+ * the interaction, giving push and live-broadcast the same commit/rollback symmetry from one harness.
+ *
  * <p>The fixture uses an admin-broadcast conversation (no event id) so {@code requireOpenThread} falls
  * back to the plain soft-close flag — a fresh broadcast thread is open — keeping the test focused on the
  * transaction/push ordering rather than the event close-policy (which its own tests cover).
@@ -58,6 +70,10 @@ class MessagePostServicePushTest extends AbstractIntegrationTest {
     @Autowired private DeviceTokenRepository deviceTokens;
     @Autowired private PlatformTransactionManager txManager;
     @Autowired private RecordingPushSender sender;
+
+    // Spy the live-SSE hub so we can assert the broadcast fires after commit / never on rollback, exactly
+    // like the push. No stream is connected in this fixture, so the real broadcast is a no-op returning 0.
+    @MockitoSpyBean private ChatStreamService chatStream;
 
     /** The verified caller who posts — provisioned as an active member of the thread below. */
     private final VerifiedUser author = new VerifiedUser("post-author", "post-author@example.com");
@@ -102,6 +118,8 @@ class MessagePostServicePushTest extends AbstractIntegrationTest {
         assertThat(pushed.body()).isEqualTo("hello team");
         // The message itself was persisted.
         assertThat(messages.findAll()).hasSize(1);
+        // ...and the live SSE broadcast fired on the same post-commit event (TM-464), symmetric with the push.
+        verify(chatStream).broadcast(eq(threadId), eq(ChatStreamService.EVENT_MESSAGE), any());
     }
 
     @Test
@@ -119,6 +137,9 @@ class MessagePostServicePushTest extends AbstractIntegrationTest {
 
         // No push was sent (the commit never happened)...
         assertThat(sender.deliveries()).isEmpty();
+        // ...no live SSE broadcast fired either — the AFTER_COMMIT stream listener is bound to the same
+        // rolled-back boundary, so a connected member is never told over the socket about a phantom message.
+        verify(chatStream, never()).broadcast(anyLong(), any(), any());
         // ...and the message row rolled back with the transaction, so there is nothing to have pushed about.
         assertThat(messages.findAll()).isEmpty();
     }

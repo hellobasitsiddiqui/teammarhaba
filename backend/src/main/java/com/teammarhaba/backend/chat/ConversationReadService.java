@@ -173,6 +173,22 @@ public class ConversationReadService {
     }
 
     /**
+     * Assert the caller is an active member of the thread, or throw a {@code 403} — the shared access
+     * gate reused by the live-chat SSE subscription (TM-464). Resolves the reader from the verified
+     * principal (never a client id) and applies the same "membership present and not REMOVED" rule as
+     * {@link #messages} / {@link #markRead}, so a non-member, a kicked member, and an unknown/foreign
+     * thread are indistinguishable ({@code 403}) — the live stream can't be used to probe thread ids.
+     * Read-only so it never opens a write transaction just to gate a subscription.
+     *
+     * @throws AccessDeniedException {@code 403} if the caller is not an active member of the thread
+     */
+    @Transactional(readOnly = true)
+    public void assertMember(VerifiedUser caller, Long conversationId) {
+        Long userId = users.provision(caller).getId();
+        requireMember(conversationId, userId);
+    }
+
+    /**
      * The caller's active membership of the thread, or a {@code 403}. Absent membership and a {@link
      * MuteState#REMOVED} (kicked) membership are treated identically — and identically to an unknown
      * thread — so thread existence can't be probed across accounts.
