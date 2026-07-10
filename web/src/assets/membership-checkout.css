@@ -1,0 +1,129 @@
+/* Membership pricing / checkout screen (TM-479, epic group-membership).
+ *
+ * Ships in its OWN stylesheet (linked from index.html) rather than touching the shared styles.css, so
+ * this screen never conflicts with the sibling membership-tier screen (TM-480) or anything else in the
+ * epic. Token-only: every colour / size / radius reads a semantic Paper token (--surface-card, --fg,
+ * --muted, --accent, --on-accent, --success, --space-*, --fs-*, --radius-*, --shadow-*), so it renders
+ * natively across the clean/sketchy Paper axes (TM-529) and light/dark — no hard-coded colours. The
+ * `.tm-wobble` hand-drawn edge (from styles.css) is applied to the card + pay mount in markup, so it
+ * picks up the sketchy wobble exactly like the other Paper surfaces. The whole screen sits behind the
+ * OFF membership flag, so these rules are inert until the epic ships. */
+
+/* The screen container the router (a later ticket) reveals; hidden by the `[hidden]` attribute until
+ * then. Centred column matching the app's other pushed screens. */
+.membership-checkout-view {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+}
+
+/* The price card — a crisp Paper card holding the title, the price badge + detail, the action and the
+ * (future) card-payment mount. */
+.tm-checkout-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--surface-card);
+  color: var(--fg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.tm-checkout-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-4);
+  line-height: 1.2;
+}
+
+/* Price row: the badge (Free / Included / £5 / Upgrade) beside its one-line explanation. */
+.tm-checkout-price {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* The price badge — a pill. The base is the calm "no charge" look (Free / Included); the Pay/Upgrade
+ * modifiers make it read as an action. */
+.tm-checkout-badge {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-4);
+  line-height: 1.1;
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border);
+}
+
+/* Free + Included: covered / on-us — the quiet success look. */
+.tm-checkout-badge-free {
+  color: var(--on-accent);
+  background: var(--success);
+  border-color: var(--success);
+}
+
+/* Pay: the accent, to read as the amount you'll be charged. */
+.tm-checkout-badge-pay {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Upgrade: outlined accent — an invitation, not a charge. */
+.tm-checkout-badge-upgrade {
+  color: var(--accent);
+  background: transparent;
+  border-color: var(--accent);
+  font-size: var(--fs-3);
+}
+
+/* The one-line explanation next to the badge ("Your first event is on us.", "Premium event.", …). */
+.tm-checkout-detail {
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+.tm-checkout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* The primary action inherits the shared `.tm-btn` look; stretch it to the card width on its own row. */
+.tm-checkout-action {
+  flex: 1 1 auto;
+  text-align: center;
+}
+
+/* The "Upgrade to attend" action is a link styled as a button — kill the underline it would inherit. */
+.tm-checkout-action-upgrade {
+  text-decoration: none;
+}
+
+/* The placeholder Pay mount — the seam TM-478 fills with the Revolut card widget. A quiet, dashed,
+ * clearly-provisional panel so it reads as "coming soon" rather than a finished control. */
+.tm-checkout-pay-mount {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: var(--border-width) dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.tm-checkout-pay-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+/* The disabled placeholder Pay button — visibly inert until the real widget lands (mirrors the
+ * "coming soon" store badge). */
+.tm-checkout-pay-btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
