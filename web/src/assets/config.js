@@ -32,6 +32,14 @@
 // on later without a code change. `flags.membership` gates the whole Membership slice (the TM-480 tier
 // screen + the TM-479 pricing/checkout screen, which READS this same flag); it ships OFF. This ticket
 // is the flag owner (adds the key); a deploy can flip it the same way it overrides other config values.
+//
+// `payments` (TM-478) is the client-side Revolut checkout config for the membership PAY path. The
+// `revolutPublicKey` is the SANDBOX Merchant PUBLIC key (pk_…) — public BY DESIGN: it ships in the
+// browser widget and is not a secret (the Secret key lives server-side in Secret Manager). `revolutMode`
+// selects the sandbox widget behaviour and `revolutScriptUrl` is the sandbox RevolutCheckout.js loader
+// (a plain external CDN script the widget mounts from — not a fingerprinted local module). Only READ
+// behind the OFF `membership` flag, so it is inert until the slice ships; go-live swaps the sandbox key +
+// mode + script URL for the live ones the same way the deploy overrides other config values.
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
@@ -46,5 +54,11 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
         // Membership slice (TM-457): OFF until the tier (TM-480) + pricing/checkout (TM-479) screens
         // and the backend (TM-474) all land. Flip to true to reveal the membership screens.
         membership: false,
+    }),
+    payments: Object.freeze({
+        // Revolut SANDBOX Merchant PUBLIC key (pk_…) — public by design, ships in the client widget (TM-478).
+        revolutPublicKey: "pk_oAVwQr53jX37c6UacDoUr88gGXNLZB2CYLoa9neTXHfDUU0Z",
+        revolutMode: "sandbox",
+        revolutScriptUrl: "https://sandbox-merchant.revolut.com/embed.js",
     }),
 });

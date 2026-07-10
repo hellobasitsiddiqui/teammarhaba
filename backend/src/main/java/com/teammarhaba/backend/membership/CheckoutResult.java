@@ -20,21 +20,35 @@ import com.teammarhaba.backend.event.RsvpResult;
  * @param order           the order recorded (or the pre-existing one, on an idempotent repeat)
  * @param paymentRequired {@code true} when the order is {@code PENDING} and the caller still owes payment
  * @param rsvp            where the RSVP landed on a fresh frictionless confirm, else {@code null}
+ * @param paymentToken    the payment provider's <b>temporary</b> client token to mount the checkout widget
+ *                        (Revolut order token, TM-478) — present only on a FRESH PAY commitment; {@code null}
+ *                        for FREE/INCLUDED and for an idempotent repeat (the token is single-use and not
+ *                        persisted, so a repeat PENDING checkout returns "payment required" without a fresh
+ *                        token — the client re-initiates checkout to obtain a new one). Null ⇒ omitted from
+ *                        the JSON (global {@code NON_NULL}), so a no-charge receipt never carries the field.
  */
-public record CheckoutResult(OrderView order, boolean paymentRequired, RsvpResult rsvp) {
+public record CheckoutResult(OrderView order, boolean paymentRequired, RsvpResult rsvp, String paymentToken) {
 
-    /** A frictionless FREE/INCLUDED confirm: a CONFIRMED order and the RSVP landing. */
+    /** A frictionless FREE/INCLUDED confirm: a CONFIRMED order and the RSVP landing; no payment token. */
     static CheckoutResult confirmed(Order order, RsvpResult rsvp) {
-        return new CheckoutResult(OrderView.from(order), false, rsvp);
+        return new CheckoutResult(OrderView.from(order), false, rsvp, null);
     }
 
-    /** A PAY commitment: a PENDING order and "payment required"; the RSVP is not yet confirmed. */
-    static CheckoutResult paymentRequired(Order order) {
-        return new CheckoutResult(OrderView.from(order), true, null);
+    /**
+     * A fresh PAY commitment: a PENDING order, "payment required", and the provider's client token so the
+     * browser can mount the checkout widget (TM-478). The RSVP is NOT confirmed — it is held back until the
+     * payment webhook settles the order.
+     */
+    static CheckoutResult paymentRequired(Order order, String paymentToken) {
+        return new CheckoutResult(OrderView.from(order), true, null, paymentToken);
     }
 
-    /** An idempotent repeat: the existing order, unchanged; paymentRequired follows its PENDING state. */
+    /**
+     * An idempotent repeat: the existing order, unchanged; paymentRequired follows its PENDING state. No
+     * fresh token — the provider token is single-use and not stored, so a client resuming a PENDING order
+     * re-initiates checkout to get a new one.
+     */
     static CheckoutResult existing(Order order) {
-        return new CheckoutResult(OrderView.from(order), order.getStatus() == OrderStatus.PENDING, null);
+        return new CheckoutResult(OrderView.from(order), order.getStatus() == OrderStatus.PENDING, null, null);
     }
 }

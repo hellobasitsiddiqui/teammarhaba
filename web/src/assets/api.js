@@ -383,6 +383,33 @@ export async function getMyOrders() {
 }
 
 /**
+ * POST /api/v1/events/{id}/checkout — RSVP checkout for an event (TM-477/TM-478). Resolves the caller's
+ * entitlement server-side and records an order; the response tells the checkout screen what to do next:
+ *   • FREE / INCLUDED → `{ paymentRequired: false, order: {status:"CONFIRMED"…}, rsvp: {state…} }` — the
+ *     RSVP is already confirmed, nothing more to do.
+ *   • PAY → `{ paymentRequired: true, order: {status:"PENDING"…}, paymentToken: "<revolut order token>" }`
+ *     — mount the Revolut widget with `paymentToken`; the RSVP is held back until the payment settles
+ *     (a webhook confirms it server-side). `paymentToken` is single-use and only present on a FRESH PAY.
+ * Idempotent per (user, event): a repeat returns the same order. Identity comes from the Bearer token,
+ * never the body. An UPGRADE-required tier is a 403; a hidden/missing event is a 404.
+ *
+ * @param {number|string} eventId the event to check out.
+ * @returns {Promise<{order: object, paymentRequired: boolean, rsvp?: object, paymentToken?: string}>}
+ * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason (a 401 will already
+ *   have refreshed/redirected via apiFetch).
+ */
+export async function checkout(eventId) {
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(eventId)}/checkout`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Checkout failed (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
  * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
  * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending

@@ -29,6 +29,9 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *   <li><b>{@code /api/v1/alerts/active}</b> — the site-wide alert-banner read (TM-243): a public,
  *       non-sensitive notices feed the web banner polls, allow-listed so a warning can show pre-login.
  *       Read-only; admin writes stay authenticated + {@code ADMIN}-gated under {@code /api/v1/admin/alerts}.</li>
+ *   <li><b>{@code /api/v1/payments/revolut/webhook}</b> — the payment provider webhook (TM-478): Revolut,
+ *       not a signed-in user, calls it to report a settled order, so it cannot carry a token. Permit-listed
+ *       but authenticity-guarded by the {@code Revolut-Signature} HMAC (an unverifiable payload gets a 401).</li>
  * </ul>
  *
  * <p>Everything else — the whole {@code /api/v1} surface and the rest of {@code /actuator/**}
@@ -83,6 +86,14 @@ public class SecurityConfig {
                                 // or schedule, and the message must never carry sensitive data. Admin
                                 // writes stay under /api/v1/admin/alerts (authenticated + ADMIN-gated).
                                 "/api/v1/alerts/active",
+                                // Payment provider webhook (TM-478): Revolut calls this to report an order
+                                // settled — it is not an authenticated user, so it cannot carry a Firebase
+                                // token and must be permit-listed. Authenticity is enforced instead by the
+                                // Revolut-Signature HMAC, verified in RevolutPaymentProvider before anything
+                                // is confirmed (a payload that does not verify gets a 401 and changes
+                                // nothing). Inert until the membership flag ships: no order is ever PENDING
+                                // to confirm while checkout's PAY branch is unreachable.
+                                "/api/v1/payments/revolut/webhook",
                                 // Emulator-only e2e peek for the code (TM-234). The handler bean only
                                 // exists when FIREBASE_AUTH_EMULATOR_HOST is set (unset in dev/prod), so
                                 // in any real environment this matches nothing and 404s — the permit is
