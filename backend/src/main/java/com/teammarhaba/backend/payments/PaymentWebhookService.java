@@ -61,9 +61,20 @@ public class PaymentWebhookService {
             // order id lives in exactly one of the two ledgers, and each confirm ignores ids it does not
             // own, so dispatching to both is safe and keeps this bridge ledger-agnostic. Both are
             // idempotent: a repeat delivery for an already-confirmed order/charge is a no-op.
-            checkout.confirmPayment(e.providerOrderId());
-            subscriptions.confirmCharge(e.providerOrderId());
-            log.info("Confirmed order for provider order id via webhook");
+            boolean orderMatched = checkout.confirmPayment(e.providerOrderId());
+            boolean chargeMatched = subscriptions.confirmCharge(e.providerOrderId());
+            if (orderMatched || chargeMatched) {
+                log.info("Confirmed provider order {} via webhook", e.providerOrderId());
+            } else {
+                // A VERIFIED settle that matched neither ledger (TM-625): real money was captured and
+                // we hold no record of it — the silent-money-loss signature. Still acknowledged (a
+                // retry would match nothing either), but flagged loudly with the order id so the
+                // capture can be reconciled against the provider dashboard instead of vanishing.
+                log.warn(
+                        "Settled payment webhook for provider order {} matched NO local ledger — "
+                                + "captured money with no record; reconcile against the provider (TM-625).",
+                        e.providerOrderId());
+            }
         } else {
             // A verified non-settle event (decline/cancel/etc.) — acknowledged (2xx) but not acted on here.
             log.debug("Ignoring verified non-settle payment webhook event");

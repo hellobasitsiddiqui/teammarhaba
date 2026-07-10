@@ -68,7 +68,11 @@ import org.springframework.transaction.annotation.Transactional;
  *       authority) and the re-check later hits the same provider order — never a fresh charge.</li>
  *   <li><b>Catch-up is forgiven, not stacked.</b> A subscription more than one full cycle in arrears
  *       (scheduler outage, kill-switch window) is charged ONCE for a window re-anchored at now —
- *       instead of one back-charge per missed month, 5 minutes apart, tripping issuer fraud rules.</li>
+ *       instead of one back-charge per missed month, 5 minutes apart, tripping issuer fraud rules.
+ *       And because the re-anchored window moves on every attempt, a catch-up RETRY additionally
+ *       falls back to the user's latest open RENEWAL charge that already carries a provider order
+ *       (TM-625) — so an indeterminate first catch-up attempt is re-paid on the SAME gateway order,
+ *       never duplicated onto a fresh one.</li>
  * </ul>
  *
  * <p><strong>Concurrency.</strong> Each subscription is processed in its OWN transaction (the scheduler
@@ -203,7 +207,8 @@ public class SubscriptionRenewalService {
         // apart — and every one of those windows is already in the past, buying the user nothing.
         // Charge ONCE for a window re-anchored at now: the gap is forgiven, the anniversary moves to
         // today. (Condition: even the window this charge would buy has fully elapsed.)
-        if (periodEnd.isBefore(now)) {
+        boolean catchUp = periodEnd.isBefore(now);
+        if (catchUp) {
             log.warn(
                     "Subscription {} is more than one full cycle in arrears; re-anchoring at now and "
                             + "charging once instead of stacking back-charges (TM-623).",
@@ -234,6 +239,30 @@ public class SubscriptionRenewalService {
         SubscriptionCharge charge = charges.findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
                         subscription.getUserId(), SubscriptionCharge.Kind.RENEWAL, periodStart)
                 .orElse(null);
+        if (charge == null && catchUp) {
+            // Catch-up idempotency backstop (TM-625). The re-anchored periodStart is NEW on every
+            // catch-up attempt, so the exact-window lookup above can never see a previous attempt —
+            // which used to mean a retry after an indeterminate ("processing") or ambiguous-timeout
+            // first attempt opened AND paid a FRESH provider order while the first one could still
+            // capture: the card charged twice for the same effective month. Any still-open RENEWAL
+            // charge that already carries a provider order IS that in-flight attempt (this catch-up's
+            // earlier tick, or the normal window's attempt that drifted into arrears while dunning) —
+            // reuse it and its gateway-idempotent order rather than opening a second one. The
+            // tier/amount guard skips stale attempts from a previous subscription episode whose order
+            // charges a different price.
+            charge = charges.findFirstByUserIdAndKindAndStatusInAndProviderOrderIdIsNotNullOrderByIdDesc(
+                            subscription.getUserId(),
+                            SubscriptionCharge.Kind.RENEWAL,
+                            List.of(SubscriptionCharge.Status.PENDING, SubscriptionCharge.Status.FAILED))
+                    .filter(prior ->
+                            prior.getTier() == subscription.getTier() && prior.getAmountPence() == amountPence)
+                    .orElse(null);
+            if (charge != null) {
+                // Re-stamp the reused attempt with the re-anchored window, so the sync settle below
+                // and a late webhook heal both grant the SAME forgiven month.
+                charge.coverPeriod(periodStart, periodEnd, now);
+            }
+        }
         if (charge == null) {
             charge = charges.save(new SubscriptionCharge(
                     subscription.getUserId(), SubscriptionCharge.Kind.RENEWAL, subscription.getTier(),

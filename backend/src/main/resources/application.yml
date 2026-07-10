@@ -250,6 +250,11 @@ app:
     initial-delay-ms: ${SUBSCRIPTIONS_INITIAL_DELAY_MS:30000}       # startup grace before the first pass
     max-retries: ${SUBSCRIPTIONS_MAX_RETRIES:3}                     # dunning retries before the downgrade
     retry-interval-hours: ${SUBSCRIPTIONS_RETRY_INTERVAL_HOURS:48}  # gap between dunning retries
+    # REFUND_DUE retry sweep (TM-625): RefundSweepScheduler re-attempts owed provider refunds (orders +
+    # subscription charges) whose inline refund attempt failed, so captured money owed back can never be
+    # stranded by one transient gateway error. Gated on the SAME opt-in pair as the renewal scheduler
+    # (this `enabled` AND app.membership.enabled both explicitly true).
+    refund-sweep-interval-ms: ${SUBSCRIPTIONS_REFUND_SWEEP_INTERVAL_MS:3600000}  # gap between sweeps (1h)
   # Membership paid path — Revolut Merchant API (TM-478). Sandbox-first: the whole £5 paid checkout ships
   # behind the OFF `membership` flag, so EVERY value here is optional and safe-by-default — a prod boot with
   # the flag off never needs a real key, and a missing secret must NOT fail startup (the deploy wires the

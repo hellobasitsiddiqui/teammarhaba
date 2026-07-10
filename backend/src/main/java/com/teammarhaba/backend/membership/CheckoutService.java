@@ -182,10 +182,20 @@ public class CheckoutService {
      * in-window cancel) confirms nothing and performs no second RSVP. An unknown provider order id (never
      * created here, or from another environment) is silently ignored.
      *
+     * <p><strong>A settle for a locally-CANCELLED order is captured money (TM-625).</strong> The
+     * cancel-vs-void race: an in-window cancel voids the provider order best-effort, but if the widget
+     * payment completed concurrently the void is refused and the money captures anyway. The order is
+     * already CANCELLED locally, so this settle buys nothing — the money is owed back: the order is
+     * flagged {@code REFUND_DUE} and refunded (retried by the sweeper on failure), never no-opped into
+     * a silent keep-the-money.
+     *
      * @param providerOrderId the payment provider's permanent order id from the webhook (the match key)
+     * @return {@code true} when {@code providerOrderId} resolved to an order in this ledger (whether or
+     *         not anything needed doing), {@code false} when it is not an event order — lets the
+     *         webhook bridge detect a settled payment that matched NO ledger and flag it loudly.
      */
     @Transactional
-    public void confirmPayment(String providerOrderId) {
+    public boolean confirmPayment(String providerOrderId) {
         // Resolve the order once to learn which user to lock, then re-read + REFRESH under that user's
         // lock so a concurrent duplicate delivery serialises and sees the COMMITTED state (the same
         // user-then-event lock ordering as checkout()/cancel(), so the paths can never deadlock). The
@@ -195,35 +205,67 @@ public class CheckoutService {
         Long userId =
                 orders.findByProviderOrderId(providerOrderId).map(Order::getUserId).orElse(null);
         if (userId == null) {
-            return; // unknown provider order — nothing of ours to confirm (idempotent no-op)
+            return false; // unknown provider order — nothing of ours to confirm (idempotent no-op)
         }
         users.lockForUpdate(userId);
 
         Order order = orders.findByProviderOrderId(providerOrderId).orElse(null);
         if (order == null) {
-            return;
+            return true; // gone while we waited — ours, but nothing left to confirm
         }
         try {
             entityManager.refresh(order); // committed state, not the stale L1-cache snapshot (TM-623)
         } catch (EntityNotFoundException gone) {
-            return; // row deleted while we waited for the lock
+            return true; // row deleted while we waited for the lock
         }
         Instant now = Instant.now();
         if (!order.confirmPaid(now)) {
-            // Already confirmed (repeat webhook) or reversed by an in-window cancel — no-op.
-            return;
+            // Not PENDING any more. A repeat webhook for a CONFIRMED (or already REFUND_DUE/REFUNDED)
+            // order is a plain idempotent no-op — but a settle for a CANCELLED order with real money
+            // behind it is the cancel-vs-void race (TM-625): the in-window cancel voided the provider
+            // order best-effort, the void was refused because this very payment was completing, and the
+            // money is now provably captured for a commitment that no longer exists. Owed back.
+            if (order.getStatus() == OrderStatus.CANCELLED
+                    && order.getAmountPence() > 0
+                    && order.getProviderOrderId() != null) {
+                log.warn(
+                        "Provider order {} settled AFTER local order {} was cancelled (void refused — "
+                                + "the cancel-vs-void race, TM-625): flagging REFUND_DUE and refunding.",
+                        providerOrderId,
+                        order.getId());
+                order.markRefundDue(now);
+                tryRefund(order, now);
+            }
+            return true;
         }
 
         // Payment settled → perform the held-back RSVP. The caller is Revolut, not a signed-in user, so we
         // load the account provisioned at checkout time by id and drive the already-provisioned RSVP write.
         //
+        // Tombstone-safe buyer resolution (TM-625): the buyer may have soft-deleted their account while
+        // the widget was open. The restricted getById used to throw OUTSIDE any handling, rolling the
+        // whole confirm back — order stranded PENDING, webhook 500-looping forever, captured money with
+        // no refund and no flag. A deleted buyer can't attend the event, so the money is owed back:
+        // REFUND_DUE + refund, and the webhook is acknowledged.
+        User user = users.findAnyById(order.getUserId())
+                .filter(account -> !account.isDeleted())
+                .orElse(null);
+        if (user == null) {
+            log.warn(
+                    "Paid order {} settled for a deleted/missing account — marking REFUND_DUE and "
+                            + "refunding (TM-625).",
+                    order.getId());
+            order.markRefundDue(now);
+            tryRefund(order, now);
+            return true;
+        }
+
         // Settle-time guard failure (TM-623): the RSVP guards (event started, booking cutoff, age-gate,
         // one-active-event) can legitimately refuse between checkout and settle. The money is CAPTURED
         // by then — throwing here used to roll the confirm back, stranding the order PENDING forever
         // while Revolut retried the same failing delivery. Instead: keep the payment recorded, mark the
         // order REFUND_DUE (service undeliverable ⇒ money owed back), issue the refund, and return
         // normally so the webhook is acknowledged and the retry loop ends.
-        User user = users.getById(order.getUserId());
         try {
             rsvps.rsvpForConfirmedOrder(user, order.getEventId());
         } catch (ResourceNotFoundException | ConflictException | BadRequestException e) {
@@ -235,6 +277,7 @@ public class CheckoutService {
             order.markRefundDue(now);
             tryRefund(order, now);
         }
+        return true;
     }
 
     /**
@@ -305,7 +348,8 @@ public class CheckoutService {
     /**
      * Issue the provider refund a {@code REFUND_DUE} order owes (TM-623), best-effort: success moves the
      * order to {@code REFUNDED} (terminal — the money is back); failure logs and leaves it
-     * {@code REFUND_DUE} so nothing about the debt is lost and the refund can be retried (admin/sweeper).
+     * {@code REFUND_DUE} so nothing about the debt is lost — the scheduled {@link RefundSweepService}
+     * (TM-625) picks the row up and retries the refund until it succeeds.
      * Never throws — a refund hiccup must not roll back the surrounding cancel/confirm bookkeeping.
      */
     private void tryRefund(Order order, Instant now) {

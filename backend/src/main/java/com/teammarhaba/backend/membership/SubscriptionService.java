@@ -112,9 +112,12 @@ public class SubscriptionService {
      * rejects/times out, the whole checkout rolls back leaving no orphan charge row.
      *
      * <p>Re-entrant: a caller who abandoned a previous attempt re-uses the still-PENDING INITIAL charge
-     * (re-pointed at a fresh provider order — the widget token is single-use; the SUPERSEDED provider
+     * (re-pointed at a fresh provider order — the widget token is single-use; the superseded provider
      * order is voided best-effort so a stale open widget can no longer capture money nothing would
-     * reconcile, TM-623), and a caller with a CANCELED/PAST_DUE subscription may subscribe again (the
+     * reconcile, TM-623). If that void is REFUSED (the old order is racing/already paid), the old row is
+     * frozen as {@code SUPERSEDED} with its provider refs kept and a fresh row opened for this attempt,
+     * so the old order's late settle still resolves to a ledger row (TM-625) — see
+     * {@link #confirmCharge}. A caller with a CANCELED/PAST_DUE subscription may subscribe again (the
      * activation resets the row). Only a currently-ACTIVE subscription blocks with a {@code 409} —
      * mid-cycle tier changes are a follow-up (cancel first, resubscribe after the period ends).
      *
@@ -159,25 +162,36 @@ public class SubscriptionService {
         if (charge == null) {
             charge = charges.save(new SubscriptionCharge(
                     user.getId(), SubscriptionCharge.Kind.INITIAL, tier, amountPence, now));
+        } else if (charge.getProviderOrderId() == null) {
+            // The abandoned attempt never reached the provider — nothing to void, just re-point it.
+            charge.repointInitialAttempt(tier, amountPence, now);
         } else {
             // Void the superseded provider order BEFORE forgetting it (TM-623): its single-use widget
             // token may still be mounted in another tab, and once this row re-points, a payment against
             // the old order would match neither ledger — money captured, nothing activated, no record.
-            // Best-effort: a failed cancel (network, already paid) must not block the new checkout —
-            // the old order id is logged so the Revolut dashboard can reconcile it manually.
-            if (charge.getProviderOrderId() != null) {
-                try {
-                    payments.cancelOrder(charge.getProviderOrderId());
-                } catch (PaymentProviderException e) {
-                    log.warn(
-                            "Could not void superseded provider order {} while re-pointing the INITIAL "
-                                    + "charge for user {} — reconcile it manually if it is ever paid.",
-                            charge.getProviderOrderId(),
-                            user.getId(),
-                            e);
-                }
+            try {
+                payments.cancelOrder(charge.getProviderOrderId());
+                // The void succeeded: the old order can never settle, so its refs may be forgotten and
+                // the row reused in place for this attempt.
+                charge.repointInitialAttempt(tier, amountPence, now);
+            } catch (PaymentProviderException e) {
+                // The void was REFUSED — most likely because the old order is mid-payment or already
+                // completed in another tab, i.e. exactly when its late settle webhook WILL arrive.
+                // Nulling the refs here (the old behaviour) made that settle match no ledger: money
+                // captured, no activation, no record, webhook silently acknowledged (TM-625). Instead,
+                // freeze this row as SUPERSEDED — refs kept, so confirmCharge can still resolve the
+                // late settle (activate, or flag REFUND_DUE) — and open a FRESH row for this attempt.
+                log.warn(
+                        "Could not void superseded provider order {} while re-pointing the INITIAL "
+                                + "charge for user {} — keeping it resolvable as SUPERSEDED so a late "
+                                + "settle activates or is flagged REFUND_DUE (TM-625).",
+                        charge.getProviderOrderId(),
+                        user.getId(),
+                        e);
+                charge.markSuperseded(now);
+                charge = charges.save(new SubscriptionCharge(
+                        user.getId(), SubscriptionCharge.Kind.INITIAL, tier, amountPence, now));
             }
-            charge.repointInitialAttempt(tier, amountPence, now);
         }
 
         PaymentOrder order = payments.createOrderForCustomer(
@@ -193,11 +207,23 @@ public class SubscriptionService {
      * subscription; a RENEWAL charge is the idempotent async backstop for the synchronous pay-order call
      * — including healing a FAILED row the provider later reports paid (real money ⇒ real period).
      *
-     * <p>Idempotent: an unknown provider order id, or a charge already PAID, is a silent no-op. The
-     * PAID check runs on state re-read fresh under the user lock (TM-623) — see the class doc.
+     * <p>Idempotent: an unknown provider order id, or a charge already PAID (or already flagged
+     * REFUND_DUE/REFUNDED), is a silent no-op. The status check runs on state re-read fresh under the
+     * user lock (TM-623) — see the class doc.
+     *
+     * <p><strong>A SUPERSEDED charge is a real settle too (TM-625).</strong> A checkout that re-pointed
+     * away from an order whose void was refused leaves the old refs on a SUPERSEDED row; when that
+     * order's late settle arrives, the money HAS been captured — so it either activates the
+     * subscription (the customer has no active one: give them what they paid for) or is flagged
+     * {@code REFUND_DUE} and refunded (duplicate money — the replacement attempt already activated).
+     * It is never silently dropped.
+     *
+     * @return {@code true} when {@code providerOrderId} resolved to a charge in this ledger (whether or
+     *         not anything needed doing), {@code false} when it is not a subscription charge — lets the
+     *         webhook bridge detect a settled payment that matched NO ledger and flag it loudly.
      */
     @Transactional
-    public void confirmCharge(String providerOrderId) {
+    public boolean confirmCharge(String providerOrderId) {
         // Resolve once to learn which user to lock, then re-read + REFRESH under that lock so a
         // duplicate delivery (or a racing renewal pass) serialises — the refresh matters because the
         // repository re-query would resolve to the same already-managed instance with its pre-lock
@@ -206,30 +232,39 @@ public class SubscriptionService {
                 .map(SubscriptionCharge::getUserId)
                 .orElse(null);
         if (userId == null) {
-            return; // not a subscription charge (an event order, or not ours) — nothing to do
+            return false; // not a subscription charge (an event order, or not ours) — nothing to do
         }
         users.lockForUpdate(userId);
 
         SubscriptionCharge charge =
                 charges.findByProviderOrderId(providerOrderId).orElse(null);
         if (charge == null) {
-            return; // gone (or re-pointed away) while we waited — idempotent no-op
+            return true; // gone while we waited — ours, but nothing left to confirm (idempotent no-op)
         }
         try {
             entityManager.refresh(charge); // committed state, not the stale L1-cache snapshot (TM-623)
         } catch (EntityNotFoundException gone) {
-            return; // row deleted while we waited for the lock
+            return true; // row deleted while we waited for the lock
         }
-        if (charge.getStatus() == SubscriptionCharge.Status.PAID) {
-            return; // a repeat webhook — idempotent no-op
-        }
-
         Instant now = Instant.now();
-        if (charge.getKind() == SubscriptionCharge.Kind.INITIAL) {
-            activate(charge, now);
-        } else {
-            healRenewal(charge, now);
+        switch (charge.getStatus()) {
+            case PAID, REFUND_DUE, REFUNDED -> {
+                return true; // a repeat webhook — already settled/flagged, idempotent no-op
+            }
+            case SUPERSEDED -> {
+                settleSupersededCharge(charge, now);
+                return true;
+            }
+            case PENDING, FAILED -> {
+                if (charge.getKind() == SubscriptionCharge.Kind.INITIAL) {
+                    activate(charge, now);
+                } else {
+                    healRenewal(charge, now);
+                }
+                return true;
+            }
         }
+        return true;
     }
 
     /**
@@ -402,6 +437,82 @@ public class SubscriptionService {
                     charge.getId(),
                     charge.getProviderOrderId(),
                     charge.getUserId());
+        }
+    }
+
+    /**
+     * A late settle on a SUPERSEDED charge (TM-625): the checkout walked away from this provider order,
+     * the best-effort void was refused (the payment was racing or already through), and the money has
+     * now provably been captured. Two honest outcomes, decided under the user lock:
+     *
+     * <ul>
+     *   <li><b>No ACTIVE subscription</b> — the replacement attempt never settled (or the account has
+     *       since lapsed): the customer paid for a subscription and does not have one, so this settle
+     *       activates exactly as the INITIAL charge it was. This mirrors the checkout gate itself,
+     *       which only 409s an ACTIVE subscription.</li>
+     *   <li><b>ACTIVE subscription exists</b> — the replacement order already activated: this capture
+     *       is duplicate money. Flag the charge {@code REFUND_DUE} and issue the provider refund
+     *       immediately; if the refund call fails the flag STAYS, visible to the refund sweeper —
+     *       never a silent drop.</li>
+     * </ul>
+     */
+    private void settleSupersededCharge(SubscriptionCharge charge, Instant now) {
+        // A soft-deleted (or vanished) buyer can't be given a subscription — and activate()'s
+        // restricted getById would throw, 500-looping the webhook (the TM-625 tombstone trap). The
+        // captured money is still owed back: REFUND_DUE + refund, never a crash or a silent drop.
+        User account = users.findAnyById(charge.getUserId()).orElse(null);
+        if (account == null || account.isDeleted()) {
+            log.warn(
+                    "Superseded provider order {} settled for deleted/missing account {} — flagging "
+                            + "REFUND_DUE and refunding (TM-625).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            charge.markRefundDue(now);
+            tryRefundCharge(charge, now);
+            return;
+        }
+        Subscription subscription =
+                subscriptions.findByUserId(charge.getUserId()).orElse(null);
+        boolean activeElsewhere = subscription != null && subscription.getStatus() == SubscriptionStatus.ACTIVE;
+        if (!activeElsewhere && charge.getKind() == SubscriptionCharge.Kind.INITIAL) {
+            log.warn(
+                    "Superseded provider order {} settled for user {} with no active subscription — "
+                            + "activating on the captured payment (TM-625).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            activate(charge, now);
+            return;
+        }
+        log.warn(
+                "Superseded provider order {} settled for user {} whose subscription is already active — "
+                        + "duplicate capture; flagging REFUND_DUE and refunding (TM-625).",
+                charge.getProviderOrderId(),
+                charge.getUserId());
+        charge.markRefundDue(now);
+        tryRefundCharge(charge, now);
+    }
+
+    /**
+     * Issue the provider refund a {@code REFUND_DUE} subscription charge owes (TM-625), best-effort:
+     * success moves the charge to {@code REFUNDED} (terminal); failure logs and leaves it
+     * {@code REFUND_DUE} so the debt stays visible and the {@code RefundSweepService} retries it.
+     * Never throws — a refund hiccup must not roll back the surrounding webhook bookkeeping.
+     */
+    private void tryRefundCharge(SubscriptionCharge charge, Instant now) {
+        try {
+            payments.refund(
+                    charge.getProviderOrderId(),
+                    charge.getAmountPence(),
+                    CURRENCY,
+                    "sub-charge:" + charge.getId());
+            charge.markRefunded(now);
+        } catch (PaymentProviderException e) {
+            log.warn(
+                    "Refund of subscription charge {} (provider order {}) failed — stays REFUND_DUE "
+                            + "for the sweeper.",
+                    charge.getId(),
+                    charge.getProviderOrderId(),
+                    e);
         }
     }
 }

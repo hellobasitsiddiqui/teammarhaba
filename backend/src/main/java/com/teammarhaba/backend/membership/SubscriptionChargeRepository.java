@@ -1,7 +1,9 @@
 package com.teammarhaba.backend.membership;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -33,6 +35,24 @@ public interface SubscriptionChargeRepository extends JpaRepository<Subscription
      */
     Optional<SubscriptionCharge> findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
             Long userId, SubscriptionCharge.Kind kind, java.time.Instant periodStart);
+
+    /**
+     * The renewal engine's catch-up idempotency backstop (TM-625): the user's latest charge of
+     * {@code kind} in one of {@code statuses} (open attempts — PENDING/FAILED) that already carries a
+     * provider order. The catch-up branch re-anchors {@code periodStart} at "now" on EVERY attempt, so
+     * the exact-window lookup above can never see a previous catch-up attempt — this query finds that
+     * in-flight attempt regardless of its window, so the retry pays the SAME gateway-idempotent order
+     * instead of opening (and paying) a second one for the same effective month.
+     */
+    Optional<SubscriptionCharge> findFirstByUserIdAndKindAndStatusInAndProviderOrderIdIsNotNullOrderByIdDesc(
+            Long userId, SubscriptionCharge.Kind kind, Collection<SubscriptionCharge.Status> statuses);
+
+    /**
+     * The refund sweep's scan (TM-625): every charge sitting in {@code status} (in practice
+     * {@code REFUND_DUE}), oldest first, bounded by the caller's page. Backed by the {@code V39}
+     * partial index so the sweep never table-scans the ledger.
+     */
+    List<SubscriptionCharge> findByStatusOrderByIdAsc(SubscriptionCharge.Status status, Pageable pageable);
 
     List<SubscriptionCharge> findTop50ByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 }
