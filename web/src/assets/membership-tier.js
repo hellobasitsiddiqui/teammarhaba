@@ -22,8 +22,9 @@
 //     undefined until TM-474 lands, resolved when the user actually clicks — exactly the contract's
 //     intent. The tests inject a mock api into the pure helpers directly, so no seam is needed there.
 //
-// The whole screen is gated behind `config.flags.membership` (this ticket ships it OFF). With the flag
-// off `initMembershipTier()` is a no-op, so merging this before TM-474 / TM-479 is inert dead code.
+// The whole screen is gated behind `config.flags.membership` (shipped OFF). While the flag is off the
+// app router never routes to `#/membership` and never calls enterMembershipTier(), so the screen is
+// inert dead code until the flag flips (TM-606 wired entry through router.js; TM-478 flips the flag).
 //
 // DESIGN: all the decisions (tier catalogue, which switches are allowed now, the first-event-credit
 // note) live in the PURE, DOM-free, api-free functions exported below and are exhaustively unit-tested
@@ -357,18 +358,22 @@ export function renderMembership(container, { membership, api, onChange } = {}) 
   container.appendChild(grid);
 }
 
-// --- Runtime mount (flag-gated; inert while the flag is OFF) --------------------------------------
+// --- Runtime mount (flag-gated; driven by router.js, inert while the flag is OFF) ----------------
 
 const SCREEN_ID = "membership-tier-screen";
-const NAV_ID = "nav-membership";
-const ROUTE = "#/membership";
+// The route this screen answers to. Exported so it's the single shared source of truth: router.js
+// registers the SAME '#/membership' (its MEMBERSHIP constant) and the membership-checkout screen's
+// "Upgrade to attend" action targets the SAME route (membership-checkout.js MEMBERSHIP_ROUTE) — the
+// TM-606 route-agreement check, all three resolve to '#/membership'.
+export const MEMBERSHIP_ROUTE = "#/membership";
 
 /** The web runtime config (`window.TEAMMARHABA_CONFIG`), or an empty object off-DOM. */
 function config() {
   return (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG) || {};
 }
 
-/** True iff the membership feature flag is ON. This ticket ships it OFF (config.js). */
+/** True iff the membership feature flag is ON. Shipped OFF (config.js). router.js imports this too, so
+ *  the whole membership route is gated in ONE place off the single config flag. */
 export function membershipEnabled() {
   const cfg = config();
   return !!(cfg.flags && cfg.flags.membership);
@@ -380,17 +385,17 @@ function getApi() {
 }
 
 /**
- * Show/hide the screen for its route and, on entry, fetch the caller's membership and render it. Kept
- * self-contained (its own hashchange listener) so it needs no edit to router.js — which this ticket
- * does not own. Only ever runs when the flag is ON.
+ * Enter the membership tier screen (TM-606): fetch the caller's membership and render it into the screen
+ * section. Called by router.js on entry into #/membership — the app router now owns the screen's
+ * show/hide + the mount-once lifecycle, so this module NO LONGER runs its own hashchange listener (that
+ * self-managed listener was removed in TM-606; routing goes through router.js like every other screen).
+ * Defensive on the network: a failed/absent membership read falls back to a fresh pay-per-event caller so
+ * the screen still renders a sensible view rather than breaking.
  */
-async function syncRoute() {
+export async function enterMembershipTier() {
   if (typeof document === "undefined") return;
   const section = document.getElementById(SCREEN_ID);
   if (!section) return;
-  const onRoute = (window.location.hash || "").startsWith(ROUTE);
-  section.hidden = !onRoute;
-  if (!onRoute) return;
   let membership = { tier: DEFAULT_TIER, firstEventCreditAvailable: false };
   try {
     const api = getApi();
@@ -401,20 +406,3 @@ async function syncRoute() {
   }
   renderMembership(section, { membership, api: getApi() });
 }
-
-/**
- * Wire the screen up at boot. No-op unless `config.flags.membership` is ON, so shipping this ahead of
- * the rest of the Membership slice is inert dead code.
- */
-export function initMembershipTier() {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
-  if (!membershipEnabled()) return;
-  const nav = document.getElementById(NAV_ID);
-  if (nav) nav.hidden = false; // reveal the nav entry when the feature is live
-  window.addEventListener("hashchange", syncRoute);
-  syncRoute();
-}
-
-// Self-initialise on import (matches the other DOM modules wired into index.html). Guarded so it's a
-// safe no-op under Node (`node --test`) and while the flag is OFF.
-initMembershipTier();

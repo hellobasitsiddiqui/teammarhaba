@@ -113,10 +113,12 @@ function priceState(kind, label, detail, amountPence, checkout) {
  *   1. A genuinely free event (admin priced it at £0) — free for everyone, consumes no credit.
  *   2. Tier coverage → "Included": Diamond covers every event; Monthly covers standard (non-premium).
  *   3. Monthly on a PREMIUM event → "Upgrade to attend" (the tier does not cover premium — AC 1).
- *   4. A pay-per-event caller whose first-event credit is still available → "Free" (their first is
- *      on us) — reached only for PAY_PER_EVENT, since covered tiers are handled above.
- *   5. Otherwise (pay-per-event, no credit) → "Pay" the event's price (£5 default, or the premium
- *      price the admin set).
+ *   4. A pay-per-event caller whose first-event credit is still available, on a STANDARD event → "Free"
+ *      (their first is on us). Premium events are NEVER free (product decision 2026-07-10): the credit is
+ *      standard-only, so a credit + a premium event skips this and falls through to Pay — matching the
+ *      authoritative TM-476 backend resolver (EntitlementResolver).
+ *   5. Otherwise (pay-per-event, no credit — or a premium event no credit can cover) → "Pay" the event's
+ *      price (£5 default, or the premium price the admin set).
  *
  * @param {{tier?: string, firstEventCreditAvailable?: boolean}} [membership] the MembershipResponse
  *   from GET /api/v1/me/membership (TM-474). Read defensively — a partial/absent object is treated as
@@ -167,8 +169,14 @@ export function resolvePriceState(membership, event) {
     );
   }
 
-  // 4. Pay-per-event with a first-event credit still available → their first event is on us.
-  if (creditAvailable) {
+  // 4. Pay-per-event with a first-event credit still available, on a STANDARD event → their first event
+  // is on us. Premium events are NEVER free (product decision 2026-07-10): the first-event credit is
+  // standard-only and does NOT apply to a premium event, so the `&& !premium` guard makes a credit-holding
+  // caller on a PREMIUM event fall through to the Pay branch below (the admin-set premium price) rather
+  // than being shown Free. This aligns the client display with the authoritative TM-476 backend resolver
+  // (EntitlementResolver: any tier below Diamond PAYs for a premium event; the credit is neither applied
+  // nor consumed), so the checkout screen and the server can never disagree.
+  if (creditAvailable && !premium) {
     return priceState(PRICE_KIND.FREE, "Free", "Your first event is on us.", null, CHECKOUT_MODE.CONFIRM);
   }
 

@@ -116,6 +116,23 @@ test("premium price — a pay-per-event caller with no credit pays the admin-set
   assert.equal(s.checkout, CHECKOUT_MODE.PAY);
 });
 
+test("Premium is never free — a PAY_PER_EVENT caller WITH a first-event credit on a PREMIUM event PAYS, not Free", () => {
+  // Product decision 2026-07-10: the first-event credit is STANDARD-only — it must never make a premium
+  // event free. This mirrors the authoritative TM-476 backend resolver (EntitlementResolver: any tier
+  // below Diamond PAYs for premium; the credit is neither applied nor consumed), so the client display
+  // and the server can't disagree. Same inputs but premium:false stays Free (the test above).
+  const s = resolvePriceState(
+    { tier: TIER.PAY_PER_EVENT, firstEventCreditAvailable: true },
+    { id: 20, pricePence: 2500, premium: true },
+  );
+  assert.equal(s.kind, PRICE_KIND.PAY);
+  assert.notEqual(s.kind, PRICE_KIND.FREE);
+  assert.equal(s.label, "£25");
+  assert.equal(s.amountPence, 2500);
+  assert.equal(s.checkout, CHECKOUT_MODE.PAY);
+  assert.match(s.detail, /premium/i);
+});
+
 test("Upgrade to attend — a Monthly member hits a premium event they must upgrade for", () => {
   const s = resolvePriceState({ tier: TIER.MONTHLY }, { id: 6, pricePence: 2000, premium: true });
   assert.equal(s.kind, PRICE_KIND.UPGRADE);

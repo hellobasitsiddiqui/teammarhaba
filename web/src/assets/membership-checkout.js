@@ -27,6 +27,7 @@ import { el, clear } from "./ui.js";
 import {
   resolvePriceState,
   checkoutPayload,
+  formatPrice,
   CHECKOUT_MODE,
   PRICE_KIND,
   TIER,
@@ -65,20 +66,33 @@ function badgeModifier(kind) {
  * (TM-478) drops into. It is a real disabled control (not a dead link), announced unavailable via
  * aria-disabled, mirroring the "Coming soon" store-badge pattern. TM-478 replaces the mount's children
  * with the live widget and enables payment; the `data-provider="revolut"` marks the intended provider.
+ *
+ * The `amountPence` is now SHOWN here (TM-606 follow-up): previously this ignored its argument and the
+ * charge only appeared on the badge, so the Pay seam gave no hint of what the card step would take. We
+ * surface the exact charge both as a dedicated line and on the (disabled) button. A null/absent/zero
+ * amount (only the Free / Included / Upgrade states carry none, and those never reveal this Pay seam)
+ * falls back to the generic copy.
  * @param {number|null} amountPence the charge to display alongside the (future) card entry.
  * @returns {HTMLElement}
  */
 function buildPayMount(amountPence) {
-  return el("div", { id: PAY_MOUNT_ID, class: "tm-checkout-pay-mount tm-wobble", dataset: { provider: "revolut" } }, [
-    el("p", { class: "tm-checkout-pay-note", text: "Card payment is coming soon." }),
+  const hasAmount = Number.isFinite(amountPence) && amountPence > 0;
+  const priceText = hasAmount ? formatPrice(amountPence) : null;
+  const children = [el("p", { class: "tm-checkout-pay-note", text: "Card payment is coming soon." })];
+  // Show the exact charge in the mount itself, not only on the badge (TM-606).
+  if (hasAmount) {
+    children.push(el("p", { class: "tm-checkout-pay-amount", text: `You'll pay ${priceText}.` }));
+  }
+  children.push(
     el("button", {
       type: "button",
       class: "tm-btn tm-checkout-pay-btn",
       disabled: true,
       "aria-disabled": "true",
-      text: "Pay by card",
+      text: hasAmount ? `Pay ${priceText} by card` : "Pay by card",
     }),
-  ]);
+  );
+  return el("div", { id: PAY_MOUNT_ID, class: "tm-checkout-pay-mount tm-wobble", dataset: { provider: "revolut" } }, children);
 }
 
 /**
