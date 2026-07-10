@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,6 +26,9 @@ import com.teammarhaba.backend.user.UserService;
 import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -427,5 +431,78 @@ class SubscriptionRenewalServiceTest {
         assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
         // The row is no longer due — the very next tick performs NO second catch-up charge.
         assertThat(subscription.getNextChargeAt()).isAfter(Instant.now());
+    }
+
+    // ------------------------------------------------------------------ catch-up retry idempotency (TM-625)
+
+    @Test
+    void arrearsCatchupWithIndeterminateFirstAttemptChargesExactlyOnce() {
+        // The CatchUpDoubleChargeRepro scenario (TM-625). A subscription >1 full cycle in arrears (the
+        // kill-switch re-enable state) hits the catch-up branch, whose window is re-anchored at "now"
+        // on EVERY attempt. Attempt 1 is indeterminate ("processing" — the money may STILL capture);
+        // the dunning retry then falls due with the settle webhook still unheard. Because the retry
+        // re-anchors periodStart afresh, the exact-window idempotency lookup can never find attempt 1
+        // — before the fix, the retry opened AND paid a SECOND provider order while the first could
+        // also settle: the card charged twice for the same effective month. The fix's invariant: ONE
+        // provider order for the whole episode, the retry re-paying it gateway-idempotently.
+        Instant subscribed = Instant.now().minus(Duration.ofDays(150)); // ~5 months in arrears
+        Subscription subscription = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", subscribed);
+        subscription.savePaymentMethodRef("pm-1", subscribed);
+        when(subscriptions.findById(7L)).thenReturn(Optional.of(subscription));
+
+        // A DB-faithful in-memory ledger implementing the repository contracts the service uses: the
+        // window lookup matches on EXACT periodStart equality (what the real derived query does — the
+        // very semantics the re-anchor defeats), and the open-attempt fallback scans status + presence
+        // of a provider order id. Mocking the finders loosely would hide the bug the test exists for.
+        List<SubscriptionCharge> ledger = new ArrayList<>();
+        when(charges.save(any(SubscriptionCharge.class))).thenAnswer(inv -> {
+            ledger.add(inv.getArgument(0));
+            return inv.getArgument(0);
+        });
+        when(charges.findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
+                        eq(42L), eq(SubscriptionCharge.Kind.RENEWAL), any(Instant.class)))
+                .thenAnswer(inv -> {
+                    Instant windowStart = inv.getArgument(2);
+                    return ledger.stream()
+                            .filter(c -> windowStart.equals(c.getPeriodStart()))
+                            .reduce((first, second) -> second); // newest wins, like ORDER BY id DESC
+                });
+        when(charges.findFirstByUserIdAndKindAndStatusInAndProviderOrderIdIsNotNullOrderByIdDesc(
+                        eq(42L), eq(SubscriptionCharge.Kind.RENEWAL), any()))
+                .thenAnswer(inv -> {
+                    Collection<SubscriptionCharge.Status> statuses = inv.getArgument(2);
+                    return ledger.stream()
+                            .filter(c -> statuses.contains(c.getStatus()) && c.getProviderOrderId() != null)
+                            .reduce((first, second) -> second);
+                });
+
+        when(payments.createOrderForCustomer(anyInt(), anyString(), anyString(), anyString()))
+                .thenReturn(new PaymentOrder("rev-o1", "tok"));
+        // Attempt 1: indeterminate — the charge stays PENDING (the webhook is the authority) and the
+        // subscription enters the dunning re-check schedule.
+        when(payments.payWithSavedMethod("rev-o1", "pm-1")).thenReturn(SavedMethodCharge.fromState("processing"));
+
+        service.processOne(7L);
+
+        assertThat(ledger).hasSize(1);
+        assertThat(ledger.get(0).getStatus()).isEqualTo(SubscriptionCharge.Status.PENDING);
+        assertThat(ledger.get(0).getProviderOrderId()).isEqualTo("rev-o1");
+
+        // The 48h retry falls due with the settle webhook STILL unheard — the double-charge window.
+        subscription.markPastDue(Instant.now().minus(Duration.ofMinutes(5)), Instant.now());
+
+        // Attempt 2 (the retry): must re-pay the SAME provider order; this time it settles.
+        when(payments.payWithSavedMethod("rev-o1", "pm-1")).thenReturn(new SavedMethodCharge("completed", true));
+
+        service.processOne(7L);
+
+        // EXACTLY ONE provider order was ever opened — the retry reused attempt 1's charge unit
+        // (before the fix: createOrderForCustomer twice, a second order paid, two possible captures).
+        verify(payments, times(1)).createOrderForCustomer(anyInt(), anyString(), anyString(), anyString());
+        verify(payments, times(2)).payWithSavedMethod("rev-o1", "pm-1");
+        assertThat(ledger).hasSize(1); // one charge unit for the whole episode, reused not duplicated
+        assertThat(ledger.get(0).getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        assertThat(subscription.getNextChargeAt()).isAfter(Instant.now()); // no longer due
     }
 }

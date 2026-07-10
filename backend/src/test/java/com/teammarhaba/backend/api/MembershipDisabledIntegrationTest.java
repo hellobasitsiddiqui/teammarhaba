@@ -162,6 +162,15 @@ class MembershipDisabledIntegrationTest {
         Mockito.verifyNoInteractions(payments);
     }
 
+    @Test
+    void refundSweepSchedulerBeanDoesNotExistWhileTheFlagIsOff() {
+        // The REFUND_DUE retry sweeper (TM-625) moves money too (provider refunds), so it is gated on
+        // the exact same opt-in pair as the renewal scheduler — no bean while membership is off.
+        assertThat(context.getBeanNamesForType(com.teammarhaba.backend.membership.RefundSweepScheduler.class))
+                .as("the refund sweeper must not exist while app.membership.enabled is off")
+                .isEmpty();
+    }
+
     /** A PUBLISHED, visible-now premium (£15) event starting 2 days out. */
     private Event premiumEvent() {
         Instant now = Instant.now();

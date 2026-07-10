@@ -50,7 +50,24 @@ public class SubscriptionCharge {
         /** The money settled — the paid window this row covers was bought. */
         PAID,
         /** The charge declined/failed — a dunning datapoint (a later webhook may still heal it to PAID). */
-        FAILED
+        FAILED,
+        /**
+         * A checkout walked away from this attempt but the best-effort provider void was REFUSED
+         * (TM-625) — usually because the order is mid-payment or already completed in another tab. The
+         * provider refs are KEPT on this row so a late settle webhook still resolves here (activating
+         * the subscription, or flagging the duplicate money {@link #REFUND_DUE}) instead of matching no
+         * ledger and being silently acknowledged — the original captured-money-with-no-record defect.
+         */
+        SUPERSEDED,
+        /**
+         * Real money settled on this charge but the service it bought cannot be delivered (TM-625) —
+         * e.g. a superseded order's late settle arriving after the replacement already activated. The
+         * customer is owed the money back; the row stays here until the provider refund succeeds
+         * (retried by {@code RefundSweepService}).
+         */
+        REFUND_DUE,
+        /** The owed refund was issued at the provider (TM-625). Terminal — nothing further is owed. */
+        REFUNDED
     }
 
     @Id
@@ -177,6 +194,37 @@ public class SubscriptionCharge {
     /** The charge declined/failed — the dunning path's datapoint. The window it would have bought is kept. */
     public void markFailed(Instant now) {
         this.status = Status.FAILED;
+        this.updatedAt = now;
+    }
+
+    /**
+     * The checkout re-pointed away from this attempt but its provider order could NOT be voided
+     * (TM-625): keep the provider refs on this row — frozen, out of the PENDING idempotency lookup —
+     * so a late settle of the maybe-still-capturable old order resolves to a ledger row instead of
+     * being silently dropped. Contrast {@link #repointInitialAttempt}, which is only safe after a
+     * SUCCESSFUL void (a voided order can never settle, so its refs may be forgotten).
+     */
+    public void markSuperseded(Instant now) {
+        this.status = Status.SUPERSEDED;
+        this.updatedAt = now;
+    }
+
+    /**
+     * Money settled on this charge that bought nothing deliverable (TM-625) — the customer is owed it
+     * back. The row stays {@code REFUND_DUE} until a provider refund succeeds; the sweeper retries.
+     */
+    public void markRefundDue(Instant now) {
+        this.status = Status.REFUND_DUE;
+        this.updatedAt = now;
+    }
+
+    /**
+     * The owed refund was issued at the provider (TM-625): {@code REFUND_DUE → REFUNDED}, terminal.
+     * Only called after the provider accepted the refund — a failed refund keeps the row
+     * {@code REFUND_DUE} so the debt stays visible and retryable.
+     */
+    public void markRefunded(Instant now) {
+        this.status = Status.REFUNDED;
         this.updatedAt = now;
     }
 

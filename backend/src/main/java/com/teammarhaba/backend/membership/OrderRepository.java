@@ -2,6 +2,7 @@ package com.teammarhaba.backend.membership;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -30,4 +31,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * newest-first ordering the endpoint's contract can rely on.
      */
     List<Order> findByUserIdOrderByCreatedAtDescIdDesc(Long userId);
+
+    /**
+     * The refund sweep's scan (TM-625): every order sitting in {@code status} (in practice
+     * {@code REFUND_DUE}), oldest first, bounded by the caller's page. This is the query that turns
+     * {@code REFUND_DUE} from a dead-end label into a work queue — before it existed, a single failed
+     * refund attempt left captured money owed back forever with no operation able to reach it. Backed
+     * by the {@code V39} partial index so the sweep never table-scans the orders ledger.
+     */
+    List<Order> findByStatusOrderByIdAsc(OrderStatus status, Pageable pageable);
 }

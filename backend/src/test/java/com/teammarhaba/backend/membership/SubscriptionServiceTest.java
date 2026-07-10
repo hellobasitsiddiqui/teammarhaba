@@ -424,9 +424,11 @@ class SubscriptionServiceTest {
     }
 
     @Test
-    void repointSurvivesAFailedVoidOfTheOldOrder() {
+    void repointSurvivesAFailedVoidKeepingTheOldOrderResolvable() {
         // The void is best-effort: the gateway refusing it (already paid / transient) must not block
-        // the caller's new checkout — the failure is logged for manual reconciliation.
+        // the caller's new checkout. But the refused void means the old order may STILL settle — so
+        // its refs must stay resolvable (a frozen SUPERSEDED row), never nulled into a state where the
+        // late settle matches no ledger and captured money silently vanishes (TM-625).
         Instant earlier = Instant.now().minus(Duration.ofHours(1));
         SubscriptionCharge abandoned =
                 new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
@@ -442,7 +444,82 @@ class SubscriptionServiceTest {
 
         SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
 
+        // The new checkout proceeds normally…
         assertThat(result.paymentToken()).isEqualTo("tok-new");
+        // …while the unvoidable old attempt is frozen with its provider refs KEPT — the webhook can
+        // still resolve "rev-old", and a fresh row (not this one) carries the new attempt.
+        assertThat(abandoned.getStatus()).isEqualTo(SubscriptionCharge.Status.SUPERSEDED);
+        assertThat(abandoned.getProviderOrderId()).isEqualTo("rev-old");
+        ArgumentCaptor<SubscriptionCharge> saved = ArgumentCaptor.forClass(SubscriptionCharge.class);
+        verify(charges).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(SubscriptionCharge.Status.PENDING);
+        assertThat(saved.getValue().getProviderOrderId()).isEqualTo("rev-new");
+    }
+
+    // ------------------------------------------------------------------ superseded late settle (TM-625)
+
+    @Test
+    void lateSettleOfASupersededOrderActivatesWhenNoActiveSubscriptionExists() {
+        // The deterministic interleaving from the re-verify: Tab A pays order O1 → Tab B re-enters
+        // checkout, the void of O1 is refused (mid-payment), the charge re-points to O2 → O1's settle
+        // webhook arrives. The money was CAPTURED; the customer has no active subscription — so the
+        // settle must ACTIVATE (they get what they paid for), not be silently dropped and 2xx-acked
+        // (the original silent-money-loss outcome).
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge abandoned =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        abandoned.setPaymentReference("revolut", "rev-old", "cust-1", earlier);
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(
+                        42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
+                .thenReturn(Optional.of(abandoned));
+        doThrow(new PaymentProviderException("payment in progress")).when(payments).cancelOrder("rev-old");
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
+        when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-1")))
+                .thenReturn(new PaymentOrder("rev-new", "tok-new"));
+        service.checkout(CALLER, MembershipTier.MONTHLY); // leaves "rev-old" SUPERSEDED, refs kept
+
+        // The late ORDER_COMPLETED for the OLD order — before the fix this matched nothing.
+        when(charges.findByProviderOrderId("rev-old")).thenReturn(Optional.of(abandoned));
+        when(payments.findMerchantSavedPaymentMethod("cust-1")).thenReturn(Optional.of("pm-1"));
+
+        boolean matched = service.confirmCharge("rev-old");
+
+        assertThat(matched).isTrue(); // resolved to OUR ledger — the webhook bridge won't flag it
+        assertThat(abandoned.getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
+        verify(subscriptions).save(any(Subscription.class)); // a real activation happened
+        verify(memberships).applyTierForSubscription(42L, MembershipTier.MONTHLY, "uid-42");
+        verify(payments, never()).refund(any(), anyInt(), any(), any()); // service delivered — no refund
+    }
+
+    @Test
+    void lateSettleOfASupersededOrderIsFlaggedRefundDueWhenTheSubscriptionIsAlreadyActive() {
+        // Same interleaving, other ordering: the REPLACEMENT order settled first and activated the
+        // subscription — the superseded order's late settle is duplicate money. It must be flagged
+        // REFUND_DUE and the provider refund attempted; a failing refund keeps the flag (the sweeper's
+        // work queue) rather than reverting to the silent drop.
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge superseded =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        superseded.setPaymentReference("revolut", "rev-old", "cust-1", earlier);
+        superseded.markSuperseded(earlier);
+        when(charges.findByProviderOrderId("rev-old")).thenReturn(Optional.of(superseded));
+        // The new attempt already activated: an ACTIVE subscription exists.
+        Subscription active = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", Instant.now());
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(active));
+        doThrow(new PaymentProviderException("gateway down"))
+                .when(payments)
+                .refund(any(), anyInt(), any(), any());
+
+        boolean matched = service.confirmCharge("rev-old");
+
+        assertThat(matched).isTrue();
+        // The refund was ATTEMPTED against the captured order, and the failed attempt keeps the debt
+        // visible as REFUND_DUE — never PAID (no double period), never silently dropped.
+        verify(payments).refund(eq("rev-old"), eq(999), eq("GBP"), anyString());
+        assertThat(superseded.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUND_DUE);
+        assertThat(active.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE); // untouched
+        verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
     }
 
     // ------------------------------------------------------------------ heal must not resurrect (TM-623)

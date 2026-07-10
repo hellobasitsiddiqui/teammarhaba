@@ -73,6 +73,8 @@ class CheckoutServiceTest {
         when(user.getId()).thenReturn(42L);
         when(users.provision(any())).thenReturn(user);
         when(users.getById(42L)).thenReturn(user);
+        // The tombstone-safe settle-time read (TM-625): the default buyer is a live account.
+        when(users.findAnyById(42L)).thenReturn(Optional.of(user));
         when(payments.name()).thenReturn("revolut");
         when(orders.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -155,6 +157,69 @@ class CheckoutServiceTest {
         service(true).confirmPayment("rev-ord-2");
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_DUE);
+    }
+
+    // ------------------------------------------------------------------ soft-deleted buyer at settle (TM-625)
+
+    @Test
+    void settleForASoftDeletedBuyerMarksRefundDueInsteadOfCrashingTheWebhook() {
+        // The buyer soft-deleted their account while the payment widget was open; the money captured
+        // anyway. The old restricted getById threw OUTSIDE any handling — the confirm rolled back,
+        // the order stayed PENDING and the webhook 500-looped forever with the money kept. Now: the
+        // service is undeliverable (no account to attend with), so the money is owed back — REFUND_DUE
+        // + provider refund + a clean acknowledge.
+        Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-6");
+        when(orders.findByProviderOrderId("rev-ord-6")).thenReturn(Optional.of(order));
+        User deleted = mock(User.class);
+        when(deleted.isDeleted()).thenReturn(true);
+        when(users.findAnyById(42L)).thenReturn(Optional.of(deleted));
+
+        boolean matched = service(true).confirmPayment("rev-ord-6"); // must NOT throw
+
+        assertThat(matched).isTrue();
+        verify(payments).refund("rev-ord-6", 500, "GBP", String.valueOf(order.getId()));
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUNDED);
+        verifyNoInteractions(rsvps); // no attendance is ever provisioned for a tombstoned account
+    }
+
+    // ------------------------------------------------------------------ cancel-vs-void race (TM-625)
+
+    @Test
+    void settleForALocallyCancelledOrderIsFlaggedRefundDueNotSilentlyKept() {
+        // The race the in-window cancel acknowledges: the best-effort void of the PENDING provider
+        // order was refused because the widget payment was completing concurrently — the order is
+        // CANCELLED locally, and the settle webhook then proves the money WAS captured. The old
+        // confirmPaid no-op silently kept it. Now the settle is recognised as captured money for a
+        // dead commitment: REFUND_DUE + provider refund.
+        Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-7");
+        order.reverse(Instant.now()); // the in-window cancel already ran: PENDING -> CANCELLED
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        when(orders.findByProviderOrderId("rev-ord-7")).thenReturn(Optional.of(order));
+
+        boolean matched = service(true).confirmPayment("rev-ord-7");
+
+        assertThat(matched).isTrue();
+        verify(payments).refund("rev-ord-7", 500, "GBP", String.valueOf(order.getId()));
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUNDED);
+        verifyNoInteractions(rsvps); // the cancelled commitment is never resurrected
+    }
+
+    @Test
+    void repeatSettleForAConfirmedOrderStaysAPlainNoOp() {
+        // The CANCELLED-settle handling must not widen: a repeat webhook for an already-CONFIRMED
+        // order still does nothing — no refund, no second RSVP.
+        Order order = new Order(42L, 7L, 500, OrderStatus.CONFIRMED, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-8");
+        when(orders.findByProviderOrderId("rev-ord-8")).thenReturn(Optional.of(order));
+
+        boolean matched = service(true).confirmPayment("rev-ord-8");
+
+        assertThat(matched).isTrue();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(payments, never()).refund(any(), anyInt(), any(), any());
+        verifyNoInteractions(rsvps);
     }
 
     // ------------------------------------------------------------------ cancel: void + refund (TM-623)
