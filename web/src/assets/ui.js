@@ -185,10 +185,10 @@ export function modal(title, content) {
 export async function copyToClipboard(text, { notify = true } = {}) {
   try {
     await navigator.clipboard.writeText(text);
-    if (notify) toast("Copied to clipboard", { type: "success", timeout: 2000 });
+    if (notify) toast("Copied to clipboard.", { type: "success", timeout: 2000 });
     return true;
   } catch {
-    if (notify) toast("Could not copy", { type: "error" });
+    if (notify) toast("Couldn't copy.", { type: "error" });
     return false;
   }
 }

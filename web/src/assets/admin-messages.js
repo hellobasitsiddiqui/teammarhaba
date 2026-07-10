@@ -467,7 +467,7 @@ async function sendMessage() {
       }
       toast(leftover.length ? leftover.join(" ") : "Please fix the highlighted fields.", { type: "error" });
     } else {
-      toast(err instanceof ApiError ? err.message : "Could not send the message.", { type: "error" });
+      toast(err instanceof ApiError ? err.message : "Couldn't send the message.", { type: "error" });
     }
   } finally {
     state.sending = false;
@@ -555,7 +555,7 @@ async function recall(result) {
     toast(summariseRecall(recallResult), { type: "success", timeout: 8000 });
     renderSentSuccess(result, { recalled: true });
   } catch (err) {
-    toast(err instanceof ApiError ? err.message : "Could not recall the message.", { type: "error" });
+    toast(err instanceof ApiError ? err.message : "Couldn't recall the message.", { type: "error" });
     if (btn) {
       btn.disabled = false;
       btn.textContent = RECALL_LABEL;

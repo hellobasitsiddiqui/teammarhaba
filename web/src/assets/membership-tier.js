@@ -341,7 +341,7 @@ export function renderMembership(container, { membership, api, onChange } = {}) 
   // membership so the "Current" marker + credit note move to the new tier.
   const onPick = async (tier) => {
     const result = await performSwitch(api, tier, {
-      onError: () => toast("Could not change your plan. Please try again.", { type: "error" }),
+      onError: () => toast("Couldn't change your plan. Please try again.", { type: "error" }),
     });
     if (result.ok) {
       toast(`You're now on ${tierMeta(result.membership.tier).label}.`, { type: "success" });

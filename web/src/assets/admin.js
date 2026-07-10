@@ -309,8 +309,8 @@ async function toggleEnabled(user) {
   });
   if (!ok) return;
   await applyPatch(user, { enabled: !user.enabled }, {
-    successMsg: disabling ? "Account disabled" : "Account enabled",
-    undo: () => applyPatch(user, { enabled: user.enabled }, { successMsg: "Reverted" }),
+    successMsg: disabling ? "Account disabled." : "Account enabled.",
+    undo: () => applyPatch(user, { enabled: user.enabled }, { successMsg: "Reverted." }),
   });
 }
 
@@ -333,12 +333,12 @@ async function changeRole(user) {
     title: "Confirm role change",
   });
   if (!verified) {
-    toast("Role change cancelled — not verified", { type: "info" });
+    toast("Role change cancelled — not verified.", { type: "info" });
     return;
   }
   await applyPatch(user, { role: next }, {
-    successMsg: `Role changed to ${next}`,
-    undo: () => applyPatch(user, { role: user.role }, { successMsg: "Reverted" }),
+    successMsg: `Role changed to ${next}.`,
+    undo: () => applyPatch(user, { role: user.role }, { successMsg: "Reverted." }),
   });
 }
 
@@ -588,7 +588,7 @@ async function sendBroadcast() {
     renderTable(); // repaint the row checkboxes now that the selection is empty
     refreshSelectionUi();
   } catch (err) {
-    const msg = err instanceof ApiClientError ? err.message : "Could not send the broadcast.";
+    const msg = err instanceof ApiClientError ? err.message : "Couldn't send the broadcast.";
     toast(msg, { type: "error" });
   } finally {
     c.sendingBusy = false;

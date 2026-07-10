@@ -71,18 +71,18 @@ export function buildSecuritySettings() {
       if (!res.ok) {
         // Auth not completed — revert the switch and don't persist.
         checkbox.checked = false;
-        if (res.reason !== "dismissed") toast("Couldn't verify — app-lock not enabled", { type: "error" });
+        if (res.reason !== "dismissed") toast("Couldn't verify — app-lock not enabled.", { type: "error" });
         return;
       }
       if (setAppLockEnabled(storage, true)) {
-        toast("App-lock turned on", { type: "success" });
+        toast("App-lock turned on.", { type: "success" });
       } else {
         checkbox.checked = false;
-        toast("Couldn't save the setting", { type: "error" });
+        toast("Couldn't save the setting.", { type: "error" });
       }
     } else {
       setAppLockEnabled(storage, false);
-      toast("App-lock turned off", { type: "info" });
+      toast("App-lock turned off.", { type: "info" });
     }
   });
 
