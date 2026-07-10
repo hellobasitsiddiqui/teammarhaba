@@ -12,7 +12,7 @@
 // XSS-safety is inherited from ui.js `el()` (textContent only, no innerHTML seam) — event headings,
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
-import { listEvents, getEvent, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
+import { listEvents, getEvent, getEventEntitlement, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
@@ -691,10 +691,70 @@ function actionButton(view, detail, spec, testid) {
   }, spec.label);
 }
 
+// ------------------------------------------------------------------ paid per-event checkout (TM-624)
+
+/**
+ * Is the membership feature flag ON? Reads `window.TEAMMARHABA_CONFIG.flags.membership` (owned by
+ * TM-480, shipped OFF). While it's off the paid-checkout detour below is entirely inert and the RSVP
+ * flow behaves exactly as before — the same single flag every other membership surface gates on.
+ */
+function membershipEnabled() {
+  const cfg = (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG) || {};
+  return Boolean(cfg.flags && cfg.flags.membership);
+}
+
+/**
+ * Before a join that would land the caller GOING, decide whether it must detour through the paid
+ * membership checkout (TM-624). Resolves the AUTHORITATIVE per-event entitlement (GET
+ * /events/{id}/entitlement, TM-476) and — only for a PAY decision — opens the membership-checkout
+ * screen (`window.tmMembershipCheckout.open`, which creates the order + mounts the Revolut card widget)
+ * instead of the direct free RSVP. Returns true when the checkout has taken over (the caller must NOT
+ * then run the free RSVP), false to fall through to the normal RSVP.
+ *
+ * Fail-safe: a failed/absent entitlement lookup returns false (fall through to the direct RSVP; the
+ * backend stays the real gate). The one case we DON'T silently free-join is a confirmed PAY with the
+ * checkout seam missing — that would let a paid event through for free — so we surface an error and
+ * abort the join instead. Only ever called with the flag ON.
+ * @param {object} detail the EventDetail being RSVP'd.
+ * @returns {Promise<boolean>} true iff the checkout screen handled it (skip the direct RSVP).
+ */
+async function routePaidCheckout(detail) {
+  let entitlement;
+  try {
+    entitlement = await getEventEntitlement(detail.id);
+  } catch (err) {
+    // Couldn't price the event — fall back to the normal RSVP path; the backend is the real gate.
+    console.warn("[events] entitlement load failed; falling back to direct RSVP:", err?.message ?? err);
+    return false;
+  }
+  if (!core.requiresPaidCheckout(entitlement)) return false; // FREE / INCLUDED / UPGRADE → normal RSVP
+
+  // PAY: this event costs the caller money — route through the checkout screen rather than free-RSVPing.
+  const checkout = typeof window !== "undefined" ? window.tmMembershipCheckout : null;
+  if (!checkout || typeof checkout.open !== "function") {
+    // The checkout module isn't available — do NOT quietly join a paid event for free. Surface it and
+    // abort the join (returning true skips the direct RSVP below).
+    toast("Checkout isn't available right now. Please try again.", { type: "error" });
+    return true;
+  }
+  await checkout.open(detail);
+  return true;
+}
+
 /** Dispatch a control action → the API, then re-render the detail with fresh counts/state. */
 async function runCommand(view, detail, spec) {
   if (spec.disabled) return;
   const id = detail.id;
+
+  // Paid per-event checkout (TM-624): a fresh RSVP that would land the caller GOING must run through the
+  // membership checkout when the event is a PAY event for them (per GET /events/{id}/entitlement) —
+  // otherwise the RSVP button joins paid/premium events for free. Only the join→GOING `rsvp` kind is
+  // gated: joining a WAITLIST is not attendance (no charge until a spot is actually claimed), and leave/
+  // claim are handled by the backend. Inert while the flag is OFF, so behaviour is unchanged there.
+  if (spec.kind === "rsvp" && membershipEnabled()) {
+    const handledByCheckout = await routePaidCheckout(detail);
+    if (handledByCheckout) return; // checkout screen owns the order + payment (or aborted on error)
+  }
 
   // RSVP that lands GOING gets the confirm dialog ("we'll remind you the day before").
   if (spec.confirm) {

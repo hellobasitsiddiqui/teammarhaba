@@ -42,6 +42,8 @@ import {
   eventFilters,
   filterCards,
   browseListModel,
+  ENTITLEMENT_DECISION,
+  requiresPaidCheckout,
 } from "../src/assets/events-core.js";
 
 const NOON_UTC = Date.parse("2026-07-05T12:00:00Z");
@@ -562,4 +564,25 @@ test("browseListModel: the all-finished (unfiltered) listing is the empty state,
   assert.equal(listModel.kind, "list");
   assert.deepEqual(listModel.happeningNow.map((c) => c.id), [1]);
   assert.deepEqual(listModel.upcoming.map((c) => c.id), [2]);
+});
+
+// ------------------------------------------------------------------ paid per-event checkout (TM-624)
+
+test("requiresPaidCheckout: only a PAY entitlement decision routes through the paid checkout", () => {
+  // PAY is the one decision that means the event costs the caller money → must detour to checkout.
+  assert.equal(requiresPaidCheckout({ decision: ENTITLEMENT_DECISION.PAY, amountPence: 500 }), true);
+  // FREE / INCLUDED are free to the caller — the normal (free) RSVP is correct, no checkout.
+  assert.equal(requiresPaidCheckout({ decision: ENTITLEMENT_DECISION.FREE, amountPence: 0 }), false);
+  assert.equal(requiresPaidCheckout({ decision: ENTITLEMENT_DECISION.INCLUDED, amountPence: 0 }), false);
+  // UPGRADE is a reserved decision the backend no longer emits — treated as "not a paid charge here".
+  assert.equal(requiresPaidCheckout({ decision: ENTITLEMENT_DECISION.UPGRADE }), false);
+});
+
+test("requiresPaidCheckout: an absent / malformed entitlement is never PAY (fail-safe → direct RSVP)", () => {
+  // A failed lookup must NOT block the join — it falls through to the direct RSVP (backend is the gate).
+  assert.equal(requiresPaidCheckout(undefined), false);
+  assert.equal(requiresPaidCheckout(null), false);
+  assert.equal(requiresPaidCheckout({}), false);
+  assert.equal(requiresPaidCheckout({ decision: "WAT" }), false);
+  assert.equal(requiresPaidCheckout({ decision: "pay" }), false); // exact enum only, not a lowered variant
 });

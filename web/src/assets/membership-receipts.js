@@ -4,10 +4,12 @@
 // checkout orders (M4 / TM-477) — event, amount, status and when it was placed — newest-first, and lets
 // them open a simple receipt for any one order. Backed by the API TM-481 adds:
 //   GET /api/v1/me/orders -> [ { id, eventId, amountPence, status, createdAt }, ... ] newest-first.
-// This ticket owns ONLY this module, its CSS (membership-receipts.css), its test
-// (web/tools/membership-receipts.test.mjs) and its own bits of index.html (a <link>, a
-// <section id="membership-receipts-screen">, a <script> and a nav entry). It does NOT touch config.js /
-// router.js / membership-tier.* / membership-checkout.* (sibling tickets own those).
+// TM-481 shipped this screen with its OWN hashchange listener + nav reveal (self-managed lifecycle).
+// TM-624 folded that routing into router.js — the app router now owns #/receipts' show/hide, its auth
+// guard, mount-once lifecycle and the nav reveal (exactly the TM-606 pattern the tier screen uses) —
+// because the self-managed version double-rendered against the router and ignored the signed-out /
+// onboarding-gated states every other screen respects. This module now exposes the pure helpers below
+// plus enterMembershipReceipts() (the router entry) and no longer touches window/hashchange itself.
 //
 // WHY the api namespace is read at RUNTIME off `window.tmApi` rather than a static `import * as api from
 // "./api.js"` — the same rationale as the sibling membership-tier.js (contract TM-457):
@@ -23,8 +25,8 @@
 //     MOCK api object, so no network/DOM is involved there.
 //
 // The whole screen is gated behind `config.flags.membership` (READ only — TM-480 owns the flag and ships
-// it OFF). With the flag off `initMembershipReceipts()` is a no-op, so merging this before the flag flips
-// is inert dead code.
+// it OFF). With the flag off router.js never treats #/receipts as a known route and never calls
+// enterMembershipReceipts(), so the screen stays inert dead code until the flag flips.
 //
 // DESIGN: every decision (status labels, money + date formatting, order normalisation/sorting, the
 // receipt line list) lives in the PURE, DOM-free, api-free functions exported below and is exhaustively
@@ -314,11 +316,9 @@ export function renderError(container, { onRetry } = {}) {
   );
 }
 
-// --- Runtime mount (flag-gated; inert while the flag is OFF) ---------------------------------------
+// --- Runtime mount (flag-gated; driven by router.js, inert while the flag is OFF) -----------------
 
 const SCREEN_ID = "membership-receipts-screen";
-const NAV_ID = "nav-receipts";
-const ROUTE = "#/receipts";
 
 /** The web runtime config (`window.TEAMMARHABA_CONFIG`), or an empty object off-DOM. */
 function config() {
@@ -337,18 +337,19 @@ function getApi() {
 }
 
 /**
- * Show/hide the screen for its route and, on entry, fetch + render the caller's orders. Kept
- * self-contained (its own hashchange listener) so it needs no edit to router.js — which this ticket does
- * NOT own. Clicking a purchase swaps the section to that order's receipt in place; Back returns to the
- * list (held in memory, no re-fetch). Only ever runs when the flag is ON.
+ * Enter the receipts screen (TM-624): fetch + render the caller's orders into the screen section.
+ * Called by router.js on entry into #/receipts — the app router now owns the screen's show/hide, its
+ * auth guard, the mount-once lifecycle AND the nav reveal, exactly like the sibling membership-tier
+ * screen (the TM-606 pattern). This module NO LONGER runs its own hashchange listener or reveals its
+ * own nav link (both were the TM-481 self-managed lifecycle that double-rendered against router.js and
+ * ignored the auth/gating states — the bug this ticket fixes). Clicking a purchase swaps the section to
+ * that order's receipt in place; Back returns to the list (held in memory, no re-fetch). Only ever
+ * entered while the flag is ON (router.js gates the whole route behind it).
  */
-async function syncRoute() {
+export async function enterMembershipReceipts() {
   if (typeof document === "undefined") return;
   const section = document.getElementById(SCREEN_ID);
   if (!section) return;
-  const onRoute = (window.location.hash || "").startsWith(ROUTE);
-  section.hidden = !onRoute;
-  if (!onRoute) return;
 
   const showList = (orders) =>
     renderList(section, orders, {
@@ -361,23 +362,6 @@ async function syncRoute() {
     showList(orders);
   } catch (err) {
     console.warn("[membership-receipts] GET /me/orders failed:", err?.message ?? err);
-    renderError(section, { onRetry: () => syncRoute() });
+    renderError(section, { onRetry: () => enterMembershipReceipts() });
   }
 }
-
-/**
- * Wire the screen up at boot. No-op unless `config.flags.membership` is ON, so shipping this ahead of the
- * rest of the Membership slice is inert dead code.
- */
-export function initMembershipReceipts() {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
-  if (!membershipEnabled()) return;
-  const nav = document.getElementById(NAV_ID);
-  if (nav) nav.hidden = false; // reveal the nav entry when the feature is live
-  window.addEventListener("hashchange", syncRoute);
-  syncRoute();
-}
-
-// Self-initialise on import (matches the other DOM modules wired into index.html). Guarded so it's a safe
-// no-op under Node (`node --test`) and while the flag is OFF.
-initMembershipReceipts();
