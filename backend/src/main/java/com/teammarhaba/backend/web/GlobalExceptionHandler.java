@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.auth.EmailCodeException;
 import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
+import com.teammarhaba.backend.membership.PaymentRequiredException;
 import com.teammarhaba.backend.membership.SubscriptionRequiredException;
 import com.teammarhaba.backend.membership.UpgradeRequiredException;
 import com.teammarhaba.backend.notify.BroadcastCooldownException;
@@ -175,6 +176,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(SubscriptionRequiredException.class)
     public ProblemDetail handleSubscriptionRequired(SubscriptionRequiredException ex) {
         return Problems.of(HttpStatus.PAYMENT_REQUIRED, "Subscription required", ex.getMessage());
+    }
+
+    /**
+     * A direct join (RSVP/claim) refused because the event needs a payment the caller has not made
+     * (TM-625) -> 402 Payment Required with the honest "use checkout" copy. The paid path settles
+     * through checkout + the payment webhook; the free verbs must not land a PAY entitlement.
+     */
+    @ExceptionHandler(PaymentRequiredException.class)
+    public ProblemDetail handlePaymentRequired(PaymentRequiredException ex) {
+        return Problems.of(HttpStatus.PAYMENT_REQUIRED, "Payment required", ex.getMessage());
     }
 
     /**

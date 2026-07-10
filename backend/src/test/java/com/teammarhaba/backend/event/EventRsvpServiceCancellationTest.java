@@ -9,6 +9,9 @@ import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.CancellationWindowProperties;
+import com.teammarhaba.backend.config.MembershipProperties;
+import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
@@ -55,13 +58,32 @@ class EventRsvpServiceCancellationTest {
     /** TM-446's event-chat lifecycle — invoked on the leave (onLeave) path; a mocked no-op here. */
     @Mock private EventChatLifecycleService chatLifecycle;
 
+    /** TM-625's paid-event join gate — a collaborator of the service but never exercised on the cancel path. */
+    @Mock private EntitlementService entitlements;
+
+    /** TM-625's settled-order exemption lookup — never exercised on the cancel path (leaving is never gated). */
+    @Mock private OrderRepository orders;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
 
     private EventRsvpService service() {
         return new EventRsvpService(
-                events, attendance, users, policy, ageGate, publisher, bookingCutoff, phasePolicy, chatLifecycle);
+                events,
+                attendance,
+                users,
+                policy,
+                ageGate,
+                publisher,
+                bookingCutoff,
+                phasePolicy,
+                chatLifecycle,
+                // The paid gate only fires on a JOIN with the flag on — cancels never resolve an
+                // entitlement, so a flag-off properties record keeps this suite entirely gate-free.
+                new MembershipProperties(false),
+                entitlements,
+                orders);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)
