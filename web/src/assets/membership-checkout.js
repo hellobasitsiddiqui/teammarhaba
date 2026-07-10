@@ -138,9 +138,12 @@ let revolutSdkPromise = null;
  * it untouched — and resolves with the global `RevolutCheckout(token, mode)` once available. The load
  * promise is memoised; a failed load clears it so a later attempt can retry. Rejects if the URL is
  * absent or the script fails to load.
+ *
+ * Exported since TM-620: the Subscribe checkout screen (membership-subscribe.js) mounts the same
+ * widget for the first subscription charge, so both screens share this one memoised loader.
  * @returns {Promise<Function>} the global RevolutCheckout loader.
  */
-function loadRevolutSdk() {
+export function loadRevolutSdk() {
   if (typeof window !== "undefined" && typeof window.RevolutCheckout === "function") {
     return Promise.resolve(window.RevolutCheckout);
   }

@@ -376,12 +376,87 @@ function openDetail(user) {
       el("dt", { text: "ID" }),
       el("dd", { text: String(user.id) }),
     ]),
+    // Subscription state + billing history (TM-620): what the account pays for and every charge
+    // attempt, straight off GET /admin/users/{id}/subscription. Loaded lazily like the activity log.
+    el("h3", { class: "tm-detail-h", text: "Subscription" }),
+    el("p", { class: "tm-muted", id: "tm-subscription" }, "Loading…"),
     el("h3", { class: "tm-detail-h", text: "Recent activity" }),
     el("p", { class: "tm-muted", id: "tm-activity" }, "Loading…"),
   ];
   const { close } = modal(`User · ${displayIdentifier(user)}`, body);
+  loadSubscription(user);
   loadActivity(user);
   return close;
+}
+
+/** "£9.99" from pence — local to keep admin.js free of the membership modules (mirrors formatPrice). */
+function formatPence(pence) {
+  const n = Number(pence);
+  const safe = Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+  const pounds = safe / 100;
+  return `£${safe % 100 === 0 ? String(pounds) : pounds.toFixed(2)}`;
+}
+
+/**
+ * Load one account's subscription state + charge history into the detail dialog (TM-620). Degrades to
+ * a clear note when the endpoint errors (e.g. an older backend) rather than breaking the modal.
+ */
+async function loadSubscription(user) {
+  const target = document.getElementById("tm-subscription");
+  if (!target) return;
+  try {
+    const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(user.id)}/subscription`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const body = await res.json();
+    const sub = body && body.subscription ? body.subscription : { subscribed: false };
+    const charges = Array.isArray(body?.charges) ? body.charges : [];
+
+    if (!sub.subscribed && charges.length === 0) {
+      target.textContent = "No subscription — pay-per-event account.";
+      return;
+    }
+
+    const parts = [];
+    if (sub.subscribed) {
+      const renewLine = sub.currentPeriodEnd
+        ? `${sub.renewing ? "renews" : "ends"} ${relativeTime(sub.currentPeriodEnd).text}`
+        : "";
+      parts.push(
+        el("p", { class: "tm-admin-subscription-state" }, [
+          el("strong", { text: `${sub.tier || "?"} · ${sub.status || "?"}` }),
+          el("span", {
+            class: "tm-muted",
+            text: ` — ${formatPence(sub.amountPence)}/month${renewLine ? ` · ${renewLine}` : ""}`,
+          }),
+        ]),
+      );
+    } else {
+      parts.push(el("p", { class: "tm-muted", text: "No current subscription (history below)." }));
+    }
+    if (charges.length) {
+      parts.push(
+        el(
+          "ul",
+          { class: "tm-activity" },
+          charges.slice(0, 10).map((c) => {
+            const when = relativeTime(c.createdAt);
+            return el("li", {}, [
+              el("span", {
+                class: "tm-activity-action",
+                text: `${c.kind || "?"} ${formatPence(c.amountPence)} · ${c.status || "?"}`,
+              }),
+              el("time", { class: "tm-muted", title: when.title, text: ` · ${when.text}` }),
+            ]);
+          }),
+        ),
+      );
+    }
+    target.replaceWith(el("div", { id: "tm-subscription" }, parts));
+  } catch {
+    target.textContent = "Subscription data isn't available.";
+  }
 }
 
 // Forward-compatible: try the audit read endpoint; it doesn't exist yet (TM-113 is write-only by

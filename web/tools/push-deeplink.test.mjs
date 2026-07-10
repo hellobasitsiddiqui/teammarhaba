@@ -144,11 +144,13 @@ test("client KNOWN_ROUTES and backend PushRoutes.KNOWN are the same set (TM-360)
   );
 });
 
-test("the allow-list is exactly the 6 v1 routes and excludes non-push app routes (TM-360)", () => {
-  // Pin the v1 contract so neither side can quietly add/drop a route (e.g. introduce a #/events view
+test("the allow-list is exactly the 7 pinned routes and excludes non-push app routes (TM-360)", () => {
+  // Pin the contract so neither side can quietly add/drop a route (e.g. introduce a #/events view
   // that doesn't exist yet) without this failing and being reviewed. Also asserts the two app-only
   // router views (#/terms, #/diagnostics) that are deliberately NOT push targets stay excluded.
-  const expected = ["#/admin", "#/help", "#/home", "#/login", "#/onboarding", "#/profile"];
+  // #/membership joined in TM-620: subscription renewal/dunning/downgrade notifications deep-link to
+  // the membership screen (flag-gated in the router; the default-route fallback catches a flag-off tap).
+  const expected = ["#/admin", "#/help", "#/home", "#/login", "#/membership", "#/onboarding", "#/profile"];
   assert.deepEqual([...KNOWN_ROUTES].sort(), expected);
   assert.deepEqual([...backendKnownRoutes()].sort(), expected);
   for (const notATarget of ["#/terms", "#/diagnostics", "#/events"]) {

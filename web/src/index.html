@@ -27,6 +27,10 @@
          restyles with Paper + the per-user accent without touching styles.css, and never collides with
          the sibling membership screens. Inert while the membership feature flag is OFF. -->
     <link rel="stylesheet" href="/assets/membership-receipts.css" />
+    <!-- Subscribe checkout screen + manage-subscription panel styles (TM-620). Its own stylesheet
+         (token-only), same convention as the sibling membership screens. Inert while the membership
+         feature flag is OFF. -->
+    <link rel="stylesheet" href="/assets/membership-subscribe.css" />
 </head>
 <body>
     <!-- Web boot screen (TM-381): a lightweight Paper-themed loading beat shown between the native-splash
@@ -365,6 +369,12 @@
              code. Its <link>+<section>+nav hook here are the only index.html spots TM-480 owns. -->
         <section id="membership-tier-screen" class="membership-tier-screen" aria-label="Membership" hidden></section>
 
+        <!-- Subscribe checkout (TM-620): the #/membership/subscribe/{TIER} paid flow — tier + monthly
+             price + the Revolut card entry that saves the card for renewals. membership-subscribe.js
+             paints it here; router.js owns its show/hide (flag-gated like the tier screen). Stays
+             `hidden` and completely inert while the membership feature flag is OFF. -->
+        <section id="membership-subscribe-screen" class="membership-subscribe-view" aria-label="Subscribe" hidden></section>
+
         <!-- First-login profile gate (TM-250): the #/onboarding view a signed-in but not-yet-onboarded
              user is forced to. onboarding.js (imported by router.js) builds the name/location/age form
              into this container; router.js owns visibility + the gating that blocks the app until it's
@@ -656,5 +666,11 @@
          cleanly on branches where api.getMembership() (TM-474) isn't present yet. Fully inert while the
          flag is OFF — nothing renders and no api call is made. -->
     <script type="module" src="/assets/membership-checkout.js"></script>
+    <!-- Subscribe checkout (TM-620): the #/membership/subscribe/{TIER} paid flow — first charge + card
+         save via the Revolut widget (shared loader exported by membership-checkout.js). ES module wired
+         into the boot graph like the other DOM modules; it self-inits nothing — router.js (which imports
+         it) calls enterMembershipSubscribe() on entry. Fully inert while the membership feature flag is
+         OFF (the router never treats the route as known with the flag off). -->
+    <script type="module" src="/assets/membership-subscribe.js"></script>
 </body>
 </html>

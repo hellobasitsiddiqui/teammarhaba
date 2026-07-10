@@ -194,9 +194,9 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.routes.length()").value(PushRoutes.KNOWN.size()))
                 .andExpect(jsonPath("$.routes",
                         org.hamcrest.Matchers.containsInAnyOrder(PushRoutes.KNOWN.toArray())))
-                // sorted ascending so the dropdown order is deterministic
+                // sorted ascending so the dropdown order is deterministic (#/membership joined in TM-620)
                 .andExpect(jsonPath("$.routes[0]").value("#/admin"))
-                .andExpect(jsonPath("$.routes[5]").value("#/profile"));
+                .andExpect(jsonPath("$.routes[6]").value("#/profile"));
     }
 
     @Test

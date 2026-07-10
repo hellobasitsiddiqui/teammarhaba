@@ -49,7 +49,10 @@ class RevolutPaymentProviderTest {
     @BeforeEach
     void startStub() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        // One generic capture-and-respond handler; HttpServer prefix-matches contexts, so it also
+        // serves /api/orders/{id}/payments and /api/customers/{id}/payment_methods (TM-620).
         server.createContext("/api/orders", this::handleCreateOrder);
+        server.createContext("/api/customers", this::handleCreateOrder);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
     }
@@ -117,6 +120,102 @@ class RevolutPaymentProviderTest {
         responseBody = "{\"state\":\"pending\"}"; // no id / token
         assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).createOrder(500, "GBP", "1"))
                 .isInstanceOf(PaymentProviderException.class);
+    }
+
+    // ------------------------------------------------------------------ subscriptions (TM-620)
+
+    @Test
+    void createCustomerPostsEmailAndFullNameAndParsesId() {
+        responseBody = "{\"id\":\"cust-1\",\"email\":\"sub@example.com\"}";
+
+        String id = provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("sub@example.com", "Sub Scriber");
+
+        assertThat(id).isEqualTo("cust-1");
+        assertThat(capturedMethod.get()).isEqualTo("POST");
+        assertThat(capturedPath.get()).isEqualTo("/api/customers");
+        assertThat(capturedAuth.get()).isEqualTo("Bearer " + SECRET_KEY);
+        assertThat(readBody().path("email").asText()).isEqualTo("sub@example.com");
+        assertThat(readBody().path("full_name").asText()).isEqualTo("Sub Scriber");
+    }
+
+    @Test
+    void createCustomerOmitsBlankFieldsAndFailsOnMissingId() {
+        responseBody = "{\"id\":\"cust-2\"}";
+        provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer(null, "Phone Only");
+        // A phone-only account has no email — the field must be absent, not an empty string.
+        assertThat(readBody().has("email")).isFalse();
+        assertThat(readBody().path("full_name").asText()).isEqualTo("Phone Only");
+
+        responseBody = "{\"state\":\"created\"}"; // no id
+        assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("a@b.c", "X"))
+                .isInstanceOf(PaymentProviderException.class);
+    }
+
+    @Test
+    void createOrderForCustomerAttachesTheCustomerId() {
+        responseBody = "{\"id\":\"rev-order-9\",\"token\":\"tok-9\",\"state\":\"pending\"}";
+
+        PaymentOrder order =
+                provider(SECRET_KEY, WEBHOOK_SECRET).createOrderForCustomer(999, "GBP", "sub-charge:5", "cust-1");
+
+        assertThat(order.id()).isEqualTo("rev-order-9");
+        assertThat(order.token()).isEqualTo("tok-9");
+        assertThat(capturedPath.get()).isEqualTo("/api/orders");
+        assertThat(readBody().path("amount").asInt()).isEqualTo(999);
+        assertThat(readBody().path("customer").path("id").asText()).isEqualTo("cust-1");
+        assertThat(readBody().path("merchant_order_ext_ref").asText()).isEqualTo("sub-charge:5");
+    }
+
+    @Test
+    void payWithSavedMethodPostsMerchantInitiatedChargeAndReadsSettledState() {
+        responseBody = "{\"id\":\"pay-1\",\"state\":\"completed\"}";
+
+        SavedMethodCharge result =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+
+        // The MIT contract: POST /api/orders/{id}/payments with the saved method + initiator=merchant.
+        assertThat(capturedMethod.get()).isEqualTo("POST");
+        assertThat(capturedPath.get()).isEqualTo("/api/orders/rev-order-9/payments");
+        assertThat(readBody().path("saved_payment_method").path("type").asText()).isEqualTo("card");
+        assertThat(readBody().path("saved_payment_method").path("id").asText()).isEqualTo("pm-1");
+        assertThat(readBody().path("saved_payment_method").path("initiator").asText())
+                .isEqualTo("merchant");
+        assertThat(result.settled()).isTrue();
+    }
+
+    @Test
+    void payWithSavedMethodTreatsDeclineAsNotSettled() {
+        responseBody = "{\"id\":\"pay-2\",\"state\":\"declined\"}";
+
+        SavedMethodCharge result =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+
+        assertThat(result.settled()).isFalse();
+        assertThat(result.state()).isEqualTo("declined");
+    }
+
+    @Test
+    void findMerchantSavedPaymentMethodPicksTheMerchantSavedCard() {
+        responseBody = "[" + "{\"id\":\"pm-cust\",\"type\":\"card\",\"saved_for\":\"CUSTOMER\"},"
+                + "{\"id\":\"pm-merch\",\"type\":\"card\",\"saved_for\":\"MERCHANT\"}]";
+
+        Optional<String> ref = provider(SECRET_KEY, WEBHOOK_SECRET).findMerchantSavedPaymentMethod("cust-1");
+
+        assertThat(capturedMethod.get()).isEqualTo("GET");
+        assertThat(capturedPath.get()).isEqualTo("/api/customers/cust-1/payment_methods");
+        // Only a MERCHANT-saved method can be charged off-session — the CUSTOMER one is skipped.
+        assertThat(ref).contains("pm-merch");
+    }
+
+    @Test
+    void findMerchantSavedPaymentMethodEmptyWhenNoneSavedForMerchant() {
+        responseBody = "[{\"id\":\"pm-cust\",\"type\":\"card\",\"saved_for\":\"CUSTOMER\"}]";
+        assertThat(provider(SECRET_KEY, WEBHOOK_SECRET).findMerchantSavedPaymentMethod("cust-1"))
+                .isEmpty();
+
+        responseBody = "[]";
+        assertThat(provider(SECRET_KEY, WEBHOOK_SECRET).findMerchantSavedPaymentMethod("cust-1"))
+                .isEmpty();
     }
 
     // ------------------------------------------------------------------ webhook verification

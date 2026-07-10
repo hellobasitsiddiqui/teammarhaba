@@ -27,6 +27,9 @@ export const KNOWN_ROUTES = Object.freeze([
   "#/help",
   "#/onboarding",
   "#/login",
+  // Membership screen (TM-620): subscription renewal/dunning/downgrade notifications deep-link here.
+  // Lock-step with the backend allow-list (PushRoutes.KNOWN) — mirror any change in both places.
+  "#/membership",
 ]);
 
 /** Default landing route when a notification carries no usable destination. */

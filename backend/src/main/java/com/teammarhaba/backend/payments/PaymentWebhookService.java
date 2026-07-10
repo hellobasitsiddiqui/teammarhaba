@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.payments;
 
 import com.teammarhaba.backend.membership.CheckoutService;
+import com.teammarhaba.backend.membership.SubscriptionService;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,10 +31,13 @@ public class PaymentWebhookService {
 
     private final PaymentProvider provider;
     private final CheckoutService checkout;
+    private final SubscriptionService subscriptions;
 
-    public PaymentWebhookService(PaymentProvider provider, CheckoutService checkout) {
+    public PaymentWebhookService(
+            PaymentProvider provider, CheckoutService checkout, SubscriptionService subscriptions) {
         this.provider = provider;
         this.checkout = checkout;
+        this.subscriptions = subscriptions;
     }
 
     /**
@@ -53,8 +57,12 @@ public class PaymentWebhookService {
 
         PaymentWebhookEvent e = event.get();
         if (e.paid()) {
-            // Idempotent: a repeat delivery for an already-CONFIRMED (or unknown) order is a no-op.
+            // A settled payment is EITHER an event-ticket order or a subscription charge — the provider
+            // order id lives in exactly one of the two ledgers, and each confirm ignores ids it does not
+            // own, so dispatching to both is safe and keeps this bridge ledger-agnostic. Both are
+            // idempotent: a repeat delivery for an already-confirmed order/charge is a no-op.
             checkout.confirmPayment(e.providerOrderId());
+            subscriptions.confirmCharge(e.providerOrderId());
             log.info("Confirmed order for provider order id via webhook");
         } else {
             // A verified non-settle event (decline/cancel/etc.) — acknowledged (2xx) but not acted on here.

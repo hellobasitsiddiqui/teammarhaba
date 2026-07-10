@@ -44,6 +44,10 @@ import { enterDiagnostics } from "./diagnostics.js";
 // single `config.flags.membership` flag (shipped OFF) so the WHOLE route is gated in one place — with the
 // flag off, `#/membership` isn't a known route here and falls through to the auth default, staying inert.
 import { enterMembershipTier, membershipEnabled } from "./membership-tier.js";
+// Subscribe checkout (TM-620): the paid flow behind the tier screen's Subscribe actions, at
+// #/membership/subscribe/{TIER}. Same flag-gating rule as the tier screen — with the flag off the
+// route isn't known here and the screen stays inert.
+import { enterMembershipSubscribe } from "./membership-subscribe.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
@@ -144,6 +148,13 @@ function chatThreadId(hash) {
 function isMembershipRoute(hash) {
   return membershipEnabled() && hash === MEMBERSHIP;
 }
+/** True for the Subscribe checkout route (TM-620): `#/membership/subscribe[/{TIER}]` — the same
+ *  flag-gating rule as the tier screen, so a flag-off build treats it as an unknown hash and the whole
+ *  checkout stays inert until the membership flag flips. Tier validity is the screen's own job
+ *  (membership-subscribe-core.js parses the same prefix). */
+function isMembershipSubscribeRoute(hash) {
+  return membershipEnabled() && (hash === `${MEMBERSHIP}/subscribe` || hash.startsWith(`${MEMBERSHIP}/subscribe/`));
+}
 /** A route requires sign-in when it's in the exact protected set, a profile route, the events or chat
  *  area, or the admin event form (ADMIN-only, so protected too) — union of TM-514 + TM-515. */
 function isProtected(route) {
@@ -156,7 +167,9 @@ function isProtected(route) {
     // Admin message compose (TM-443) — ADMIN-only, so protected too.
     isAdminMessageComposeRoute(route) ||
     // Membership tier screen (TM-606) — protected (any signed-in user) when the flag is on.
-    isMembershipRoute(route)
+    isMembershipRoute(route) ||
+    // Subscribe checkout (TM-620) — protected (any signed-in user) when the flag is on.
+    isMembershipSubscribeRoute(route)
   );
 }
 
@@ -208,6 +221,10 @@ let notificationsActive = false;
 // tier after a switch made elsewhere). Only ever entered while the flag is on. Same single-route,
 // mount-once lifecycle as the notifications feed above.
 let membershipActive = false;
+// Subscribe checkout (TM-620): the currently mounted subscribe ROUTE (null when off it). Tracked as
+// the route string rather than a boolean so moving between the two tier variants
+// (#/membership/subscribe/MONTHLY ↔ /DIAMOND) re-mounts with the right tier.
+let membershipSubscribeActive = null;
 // Home feed (TM-512): mount the "Events near you" feed / empty-home into #auth-signed-in on entry,
 // reset on leaving so returning to Home re-fetches (fresh counts / RSVP state after acting elsewhere).
 let homeActive = false;
@@ -246,6 +263,9 @@ function currentRoute() {
   // ON — with the flag off this predicate is false, so #/membership falls through to the auth default
   // below and the screen stays inert.
   if (isMembershipRoute(hash)) return hash;
+  // Subscribe checkout (TM-620): #/membership/subscribe/{TIER}, same flag rule — the raw hash is
+  // returned so the tier segment survives for the screen to parse.
+  if (isMembershipSubscribeRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -305,6 +325,10 @@ function render() {
   // stays hidden and the screen is inert.
   const membershipView = $("membership-tier-screen");
   if (membershipView) membershipView.hidden = route !== MEMBERSHIP;
+  // Subscribe checkout (TM-620) — shown for the #/membership/subscribe/{TIER} routes (flag-gated the
+  // same way; with the flag off the predicate is false and the section stays hidden).
+  const membershipSubscribeView = $("membership-subscribe-screen");
+  if (membershipSubscribeView) membershipSubscribeView.hidden = !isMembershipSubscribeRoute(route);
   // Membership checkout (TM-479) is a per-event CONTEXTUAL overlay opened via
   // window.tmMembershipCheckout.open(event) — it has no hash route of its own. Router hygiene: hide it on
   // every (re)render so a stale checkout is dismissed whenever we navigate. open() runs on a user click
@@ -576,6 +600,17 @@ function guard() {
     }
   } else {
     membershipActive = false;
+  }
+  // Subscribe checkout (TM-620): mount + fetch on entry into #/membership/subscribe/{TIER}, reset on
+  // leaving so a future entry re-fetches (and re-parses the tier from the hash). Same flag/auth
+  // guarantees and mount-once lifecycle as the tier screen above.
+  if (isMembershipSubscribeRoute(route)) {
+    if (membershipSubscribeActive !== route) {
+      membershipSubscribeActive = route;
+      enterMembershipSubscribe();
+    }
+  } else {
+    membershipSubscribeActive = null;
   }
   // Home feed (TM-512): mount the "Events near you" feed / empty-home on entry into #/home, reset on
   // leaving so re-entering (e.g. tapping the Home tab after RSVPing elsewhere) re-fetches. Repeated

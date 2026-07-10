@@ -133,8 +133,47 @@ public enum AuditAction {
      * A user self-switched their membership tier via {@code POST /api/v1/me/membership/tier} (TM-474 /
      * epic Membership). One row per <em>actual</em> change (switching to the tier already held is a
      * no-op and not recorded), carrying the account's {@code user_id} as the target and the
-     * {@code from → to} tier transition in its metadata. No payment gate in this slice — the paid-
-     * upgrade billing gate (Revolut) lands later (TM-478).
+     * {@code from → to} tier transition in its metadata. Since TM-620 a change applied by the
+     * subscription machinery (activation / downgrade) records the same action with a
+     * {@code via=subscription} metadata marker; the self-switch endpoint itself is payment-gated.
      */
-    MEMBERSHIP_TIER_CHANGED
+    MEMBERSHIP_TIER_CHANGED,
+
+    /**
+     * A recurring subscription was activated (TM-620 / epic Membership): the Subscribe checkout's first
+     * charge settled (confirmed by the provider webhook), the card was saved for off-session renewals
+     * and the paid tier was granted. One row per activation (including a re-subscribe after a cancel),
+     * carrying the account's {@code user_id} as the target and the tier + period end in its metadata.
+     */
+    SUBSCRIPTION_STARTED,
+
+    /**
+     * A subscription renewal charge settled (TM-620): the scheduler charged the saved card off-session
+     * and rolled the paid window forward one month. One row per successful renewal, carrying the
+     * account's {@code user_id} as the target and the tier + new period end in its metadata.
+     */
+    SUBSCRIPTION_RENEWED,
+
+    /**
+     * A subscription renewal charge failed and the subscription entered (or continued) dunning
+     * (TM-620): the row is PAST_DUE and a retry is scheduled. One row per failed attempt, carrying the
+     * account's {@code user_id} as the target and the tier + retry count in its metadata.
+     */
+    SUBSCRIPTION_RENEWAL_FAILED,
+
+    /**
+     * The user cancelled their subscription via {@code POST /api/v1/me/subscription/cancel} (TM-620):
+     * renewals stop, the paid tier survives to the period end, then the scheduler downgrades. One row
+     * per cancel, carrying the account's {@code user_id} as the target and the tier + period end (when
+     * the tier will lapse) in its metadata.
+     */
+    SUBSCRIPTION_CANCELED,
+
+    /**
+     * A subscription reached its terminal end and the membership was downgraded to pay-per-event
+     * (TM-620): either dunning exhausted its retries, or a user-cancelled subscription's paid period ran
+     * out. One row per lapse, carrying the account's {@code user_id} as the target and the tier + reason
+     * ({@code dunning_exhausted} / {@code period_ended}) in its metadata.
+     */
+    SUBSCRIPTION_LAPSED
 }

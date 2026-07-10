@@ -224,6 +224,20 @@
         },
         "type" : "object"
       },
+      "AdminSubscriptionResponse" : {
+        "properties" : {
+          "charges" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ChargeResponse"
+            },
+            "type" : "array"
+          },
+          "subscription" : {
+            "$ref" : "#/components/schemas/SubscriptionResponse"
+          }
+        },
+        "type" : "object"
+      },
       "AlertAdminResponse" : {
         "properties" : {
           "createdAt" : {
@@ -424,6 +438,49 @@
           },
           "preview" : {
             "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "ChargeResponse" : {
+        "properties" : {
+          "amountPence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "kind" : {
+            "enum" : [ "INITIAL", "RENEWAL" ],
+            "type" : "string"
+          },
+          "periodEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "periodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "providerOrderId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "PAID", "FAILED" ],
+            "type" : "string"
+          },
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -1285,7 +1342,7 @@
             "type" : "string"
           },
           "type" : {
-            "enum" : [ "ADMIN_MESSAGE", "EVENT_UPDATED", "EVENT_CANCELLED", "WAITLIST_OFFER", "RSVP_CONFIRMED", "EVENT_REMINDER" ],
+            "enum" : [ "ADMIN_MESSAGE", "EVENT_UPDATED", "EVENT_CANCELLED", "WAITLIST_OFFER", "RSVP_CONFIRMED", "EVENT_REMINDER", "SUBSCRIPTION_STARTED", "SUBSCRIPTION_RENEWED", "SUBSCRIPTION_PAYMENT_FAILED", "SUBSCRIPTION_ENDED" ],
             "type" : "string"
           }
         },
@@ -1694,6 +1751,66 @@
           "timeout" : {
             "format" : "int64",
             "type" : [ "integer", "null" ]
+          }
+        },
+        "type" : "object"
+      },
+      "SubscriptionCheckoutRequest" : {
+        "properties" : {
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "tier" ],
+        "type" : "object"
+      },
+      "SubscriptionCheckoutResponse" : {
+        "properties" : {
+          "amountPence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "paymentToken" : {
+            "type" : "string"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "SubscriptionResponse" : {
+        "properties" : {
+          "amountPence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "currentPeriodEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "currentPeriodStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "renewing" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "enum" : [ "ACTIVE", "PAST_DUE", "CANCELED" ],
+            "type" : "string"
+          },
+          "subscribed" : {
+            "type" : "boolean"
+          },
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -2211,7 +2328,7 @@
     },
     "/api/v1/admin/events/{id}/cancel" : {
       "post" : {
-        "operationId" : "cancel",
+        "operationId" : "cancel_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -2515,6 +2632,33 @@
           }
         },
         "tags" : [ "user-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/users/{id}/subscription" : {
+      "get" : {
+        "operationId" : "subscription_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdminSubscriptionResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "subscription-admin-controller" ]
       }
     },
     "/api/v1/admin/users/{id}/test-push" : {
@@ -3097,7 +3241,7 @@
     },
     "/api/v1/events/{id}/checkout" : {
       "post" : {
-        "operationId" : "checkout",
+        "operationId" : "checkout_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -3697,6 +3841,70 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/subscription" : {
+      "get" : {
+        "operationId" : "subscription",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubscriptionResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "subscription-controller" ]
+      }
+    },
+    "/api/v1/me/subscription/cancel" : {
+      "post" : {
+        "operationId" : "cancel",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubscriptionResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "subscription-controller" ]
+      }
+    },
+    "/api/v1/me/subscription/checkout" : {
+      "post" : {
+        "operationId" : "checkout",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SubscriptionCheckoutRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SubscriptionCheckoutResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "subscription-controller" ]
       }
     },
     "/api/v1/messages/{messageId}/reactions" : {

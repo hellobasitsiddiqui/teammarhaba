@@ -5,6 +5,7 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
+import com.teammarhaba.backend.web.ConflictException;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -43,16 +44,19 @@ public class MembershipService {
     private final UserService users;
     private final MembershipProvisioner provisioner;
     private final AuditService audit;
+    private final SubscriptionRepository subscriptions;
 
     public MembershipService(
             MembershipRepository memberships,
             UserService users,
             MembershipProvisioner provisioner,
-            AuditService audit) {
+            AuditService audit,
+            SubscriptionRepository subscriptions) {
         this.memberships = memberships;
         this.users = users;
         this.provisioner = provisioner;
         this.audit = audit;
+        this.subscriptions = subscriptions;
     }
 
     /**
@@ -68,11 +72,20 @@ public class MembershipService {
     }
 
     /**
-     * Self-switch the caller's membership to {@code tier} (TM-474). Enrols first if needed, so a switch
-     * before any {@code GET /me/membership} still works. No payment gate in this slice (paid upgrades are
-     * TM-478). Idempotent: switching to the tier already held is a no-op — the row is untouched and
-     * nothing is audited. Only an actual change bumps {@code updatedAt} and records a
-     * {@link AuditAction#MEMBERSHIP_TIER_CHANGED} audit row carrying the {@code from → to} transition.
+     * Self-switch the caller's membership to {@code tier} (TM-474, gated since TM-620). Enrols first if
+     * needed, so a switch before any {@code GET /me/membership} still works. Idempotent: switching to the
+     * tier already held is a no-op — the row is untouched and nothing is audited. Only an actual change
+     * bumps {@code updatedAt} and records a {@link AuditAction#MEMBERSHIP_TIER_CHANGED} audit row carrying
+     * the {@code from → to} transition.
+     *
+     * <p><strong>The payment gate (TM-620).</strong> The old "no payment gate" shortcut is removed:
+     * switching INTO a paid tier (MONTHLY/DIAMOND) requires a subscription for exactly that tier that
+     * still entitles the caller (ACTIVE, PAST_DUE-in-dunning, or CANCELED with paid time left) — else a
+     * {@code 402} via {@link SubscriptionRequiredException}. Switching back DOWN to the free base while a
+     * subscription is still renewing is a {@code 409} ({@link ConflictException}) pointing at cancel —
+     * silently keeping the charge while dropping the benefits would be a billing trap. The subscription
+     * machinery itself never comes through here: activation/downgrade apply the tier via
+     * {@link #applyTierForSubscription}, which carries no gate.
      */
     @Transactional
     public Membership switchTier(VerifiedUser caller, MembershipTier tier) {
@@ -82,6 +95,7 @@ public class MembershipService {
 
         MembershipTier previous = membership.getTier();
         if (previous != tier) {
+            requireSwitchAllowed(user.getId(), tier);
             membership.changeTier(tier, Instant.now()); // dirty-checking flushes on commit
             audit.record(
                     caller.uid(),
@@ -89,6 +103,56 @@ public class MembershipService {
                     TARGET_MEMBERSHIP,
                     String.valueOf(user.getId()),
                     Map.of("from", previous.name(), "to", tier.name()));
+        }
+        return membership;
+    }
+
+    /**
+     * The TM-620 tier-switch gate (see {@link #switchTier}): a paid target tier needs a live
+     * subscription for that exact tier; leaving for the free base while a subscription still renews is
+     * blocked in favour of cancelling (which keeps the paid tier to the period end, then downgrades).
+     */
+    private void requireSwitchAllowed(Long userId, MembershipTier target) {
+        Subscription subscription = subscriptions.findByUserId(userId).orElse(null);
+        Instant now = Instant.now();
+        if (SubscriptionPricing.isPaidTier(target)) {
+            boolean covered =
+                    subscription != null && subscription.getTier() == target && subscription.isEntitledAt(now);
+            if (!covered) {
+                throw new SubscriptionRequiredException(
+                        "An active subscription is required for the " + target.name() + " tier — subscribe first.");
+            }
+        } else if (subscription != null && subscription.isRenewing()) {
+            throw new ConflictException(
+                    "Cancel your subscription instead — your paid tier stays until the end of the billing period.");
+        }
+    }
+
+    /**
+     * Apply a tier change driven by the subscription machinery itself (TM-620) — activation granting the
+     * paid tier, or a cancel/dunning downgrade returning the account to pay-per-event. Deliberately NOT
+     * gated by {@link #requireSwitchAllowed} (the subscription state transition is the authority here) but
+     * audited exactly like a self-switch, with a {@code via=subscription} marker so the log tells the two
+     * apart. Enrols the membership first if the account somehow has none. Idempotent: applying the tier
+     * already held changes and audits nothing.
+     *
+     * @param userId   the account whose membership follows the subscription
+     * @param tier     the tier the subscription state now grants
+     * @param actorUid the audit actor — the account's own Firebase uid (the change is on their behalf,
+     *                 whether triggered by their webhook-confirmed payment or the renewal scheduler)
+     */
+    @Transactional
+    public Membership applyTierForSubscription(Long userId, MembershipTier tier, String actorUid) {
+        Membership membership = memberships.findByUserId(userId).orElseGet(() -> enrol(userId));
+        MembershipTier previous = membership.getTier();
+        if (previous != tier) {
+            membership.changeTier(tier, Instant.now());
+            audit.record(
+                    actorUid,
+                    AuditAction.MEMBERSHIP_TIER_CHANGED,
+                    TARGET_MEMBERSHIP,
+                    String.valueOf(userId),
+                    Map.of("from", previous.name(), "to", tier.name(), "via", "subscription"));
         }
         return membership;
     }
