@@ -84,6 +84,13 @@ public class ConversationReadService {
      * per-member unread count, sort by last-activity descending (thread id as the deterministic
      * same-instant tiebreak), then window to the requested page. Totals span every membership so the
      * client's pager is accurate.
+     *
+     * <p><b>Constant query count (TM-581).</b> Last-message + unread are resolved in TWO batched
+     * queries keyed by conversation id ({@link MessageRepository#findLatestLiveMessagePerConversation}
+     * + {@link MessageRepository#unreadCountsForUser}), never a per-membership finder pair — so the
+     * whole list costs a fixed handful of queries (memberships, threads, event headings, the two
+     * batches) regardless of how many threads the caller is in, instead of the old {@code 1 + 1 + 1 +
+     * 2N} that also did full per-thread work even when the caller only asked for page 2+.
      */
     @Transactional(readOnly = true)
     public PageResponse<ConversationSummaryResponse> list(VerifiedUser caller, Pageable pageable) {
@@ -99,18 +106,29 @@ public class ConversationReadService {
                 .filter(m -> m.getMute() != MuteState.REMOVED)
                 .toList();
 
+        Set<Long> conversationIds = memberships.stream()
+                .map(ConversationMember::getConversationId)
+                .collect(Collectors.toSet());
+
         // Bulk-resolve the threads (one query) and the event headings for the derived titles (one
         // query), so title/preview assembly below doesn't re-hit those tables per row.
-        Map<Long, Conversation> threadsById = conversations
-                .findAllById(memberships.stream()
-                        .map(ConversationMember::getConversationId)
-                        .collect(Collectors.toSet()))
-                .stream()
+        Map<Long, Conversation> threadsById = conversations.findAllById(conversationIds).stream()
                 .collect(Collectors.toMap(Conversation::getId, Function.identity()));
         Map<Long, String> eventHeadingsById = eventHeadings(threadsById.values());
 
+        // The two batched, conversation-id-keyed lookups that replace the old per-membership N+1: the
+        // newest live message of every thread in one query, and every thread's per-caller unread count
+        // in one grouped query. Both are constant-cost in the caller's thread count (see method doc).
+        Map<Long, Message> lastMessagesByConversationId = lastMessages(conversationIds);
+        Map<Long, Long> unreadByConversationId = unreadCounts(userId, conversationIds);
+
         List<ConversationSummaryResponse> rows = memberships.stream()
-                .map(m -> summary(m, threadsById.get(m.getConversationId()), eventHeadingsById))
+                .map(m -> summary(
+                        m,
+                        threadsById.get(m.getConversationId()),
+                        eventHeadingsById,
+                        lastMessagesByConversationId,
+                        unreadByConversationId))
                 .filter(java.util.Objects::nonNull)
                 // Most-recently-active first; thread id descending breaks a same-instant tie.
                 .sorted(Comparator.comparing(ConversationSummaryResponse::lastActiveAt)
@@ -145,6 +163,36 @@ public class ConversationReadService {
                 .filter(m -> m.getMute() != MuteState.REMOVED)
                 .mapToLong(m -> messages.countUnread(m.getConversationId(), m.getLastReadAt()))
                 .sum();
+    }
+
+    /**
+     * The newest live message of each of the caller's threads, keyed by conversation id (TM-581) — one
+     * batched query behind the list's previews + sort key. Empty (and the query skipped) when the caller
+     * has no threads, since an empty SQL {@code IN ()} is invalid. A silent thread simply has no entry,
+     * so {@link #summary} falls back to the thread's creation instant for its sort key.
+     */
+    private Map<Long, Message> lastMessages(Set<Long> conversationIds) {
+        if (conversationIds.isEmpty()) {
+            return Map.of();
+        }
+        return messages.findLatestLiveMessagePerConversation(conversationIds).stream()
+                .collect(Collectors.toMap(Message::getConversationId, Function.identity()));
+    }
+
+    /**
+     * Every one of the caller's threads' unread counts, keyed by conversation id (TM-581) — one batched
+     * grouped query behind the list's per-thread unread values, replacing the old per-membership {@code
+     * countUnread}. A thread with nothing unread produces no row (read back as {@code 0} in {@link
+     * #summary}); skipped entirely when the caller has no threads.
+     */
+    private Map<Long, Long> unreadCounts(Long userId, Set<Long> conversationIds) {
+        if (conversationIds.isEmpty()) {
+            return Map.of();
+        }
+        return messages.unreadCountsForUser(userId).stream()
+                .collect(Collectors.toMap(
+                        MessageRepository.ConversationUnreadCount::getConversationId,
+                        MessageRepository.ConversationUnreadCount::getUnread));
     }
 
     /**
@@ -345,18 +393,27 @@ public class ConversationReadService {
                 .orElseThrow(() -> new AccessDeniedException("Not a member of this conversation."));
     }
 
-    /** Build one list row for a membership; {@code null} (skipped by the caller) if its thread vanished. */
+    /**
+     * Build one list row for a membership; {@code null} (skipped by the caller) if its thread vanished.
+     * Both the last-message preview and the unread count are read out of the pre-batched, conversation-id
+     * keyed maps (TM-581) rather than re-queried per row — so this method issues no query of its own.
+     * A thread absent from {@code lastMessagesByConversationId} is silent (fall back to its creation
+     * instant for the sort key); absent from {@code unreadByConversationId} means nothing unread ({@code
+     * 0}).
+     */
     private ConversationSummaryResponse summary(
-            ConversationMember member, Conversation thread, Map<Long, String> eventHeadingsById) {
+            ConversationMember member,
+            Conversation thread,
+            Map<Long, String> eventHeadingsById,
+            Map<Long, Message> lastMessagesByConversationId,
+            Map<Long, Long> unreadByConversationId) {
         if (thread == null) {
             return null; // defensive: a membership whose thread row is gone is simply omitted
         }
-        Message lastMessage = messages
-                .findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId())
-                .orElse(null);
+        Message lastMessage = lastMessagesByConversationId.get(thread.getId());
         // Last activity = the newest live message's instant, or the thread's own creation while silent.
         Instant lastActiveAt = lastMessage != null ? lastMessage.getCreatedAt() : thread.getCreatedAt();
-        long unread = messages.countUnread(thread.getId(), member.getLastReadAt());
+        long unread = unreadByConversationId.getOrDefault(thread.getId(), 0L);
         // Carry the caller's own self-service membership state (TM-471) so the list can render the right
         // control: `notificationsMuted` → show a muted indicator; `left` → render a rejoin row.
         return ConversationSummaryResponse.of(

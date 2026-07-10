@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -280,6 +282,93 @@ class ConversationMessageRepositoryIntegrationTest extends AbstractIntegrationTe
         four.softDelete(Instant.now());
         messages.save(four);
         assertThat(messages.countUnread(thread.getId(), newestAt)).isZero();
+    }
+
+    // ── batched list-path finders (TM-581) ────────────────────────────────────────────────────────
+
+    @Test
+    void findLatestLiveMessagePerConversationReturnsNewestLivePerThreadBatched() {
+        Conversation a = conversations.save(Conversation.adminBroadcast());
+        Conversation b = conversations.save(Conversation.adminBroadcast());
+        Conversation silent = conversations.save(Conversation.adminBroadcast()); // no live messages
+        Long author = newUser("batch-latest-author");
+
+        // Separate txns → each row a distinct DB now(), so "a-new" is unambiguously newest in a.
+        messages.save(Message.fromUser(a.getId(), author, "a-old"));
+        messages.save(Message.fromUser(a.getId(), author, "a-new"));
+        messages.save(Message.fromUser(b.getId(), author, "b-only"));
+        // A later message in b that is then soft-deleted: must NOT be the "latest" the batch keeps.
+        Message doomed = messages.save(Message.fromUser(b.getId(), author, "b-doomed"));
+        doomed.softDelete(Instant.now());
+        messages.save(doomed);
+
+        Map<Long, Message> latest = messages
+                .findLatestLiveMessagePerConversation(List.of(a.getId(), b.getId(), silent.getId()))
+                .stream()
+                .collect(Collectors.toMap(Message::getConversationId, m -> m));
+
+        // Exactly one row per thread that has a live message; the silent thread is absent.
+        assertThat(latest).containsOnlyKeys(a.getId(), b.getId());
+        assertThat(latest.get(a.getId()).getBody()).isEqualTo("a-new"); // newest live in a
+        assertThat(latest.get(b.getId()).getBody()).isEqualTo("b-only"); // soft-deleted "b-doomed" skipped
+
+        // Row-for-row identical to the single-thread finder it replaces on the list path.
+        assertThat(latest.get(a.getId()).getId())
+                .isEqualTo(messages
+                        .findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(a.getId())
+                        .orElseThrow()
+                        .getId());
+    }
+
+    @Test
+    void unreadCountsForUserGroupsPerThreadRelativeToEachCursorBatched() {
+        Long user = newUser("batch-unread-user");
+        Conversation neverRead = conversations.save(Conversation.adminBroadcast());
+        Conversation partiallyRead = conversations.save(Conversation.adminBroadcast());
+        Conversation fullyRead = conversations.save(Conversation.adminBroadcast());
+        members.save(new ConversationMember(neverRead.getId(), user, MemberRole.MEMBER));
+        ConversationMember partial =
+                members.save(new ConversationMember(partiallyRead.getId(), user, MemberRole.MEMBER));
+        ConversationMember full =
+                members.save(new ConversationMember(fullyRead.getId(), user, MemberRole.MEMBER));
+
+        // neverRead: 2 messages, null cursor → both unread.
+        messages.save(Message.fromSystem(neverRead.getId(), "n1", null));
+        messages.save(Message.fromSystem(neverRead.getId(), "n2", null));
+
+        // partiallyRead: 3 messages, cursor at the OLDEST → the two strictly-newer ones are unread.
+        messages.save(Message.fromSystem(partiallyRead.getId(), "p1", null));
+        messages.save(Message.fromSystem(partiallyRead.getId(), "p2", null));
+        messages.save(Message.fromSystem(partiallyRead.getId(), "p3", null));
+        List<Message> pOrdered =
+                messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(partiallyRead.getId());
+        partial.markRead(pOrdered.get(pOrdered.size() - 1).getCreatedAt()); // oldest = last in newest-first list
+        members.save(partial);
+
+        // fullyRead: 1 message, cursor past it → nothing unread (must be ABSENT from the grouped result).
+        messages.save(Message.fromSystem(fullyRead.getId(), "f1", null));
+        Instant fNewest = messages
+                .findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(fullyRead.getId())
+                .orElseThrow()
+                .getCreatedAt();
+        full.markRead(fNewest);
+        members.save(full);
+
+        Map<Long, Long> unread = messages.unreadCountsForUser(user).stream()
+                .collect(Collectors.toMap(
+                        MessageRepository.ConversationUnreadCount::getConversationId,
+                        MessageRepository.ConversationUnreadCount::getUnread));
+
+        // Grouped counts match the per-thread countUnread exactly; a fully-read thread yields no row,
+        // so it is read back as 0 via getOrDefault (the service's fallback).
+        assertThat(unread.get(neverRead.getId())).isEqualTo(2);
+        assertThat(unread.get(partiallyRead.getId())).isEqualTo(2);
+        assertThat(unread).doesNotContainKey(fullyRead.getId());
+        assertThat(unread.getOrDefault(fullyRead.getId(), 0L)).isZero();
+        // Cross-check against the single-thread finder the batch replaces.
+        assertThat(unread.get(neverRead.getId())).isEqualTo(messages.countUnread(neverRead.getId(), null));
+        assertThat(unread.get(partiallyRead.getId()))
+                .isEqualTo(messages.countUnread(partiallyRead.getId(), partial.getLastReadAt()));
     }
 
     @Test
