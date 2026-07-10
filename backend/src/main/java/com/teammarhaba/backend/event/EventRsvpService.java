@@ -1,6 +1,12 @@
 package com.teammarhaba.backend.event;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
+import com.teammarhaba.backend.membership.EntitlementDecision;
+import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.OrderRepository;
+import com.teammarhaba.backend.membership.OrderStatus;
+import com.teammarhaba.backend.membership.PaymentRequiredException;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
@@ -64,6 +70,17 @@ import org.springframework.transaction.annotation.Transactional;
  * by the app-level ±tolerance grace), else a {@code 409} that names the band — or, for an unset age,
  * prompts profile completion. Leaving ({@link #cancelRsvp}) is never age-gated: a user can always
  * drop out.
+ *
+ * <p><b>Paid-event join gate (TM-625)</b> — while the server-side membership flag
+ * ({@code app.membership.enabled}, TM-623) is on, a <em>new</em> landing via the direct verbs (a fresh
+ * RSVP/waitlist-join, or a claim) on an event whose entitlement resolves to {@code PAY} is refused
+ * with a {@code 402 Payment Required} unless the caller already holds a settled ({@code CONFIRMED})
+ * order for it — the join must go through checkout (TM-477/478) so the money settles first. Without
+ * this, any authenticated caller could free-join a priced/premium event, bypassing the checkout PAY
+ * gate entirely. {@code FREE}/{@code INCLUDED} entitlements join normally; the webhook-driven
+ * {@link #rsvpForConfirmedOrder} path (money already settled) is never re-gated; idempotent
+ * re-RSVPs/double-tap claims and leaving are untouched; and with the flag <em>off</em> no entitlement
+ * is resolved at all — the verbs keep their exact legacy behaviour.
  */
 @Service
 public class EventRsvpService {
@@ -74,6 +91,8 @@ public class EventRsvpService {
     static final String SPOT_ALREADY_TAKEN = "That spot has already been taken — you are still on the waitlist.";
     static final String BOOKING_CLOSED =
             "Booking has closed for this event — you can no longer join this close to when it starts.";
+    static final String PAYMENT_REQUIRED =
+            "This event requires payment — complete checkout to book your spot.";
 
     /**
      * The 409 copy for the "one active event at a time" rule, naming the event the caller is still
@@ -93,6 +112,9 @@ public class EventRsvpService {
     private final BookingCutoffPolicy bookingCutoff;
     private final EventPhasePolicy phasePolicy;
     private final EventChatLifecycleService chatLifecycle;
+    private final MembershipProperties membershipProps;
+    private final EntitlementService entitlements;
+    private final OrderRepository orders;
 
     public EventRsvpService(
             EventRepository events,
@@ -103,7 +125,10 @@ public class EventRsvpService {
             ApplicationEventPublisher publisher,
             BookingCutoffPolicy bookingCutoff,
             EventPhasePolicy phasePolicy,
-            EventChatLifecycleService chatLifecycle) {
+            EventChatLifecycleService chatLifecycle,
+            MembershipProperties membershipProps,
+            EntitlementService entitlements,
+            OrderRepository orders) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -113,6 +138,9 @@ public class EventRsvpService {
         this.bookingCutoff = bookingCutoff;
         this.phasePolicy = phasePolicy;
         this.chatLifecycle = chatLifecycle;
+        this.membershipProps = membershipProps;
+        this.entitlements = entitlements;
+        this.orders = orders;
     }
 
     /**
@@ -126,7 +154,8 @@ public class EventRsvpService {
     @Transactional
     public RsvpResult rsvp(VerifiedUser caller, Long eventId) {
         // Provision the caller from their verified token, then run the shared capacity-safe write.
-        return rsvpProvisioned(users.provision(caller), eventId);
+        // Passing the caller marks this a DIRECT join, subject to the TM-625 paid-event gate.
+        return rsvpProvisioned(users.provision(caller), eventId, caller);
     }
 
     /**
@@ -139,11 +168,16 @@ public class EventRsvpService {
      */
     @Transactional
     public RsvpResult rsvpForConfirmedOrder(User user, Long eventId) {
-        return rsvpProvisioned(user, eventId);
+        // No direct caller: this join is backed by a settled order, so the TM-625 gate never re-fires.
+        return rsvpProvisioned(user, eventId, null);
     }
 
-    /** The shared capacity-safe RSVP write for a provisioned {@code user} — see {@link #rsvp} for contract. */
-    private RsvpResult rsvpProvisioned(User user, Long eventId) {
+    /**
+     * The shared capacity-safe RSVP write for a provisioned {@code user} — see {@link #rsvp} for contract.
+     * {@code directCaller} is the verified caller on the direct-verb path (subject to the TM-625
+     * paid-event gate) and {@code null} on the confirmed-order path (money settled — never re-gated).
+     */
+    private RsvpResult rsvpProvisioned(User user, Long eventId, VerifiedUser directCaller) {
         users.lockForUpdate(user.getId()); // TM-423: user-row lock serialises this caller's GOING-landings
         Instant now = Instant.now();
         Event event = lockedVisibleEvent(eventId, now);
@@ -163,6 +197,11 @@ public class EventRsvpService {
                 .findByEventIdAndUserId(eventId, user.getId())
                 .map(existing -> new RsvpResult(existing.getState(), going, waitlisted))
                 .orElseGet(() -> {
+                    // Paid-event join gate (TM-625): only a NEW landing is gated — the idempotent
+                    // re-RSVP branch above returns the existing state without ever resolving an
+                    // entitlement, and every pre-existing guard (404/started/cutoff/age) keeps its
+                    // precedence because the gate runs last, just before the attendance write.
+                    guardPaidEventJoin(directCaller, user, eventId);
                     boolean spotFree = !event.hasCapacityLimit() || going < event.getCapacity();
                     AttendanceState state =
                             (spotFree && waitlisted == 0) ? AttendanceState.GOING : AttendanceState.WAITLISTED;
@@ -288,6 +327,11 @@ public class EventRsvpService {
         if (event.hasCapacityLimit() && going >= event.getCapacity()) {
             throw new ConflictException(SPOT_ALREADY_TAKEN);
         }
+        // Paid-event join gate (TM-625): a claim is a route into a GOING spot, so it is gated exactly
+        // like a fresh RSVP — otherwise a free waitlist landing could be promoted into a paid event
+        // without ever paying. A paid-up member (their CONFIRMED order landed them WAITLISTED via the
+        // payment webhook when the event was full) passes: their money already settled.
+        guardPaidEventJoin(caller, user, eventId);
         guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
@@ -307,6 +351,51 @@ public class EventRsvpService {
         // suppressed duplicate.
         publisher.publishEvent(new EventClaimedEvent(eventId, user.getId(), event.getHeading(), now));
         return new RsvpResult(AttendanceState.GOING, going + 1, waitlisted - 1);
+    }
+
+    /**
+     * The paid-event join gate (TM-625): refuse a direct join (a fresh RSVP/waitlist-join, or a claim)
+     * when the event actually costs the caller money they have not paid. Closes the residual deploy
+     * blocker from the TM-623 re-verify — the checkout PAY branch was gated, but these free verbs let
+     * any authenticated caller land {@code GOING} on a priced/premium event with no order and no payment.
+     *
+     * <ul>
+     *   <li><b>Flag off ({@code app.membership.enabled=false})</b> — the paid feature does not exist:
+     *       no entitlement is resolved, no gate; the verbs behave exactly as before TM-625.</li>
+     *   <li><b>Confirmed-order path ({@code directCaller == null})</b> — the payment webhook drives
+     *       {@link #rsvpForConfirmedOrder} after the money settles; re-gating it would deadlock the
+     *       paid flow, so it is exempt by construction.</li>
+     *   <li><b>{@code FREE} / {@code INCLUDED}</b> — no charge stands in the way; the join proceeds.
+     *       (Reusing {@link EntitlementService} — the tier x event rules are never re-derived here.)</li>
+     *   <li><b>{@code PAY} (and the reserved {@code UPGRADE})</b> — refused with a {@code 402} unless
+     *       the caller holds a settled ({@code CONFIRMED}) order for this event. The order check keeps
+     *       the paid waitlist flow working: a member whose paid RSVP landed {@code WAITLISTED} must
+     *       still be able to {@linkplain #claim claim} a freed spot, and a paid member's re-RSVP stays
+     *       idempotent rather than demanding a second payment.</li>
+     * </ul>
+     *
+     * <p>Runs inside the command's transaction, after every pre-existing guard, immediately before the
+     * attendance write — so no existing 404/409 outcome changes precedence, and the entitlement read
+     * (which may JIT-enrol a membership, exactly as checkout does) shares the surrounding locks.
+     */
+    private void guardPaidEventJoin(VerifiedUser directCaller, User user, Long eventId) {
+        if (directCaller == null || !membershipProps.enabled()) {
+            return; // settled-order path, or the paid feature is off — legacy behaviour, no resolution
+        }
+        EntitlementDecision decision =
+                entitlements.resolve(directCaller, eventId).decision();
+        if (decision == EntitlementDecision.FREE || decision == EntitlementDecision.INCLUDED) {
+            return; // nothing to pay — the direct join is legitimate
+        }
+        // PAY (or reserved UPGRADE): only a settled order proves the money side is done. PENDING /
+        // CANCELLED / REFUND_DUE / REFUNDED orders do not buy a join — the money never (or no longer)
+        // covers this event.
+        boolean settled = orders.findByUserIdAndEventId(user.getId(), eventId)
+                .map(order -> order.getStatus() == OrderStatus.CONFIRMED)
+                .orElse(false);
+        if (!settled) {
+            throw new PaymentRequiredException(PAYMENT_REQUIRED);
+        }
     }
 
     /**

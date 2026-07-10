@@ -96,7 +96,14 @@ public class EventController {
         return queries.detail(caller.uid(), id);
     }
 
-    /** RSVP (or re-RSVP, idempotently). Returns where the caller landed plus fresh counts. */
+    /**
+     * RSVP (or re-RSVP, idempotently). Returns where the caller landed plus fresh counts.
+     *
+     * <p>Paid-event gate (TM-625): while the server-side membership flag is on, a fresh join on an
+     * event whose entitlement resolves to {@code PAY} is a {@code 402 Payment Required} unless the
+     * caller already holds a settled order — the join must go through {@code /checkout} so the money
+     * settles first. Flag off: ungated, exactly the pre-membership behaviour.
+     */
     @PostMapping("/events/{id}/rsvp")
     RsvpResult rsvp(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
         return rsvps.rsvp(caller, id);
@@ -121,7 +128,11 @@ public class EventController {
         return rsvps.cancelRsvp(caller, id, preview);
     }
 
-    /** Claim an open spot from the waitlist — first-claim-wins, capacity-safe. */
+    /**
+     * Claim an open spot from the waitlist — first-claim-wins, capacity-safe. Subject to the same
+     * TM-625 paid-event gate as RSVP: promoting into a {@code PAY} event without a settled order is a
+     * {@code 402} (a paid-up member whose settled order landed them waitlisted claims normally).
+     */
     @PostMapping("/events/{id}/claim")
     RsvpResult claim(@AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
         return rsvps.claim(caller, id);

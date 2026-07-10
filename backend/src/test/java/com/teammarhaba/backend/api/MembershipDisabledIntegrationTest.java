@@ -4,13 +4,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.teammarhaba.backend.TestcontainersConfiguration;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.event.AttendanceState;
+import com.teammarhaba.backend.event.Event;
+import com.teammarhaba.backend.event.EventAttendance;
+import com.teammarhaba.backend.event.EventAttendanceRepository;
+import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.membership.SubscriptionRenewalScheduler;
 import com.teammarhaba.backend.payments.PaymentProvider;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserRepository;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,6 +67,15 @@ class MembershipDisabledIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private EventRepository events;
+
+    @Autowired
+    private EventAttendanceRepository attendance;
+
+    @Autowired
+    private UserRepository users;
 
     /** The payment seam, mocked — and expected to record ZERO interactions while the flag is off. */
     @MockitoBean
@@ -109,5 +129,57 @@ class MembershipDisabledIntegrationTest {
         assertThat(context.getBeanNamesForType(SubscriptionRenewalScheduler.class))
                 .as("the off-session charging scheduler must not exist while app.membership.enabled is off")
                 .isEmpty();
+    }
+
+    // ------------------------------------------------------------------ direct join verbs (TM-625)
+
+    @Test
+    void rsvpOnAPremiumEventIsUngatedWhileTheFlagIsOff() throws Exception {
+        // While the paid feature is OFF there is no paid path at all, so the RSVP verb keeps its exact
+        // pre-membership behaviour: a premium event joins directly, no entitlement gate fires, and the
+        // payment provider is never touched. (With the flag ON the same request is a 402 — proven by
+        // EventRsvpPaidGateIntegrationTest against the flag-on context.)
+        Event event = premiumEvent();
+
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(caller("uid-flag-off-rsvp")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("GOING"));
+        Mockito.verifyNoInteractions(payments);
+    }
+
+    @Test
+    void claimOnAPremiumEventIsUngatedWhileTheFlagIsOff() throws Exception {
+        // Same legacy contract for the claim verb: a waitlisted member promotes into a premium event
+        // without any payment gate while the feature is off.
+        Event event = premiumEvent();
+        Long userId = users.save(new User("uid-flag-off-claim", "uid-flag-off-claim@example.com", "Member"))
+                .getId();
+        attendance.save(new EventAttendance(event.getId(), userId, AttendanceState.WAITLISTED));
+
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/claim").with(caller("uid-flag-off-claim")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("GOING"));
+        Mockito.verifyNoInteractions(payments);
+    }
+
+    /** A PUBLISHED, visible-now premium (£15) event starting 2 days out. */
+    private Event premiumEvent() {
+        Instant now = Instant.now();
+        Long creatorId = users.save(
+                        new User("uid-flag-off-creator-" + UUID.randomUUID(), "creator@example.com", "Creator"))
+                .getId();
+        Event event = new Event(
+                "Flag off " + UUID.randomUUID(),
+                "Come along!",
+                "Marhaba Cafe",
+                "Europe/London",
+                now.plus(2, ChronoUnit.DAYS),
+                now.minus(1, ChronoUnit.HOURS),
+                now.plus(7, ChronoUnit.DAYS),
+                creatorId,
+                now);
+        event.setPricePence(1500);
+        event.setPremium(true);
+        return events.save(event);
     }
 }
