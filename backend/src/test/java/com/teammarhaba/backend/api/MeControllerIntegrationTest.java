@@ -78,7 +78,9 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.uid").value("uid-new"))
                 .andExpect(jsonPath("$.email").value("ada@example.com"))
                 .andExpect(jsonPath("$.displayName").doesNotExist())
-                .andExpect(jsonPath("$.role").value("USER"));
+                .andExpect(jsonPath("$.role").value("USER"))
+                // admin (TM-589): a default USER is not an app-admin, so the flag is false.
+                .andExpect(jsonPath("$.admin").value(false));
 
         Long firstId = users.findByFirebaseUid("uid-new").orElseThrow().getId();
 

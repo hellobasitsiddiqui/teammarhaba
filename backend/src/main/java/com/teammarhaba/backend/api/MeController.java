@@ -10,6 +10,7 @@ import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.config.TermsProperties;
 import com.teammarhaba.backend.user.ProfileUpdate;
+import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import jakarta.validation.Valid;
@@ -203,6 +204,10 @@ public class MeController {
                 user.getTimezone(),
                 user.getLocale(),
                 user.getRole().name(),
+                // admin (TM-589): the caller-context boolean the client gates admin UI on (e.g. TM-449
+                // moderation controls). Derived from the same server-owned role the `role` string reports,
+                // so the two can never disagree; ADMIN is the only elevated role today.
+                user.getRole() == Role.ADMIN,
                 user.isOnboardingCompleted(),
                 user.getTermsAcceptedVersion(),
                 user.getTermsAcceptedAt(),

@@ -459,6 +459,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "mine" : {
+            "type" : "boolean"
+          },
           "reactions" : {
             "items" : {
               "$ref" : "#/components/schemas/EmojiReactionCount"
@@ -1001,6 +1004,9 @@
         "properties" : {
           "accountState" : {
             "$ref" : "#/components/schemas/AccountState"
+          },
+          "admin" : {
+            "type" : "boolean"
           },
           "age" : {
             "format" : "int32",

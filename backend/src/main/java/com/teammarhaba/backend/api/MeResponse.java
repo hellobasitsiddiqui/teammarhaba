@@ -22,6 +22,11 @@ import java.time.Instant;
  * @param timezone             IANA timezone id (may be {@code null})
  * @param locale               BCP-47 language tag (may be {@code null})
  * @param role                 the caller's role — defaults to {@code "USER"} until claims land (TM-110)
+ * @param admin                convenience: {@code role == "ADMIN"} (TM-589) — the single caller-context
+ *                             boolean the client reads once (on {@code GET /me}) to gate app-admin UI:
+ *                             mounting the in-thread moderation controls (TM-449) and any other
+ *                             admin-only affordance, without string-comparing {@code role}. Server-derived
+ *                             from the verified token's role claim, never client-asserted.
  * @param onboardingCompleted  whether first-run onboarding is finished (TM-163); defaults to {@code false}
  * @param termsAcceptedVersion the terms version the user accepted (TM-163), or {@code null} if never
  * @param termsAcceptedAt      when that terms version was accepted (TM-163), or {@code null} if never
@@ -59,6 +64,7 @@ public record MeResponse(
         String timezone,
         String locale,
         String role,
+        boolean admin,
         boolean onboardingCompleted,
         String termsAcceptedVersion,
         Instant termsAcceptedAt,
