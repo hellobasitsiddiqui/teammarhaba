@@ -4,6 +4,8 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.CancelResult;
 import com.teammarhaba.backend.event.EventRsvpService;
 import com.teammarhaba.backend.event.RsvpResult;
+import com.teammarhaba.backend.payments.PaymentOrder;
+import com.teammarhaba.backend.payments.PaymentProvider;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import java.time.Instant;
@@ -53,23 +55,29 @@ public class CheckoutService {
     /** The 403 copy when the caller's tier is too low to attend and no per-event charge unlocks it. */
     static final String UPGRADE_TO_ATTEND = "Upgrade your membership to attend this event.";
 
+    /** The single currency the paid path charges in — order amounts are defined in GBP pence (V36). */
+    private static final String CURRENCY = "GBP";
+
     private final EntitlementService entitlements;
     private final EventRsvpService rsvps;
     private final MembershipService memberships;
     private final OrderRepository orders;
     private final UserService users;
+    private final PaymentProvider payments;
 
     public CheckoutService(
             EntitlementService entitlements,
             EventRsvpService rsvps,
             MembershipService memberships,
             OrderRepository orders,
-            UserService users) {
+            UserService users,
+            PaymentProvider payments) {
         this.entitlements = entitlements;
         this.rsvps = rsvps;
         this.memberships = memberships;
         this.orders = orders;
         this.users = users;
+        this.payments = payments;
     }
 
     /**
@@ -101,12 +109,21 @@ public class CheckoutService {
         }
 
         if (entitlement.decision() == EntitlementDecision.PAY) {
-            // Charge STUBBED here — the Revolut integration is TM-478. Record a PENDING order for the
-            // amount and return "payment required"; the RSVP is NOT created, so the caller stays
-            // unconfirmed until payment settles.
+            // PAY (TM-478): record a PENDING order, then open a REAL payment order with the provider for the
+            // amount. Persist the provider's permanent order id on our order (the webhook match key) and
+            // return its client token so the browser mounts the checkout widget. The RSVP is NOT created —
+            // the caller stays unconfirmed until the payment webhook settles the order.
+            //
+            // The provider call is inside this transaction (which holds the caller's user-row lock): if it
+            // throws — provider down / rejected — the whole checkout rolls back, leaving no orphan PENDING
+            // order and no consumed credit. The local order is saved first so its id is the merchant
+            // reference passed to the provider for reconciliation.
             Order order =
                     orders.save(new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.PENDING, now));
-            return CheckoutResult.paymentRequired(order);
+            PaymentOrder providerOrder =
+                    payments.createOrder(entitlement.amountPence(), CURRENCY, String.valueOf(order.getId()));
+            order.setPaymentReference(payments.name(), providerOrder.id());
+            return CheckoutResult.paymentRequired(order, providerOrder.token());
         }
 
         // FREE / INCLUDED -> frictionless confirm. Do the real RSVP first (all capacity/eligibility guards
@@ -124,6 +141,44 @@ public class CheckoutService {
         Order order =
                 orders.save(new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.CONFIRMED, now));
         return CheckoutResult.confirmed(order, rsvp);
+    }
+
+    /**
+     * Settle a PAY checkout on a verified payment webhook (TM-478) — the other half of the PAY path. Moves
+     * the local order {@code PENDING → CONFIRMED} and performs the RSVP that {@link #checkout} held back, so
+     * the caller is finally confirmed to the event. Reuses the same capacity-safe RSVP write, so every
+     * booking-cutoff / age-gate / one-active-event / capacity guard still applies at settle time.
+     *
+     * <p><strong>Idempotent.</strong> A repeat webhook (Revolut retries, or a double delivery) is a no-op:
+     * the caller's user-row lock serialises concurrent deliveries, and {@link Order#confirmPaid} only
+     * transitions a still-{@code PENDING} order — an already-{@code CONFIRMED} order (or one reversed by an
+     * in-window cancel) confirms nothing and performs no second RSVP. An unknown provider order id (never
+     * created here, or from another environment) is silently ignored.
+     *
+     * @param providerOrderId the payment provider's permanent order id from the webhook (the match key)
+     */
+    @Transactional
+    public void confirmPayment(String providerOrderId) {
+        // Resolve the order once to learn which user to lock, then re-read UNDER that user's lock so a
+        // concurrent duplicate delivery serialises and sees the committed CONFIRMED state (the same
+        // user-then-event lock ordering as checkout()/cancel(), so the paths can never deadlock).
+        Long userId =
+                orders.findByProviderOrderId(providerOrderId).map(Order::getUserId).orElse(null);
+        if (userId == null) {
+            return; // unknown provider order — nothing of ours to confirm (idempotent no-op)
+        }
+        users.lockForUpdate(userId);
+
+        Order order = orders.findByProviderOrderId(providerOrderId).orElse(null);
+        if (order == null || !order.confirmPaid(Instant.now())) {
+            // Gone, already confirmed (repeat webhook), or reversed by an in-window cancel — no-op.
+            return;
+        }
+
+        // Payment settled → perform the held-back RSVP. The caller is Revolut, not a signed-in user, so we
+        // load the account provisioned at checkout time by id and drive the already-provisioned RSVP write.
+        User user = users.getById(order.getUserId());
+        rsvps.rsvpForConfirmedOrder(user, order.getEventId());
     }
 
     /**

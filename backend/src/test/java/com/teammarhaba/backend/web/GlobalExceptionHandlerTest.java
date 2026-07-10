@@ -173,6 +173,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.membership.OrderQueryService orderQueryService;
 
+    // PaymentWebhookController's /payments/revolut/webhook route (TM-478) needs a PaymentWebhookService —
+    // supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.payments.PaymentWebhookService paymentWebhookService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

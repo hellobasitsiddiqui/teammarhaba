@@ -453,6 +453,9 @@
           "paymentRequired" : {
             "type" : "boolean"
           },
+          "paymentToken" : {
+            "type" : "string"
+          },
           "rsvp" : {
             "$ref" : "#/components/schemas/RsvpResult"
           }
@@ -3783,6 +3786,42 @@
           }
         },
         "tags" : [ "meta-controller" ]
+      }
+    },
+    "/api/v1/payments/revolut/webhook" : {
+      "post" : {
+        "operationId" : "revolutWebhook",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Revolut-Signature",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Revolut-Request-Timestamp",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "format" : "byte",
+                "type" : "string"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "payment-webhook-controller" ]
       }
     },
     "/api/v1/ping" : {

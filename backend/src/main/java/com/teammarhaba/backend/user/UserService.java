@@ -106,6 +106,19 @@ public class UserService {
     }
 
     /**
+     * Load an existing account by its surrogate id (TM-478). Used by the payment-webhook confirm path,
+     * which knows the buyer only by the {@code user_id} stored on the order (the caller is the payment
+     * provider, not a signed-in user, so there is no {@link VerifiedUser} to {@link #provision}). The
+     * account was already provisioned at checkout time, so a missing row is an invariant breach and fails
+     * loudly rather than silently skipping the RSVP.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public User getById(Long userId) {
+        return users.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("No user for id " + userId));
+    }
+
+    /**
      * Provision the caller (as {@link #provision}) and stamp {@code last_active_at = now()} (TM-164).
      * This backs {@code GET /api/v1/me}: every authenticated read advances our own "last active"
      * marker — the one piece of account state we own (Firebase reports last <em>login</em>, not last

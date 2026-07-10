@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.EventRsvpService;
+import com.teammarhaba.backend.payments.PaymentProvider;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ class CheckoutServiceTest {
         EventRsvpService rsvps = mock(EventRsvpService.class);
         MembershipService memberships = mock(MembershipService.class);
         OrderRepository orders = mock(OrderRepository.class);
+        PaymentProvider payments = mock(PaymentProvider.class);
 
         User user = mock(User.class);
         when(user.getId()).thenReturn(42L);
@@ -38,14 +40,14 @@ class CheckoutServiceTest {
         when(entitlements.resolve(any(), anyLong()))
                 .thenReturn(new Entitlement(EntitlementDecision.UPGRADE, 0, EntitlementReason.PAY_PREMIUM));
 
-        CheckoutService checkout = new CheckoutService(entitlements, rsvps, memberships, orders, users);
+        CheckoutService checkout = new CheckoutService(entitlements, rsvps, memberships, orders, users, payments);
         VerifiedUser caller = new VerifiedUser("uid-upgrade", "upgrade@example.com");
 
         assertThatThrownBy(() -> checkout.checkout(caller, 7L))
                 .isInstanceOf(UpgradeRequiredException.class)
                 .hasMessage(CheckoutService.UPGRADE_TO_ATTEND);
 
-        // The UPGRADE path is a hard gate: no order is recorded and no RSVP is attempted.
-        verifyNoInteractions(orders, rsvps);
+        // The UPGRADE path is a hard gate: no order is recorded, no RSVP, and no payment order created.
+        verifyNoInteractions(orders, rsvps, payments);
     }
 }

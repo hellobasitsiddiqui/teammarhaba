@@ -125,7 +125,25 @@ public class EventRsvpService {
      */
     @Transactional
     public RsvpResult rsvp(VerifiedUser caller, Long eventId) {
-        User user = users.provision(caller);
+        // Provision the caller from their verified token, then run the shared capacity-safe write.
+        return rsvpProvisioned(users.provision(caller), eventId);
+    }
+
+    /**
+     * RSVP an <em>already-provisioned</em> user (TM-478 payment confirm) — the identical capacity-safe
+     * write as {@link #rsvp(VerifiedUser, Long)}, for a caller resolved by id rather than a Firebase token.
+     * The payment webhook has no {@link VerifiedUser} (the caller is the payment provider, not the user),
+     * so {@code CheckoutService.confirmPayment} loads the account provisioned at checkout time and drives
+     * the RSVP that PAY held back until the money settled. Joins the confirm's transaction (propagation
+     * REQUIRED) so the order-confirm and the RSVP commit atomically.
+     */
+    @Transactional
+    public RsvpResult rsvpForConfirmedOrder(User user, Long eventId) {
+        return rsvpProvisioned(user, eventId);
+    }
+
+    /** The shared capacity-safe RSVP write for a provisioned {@code user} — see {@link #rsvp} for contract. */
+    private RsvpResult rsvpProvisioned(User user, Long eventId) {
         users.lockForUpdate(user.getId()); // TM-423: user-row lock serialises this caller's GOING-landings
         Instant now = Instant.now();
         Event event = lockedVisibleEvent(eventId, now);

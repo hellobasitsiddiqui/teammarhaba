@@ -35,7 +35,7 @@ import {
 
 /** The screen container id (the `<section>` this module owns in index.html). */
 const SCREEN_ID = "membership-checkout-screen";
-/** The placeholder Pay mount point id — the seam the Revolut widget (TM-478) will fill. */
+/** The Pay mount point id — the seam the Revolut checkout widget mounts into (TM-478). */
 const PAY_MOUNT_ID = "membership-checkout-pay-mount";
 /** Where the "Upgrade to attend" action sends the user — the membership/tier screen (TM-480). */
 const MEMBERSHIP_ROUTE = "#/membership";
@@ -62,37 +62,27 @@ function badgeModifier(kind) {
 }
 
 /**
- * Build the placeholder Pay mount point — the disabled, "coming soon" seam the Revolut card widget
- * (TM-478) drops into. It is a real disabled control (not a dead link), announced unavailable via
- * aria-disabled, mirroring the "Coming soon" store-badge pattern. TM-478 replaces the mount's children
- * with the live widget and enables payment; the `data-provider="revolut"` marks the intended provider.
+ * Build the Pay mount point — the seam the real Revolut card widget (TM-478) drops into. It carries a
+ * charge line, an empty widget host the RevolutCheckout.js card field mounts into on demand, and an
+ * aria-live status line for progress/errors. Empty + hidden until the caller chooses to pay (see
+ * {@link startPayment}); the `data-provider="revolut"` marks the provider.
  *
- * The `amountPence` is now SHOWN here (TM-606 follow-up): previously this ignored its argument and the
- * charge only appeared on the badge, so the Pay seam gave no hint of what the card step would take. We
- * surface the exact charge both as a dedicated line and on the (disabled) button. A null/absent/zero
- * amount (only the Free / Included / Upgrade states carry none, and those never reveal this Pay seam)
- * falls back to the generic copy.
- * @param {number|null} amountPence the charge to display alongside the (future) card entry.
+ * The `amountPence` is SHOWN here (TM-606): the exact charge appears as a dedicated line so the Pay seam
+ * states what the card step will take. A null/absent/zero amount (only the Free / Included / Upgrade
+ * states carry none, and those never reveal this Pay seam) falls back to the generic copy.
+ * @param {number|null} amountPence the charge to display alongside the card entry.
  * @returns {HTMLElement}
  */
 function buildPayMount(amountPence) {
   const hasAmount = Number.isFinite(amountPence) && amountPence > 0;
   const priceText = hasAmount ? formatPrice(amountPence) : null;
-  const children = [el("p", { class: "tm-checkout-pay-note", text: "Card payment is coming soon." })];
-  // Show the exact charge in the mount itself, not only on the badge (TM-606).
-  if (hasAmount) {
-    children.push(el("p", { class: "tm-checkout-pay-amount", text: `You'll pay ${priceText}.` }));
-  }
-  children.push(
-    el("button", {
-      type: "button",
-      class: "tm-btn tm-checkout-pay-btn",
-      disabled: true,
-      "aria-disabled": "true",
-      text: hasAmount ? `Pay ${priceText} by card` : "Pay by card",
-    }),
-  );
-  return el("div", { id: PAY_MOUNT_ID, class: "tm-checkout-pay-mount tm-wobble", dataset: { provider: "revolut" } }, children);
+  return el("div", { id: PAY_MOUNT_ID, class: "tm-checkout-pay-mount tm-wobble", dataset: { provider: "revolut" } }, [
+    el("p", { class: "tm-checkout-pay-note", text: hasAmount ? `Pay ${priceText} by card` : "Pay by card" }),
+    // The RevolutCheckout.js card field is mounted into this host on demand (startPayment).
+    el("div", { class: "tm-checkout-pay-widget" }),
+    // Progress / error copy — polite live region so a screen reader announces status changes.
+    el("p", { class: "tm-checkout-pay-status", "aria-live": "polite", text: "" }),
+  ]);
 }
 
 /**
@@ -100,9 +90,9 @@ function buildPayMount(amountPence) {
  *   • CONFIRM → a "Reserve my place" button (no payment);
  *   • PAY     → a "Continue to payment" button that reveals the Pay mount (TM-478 placeholder);
  *   • UPGRADE → an "Upgrade to attend" link to the membership/tier screen (TM-480).
- * The handler builds the canonical checkout payload from the core; the actual RSVP/charge network call
- * is wired by a later ticket (the checkout screen is not routed yet), so CONFIRM/PAY only log + expose
- * the payload for now while UPGRADE navigates.
+ * PAY runs the real Revolut checkout (TM-478): {@link startPayment} creates the order server-side and
+ * mounts the card widget with the returned token. CONFIRM's frictionless RSVP wiring is future work (the
+ * screen is not routed yet), so it exposes the payload; UPGRADE navigates.
  * @param {object} state a resolvePriceState() result.
  * @param {object} event the event being checked out.
  * @returns {HTMLElement}
@@ -122,16 +112,154 @@ function buildAction(state, event) {
     class: "tm-btn tm-checkout-action",
     text: isPay ? "Continue to payment" : "Reserve my place",
     onClick: () => {
-      const payload = checkoutPayload(event, state);
       if (isPay) {
-        // Reveal the Pay mount (Revolut placeholder until TM-478). The RSVP+charge call is future work.
-        const mount = document.getElementById(PAY_MOUNT_ID);
-        if (mount) mount.hidden = false;
+        // Real Revolut checkout (TM-478): create the order server-side, then mount the card widget.
+        startPayment(event, state);
+        return;
       }
-      // The RSVP/checkout network call lands in a later ticket; expose the payload for that wiring.
-      console.info("[membership-checkout] checkout intent:", payload);
+      // CONFIRM's frictionless RSVP call lands in a later ticket; expose the payload for that wiring.
+      console.info("[membership-checkout] checkout intent:", checkoutPayload(event, state));
     },
   });
+}
+
+/** Read the client payment config (TM-478): the sandbox Revolut PUBLIC key + widget mode + SDK URL. */
+function paymentsConfig() {
+  const cfg = (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG) || {};
+  return cfg.payments && typeof cfg.payments === "object" ? cfg.payments : {};
+}
+
+// Memoised load of the Revolut SDK so repeated pay attempts reuse one <script>.
+let revolutSdkPromise = null;
+
+/**
+ * Load the Revolut checkout SDK (embed.js) from the configured sandbox CDN, once. Injects a PLAIN
+ * external <script> — not a fingerprinted local ES module, so the deploy fingerprinter (TM-144) leaves
+ * it untouched — and resolves with the global `RevolutCheckout(token, mode)` once available. The load
+ * promise is memoised; a failed load clears it so a later attempt can retry. Rejects if the URL is
+ * absent or the script fails to load.
+ * @returns {Promise<Function>} the global RevolutCheckout loader.
+ */
+function loadRevolutSdk() {
+  if (typeof window !== "undefined" && typeof window.RevolutCheckout === "function") {
+    return Promise.resolve(window.RevolutCheckout);
+  }
+  if (revolutSdkPromise) return revolutSdkPromise;
+  const src = paymentsConfig().revolutScriptUrl;
+  revolutSdkPromise = new Promise((resolve, reject) => {
+    if (!src || typeof document === "undefined") {
+      reject(new Error("Revolut checkout SDK is not configured."));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => {
+      if (typeof window.RevolutCheckout === "function") resolve(window.RevolutCheckout);
+      else reject(new Error("Revolut checkout SDK loaded but RevolutCheckout is unavailable."));
+    };
+    script.onerror = () => {
+      revolutSdkPromise = null; // allow a retry on a transient CDN failure
+      reject(new Error("Could not load the Revolut checkout SDK."));
+    };
+    document.head.appendChild(script);
+  });
+  return revolutSdkPromise;
+}
+
+/** Set the Pay mount's aria-live status line (progress / error copy). No-op if the mount is gone. */
+function setPayStatus(mount, text) {
+  const status = mount && mount.querySelector(".tm-checkout-pay-status");
+  if (status) status.textContent = text;
+}
+
+/**
+ * Reflect a settled payment in the Pay mount (TM-478): the RSVP is confirmed server-side by the payment
+ * webhook, so the client just replaces the card widget with a paid confirmation. Purely cosmetic.
+ */
+function reflectPaid(mount, text) {
+  if (!mount) return;
+  clear(mount);
+  mount.append(el("p", { class: "tm-checkout-pay-status tm-checkout-pay-paid", "aria-live": "polite", text }));
+}
+
+/**
+ * Run the PAY flow (TM-478): create the checkout order server-side (`api.checkout`), then mount the
+ * Revolut card field with the returned order token and charge on submit. On success the RSVP is confirmed
+ * server-side by the payment webhook; the client reflects the paid state. Every failure renders an inline,
+ * NON-throwing status message — a payment hiccup must never white-screen the checkout screen.
+ * @param {object} event the event being paid for.
+ * @param {object} state the resolved price state (carries amountPence for the button label).
+ */
+async function startPayment(event, state) {
+  const mount = typeof document !== "undefined" ? document.getElementById(PAY_MOUNT_ID) : null;
+  if (!mount) return;
+  mount.hidden = false;
+  setPayStatus(mount, "Starting secure card payment…");
+
+  let result;
+  try {
+    result = await api.checkout(event?.id);
+  } catch (err) {
+    setPayStatus(mount, `Could not start payment: ${err?.message ?? err}`);
+    return;
+  }
+
+  // A frictionless confirm slipped through (e.g. an entitlement change) — reflect it, no card needed.
+  if (result && result.paymentRequired === false) {
+    reflectPaid(mount, "You're confirmed for this event.");
+    return;
+  }
+  const token = result && result.paymentToken;
+  if (!token) {
+    setPayStatus(mount, "Payment could not be initialised. Please try again.");
+    return;
+  }
+
+  try {
+    await mountRevolutCard(mount, token, state);
+  } catch (err) {
+    setPayStatus(mount, `Payment is unavailable right now: ${err?.message ?? err}`);
+  }
+}
+
+/**
+ * Mount the Revolut card field into the Pay mount and wire a Pay button that submits it (TM-478). Loads
+ * the SDK, initialises it with the order `token` + configured sandbox mode, renders the card field into
+ * the widget host, and charges on the Pay button. `onSuccess` reflects the paid state; `onError` surfaces
+ * the reason inline. Built against the documented sandbox RevolutCheckout.js card-field contract — the
+ * exact success/submit callback shape is an API-shape assumption flagged for the live smoke test.
+ * @param {HTMLElement} mount the Pay mount element.
+ * @param {string} token the Revolut order token from checkout.
+ * @param {object} state the resolved price state (amountPence for the button label).
+ */
+async function mountRevolutCard(mount, token, state) {
+  const RevolutCheckout = await loadRevolutSdk();
+  const mode = paymentsConfig().revolutMode || "sandbox";
+  const instance = await RevolutCheckout(token, mode);
+
+  const host = mount.querySelector(".tm-checkout-pay-widget");
+  if (host) clear(host);
+  const priceText =
+    Number.isFinite(state?.amountPence) && state.amountPence > 0 ? formatPrice(state.amountPence) : null;
+  const payBtn = el("button", {
+    type: "button",
+    class: "tm-btn tm-checkout-pay-btn",
+    text: priceText ? `Pay ${priceText}` : "Pay",
+  });
+
+  const cardField = instance.createCardField({
+    target: host,
+    onSuccess: () => reflectPaid(mount, "Payment received — you're confirmed for this event."),
+    onError: (message) => setPayStatus(mount, `Payment failed: ${message?.message ?? message ?? "please try again"}`),
+  });
+
+  payBtn.addEventListener("click", () => {
+    setPayStatus(mount, "Processing payment…");
+    cardField.submit();
+  });
+  if (host) host.append(payBtn);
+  setPayStatus(mount, "Enter your card details to pay.");
 }
 
 /**

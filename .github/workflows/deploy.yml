@@ -316,6 +316,51 @@ jobs:
           echo "secrets=${MAIL_SECRETS}" >> "$GITHUB_OUTPUT"
           echo "env=${MAIL_ENV}" >> "$GITHUB_OUTPUT"
 
+      # Resolve the Revolut Merchant API (membership £5 paid path) config — gated on the secret(s)
+      # EXISTING, the SAME "impossible to footgun" pattern as MAIL above (TM-478).
+      #
+      # WHY GATED, not hardcoded: `--set-secrets=REVOLUT_SECRET_KEY=teammarhaba-revolut-sandbox-secret:latest`
+      # FAILS THE WHOLE DEPLOY if that Secret Manager secret doesn't exist. Minting + pasting the sandbox
+      # Secret key is the HUMAN half (TM-599, secret-split) and may not be done when this lands — and it
+      # need NOT be, because the whole paid path is behind the OFF `membership` flag. So we probe and wire
+      # each Revolut secret only when present; absent ⇒ add nothing and the deploy stays GREEN:
+      #   - REVOLUT_API_BASE  ALWAYS set (plain env, non-sensitive) → the sandbox base, so a flipped flag
+      #                       hits sandbox by default; go-live overrides it to merchant.revolut.com.
+      #   - secret PRESENT    → add REVOLUT_SECRET_KEY (create-order bearer) as a Secret Manager reference.
+      #   - webhook secret PRESENT → add REVOLUT_WEBHOOK_SIGNING_SECRET (verifies the Revolut-Signature HMAC).
+      #                       Needed for the webhook to accept a live sandbox payment; until it exists every
+      #                       webhook is rejected (fail-closed) — harmless while the flag is off.
+      # Env names match application.yml exactly: REVOLUT_SECRET_KEY→app.payments.revolut.secret-key,
+      # REVOLUT_API_BASE→…api-base, REVOLUT_WEBHOOK_SIGNING_SECRET→…webhook-signing-secret. Secret values
+      # are passed by Secret Manager *name* only — never touching CI, the repo, or the logs (same no-mask
+      # property as DB_PASSWORD/MAIL_PASSWORD). The runtime SA teammarhaba-run needs secretAccessor on both
+      # Revolut secrets when they exist — see infra/gcp/secrets-env.md.
+      - name: Resolve Revolut config (gate on secret existing — TM-478/TM-599)
+        id: revolut
+        run: |
+          set -euo pipefail
+          REVOLUT_SECRETS=""
+          # Always point the app at the sandbox base (non-sensitive). Go-live swaps this to merchant.revolut.com.
+          REVOLUT_ENV="REVOLUT_API_BASE=https://sandbox-merchant.revolut.com"
+          if gcloud secrets describe teammarhaba-revolut-sandbox-secret --project="${PROJECT}" >/dev/null 2>&1; then
+            echo "Secret teammarhaba-revolut-sandbox-secret found — wiring Revolut create-order (TM-478)."
+            REVOLUT_SECRETS="REVOLUT_SECRET_KEY=teammarhaba-revolut-sandbox-secret:latest"
+            echo "- Revolut payments: **secret wired** (create-order enabled when the flag flips)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Secret teammarhaba-revolut-sandbox-secret NOT found — deploying WITHOUT the Revolut secret. Create it (TM-599) to enable the paid path; see infra/gcp/secrets-env.md."
+            echo "- Revolut payments: **secret absent** (paid path inert; create it per TM-599)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The webhook signing secret is a SEPARATE secret (generated on the Revolut dashboard when the
+          # webhook is created), gated independently so either can land first without red-failing the deploy.
+          if gcloud secrets describe teammarhaba-revolut-sandbox-webhook-secret --project="${PROJECT}" >/dev/null 2>&1; then
+            echo "Secret teammarhaba-revolut-sandbox-webhook-secret found — wiring webhook signature verification."
+            REVOLUT_SECRETS="${REVOLUT_SECRETS:+${REVOLUT_SECRETS},}REVOLUT_WEBHOOK_SIGNING_SECRET=teammarhaba-revolut-sandbox-webhook-secret:latest"
+          else
+            echo "::warning::Secret teammarhaba-revolut-sandbox-webhook-secret NOT found — webhooks will be rejected until it exists (TM-599)."
+          fi
+          echo "secrets=${REVOLUT_SECRETS}" >> "$GITHUB_OUTPUT"
+          echo "env=${REVOLUT_ENV}" >> "$GITHUB_OUTPUT"
+
       # Deploy the immutable SHA-tagged image (EFFECTIVE_SHA, resolved above — HEAD when its
       # image exists, else the newest ancestor that has one; TM-194) as a ZERO-TRAFFIC
       # CANDIDATE revision (TM-270). The atomicity contract — the fix for the TM-269 outage:
@@ -369,11 +414,13 @@ jobs:
         env:
           MAIL_SECRETS: ${{ steps.mail.outputs.secrets }}
           MAIL_ENV: ${{ steps.mail.outputs.env }}
+          REVOLUT_SECRETS: ${{ steps.revolut.outputs.secrets }}
+          REVOLUT_ENV: ${{ steps.revolut.outputs.env }}
         run: |
           set -euo pipefail
-          # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD (empty -> no trailing comma).
-          SECRETS="DB_PASSWORD=teammarhaba-db-app-password:latest${MAIL_SECRETS:+,${MAIL_SECRETS}}"
-          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }}${MAIL_ENV:+,${MAIL_ENV}}"
+          # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD + Revolut secrets (empty -> no stray comma).
+          SECRETS="DB_PASSWORD=teammarhaba-db-app-password:latest${MAIL_SECRETS:+,${MAIL_SECRETS}}${REVOLUT_SECRETS:+,${REVOLUT_SECRETS}}"
+          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }}${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}"
 
           # --no-traffic is only meaningful when a previous revision holds traffic; on the
           # first-ever deploy of the service (fresh replay) the first revision must serve.

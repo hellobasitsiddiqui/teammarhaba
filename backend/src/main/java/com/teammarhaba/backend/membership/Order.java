@@ -51,6 +51,22 @@ public class Order {
     @Column(name = "status", nullable = false)
     private OrderStatus status;
 
+    /**
+     * Which payment provider holds the money for a PAY order ({@code "revolut"}); {@code null} for a
+     * FREE/INCLUDED £0 order that never touched a gateway (TM-478, {@code V37}). Set once, on the PAY
+     * checkout branch, alongside {@link #providerOrderId}.
+     */
+    @Column(name = "provider")
+    private String provider;
+
+    /**
+     * The provider's <b>permanent</b> order id for a PAY order (Revolut order UUID); {@code null} for a
+     * £0 order (TM-478, {@code V37}). The key an inbound webhook is matched back on (unique, partial) and
+     * the handle a later refund/reconcile uses. Set once, on the PAY checkout branch.
+     */
+    @Column(name = "provider_order_id")
+    private String providerOrderId;
+
     /** DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity. */
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
@@ -99,6 +115,40 @@ public class Order {
 
     public OrderStatus getStatus() {
         return status;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public String getProviderOrderId() {
+        return providerOrderId;
+    }
+
+    /**
+     * Record the payment provider + its permanent order id on a PAY order (TM-478), set once when the
+     * checkout PAY branch creates the provider order. This is what an inbound webhook is matched back on
+     * (PENDING → CONFIRMED) and what a later refund/reconcile uses.
+     */
+    public void setPaymentReference(String provider, String providerOrderId) {
+        this.provider = provider;
+        this.providerOrderId = providerOrderId;
+    }
+
+    /**
+     * Settle a PAY order on a verified payment webhook (TM-478): {@code PENDING → CONFIRMED}. Only a
+     * still-{@code PENDING} order transitions — a repeat webhook for an already-{@code CONFIRMED} (or
+     * reversed) order is a no-op, so a redelivered notification never double-confirms or resurrects a
+     * cancelled order. Returns {@code true} iff this call actually confirmed the order (so the caller
+     * performs the held-back RSVP exactly once), {@code false} when there was nothing to do.
+     */
+    public boolean confirmPaid(Instant when) {
+        if (status != OrderStatus.PENDING) {
+            return false;
+        }
+        this.status = OrderStatus.CONFIRMED;
+        this.updatedAt = when;
+        return true;
     }
 
     public Instant getCreatedAt() {
