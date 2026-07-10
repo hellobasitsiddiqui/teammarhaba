@@ -1587,6 +1587,14 @@
         },
         "type" : "object"
       },
+      "TypingRequest" : {
+        "properties" : {
+          "typing" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
       "UnreadTotalResponse" : {
         "properties" : {
           "total" : {
@@ -2770,6 +2778,35 @@
           }
         },
         "tags" : [ "conversation-stream-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/typing" : {
+      "post" : {
+        "operationId" : "typing",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TypingRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "202" : {
+            "description" : "Accepted"
+          }
+        },
+        "tags" : [ "conversation-typing-controller" ]
       }
     },
     "/api/v1/conversations/{id}/unmute" : {

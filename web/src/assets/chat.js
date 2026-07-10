@@ -41,6 +41,7 @@ import {
   getConversationMessages,
   markConversationRead,
   postConversationMessage,
+  signalTyping,
   openConversationStream,
   muteConversation,
   unmuteConversation,
@@ -82,7 +83,12 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   replyTo: null, composerInput: null, replyPreviewEl: null,
   // Reactions (TM-462): in-flight `${messageId}:${emoji}` keys, so a rapid double-tap on the same chip
   // is ignored while its react/un-react round-trip is pending (the optimistic paint already reflects it).
-  reacting: new Set() };
+  reacting: new Set(),
+  // Typing indicators (TM-465): `typists` is the live "who's typing" list folded from received `typing`
+  // SSE events (each { userId, name, expiresAt }, expired by the ticker); `typingEl` is the persistent
+  // indicator line under the body; `typingTimer` is the 1s expiry ticker; `lastTypingSentAt` debounces
+  // our OWN outgoing signal (epoch-ms of the last one we sent, 0 = none this composing burst).
+  typists: [], typingEl: null, typingTimer: null, lastTypingSentAt: 0 };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
@@ -97,6 +103,11 @@ function closeLiveStream() {
     liveStream.close();
     liveStream = null;
   }
+  // Tear down the typing indicator too (TM-465): stop the expiry ticker and forget any typists, so a
+  // left thread neither keeps ticking nor carries a stale "X is typing…" into the next view.
+  stopTypingExpiry();
+  thread.typists = [];
+  thread.lastTypingSentAt = 0;
 }
 
 /**
@@ -406,16 +417,23 @@ async function renderThread(view, id) {
   thread.composerInput = null;
   thread.replyPreviewEl = null;
   thread.reacting = new Set(); // no in-flight reaction toggles carried across a thread open (TM-462)
+  thread.typists = []; // no typists carried across a thread open (TM-465)
+  thread.lastTypingSentAt = 0; // fresh debounce window for our own outgoing typing signal
 
   const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
   thread.bodyEl = body;
+  const typingIndicator = buildTypingIndicator();
+  thread.typingEl = typingIndicator;
   const compose = buildComposer(id, meta);
 
-  // The loaded thread carries the self-service actions (mute / leave, TM-471) in its header.
-  clear(view).append(threadHeader(meta, buildThreadActions(id, meta.typeKey)), body, compose);
+  // The loaded thread carries the self-service actions (mute / leave, TM-471) in its header. The typing
+  // indicator (TM-465) sits between the message body and the composer, so "X is typing…" reads directly
+  // above where you're about to reply.
+  clear(view).append(threadHeader(meta, buildThreadActions(id, meta.typeKey)), body, typingIndicator, compose);
   repaintBody(); // paints the loaded messages (or the empty state) + scrolls to the newest
   wirePush(); // foreground-push → immediate poll while a thread is open
   startThreadPoll(id);
+  startTypingExpiry(); // TM-465: expire stale typists on a 1s ticker while the thread is open
   markThreadRead(id);
   openLiveThread(id, mine); // TM-464: live SSE append on top of the poll (best-effort)
 }
@@ -450,9 +468,83 @@ function openLiveThread(id, token) {
       thread.messages = core.upsertMessage(thread.messages, m);
       repaintBody();
     },
+    // Typing indicator (TM-465): fold each received `typing` signal into the typist list (keyed + expiring
+    // in chat-core) and repaint the "X is typing…" line. Ephemeral — never touches thread.messages, so it
+    // can't affect the durable timeline. The typist is excluded server-side, so this is never our own.
+    onTyping: (raw) => {
+      if (token !== renderToken || thread.id !== String(id)) return; // drop late/other-thread frames
+      thread.typists = core.applyTypingEvent(thread.typists, raw, Date.now());
+      paintTyping();
+    },
     // A dropped/refused stream is non-fatal: the history is already loaded and re-syncs via the poll.
     onError: (err) => console.warn("[chat] live stream unavailable:", err?.message ?? err),
   });
+}
+
+/* ─────────────────────────────── Typing indicator (TM-465) ─────────────────────────────────────── */
+
+/** The persistent "X is typing…" line under the thread body — hidden until someone's typing. */
+function buildTypingIndicator() {
+  return el("div", { class: "tm-chat-typing", "data-testid": "chat-typing", hidden: true, "aria-live": "polite" }, [
+    el("span", { class: "tm-chat-typing-text" }),
+  ]);
+}
+
+/**
+ * Repaint the typing line from `thread.typists`: the aggregated label ("X is typing…", "X and Y are
+ * typing…", "X, Y and N others are typing…") from chat-core, or hidden when nobody is typing. Pure
+ * reflection of state, so both a received signal and the expiry ticker route through here.
+ */
+function paintTyping() {
+  const box = thread.typingEl;
+  if (!box) return;
+  const label = core.typingLabel(thread.typists, Date.now());
+  const text = box.querySelector(".tm-chat-typing-text");
+  if (text) text.textContent = label;
+  box.hidden = label === "";
+}
+
+/** Start the 1s ticker that expires stale typists and repaints (idempotent — clears any prior first). */
+function startTypingExpiry() {
+  stopTypingExpiry();
+  if (typeof window === "undefined") return;
+  thread.typingTimer = window.setInterval(() => {
+    const before = thread.typists.length;
+    thread.typists = core.pruneTypists(thread.typists, Date.now());
+    // Only repaint when the set actually shrank — an unchanged tick leaves the DOM (and label) alone.
+    if (thread.typists.length !== before) paintTyping();
+  }, 1000);
+}
+
+/** Stop the typing-expiry ticker. */
+function stopTypingExpiry() {
+  if (thread.typingTimer != null && typeof window !== "undefined") window.clearInterval(thread.typingTimer);
+  thread.typingTimer = null;
+}
+
+/**
+ * Handle a keystroke in the composer (TM-465): while there's text, send a DEBOUNCED "I'm typing" signal
+ * (at most one every core.TYPING_DEBOUNCE_MS, decided by core.shouldSignalTyping); when the box is
+ * cleared, send an explicit "stopped" so others' indicators clear at once. Best-effort — signalTyping
+ * never throws.
+ */
+function handleTypingInput(id, value) {
+  if (value.trim().length === 0) {
+    stopOutgoingTyping(id); // box emptied → clear others' indicator immediately
+    return;
+  }
+  const now = Date.now();
+  if (core.shouldSignalTyping(thread.lastTypingSentAt, now)) {
+    thread.lastTypingSentAt = now;
+    signalTyping(id, true); // fire-and-forget; the debounce keeps this to ~one call per window
+  }
+}
+
+/** Send an explicit "stopped typing" signal if we'd started one this burst, and reset the debounce. */
+function stopOutgoingTyping(id) {
+  if (!thread.lastTypingSentAt) return; // never signalled this burst — nothing to stop
+  thread.lastTypingSentAt = 0;
+  signalTyping(id, false);
 }
 
 /**
@@ -516,7 +608,10 @@ function buildComposer(id, meta) {
   paintReplyPreview(); // reflect any pre-existing reply target (normally none on a fresh composer)
 
   const syncEnabled = () => { sendBtn.disabled = !core.validateDraft(input.value).canSend; };
-  input.addEventListener("input", syncEnabled);
+  input.addEventListener("input", () => {
+    syncEnabled();
+    handleTypingInput(id, input.value); // TM-465: debounced typing signal while composing
+  });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     send(id, form, input, sendBtn);
@@ -608,6 +703,7 @@ async function send(id, form, input, sendBtn) {
   thread.sending = true;
   sendBtn.disabled = true;
   input.value = "";
+  stopOutgoingTyping(id); // TM-465: the message is sent → clear our typing signal for the others
   const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   thread.pending.push(core.pendingMessage(draft.value, { localId, replyTo: replyTarget }));
   repaintBody(); // optimistic echo, dimmed + "Sending…"

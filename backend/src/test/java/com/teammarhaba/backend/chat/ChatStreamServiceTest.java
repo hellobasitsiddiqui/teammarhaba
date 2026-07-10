@@ -42,6 +42,35 @@ class ChatStreamServiceTest {
     }
 
     @Test
+    void broadcastExcludingReachesOtherMembersButNeverTheExcludedSender() throws IOException {
+        // Two members connected to the same thread, each stream registered under its owner's uid. A typing
+        // signal (TM-465) must reach the OTHER member but never echo back to the typist's own stream.
+        SseEmitter sender = mock(SseEmitter.class);
+        SseEmitter other = mock(SseEmitter.class);
+        service.register(CONVERSATION_A, sender, "uid-sender");
+        service.register(CONVERSATION_A, other, "uid-other");
+
+        int delivered = service.broadcastExcluding(CONVERSATION_A, ChatStreamService.EVENT_TYPING, "typing", "uid-sender");
+
+        assertThat(delivered).isEqualTo(1); // only the other member, not the sender
+        verify(other).send(any(SseEventBuilder.class));
+        verify(sender, never()).send(any(SseEventBuilder.class)); // the typist never hears their own typing
+    }
+
+    @Test
+    void broadcastExcludingWithNoOwnerRecordedDeliversToEveryStream() throws IOException {
+        // A stream opened without an owner (the legacy open(id) path) is never excluded — the uid simply
+        // doesn't match, so a broadcast still reaches it. Guards the owner-tracking additive change.
+        SseEmitter anonymous = mock(SseEmitter.class);
+        service.register(CONVERSATION_A, anonymous); // no owner uid
+
+        int delivered = service.broadcastExcluding(CONVERSATION_A, ChatStreamService.EVENT_TYPING, "typing", "uid-sender");
+
+        assertThat(delivered).isEqualTo(1);
+        verify(anonymous).send(any(SseEventBuilder.class));
+    }
+
+    @Test
     void broadcastIsScopedToItsConversationAndNeverLeaksToOthers() throws IOException {
         SseEmitter inThread = mock(SseEmitter.class);
         SseEmitter otherThread = mock(SseEmitter.class);
