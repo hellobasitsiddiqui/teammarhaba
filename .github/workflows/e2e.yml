@@ -112,6 +112,17 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/teammarhaba
           SPRING_DATASOURCE_USERNAME: app
           SPRING_DATASOURCE_PASSWORD: devpassword
+          # Disable the per-client API rate limiter (TM-158) for the browser-e2e backend (TM-595). The
+          # limiter defaults to 120 req/min PER CLIENT, keyed by uid. The browser suite is a synthetic
+          # load, not a real user: EVERY admin spec (admin-walkthrough, broadcast-admin, theme-visual,
+          # admin-events, …) signs in as the ONE seeded `e2e-admin` uid, so they all share a single
+          # bucket, and each authenticated page-load bursts several parallel /me + badge + unread-total
+          # calls on auth-resolve. Cumulatively that blows the 120/min budget — the tests running LAST
+          # (mobile admin-events) then get a 429 on the edit-PATCH / list-reload and fail. This mirrors
+          # exactly what application-test.yml already does for the integration suite (rate-limit off so
+          # the shared MockMvc client isn't throttled); the limiter itself keeps its own dedicated
+          # coverage in RateLimitFilterIntegrationTest, so nothing is lost by exempting the UI journeys.
+          API_RATE_LIMIT_ENABLED: "false"
           # Events e2e (TM-400): run the waitlist offer-cascade sweep (TM-397) on a FAST cadence so the
           # "un-RSVP → a freed spot is offered → claim" path lands within seconds instead of the ~60s
           # prod default. The events spec still polls (bounded) for the claim affordance, so this only
