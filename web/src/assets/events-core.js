@@ -838,3 +838,36 @@ export function eventChatEntryModel({ detail, me, conversations = [] } = {}) {
     reason: "This event's chat isn't ready yet — check back once it gets going.",
   };
 }
+
+// ------------------------------------------------------------------ paid per-event checkout (TM-624)
+//
+// The events RSVP flow (events.js) must not join a paid/premium event for free once the membership
+// feature ships. The authoritative per-event decision comes from GET /events/{id}/entitlement (TM-476):
+// `{ decision: FREE|INCLUDED|PAY|UPGRADE, amountPence, reason }`. This tiny pure predicate is the single
+// place that decides whether a join has to detour through the membership checkout screen (create the
+// order + take payment) instead of the direct free RSVP — kept here so that decision is unit-testable
+// without a DOM (events.js itself can't be node-tested: it imports api.js → the Firebase CDN).
+
+/** The per-event entitlement decisions the backend can return (mirrors EntitlementDecision). */
+export const ENTITLEMENT_DECISION = Object.freeze({
+  FREE: "FREE", // no charge — a free event, or the caller's first-event credit covers it
+  INCLUDED: "INCLUDED", // no charge — the caller's membership tier already covers it
+  PAY: "PAY", // the caller must pay the event's price → route through checkout
+  UPGRADE: "UPGRADE", // reserved contract value; the TM-476 resolver no longer produces it
+});
+
+/**
+ * Does RSVPing this event require the caller to go through the paid checkout, per their resolved
+ * entitlement? True ONLY for a PAY decision — the one case where a direct free RSVP would let the
+ * caller attend a paid/premium event without being charged. FREE / INCLUDED are genuinely free to the
+ * caller (the normal RSVP is correct); UPGRADE is a reserved decision the backend no longer emits (a
+ * tier below Diamond on a premium event now resolves to PAY), so it is treated as "not a paid charge
+ * here" and falls through to the normal RSVP rather than a checkout dead-end. Read defensively — an
+ * absent / malformed entitlement (e.g. a failed lookup) is NOT PAY, so the flow degrades to the direct
+ * RSVP with the backend as the real gate rather than blocking the user.
+ * @param {{decision?: string}} [entitlement] a GET /events/{id}/entitlement result
+ * @returns {boolean}
+ */
+export function requiresPaidCheckout(entitlement) {
+  return entitlement?.decision === ENTITLEMENT_DECISION.PAY;
+}

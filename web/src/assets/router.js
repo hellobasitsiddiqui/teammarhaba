@@ -48,6 +48,13 @@ import { enterMembershipTier, membershipEnabled } from "./membership-tier.js";
 // #/membership/subscribe/{TIER}. Same flag-gating rule as the tier screen — with the flag off the
 // route isn't known here and the screen stays inert.
 import { enterMembershipSubscribe } from "./membership-subscribe.js";
+// My tickets / purchases + receipts screen (TM-481 built it; TM-624 wires it live through this router).
+// Like the tier screen (TM-606), router.js now owns its show/hide + auth guard + mount lifecycle + nav
+// reveal; the screen's old self-managed hashchange listener + nav reveal were removed in TM-624. Gated by
+// the SAME `membershipEnabled()` (config.flags.membership, shipped OFF) so the whole route is inert until
+// the flag flips — with the flag off `#/receipts` is not a known route here and falls through to the auth
+// default. `membershipEnabled` is imported once from membership-tier.js (the single flag source).
+import { enterMembershipReceipts } from "./membership-receipts.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
@@ -116,6 +123,14 @@ const NOTIFICATIONS = "#/notifications";
 // screen stays inert. Kept OUT of the static PROTECTED set (which is flag-independent) and handled by the
 // flag-aware isMembershipRoute() instead, so a flag-off build never even treats it as a membership route.
 const MEMBERSHIP = "#/membership";
+// My tickets / purchases + receipts (TM-481 screen, wired live TM-624) — protected, any signed-in,
+// onboarded user (per-user order history; NOT admin-only). membership-receipts.js paints it into
+// #membership-receipts-screen and exposes enterMembershipReceipts(); the WHOLE route is gated behind the
+// membership feature flag via isReceiptsRoute() below — while the flag is off `#/receipts` is not a known
+// route, so it falls through to the auth default and the screen stays inert. Kept OUT of the static
+// PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
+// the membership tier route.
+const RECEIPTS = "#/receipts";
 const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
@@ -155,6 +170,13 @@ function isMembershipRoute(hash) {
 function isMembershipSubscribeRoute(hash) {
   return membershipEnabled() && (hash === `${MEMBERSHIP}/subscribe` || hash.startsWith(`${MEMBERSHIP}/subscribe/`));
 }
+/** True for the receipts screen route (TM-624) — but ONLY a known route while the membership feature flag
+ *  is ON. With the flag OFF this is always false, so `#/receipts` is treated as an unknown hash (falls
+ *  through to the auth default) and the whole screen stays inert until the flag flips. Mirrors
+ *  isMembershipRoute exactly — one flag, gated in this one place. */
+function isReceiptsRoute(hash) {
+  return membershipEnabled() && hash === RECEIPTS;
+}
 /** A route requires sign-in when it's in the exact protected set, a profile route, the events or chat
  *  area, or the admin event form (ADMIN-only, so protected too) — union of TM-514 + TM-515. */
 function isProtected(route) {
@@ -169,7 +191,11 @@ function isProtected(route) {
     // Membership tier screen (TM-606) — protected (any signed-in user) when the flag is on.
     isMembershipRoute(route) ||
     // Subscribe checkout (TM-620) — protected (any signed-in user) when the flag is on.
-    isMembershipSubscribeRoute(route)
+    isMembershipSubscribeRoute(route) ||
+    // Receipts / my-tickets screen (TM-624) — protected (any signed-in user) when the flag is on. This
+    // gives it the auth guard the TM-481 self-managed version lacked (a signed-out deep link now bounces
+    // to login + returns after sign-in, instead of firing GET /me/orders with no token).
+    isReceiptsRoute(route)
   );
 }
 
@@ -225,6 +251,11 @@ let membershipActive = false;
 // the route string rather than a boolean so moving between the two tier variants
 // (#/membership/subscribe/MONTHLY ↔ /DIAMOND) re-mounts with the right tier.
 let membershipSubscribeActive = null;
+// Receipts / my-tickets screen (TM-624): whether it's currently mounted, so we mount + fetch the caller's
+// orders once on entry into #/receipts and reset on leaving so a future entry re-fetches (fresh orders
+// after a checkout elsewhere). Only ever entered while the flag is on. Same single-route, mount-once
+// lifecycle as the membership tier screen.
+let receiptsActive = false;
 // Home feed (TM-512): mount the "Events near you" feed / empty-home into #auth-signed-in on entry,
 // reset on leaving so returning to Home re-fetches (fresh counts / RSVP state after acting elsewhere).
 let homeActive = false;
@@ -266,6 +297,10 @@ function currentRoute() {
   // Subscribe checkout (TM-620): #/membership/subscribe/{TIER}, same flag rule — the raw hash is
   // returned so the tier segment survives for the screen to parse.
   if (isMembershipSubscribeRoute(hash)) return hash;
+  // Receipts / my-tickets (TM-624): the exact #/receipts route, but ONLY when the membership flag is ON
+  // — with the flag off this predicate is false, so #/receipts falls through to the auth default below
+  // and the screen stays inert (mirrors the membership tier route).
+  if (isReceiptsRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -335,6 +370,11 @@ function render() {
   // and never triggers render(), so this never fights it. Inert while the flag is OFF — nothing opens it.
   const checkoutView = $("membership-checkout-screen");
   if (checkoutView) checkoutView.hidden = true;
+  // Receipts / my-tickets screen (TM-624) — shown for the exact #/receipts route. `route` is only ever
+  // RECEIPTS while the flag is on (isReceiptsRoute gates currentRoute()), so with the flag off this stays
+  // hidden and the screen is inert (mirrors the membership tier screen above).
+  const receiptsView = $("membership-receipts-screen");
+  if (receiptsView) receiptsView.hidden = route !== RECEIPTS;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
   // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
@@ -365,6 +405,12 @@ function render() {
   // while gated, and whenever the flag is off, so it stays inert until the flag flips (TM-478).
   const navMembership = $("nav-membership");
   if (navMembership) navMembership.hidden = !(signedIn && membershipEnabled()) || gated;
+  // The My-tickets / receipts link (TM-481 screen, wired live TM-624) — same rule as the Membership link:
+  // shown for a signed-in, onboarded user ONLY while the membership flag is on, hidden signed-out / while
+  // gated / whenever the flag is off. This replaces the reveal membership-receipts.js used to do on its
+  // own at boot (which ignored the signed-out + gated states), so it now respects them like every other link.
+  const navReceipts = $("nav-receipts");
+  if (navReceipts) navReceipts.hidden = !(signedIn && membershipEnabled()) || gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
@@ -611,6 +657,19 @@ function guard() {
     }
   } else {
     membershipSubscribeActive = null;
+  }
+  // Receipts / my-tickets screen (TM-624): mount + fetch the caller's orders on entry into #/receipts,
+  // reset on leaving so a future entry re-fetches. `route === RECEIPTS` is only ever true while the flag
+  // is on (currentRoute gates it via isReceiptsRoute), and a signed-out user is already bounced to login
+  // by the isProtected() check above, so this only mounts for a signed-in user with the flag on. Same
+  // mount-once lifecycle as the membership tier screen.
+  if (route === RECEIPTS) {
+    if (!receiptsActive) {
+      receiptsActive = true;
+      enterMembershipReceipts();
+    }
+  } else {
+    receiptsActive = false;
   }
   // Home feed (TM-512): mount the "Events near you" feed / empty-home on entry into #/home, reset on
   // leaving so re-entering (e.g. tapping the Home tab after RSVPing elsewhere) re-fetches. Repeated

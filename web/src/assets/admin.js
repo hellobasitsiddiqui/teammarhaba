@@ -342,6 +342,17 @@ async function changeRole(user) {
   });
 }
 
+/**
+ * Is the membership feature flag ON? Reads `window.TEAMMARHABA_CONFIG.flags.membership` (owned by TM-480,
+ * shipped OFF) — the SAME single flag every other membership surface gates on (membership-tier.js et al).
+ * Used to keep the admin user-detail Subscription panel (TM-620) inert while the epic is OFF (TM-624), so
+ * the epic's "all membership UI ships behind the OFF flag" invariant holds in the admin console too.
+ */
+function membershipEnabled() {
+  const cfg = opsConfig();
+  return Boolean(cfg.flags && cfg.flags.membership);
+}
+
 function openDetail(user) {
   const body = [
     el("dl", { class: "tm-detail" }, [
@@ -378,13 +389,22 @@ function openDetail(user) {
     ]),
     // Subscription state + billing history (TM-620): what the account pays for and every charge
     // attempt, straight off GET /admin/users/{id}/subscription. Loaded lazily like the activity log.
-    el("h3", { class: "tm-detail-h", text: "Subscription" }),
-    el("p", { class: "tm-muted", id: "tm-subscription" }, "Loading…"),
+    // GATED behind config.flags.membership (TM-624): the whole membership epic ships inert behind the
+    // OFF flag, so while it's off the admin modal shows NO Subscription section and fires no extra
+    // GET .../subscription request per open — the panel (and its loadSubscription() call below) only
+    // appears once the flag flips, exactly like every other membership surface.
+    ...(membershipEnabled()
+      ? [
+          el("h3", { class: "tm-detail-h", text: "Subscription" }),
+          el("p", { class: "tm-muted", id: "tm-subscription" }, "Loading…"),
+        ]
+      : []),
     el("h3", { class: "tm-detail-h", text: "Recent activity" }),
     el("p", { class: "tm-muted", id: "tm-activity" }, "Loading…"),
   ];
   const { close } = modal(`User · ${displayIdentifier(user)}`, body);
-  loadSubscription(user);
+  // Only fetch the subscription when the panel is actually shown (flag ON) — no leaked request while OFF.
+  if (membershipEnabled()) loadSubscription(user);
   loadActivity(user);
   return close;
 }
