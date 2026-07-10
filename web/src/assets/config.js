@@ -26,6 +26,12 @@
 // The values below are TeamMarhaba's worked example (mirroring docs/agents/CONSTANTS.md); the deploy
 // injects them into the built config.js the same way it injects `apiBaseUrl` (TM-142), so a re-skinned
 // deploy.yml/CONSTANTS flows through. Any left blank simply hides its link (admin-ops-core.js).
+//
+// `flags` (TM-480) is the web feature-flag block — plain booleans read as `config.flags.<name>` that
+// gate not-yet-launched screens behind an off switch so they can ship as inert dead code and be turned
+// on later without a code change. `flags.membership` gates the whole Membership slice (the TM-480 tier
+// screen + the TM-479 pricing/checkout screen, which READS this same flag); it ships OFF. This ticket
+// is the flag owner (adds the key); a deploy can flip it the same way it overrides other config values.
 window.TEAMMARHABA_CONFIG = Object.freeze({
     apiBaseUrl: "http://127.0.0.1:8080",
     authEmulatorHost: null,
@@ -36,4 +42,9 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
     opsService: "teammarhaba-backend",
     opsRepo: "hellobasitsiddiqui/teammarhaba",
     opsJiraBoardUrl: "https://10xai.atlassian.net/jira/software/projects/TM/boards/1",
+    flags: Object.freeze({
+        // Membership slice (TM-457): OFF until the tier (TM-480) + pricing/checkout (TM-479) screens
+        // and the backend (TM-474) all land. Flip to true to reveal the membership screens.
+        membership: false,
+    }),
 });
