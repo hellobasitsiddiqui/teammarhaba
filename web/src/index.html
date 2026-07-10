@@ -15,6 +15,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/assets/styles.css" />
+    <!-- Membership pricing/checkout screen styles (TM-479). Ships in its OWN stylesheet (not styles.css)
+         so the screen never conflicts with the sibling membership-tier screen (TM-480). Token-only, so
+         it inherits the Paper theme; inert until the OFF membership flag is turned on. -->
+    <link rel="stylesheet" href="/assets/membership-checkout.css" />
 </head>
 <body>
     <!-- Web boot screen (TM-381): a lightweight Paper-themed loading beat shown between the native-splash
@@ -378,6 +382,15 @@
              visibility. Distinct from the foreground-push bell/inbox (notification-center.js). -->
         <section id="notifications-view" class="notifications-view" aria-label="Notifications" hidden></section>
 
+        <!-- Membership pricing/checkout screen (TM-479, epic group-membership). The per-event price
+             screen — Free (your first) / Included (your tier) / £5 (or the premium price) / Upgrade to
+             attend — plus the checkout action and the placeholder Pay mount the Revolut widget (TM-478)
+             will fill. membership-checkout.js (the module script below) builds the card into this
+             container via window.tmMembershipCheckout; it stays hidden behind the OFF membership flag
+             (config.flags.membership, owned by TM-480) until the epic ships. Its own distinct spot so it
+             never collides with the sibling membership-tier screen (TM-480). -->
+        <section id="membership-checkout-screen" class="membership-checkout-view" aria-label="Checkout" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
@@ -588,5 +601,11 @@
          web layer owns the hide). Fully inert on the browser/PWA build (no native SplashScreen plugin
          → no-op), so the web experience is unaffected. -->
     <script type="module" src="/assets/splash.js"></script>
+    <!-- Membership pricing/checkout (TM-479). ES module: reads config.flags.membership (OFF by default,
+         added by TM-480) and self-registers window.tmMembershipCheckout so the events screen can open
+         the per-event price/checkout card. Imports api as a namespace and calls at runtime, so it links
+         cleanly on branches where api.getMembership() (TM-474) isn't present yet. Fully inert while the
+         flag is OFF — nothing renders and no api call is made. -->
+    <script type="module" src="/assets/membership-checkout.js"></script>
 </body>
 </html>
