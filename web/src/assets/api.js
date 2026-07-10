@@ -361,6 +361,28 @@ export async function switchTier(tier) {
 }
 
 /**
+ * GET /api/v1/me/orders — the caller's checkout orders newest-first (TM-481), the data behind the
+ * "my tickets / purchases" screen. Read-only: it lists the orders checkout (TM-477) already recorded for
+ * the signed-in caller. Each order is `{ id, eventId, amountPence, status, createdAt }` where `status` is
+ * one of `PENDING | CONFIRMED | CANCELLED | REFUND_DUE` and `createdAt` is an ISO-8601 instant. A caller
+ * who has never checked anything out gets an empty array (never a 404). Identity comes from the Bearer
+ * token, never the client.
+ *
+ * @returns {Promise<Array<{id: number, eventId: number, amountPence: number, status: string, createdAt: string}>>}
+ *   the caller's orders newest-first (possibly empty).
+ * @throws {Error} on a non-2xx response (a 401 will already have refreshed/redirected via apiFetch).
+ */
+export async function getMyOrders() {
+  const response = await apiFetch("/api/v1/me/orders", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/orders failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
  * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
  * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending
@@ -1217,6 +1239,7 @@ if (typeof window !== "undefined") {
     acceptTerms,
     getMembership,
     switchTier,
+    getMyOrders,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,

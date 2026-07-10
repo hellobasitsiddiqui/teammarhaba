@@ -169,6 +169,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.membership.CheckoutService checkoutService;
 
+    // OrderController's /me/orders route (TM-481) needs an OrderQueryService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.membership.OrderQueryService orderQueryService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

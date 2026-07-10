@@ -1316,6 +1316,10 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
           "eventId" : {
             "format" : "int64",
             "type" : "integer"
@@ -3658,6 +3662,27 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/orders" : {
+      "get" : {
+        "operationId" : "myOrders",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/OrderView"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "order-controller" ]
       }
     },
     "/api/v1/me/resend-verification" : {
