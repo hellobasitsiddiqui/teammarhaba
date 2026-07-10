@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
@@ -22,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.AccessDeniedException;
 
 /**
  * The TM-620 tier-switch payment gate: the old "no payment gate" shortcut in
@@ -49,7 +51,9 @@ class MembershipServiceTierGateTest {
         provisioner = mock(MembershipProvisioner.class);
         audit = mock(AuditService.class);
         subscriptions = mock(SubscriptionRepository.class);
-        service = new MembershipService(memberships, users, provisioner, audit, subscriptions);
+        // Server-side membership flag ON for the ordinary gate tests; the flag-OFF 403 has its own test.
+        service = new MembershipService(
+                memberships, users, provisioner, audit, subscriptions, new MembershipProperties(true));
 
         User user = mock(User.class);
         when(user.getId()).thenReturn(42L);
@@ -172,5 +176,48 @@ class MembershipServiceTierGateTest {
 
         assertThat(result.getTier()).isEqualTo(MembershipTier.MONTHLY);
         verify(audit, never()).record(anyString(), any(), anyString(), anyString(), any(Map.class));
+    }
+
+    // ------------------------------------------------------------------ server-side flag (TM-623)
+
+    @Test
+    void switchIntoPaidTierIs403WhileTheServerSideMembershipFlagIsOff() {
+        // Even a caller who somehow holds a matching ACTIVE subscription cannot switch into a paid
+        // tier while the feature is off — the paid tiers do not exist server-side.
+        MembershipService gated = new MembershipService(
+                memberships, users, provisioner, audit, subscriptions, new MembershipProperties(false));
+        Subscription active = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", Instant.now());
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(active));
+
+        assertThatThrownBy(() -> gated.switchTier(CALLER, MembershipTier.MONTHLY))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThat(membership.getTier()).isEqualTo(MembershipTier.PAY_PER_EVENT); // nothing changed
+        verify(audit, never()).record(anyString(), any(), anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    void switchingDownToTheFreeBaseStaysAvailableWhileTheFlagIsOff() {
+        // A feature rollback must never trap anyone in a paid tier: the DOWN switch is ungated. (The
+        // renewing-subscription 409 doesn't apply here — no subscription row exists.)
+        MembershipService gated = new MembershipService(
+                memberships, users, provisioner, audit, subscriptions, new MembershipProperties(false));
+        membership.changeTier(MembershipTier.MONTHLY, Instant.now());
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+
+        Membership result = gated.switchTier(CALLER, MembershipTier.PAY_PER_EVENT);
+
+        assertThat(result.getTier()).isEqualTo(MembershipTier.PAY_PER_EVENT);
+    }
+
+    @Test
+    void applyTierForSubscriptionStaysUngatedWhileTheFlagIsOff() {
+        // The subscription machinery remains the authority even mid-rollback: a lapse/downgrade (or a
+        // heal of money already taken) must still be able to apply the tier it decides.
+        MembershipService gated = new MembershipService(
+                memberships, users, provisioner, audit, subscriptions, new MembershipProperties(false));
+
+        Membership result = gated.applyTierForSubscription(42L, MembershipTier.DIAMOND, "uid-42");
+
+        assertThat(result.getTier()).isEqualTo(MembershipTier.DIAMOND);
     }
 }

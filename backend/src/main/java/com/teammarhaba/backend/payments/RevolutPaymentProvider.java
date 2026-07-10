@@ -68,6 +68,14 @@ public class RevolutPaymentProvider implements PaymentProvider {
      */
     private static final Set<String> SETTLED_EVENTS = Set.of("ORDER_COMPLETED", "ORDER_AUTHORISED");
 
+    /**
+     * Replay window (TM-623): how far a webhook's {@code Revolut-Request-Timestamp} may deviate from
+     * the server clock before the delivery is rejected. The timestamp is inside the signed payload, so
+     * an attacker can't forge a fresh one — but WITHOUT this check any captured signed delivery would
+     * verify forever. 5 minutes matches Revolut's own guidance and absorbs normal clock skew + retry lag.
+     */
+    private static final Duration MAX_WEBHOOK_AGE = Duration.ofMinutes(5);
+
     private final RevolutProperties props;
     private final ObjectMapper json;
     private final HttpClient http;
@@ -105,14 +113,20 @@ public class RevolutPaymentProvider implements PaymentProvider {
     }
 
     @Override
-    public String createCustomer(String email, String fullName) {
+    public String createCustomer(String email, String phone, String fullName) {
         // Register the account with Revolut so the widget's card-save has a Customer to attach the method
-        // to (TM-620). Only non-blank fields are sent — a phone-only account has no email and Revolut
-        // accepts a customer with either identifier. Endpoint per the Merchant API customers reference:
-        // POST {base}/api/customers {email, full_name} → {id, …}.
+        // to (TM-620). Only non-blank fields are sent. The phone number is included (TM-623) because a
+        // phone-only account — a mainline, supported sign-in path — has no email and often no display
+        // name; without the phone the request body would be literally {} and the registration (and with
+        // it the whole subscribe flow for those users) would hinge on Revolut accepting an anonymous
+        // customer. Endpoint per the Merchant API customers reference:
+        // POST {base}/api/customers {email, phone, full_name} → {id, …}.
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         if (email != null && !email.isBlank()) {
             body.put("email", email);
+        }
+        if (phone != null && !phone.isBlank()) {
+            body.put("phone", phone);
         }
         if (fullName != null && !fullName.isBlank()) {
             body.put("full_name", fullName);
@@ -123,6 +137,31 @@ public class RevolutPaymentProvider implements PaymentProvider {
             throw new PaymentProviderException("Revolut create-customer response missing id");
         }
         return id;
+    }
+
+    @Override
+    public void cancelOrder(String providerOrderId) {
+        // Void an unpaid order (TM-623): POST /api/orders/{id}/cancel per the Merchant API reference.
+        // Called best-effort when the local flow abandons an order (a re-pointed Subscribe checkout, a
+        // cancelled PENDING PAY order) so its still-live widget token can no longer capture money that
+        // would reconcile to nothing. A cancel of an already-completed order is refused by Revolut —
+        // the caller logs and moves on (the settle webhook then handles the completed payment).
+        postJson("/api/orders/" + providerOrderId + "/cancel", Map.of(), "cancel-order");
+    }
+
+    @Override
+    public void refund(String providerOrderId, int amountMinor, String currency, String reference) {
+        // Return captured money (TM-623): POST /api/orders/{id}/refund with the minor-unit amount, per
+        // the Merchant API refund reference. Drives OrderStatus.REFUND_DUE — the state that previously
+        // had no execution path at all. A non-2xx (already refunded, too late, wrong amount) throws and
+        // the order stays REFUND_DUE, keeping the debt visible and retryable.
+        postJson(
+                "/api/orders/" + providerOrderId + "/refund",
+                Map.of(
+                        "amount", amountMinor,
+                        "currency", currency,
+                        "merchant_order_ext_ref", reference == null ? "" : reference),
+                "refund-order");
     }
 
     @Override
@@ -168,15 +207,25 @@ public class RevolutPaymentProvider implements PaymentProvider {
     public Optional<String> findMerchantSavedPaymentMethod(String customerId) {
         // GET /api/customers/{id}/payment_methods → the customer's saved methods; only one saved with
         // saved_for=MERCHANT can be charged off-session (the widget's savePaymentMethodFor:"merchant"
-        // save). The LAST matching entry is used — the most recently saved card wins after a re-subscribe.
+        // save). "Most recently saved wins" after a re-subscribe: prefer the entry with the LATEST
+        // created_at when the field is present (ISO-8601 sorts lexicographically), falling back to array
+        // position — response ordering alone is an undocumented assumption (TM-623), and picking an old
+        // entry could charge an expired card while a fresh one sits saved.
         JsonNode node = getJson("/api/customers/" + customerId + "/payment_methods", "list-payment-methods");
         String found = null;
+        String foundCreatedAt = null;
         if (node.isArray()) {
             for (JsonNode method : node) {
                 String savedFor = method.path("saved_for").asText("").toUpperCase(Locale.ROOT);
                 String id = method.path("id").asText(null);
-                if ("MERCHANT".equals(savedFor) && id != null && !id.isBlank()) {
+                if (!"MERCHANT".equals(savedFor) || id == null || id.isBlank()) {
+                    continue;
+                }
+                String createdAt = method.path("created_at").asText("");
+                // Later created_at wins; equal/absent timestamps keep the old "later array entry wins".
+                if (found == null || createdAt.compareTo(foundCreatedAt) >= 0) {
                     found = id;
+                    foundCreatedAt = createdAt;
                 }
             }
         }
@@ -216,8 +265,9 @@ public class RevolutPaymentProvider implements PaymentProvider {
     /**
      * The common request scaffold every Merchant API call shares: the Secret key as a Bearer token, the
      * dated {@code Revolut-Api-Version} header and JSON content negotiation. Fails loudly (rather than
-     * firing an unauthenticated request) when no secret key is configured — unreachable while the
-     * membership flag is off, so this only guards a misconfigured live boot.
+     * firing an unauthenticated request) when no secret key is configured — the money paths are gated by
+     * the SERVER-SIDE membership flag (TM-623), so this guards a misconfigured live boot after the flag
+     * flips (the web-only flag never actually made these calls unreachable).
      */
     private HttpRequest.Builder authorisedRequest(String path) {
         if (props.secretKey().isBlank()) {
@@ -286,6 +336,25 @@ public class RevolutPaymentProvider implements PaymentProvider {
         }
         if (!verified) {
             log.warn("Rejecting Revolut webhook: signature did not verify");
+            return Optional.empty();
+        }
+
+        // Freshness (TM-623), checked AFTER the signature so only authentic-but-stale deliveries are
+        // measured: a replayed capture of a genuine delivery must not stay valid forever. The header is
+        // epoch MILLISECONDS per the Revolut docs; a 10-digit value is tolerated as epoch seconds so a
+        // unit mismatch fails safe (rejected as stale) rather than wildly misreading the age.
+        long timestampMs;
+        try {
+            timestampMs = Long.parseLong(timestampHeader.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Rejecting Revolut webhook: timestamp header did not parse");
+            return Optional.empty();
+        }
+        if (timestampMs < 100_000_000_000L) {
+            timestampMs *= 1000; // looks like epoch seconds — normalise to milliseconds
+        }
+        if (Math.abs(System.currentTimeMillis() - timestampMs) > MAX_WEBHOOK_AGE.toMillis()) {
+            log.warn("Rejecting Revolut webhook: timestamp outside the {} replay window", MAX_WEBHOOK_AGE);
             return Optional.empty();
         }
 

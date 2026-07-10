@@ -224,16 +224,28 @@ app:
     refill-tokens: ${API_RATE_LIMIT_REFILL_TOKENS:120}       # tokens replenished each refill-period
     refill-period: ${API_RATE_LIMIT_REFILL_PERIOD:1m}        # window over which refill-tokens are added back
     max-tracked-clients: ${API_RATE_LIMIT_MAX_TRACKED_CLIENTS:100000}  # hard cap on tracked keys (bounds the limiter)
+  # SERVER-SIDE membership feature flag (TM-623). The web `membership` flag only hides UI — every
+  # money-moving backend endpoint stayed reachable via curl while it was "off". This flag is the
+  # backend's own gate: subscription checkout/cancel 404, paid tier switches and the per-event PAY
+  # checkout branch 403, and the renewal scheduler bean is not created at all while it is false.
+  # DEFAULT OFF (fail-safe): deploy.yml sets MEMBERSHIP_ENABLED explicitly; flip it together with the
+  # web flag at launch. Read-only membership/subscription/entitlement reads are NOT gated.
+  membership:
+    enabled: ${MEMBERSHIP_ENABLED:false}
   # Subscription renewals + dunning (TM-620): a fixed-delay @Scheduled tick (SubscriptionRenewalScheduler)
   # that charges due subscriptions off-session (merchant-initiated, via the saved Revolut card) and applies
   # the dunning policy on failures. `enabled: false` skips creating the scheduler bean entirely (the test
-  # profile does this so integration tests drive the service directly). With the membership flag off there
-  # are no subscription rows, so the scheduler is inert in prod until the slice ships. Cadence + dunning
+  # profile does this so integration tests drive the service directly). Cadence + dunning
   # knobs are tunables, not secrets: renewals are date-based, so the 5-minute default scan is generous;
   # max-retries × retry-interval-hours is the grace window a failing card gets before the downgrade to
   # pay-per-event (3 × 48h ≈ six days — the "retry over a few days" the product decision asks for).
+  #
+  # KILL SWITCH (TM-623): the scheduler is OPT-IN — it charges saved cards off-session, so its bean
+  # only exists when BOTH this `enabled` AND app.membership.enabled above are explicitly true (the
+  # default here is now FALSE and the @ConditionalOnProperty is matchIfMissing=false). deploy.yml
+  # declares both envs explicitly so the prod state is never an accident of a missing variable.
   subscriptions:
-    enabled: ${SUBSCRIPTIONS_ENABLED:true}
+    enabled: ${SUBSCRIPTIONS_ENABLED:false}
     scan-interval-ms: ${SUBSCRIPTIONS_SCAN_INTERVAL_MS:300000}      # gap between renewal passes (5 min)
     initial-delay-ms: ${SUBSCRIPTIONS_INITIAL_DELAY_MS:30000}       # startup grace before the first pass
     max-retries: ${SUBSCRIPTIONS_MAX_RETRIES:3}                     # dunning retries before the downgrade

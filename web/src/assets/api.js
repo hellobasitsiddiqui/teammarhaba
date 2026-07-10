@@ -449,7 +449,7 @@ export async function adminGetUserSubscription(userId) {
  * GET /api/v1/me/orders — the caller's checkout orders newest-first (TM-481), the data behind the
  * "my tickets / purchases" screen. Read-only: it lists the orders checkout (TM-477) already recorded for
  * the signed-in caller. Each order is `{ id, eventId, amountPence, status, createdAt }` where `status` is
- * one of `PENDING | CONFIRMED | CANCELLED | REFUND_DUE` and `createdAt` is an ISO-8601 instant. A caller
+ * one of `PENDING | CONFIRMED | CANCELLED | REFUND_DUE | REFUNDED` and `createdAt` is an ISO-8601 instant. A caller
  * who has never checked anything out gets an empty array (never a 404). Identity comes from the Bearer
  * token, never the client.
  *

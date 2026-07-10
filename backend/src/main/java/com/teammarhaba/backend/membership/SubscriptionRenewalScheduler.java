@@ -30,9 +30,21 @@ import org.springframework.stereotype.Component;
  * (this bean simply isn't created when false — the {@code test} profile does that so integration tests
  * stay deterministic), {@code scan-interval-ms} and {@code initial-delay-ms} (startup grace). The
  * dunning policy knobs live in {@code SubscriptionProperties} and are applied by the service.
+ *
+ * <p><strong>Kill switch (TM-623).</strong> This bean charges saved cards off-session, so it must be
+ * OPT-IN, twice over: BOTH {@code app.subscriptions.enabled} (the scheduler's own switch) AND
+ * {@code app.membership.enabled} (the server-side membership feature flag, {@code MEMBERSHIP_ENABLED})
+ * must be explicitly {@code true} for the bean to exist. {@code matchIfMissing = false} means a
+ * profile/test context that never binds the properties gets NO scheduler — previously
+ * {@code matchIfMissing = true} booted it on-by-default everywhere, and there was no coupling to the
+ * membership flag at all, so a feature rollback (web flag off) would have kept charging cards.
+ * {@code deploy.yml} sets both envs explicitly so the prod state is declared, never defaulted.
  */
 @Component
-@ConditionalOnProperty(name = "app.subscriptions.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(
+        name = {"app.subscriptions.enabled", "app.membership.enabled"},
+        havingValue = "true",
+        matchIfMissing = false)
 public class SubscriptionRenewalScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionRenewalScheduler.class);

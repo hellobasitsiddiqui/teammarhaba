@@ -177,4 +177,24 @@ public class Order {
                 : OrderStatus.CANCELLED;
         this.updatedAt = when;
     }
+
+    /**
+     * Money was captured but the promised service cannot be delivered (TM-623): a settle-time RSVP guard
+     * refused the paid attendance (event started / booking closed / age-gate / one-active-event). The
+     * order owes the customer their money back — {@code REFUND_DUE} until the provider refund succeeds.
+     */
+    public void markRefundDue(Instant when) {
+        this.status = OrderStatus.REFUND_DUE;
+        this.updatedAt = when;
+    }
+
+    /**
+     * The owed refund was issued at the provider (TM-623): {@code REFUND_DUE → REFUNDED}, terminal.
+     * Only called after the provider accepted the refund — a failed refund keeps the order
+     * {@code REFUND_DUE} so the debt stays visible and retryable.
+     */
+    public void markRefunded(Instant when) {
+        this.status = OrderStatus.REFUNDED;
+        this.updatedAt = when;
+    }
 }

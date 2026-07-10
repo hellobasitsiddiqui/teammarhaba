@@ -44,6 +44,7 @@ export const ORDER_STATUS = Object.freeze({
   CONFIRMED: "CONFIRMED",
   CANCELLED: "CANCELLED",
   REFUND_DUE: "REFUND_DUE",
+  REFUNDED: "REFUNDED", // TM-623: the owed refund was issued at the provider — terminal
 });
 
 /**
@@ -64,6 +65,9 @@ export function statusMeta(status) {
       return { label: "Cancelled", tone: "cancelled" };
     case ORDER_STATUS.REFUND_DUE:
       return { label: "Refund due", tone: "refund" };
+    case ORDER_STATUS.REFUNDED:
+      // The money came back (TM-623) — reads as settled-and-closed, like a cancellation.
+      return { label: "Refunded", tone: "cancelled" };
     default:
       return { label: "Unknown", tone: "unknown" };
   }

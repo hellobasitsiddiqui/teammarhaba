@@ -57,4 +57,24 @@ public record RevolutProperties(
     private static String blankTo(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }
+
+    /**
+     * Secrets never in text form (TM-623): a record's generated {@code toString} would print the API
+     * secret key and the webhook signing secret verbatim, so any incautious log/debug/error message
+     * carrying this object would leak live credentials. Both are masked to presence-only.
+     */
+    @Override
+    public String toString() {
+        return "RevolutProperties{apiBase=" + apiBase
+                + ", apiVersion=" + apiVersion
+                + ", currency=" + currency
+                + ", secretKey=" + mask(secretKey)
+                + ", webhookSigningSecret=" + mask(webhookSigningSecret)
+                + "}";
+    }
+
+    /** Presence-only rendering of a secret: never the value, just whether one is configured. */
+    private static String mask(String secret) {
+        return secret == null || secret.isBlank() ? "(unset)" : "***";
+    }
 }

@@ -91,8 +91,10 @@ public class SecurityConfig {
                                 // token and must be permit-listed. Authenticity is enforced instead by the
                                 // Revolut-Signature HMAC, verified in RevolutPaymentProvider before anything
                                 // is confirmed (a payload that does not verify gets a 401 and changes
-                                // nothing). Inert until the membership flag ships: no order is ever PENDING
-                                // to confirm while checkout's PAY branch is unreachable.
+                                // nothing), plus a ~5-minute timestamp replay window (TM-623). Inert until
+                                // the SERVER-SIDE membership flag (app.membership.enabled) ships: the PAY
+                                // checkout branch is 403 while it is off, so no order is ever PENDING to
+                                // confirm — a guarantee the web-only flag could never make (TM-623).
                                 "/api/v1/payments/revolut/webhook",
                                 // Emulator-only e2e peek for the code (TM-234). The handler bean only
                                 // exists when FIREBASE_AUTH_EMULATOR_HOST is set (unset in dev/prod), so

@@ -24,5 +24,15 @@ public interface SubscriptionChargeRepository extends JpaRepository<Subscription
     Optional<SubscriptionCharge> findFirstByUserIdAndKindAndStatus(
             Long userId, SubscriptionCharge.Kind kind, SubscriptionCharge.Status status);
 
+    /**
+     * The renewal engine's per-window idempotency read (TM-623): the latest charge attempt covering the
+     * billing window that starts at {@code periodStart}. A dunning retry reuses THIS row (and its
+     * provider order) instead of opening a fresh provider order per attempt — one charge unit per
+     * (account, window), enforced gateway-side because an order can only be paid once. Newest first
+     * ({@code id} desc) in case historical data ever holds several rows for one window.
+     */
+    Optional<SubscriptionCharge> findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
+            Long userId, SubscriptionCharge.Kind kind, java.time.Instant periodStart);
+
     List<SubscriptionCharge> findTop50ByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 }

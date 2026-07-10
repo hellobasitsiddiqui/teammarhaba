@@ -33,6 +33,12 @@ app:
   # subscription state a test sets up itself.
   subscriptions:
     enabled: false
+  # The SERVER-SIDE membership flag (TM-623) is ON under test so the integration suite can exercise the
+  # money paths end to end (subscription checkout/cancel, PAY checkout) with the provider seam mocked.
+  # The flag-OFF behaviour (money endpoints 404/403, scheduler bean absent) is proven by
+  # MembershipDisabledIntegrationTest, which overrides this back to false — exactly what prod inherits.
+  membership:
+    enabled: true
   # Pin the open-ended default duration (TM-412) so listing-state integration tests are deterministic
   # regardless of any future change to the shipped prod default.
   event-listing:

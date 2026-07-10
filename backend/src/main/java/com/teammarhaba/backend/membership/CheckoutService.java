@@ -1,15 +1,25 @@
 package com.teammarhaba.backend.membership;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.event.CancelResult;
 import com.teammarhaba.backend.event.EventRsvpService;
 import com.teammarhaba.backend.event.RsvpResult;
 import com.teammarhaba.backend.payments.PaymentOrder;
 import com.teammarhaba.backend.payments.PaymentProvider;
+import com.teammarhaba.backend.payments.PaymentProviderException;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
+import com.teammarhaba.backend.web.BadRequestException;
+import com.teammarhaba.backend.web.ConflictException;
+import com.teammarhaba.backend.web.ResourceNotFoundException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import java.time.Instant;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,8 +62,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CheckoutService {
 
+    private static final Logger log = LoggerFactory.getLogger(CheckoutService.class);
+
     /** The 403 copy when the caller's tier is too low to attend and no per-event charge unlocks it. */
     static final String UPGRADE_TO_ATTEND = "Upgrade your membership to attend this event.";
+
+    /** The 403 copy when the server-side membership flag is off and the checkout would need a payment. */
+    static final String PAYMENTS_OFF = "Paid tickets are not available.";
 
     /** The single currency the paid path charges in — order amounts are defined in GBP pence (V36). */
     private static final String CURRENCY = "GBP";
@@ -64,6 +79,8 @@ public class CheckoutService {
     private final OrderRepository orders;
     private final UserService users;
     private final PaymentProvider payments;
+    private final MembershipProperties membershipProps;
+    private final EntityManager entityManager;
 
     public CheckoutService(
             EntitlementService entitlements,
@@ -71,13 +88,17 @@ public class CheckoutService {
             MembershipService memberships,
             OrderRepository orders,
             UserService users,
-            PaymentProvider payments) {
+            PaymentProvider payments,
+            MembershipProperties membershipProps,
+            EntityManager entityManager) {
         this.entitlements = entitlements;
         this.rsvps = rsvps;
         this.memberships = memberships;
         this.orders = orders;
         this.users = users;
         this.payments = payments;
+        this.membershipProps = membershipProps;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -109,6 +130,12 @@ public class CheckoutService {
         }
 
         if (entitlement.decision() == EntitlementDecision.PAY) {
+            // Server-side membership flag (TM-623): the PAY branch opens a REAL provider order, so it
+            // is 403 while the paid feature is off — the web flag alone left this reachable via curl,
+            // falsifying every "unreachable while the flag is off" assumption downstream.
+            if (!membershipProps.enabled()) {
+                throw new AccessDeniedException(PAYMENTS_OFF);
+            }
             // PAY (TM-478): record a PENDING order, then open a REAL payment order with the provider for the
             // amount. Persist the provider's permanent order id on our order (the webhook match key) and
             // return its client token so the browser mounts the checkout widget. The RSVP is NOT created —
@@ -159,9 +186,12 @@ public class CheckoutService {
      */
     @Transactional
     public void confirmPayment(String providerOrderId) {
-        // Resolve the order once to learn which user to lock, then re-read UNDER that user's lock so a
-        // concurrent duplicate delivery serialises and sees the committed CONFIRMED state (the same
-        // user-then-event lock ordering as checkout()/cancel(), so the paths can never deadlock).
+        // Resolve the order once to learn which user to lock, then re-read + REFRESH under that user's
+        // lock so a concurrent duplicate delivery serialises and sees the COMMITTED state (the same
+        // user-then-event lock ordering as checkout()/cancel(), so the paths can never deadlock). The
+        // refresh matters (TM-623): the repository re-query resolves to the same already-managed
+        // instance with its pre-lock field values, so without it the confirmPaid idempotency check
+        // would evaluate stale state after losing a duplicate-delivery race.
         Long userId =
                 orders.findByProviderOrderId(providerOrderId).map(Order::getUserId).orElse(null);
         if (userId == null) {
@@ -170,15 +200,41 @@ public class CheckoutService {
         users.lockForUpdate(userId);
 
         Order order = orders.findByProviderOrderId(providerOrderId).orElse(null);
-        if (order == null || !order.confirmPaid(Instant.now())) {
-            // Gone, already confirmed (repeat webhook), or reversed by an in-window cancel — no-op.
+        if (order == null) {
+            return;
+        }
+        try {
+            entityManager.refresh(order); // committed state, not the stale L1-cache snapshot (TM-623)
+        } catch (EntityNotFoundException gone) {
+            return; // row deleted while we waited for the lock
+        }
+        Instant now = Instant.now();
+        if (!order.confirmPaid(now)) {
+            // Already confirmed (repeat webhook) or reversed by an in-window cancel — no-op.
             return;
         }
 
         // Payment settled → perform the held-back RSVP. The caller is Revolut, not a signed-in user, so we
         // load the account provisioned at checkout time by id and drive the already-provisioned RSVP write.
+        //
+        // Settle-time guard failure (TM-623): the RSVP guards (event started, booking cutoff, age-gate,
+        // one-active-event) can legitimately refuse between checkout and settle. The money is CAPTURED
+        // by then — throwing here used to roll the confirm back, stranding the order PENDING forever
+        // while Revolut retried the same failing delivery. Instead: keep the payment recorded, mark the
+        // order REFUND_DUE (service undeliverable ⇒ money owed back), issue the refund, and return
+        // normally so the webhook is acknowledged and the retry loop ends.
         User user = users.getById(order.getUserId());
-        rsvps.rsvpForConfirmedOrder(user, order.getEventId());
+        try {
+            rsvps.rsvpForConfirmedOrder(user, order.getEventId());
+        } catch (ResourceNotFoundException | ConflictException | BadRequestException e) {
+            log.warn(
+                    "Paid order {} could not be provisioned at settle time ({}) — marking REFUND_DUE "
+                            + "and refunding (TM-623).",
+                    order.getId(),
+                    e.getMessage());
+            order.markRefundDue(now);
+            tryRefund(order, now);
+        }
     }
 
     /**
@@ -218,7 +274,56 @@ public class CheckoutService {
         if (creditReturned) {
             membership.reverseFirstEventCredit(now);
         }
+
+        // Reversing a still-PENDING PAY order: void the provider order too (TM-623, best-effort). Its
+        // single-use widget token may still be mounted in an open tab — without the void, a payment
+        // completed there AFTER this cancel would be captured at the provider and then no-op locally
+        // (confirmPaid refuses a non-PENDING order): money taken, no attendance, no reconciliation.
+        if (order.getStatus() == OrderStatus.PENDING && order.getProviderOrderId() != null) {
+            try {
+                payments.cancelOrder(order.getProviderOrderId());
+            } catch (PaymentProviderException e) {
+                log.warn(
+                        "Could not void provider order {} while cancelling order {} — reconcile it "
+                                + "manually if it is ever paid.",
+                        order.getProviderOrderId(),
+                        order.getId(),
+                        e);
+            }
+        }
+
         order.reverse(now); // CONFIRMED + real money -> REFUND_DUE, else -> CANCELLED; flushes on commit
+
+        // REFUND_DUE now has a real execution path (TM-623): issue the provider refund immediately.
+        // On failure the order simply STAYS REFUND_DUE — the debt remains visible and retryable.
+        if (order.getStatus() == OrderStatus.REFUND_DUE) {
+            tryRefund(order, now);
+        }
         return CheckoutCancelResult.of(true, creditReturned, cancel, order);
+    }
+
+    /**
+     * Issue the provider refund a {@code REFUND_DUE} order owes (TM-623), best-effort: success moves the
+     * order to {@code REFUNDED} (terminal — the money is back); failure logs and leaves it
+     * {@code REFUND_DUE} so nothing about the debt is lost and the refund can be retried (admin/sweeper).
+     * Never throws — a refund hiccup must not roll back the surrounding cancel/confirm bookkeeping.
+     */
+    private void tryRefund(Order order, Instant now) {
+        if (order.getProviderOrderId() == null || order.getAmountPence() <= 0) {
+            // No captured provider payment behind this order (defensive) — nothing to return.
+            order.markRefunded(now);
+            return;
+        }
+        try {
+            payments.refund(
+                    order.getProviderOrderId(), order.getAmountPence(), CURRENCY, String.valueOf(order.getId()));
+            order.markRefunded(now);
+        } catch (PaymentProviderException e) {
+            log.warn(
+                    "Refund of order {} (provider order {}) failed — order stays REFUND_DUE for retry.",
+                    order.getId(),
+                    order.getProviderOrderId(),
+                    e);
+        }
     }
 }

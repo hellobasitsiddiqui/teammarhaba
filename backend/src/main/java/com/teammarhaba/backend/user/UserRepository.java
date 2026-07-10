@@ -33,6 +33,18 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findAnyByFirebaseUid(@Param("firebaseUid") String firebaseUid);
 
     /**
+     * Lookup by surrogate id that <em>includes</em> soft-deleted rows (TM-623) — for the scheduler /
+     * webhook paths that must act on an account whatever its lifecycle state. The renewal engine uses
+     * it to tell "account tombstoned → lapse the subscription, charge NOTHING" apart from "account
+     * gone entirely" — the restricted {@code findById} conflates the two, and (before this) the engine
+     * charged the card FIRST and only then blew up on the invisible account, retrying the charge every
+     * tick. Native SQL bypasses the {@code @SQLRestriction} (which only rewrites Hibernate-generated
+     * queries).
+     */
+    @Query(value = "SELECT * FROM users WHERE id = :id", nativeQuery = true)
+    Optional<User> findAnyById(@Param("id") Long id);
+
+    /**
      * Load the account holding a {@code SELECT ... FOR UPDATE} row lock — the per-user serialisation
      * point for the "one active event at a time" rule (TM-413/TM-423), mirroring
      * {@code EventRepository.findByIdForUpdate}. Taking this lock at the top of a GOING-landing command

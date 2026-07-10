@@ -74,8 +74,9 @@ class SubscriptionControllerIntegrationTest extends AbstractIntegrationTest {
     @BeforeEach
     void stubProvider() {
         when(payments.name()).thenReturn("revolut");
-        // any() (not anyString()) — a JIT-provisioned account's displayName is null at checkout time.
-        when(payments.createCustomer(any(), any())).thenReturn("cust-it-1");
+        // any() (not anyString()) — a JIT-provisioned account's email/phone/displayName can be null
+        // at checkout time.
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-it-1");
         when(payments.createOrderForCustomer(anyInt(), eq("GBP"), anyString(), eq("cust-it-1")))
                 .thenReturn(new PaymentOrder("rev-it-order-1", "tok-it-1"));
         when(payments.findMerchantSavedPaymentMethod("cust-it-1")).thenReturn(Optional.of("pm-it-1"));

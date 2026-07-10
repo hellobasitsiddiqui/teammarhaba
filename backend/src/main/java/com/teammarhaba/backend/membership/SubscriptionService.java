@@ -3,6 +3,7 @@ package com.teammarhaba.backend.membership;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.payments.PaymentOrder;
 import com.teammarhaba.backend.payments.PaymentProvider;
 import com.teammarhaba.backend.payments.PaymentProviderException;
@@ -11,6 +12,8 @@ import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +28,13 @@ import org.springframework.transaction.annotation.Transactional;
  * activation, and cancel. The renewal/dunning engine lives in {@link SubscriptionRenewalService}; this
  * class owns everything a user (or a webhook about a user's payment) drives directly.
  *
+ * <p><strong>Server-side flag (TM-623).</strong> {@link #checkout} and {@link #cancel} are 404 while
+ * {@code app.membership.enabled} is off: the web {@code membership} flag only hides UI, so without this
+ * gate any authenticated caller could open real provider orders (and thereby a live recurring
+ * subscription) by curling the endpoints. Reads ({@link #find}, {@link #adminView}) stay open — they
+ * move no money. The webhook confirm ({@link #confirmCharge}) also stays open: it settles charges that
+ * were legitimately opened while the flag WAS on (a flag rollback must not strand in-flight money).
+ *
  * <p><strong>Subscribe checkout</strong> ({@link #checkout}) — the separate paid flow the product
  * decision mandates (tier-switch stays free-of-charge until subscribed): registers a provider Customer
  * for the account, opens a provider order for the tier's monthly price <em>attached to that customer</em>
@@ -38,7 +48,10 @@ import org.springframework.transaction.annotation.Transactional;
  * creates (or resets, on a re-subscribe) the one {@link Subscription} row as ACTIVE with a rolling
  * monthly period anchored at the settle time, resolves + stores the merchant-saved payment method for
  * renewals, grants the paid tier through {@link MembershipService#applyTierForSubscription}, audits and
- * notifies. Idempotent: a repeat webhook finds the charge already PAID and does nothing.
+ * notifies. Idempotent: a repeat webhook finds the charge already PAID and does nothing — and the
+ * "already PAID?" check reads state re-fetched UNDER the user lock ({@code EntityManager.refresh}),
+ * because a repository re-query would return the same stale first-level-cache instance and truly
+ * concurrent duplicate deliveries would both pass the check (TM-623).
  *
  * <p><strong>Cancel</strong> ({@link #cancel}) — stop renewals, keep the tier: the subscription flips
  * to CANCELED with its "due" pointer parked at the period end, where the renewal scheduler performs the
@@ -59,6 +72,9 @@ public class SubscriptionService {
     /** The single currency subscriptions charge in — prices are defined in GBP pence (V38). */
     private static final String CURRENCY = "GBP";
 
+    /** The 404 copy when the server-side membership flag is off — the feature does not exist yet. */
+    static final String MEMBERSHIP_OFF = "Subscriptions are not available.";
+
     private final SubscriptionRepository subscriptions;
     private final SubscriptionChargeRepository charges;
     private final MembershipService memberships;
@@ -66,6 +82,8 @@ public class SubscriptionService {
     private final PaymentProvider payments;
     private final AuditService audit;
     private final SubscriptionNotifier notifier;
+    private final MembershipProperties membershipProps;
+    private final EntityManager entityManager;
 
     public SubscriptionService(
             SubscriptionRepository subscriptions,
@@ -74,7 +92,9 @@ public class SubscriptionService {
             UserService users,
             PaymentProvider payments,
             AuditService audit,
-            SubscriptionNotifier notifier) {
+            SubscriptionNotifier notifier,
+            MembershipProperties membershipProps,
+            EntityManager entityManager) {
         this.subscriptions = subscriptions;
         this.charges = charges;
         this.memberships = memberships;
@@ -82,6 +102,8 @@ public class SubscriptionService {
         this.payments = payments;
         this.audit = audit;
         this.notifier = notifier;
+        this.membershipProps = membershipProps;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -90,16 +112,19 @@ public class SubscriptionService {
      * rejects/times out, the whole checkout rolls back leaving no orphan charge row.
      *
      * <p>Re-entrant: a caller who abandoned a previous attempt re-uses the still-PENDING INITIAL charge
-     * (re-pointed at a fresh provider order — the widget token is single-use), and a caller with a
-     * CANCELED/PAST_DUE subscription may subscribe again (the activation resets the row). Only a
-     * currently-ACTIVE subscription blocks with a {@code 409} — mid-cycle tier changes are a follow-up
-     * (cancel first, resubscribe after the period ends).
+     * (re-pointed at a fresh provider order — the widget token is single-use; the SUPERSEDED provider
+     * order is voided best-effort so a stale open widget can no longer capture money nothing would
+     * reconcile, TM-623), and a caller with a CANCELED/PAST_DUE subscription may subscribe again (the
+     * activation resets the row). Only a currently-ACTIVE subscription blocks with a {@code 409} —
+     * mid-cycle tier changes are a follow-up (cancel first, resubscribe after the period ends).
      *
-     * @throws BadRequestException for the free base tier — there is nothing to subscribe to
-     * @throws ConflictException   when an ACTIVE subscription already exists
+     * @throws ResourceNotFoundException while the server-side membership flag is off (TM-623)
+     * @throws BadRequestException       for the free base tier — there is nothing to subscribe to
+     * @throws ConflictException         when an ACTIVE subscription already exists
      */
     @Transactional
     public SubscriptionCheckout checkout(VerifiedUser caller, MembershipTier tier) {
+        requireMembershipEnabled();
         if (!SubscriptionPricing.isPaidTier(tier)) {
             throw new BadRequestException("Choose a paid tier to subscribe to (MONTHLY or DIAMOND).");
         }
@@ -117,12 +142,14 @@ public class SubscriptionService {
         int amountPence = SubscriptionPricing.monthlyPricePence(tier);
 
         // Reuse the provider customer a previous subscription registered (same gateway), else create one —
-        // the container the widget saves the card into and renewals charge through.
+        // the container the widget saves the card into and renewals charge through. The phone number
+        // rides along (TM-623) so a phone-only account (no email, often no name) still registers a
+        // customer with a real identifying field.
         String customerId = existing != null
                         && existing.getProviderCustomerId() != null
                         && payments.name().equals(existing.getProvider())
                 ? existing.getProviderCustomerId()
-                : payments.createCustomer(user.getEmail(), user.getDisplayName());
+                : payments.createCustomer(user.getEmail(), user.getPhone(), user.getDisplayName());
 
         // One PENDING INITIAL charge per account: re-use (re-point) an abandoned attempt rather than
         // accumulating a dead row per click. Saved first so its id is the merchant reference.
@@ -133,6 +160,23 @@ public class SubscriptionService {
             charge = charges.save(new SubscriptionCharge(
                     user.getId(), SubscriptionCharge.Kind.INITIAL, tier, amountPence, now));
         } else {
+            // Void the superseded provider order BEFORE forgetting it (TM-623): its single-use widget
+            // token may still be mounted in another tab, and once this row re-points, a payment against
+            // the old order would match neither ledger — money captured, nothing activated, no record.
+            // Best-effort: a failed cancel (network, already paid) must not block the new checkout —
+            // the old order id is logged so the Revolut dashboard can reconcile it manually.
+            if (charge.getProviderOrderId() != null) {
+                try {
+                    payments.cancelOrder(charge.getProviderOrderId());
+                } catch (PaymentProviderException e) {
+                    log.warn(
+                            "Could not void superseded provider order {} while re-pointing the INITIAL "
+                                    + "charge for user {} — reconcile it manually if it is ever paid.",
+                            charge.getProviderOrderId(),
+                            user.getId(),
+                            e);
+                }
+            }
             charge.repointInitialAttempt(tier, amountPence, now);
         }
 
@@ -149,12 +193,15 @@ public class SubscriptionService {
      * subscription; a RENEWAL charge is the idempotent async backstop for the synchronous pay-order call
      * — including healing a FAILED row the provider later reports paid (real money ⇒ real period).
      *
-     * <p>Idempotent: an unknown provider order id, or a charge already PAID, is a silent no-op.
+     * <p>Idempotent: an unknown provider order id, or a charge already PAID, is a silent no-op. The
+     * PAID check runs on state re-read fresh under the user lock (TM-623) — see the class doc.
      */
     @Transactional
     public void confirmCharge(String providerOrderId) {
-        // Resolve once to learn which user to lock, then RE-READ under that lock so a duplicate delivery
-        // (or a racing renewal pass) serialises — the same two-step as CheckoutService.confirmPayment.
+        // Resolve once to learn which user to lock, then re-read + REFRESH under that lock so a
+        // duplicate delivery (or a racing renewal pass) serialises — the refresh matters because the
+        // repository re-query would resolve to the same already-managed instance with its pre-lock
+        // field values, making the "already PAID" idempotency check a no-op under a real race.
         Long userId = charges.findByProviderOrderId(providerOrderId)
                 .map(SubscriptionCharge::getUserId)
                 .orElse(null);
@@ -165,8 +212,16 @@ public class SubscriptionService {
 
         SubscriptionCharge charge =
                 charges.findByProviderOrderId(providerOrderId).orElse(null);
-        if (charge == null || charge.getStatus() == SubscriptionCharge.Status.PAID) {
-            return; // gone, or a repeat webhook — idempotent no-op
+        if (charge == null) {
+            return; // gone (or re-pointed away) while we waited — idempotent no-op
+        }
+        try {
+            entityManager.refresh(charge); // committed state, not the stale L1-cache snapshot (TM-623)
+        } catch (EntityNotFoundException gone) {
+            return; // row deleted while we waited for the lock
+        }
+        if (charge.getStatus() == SubscriptionCharge.Status.PAID) {
+            return; // a repeat webhook — idempotent no-op
         }
 
         Instant now = Instant.now();
@@ -182,10 +237,12 @@ public class SubscriptionService {
      * end — the scheduler (whose "due" pointer the cancel parks exactly there) performs the downgrade.
      * Idempotent: cancelling an already-CANCELED subscription returns it unchanged.
      *
-     * @throws ResourceNotFoundException when the caller has no subscription at all
+     * @throws ResourceNotFoundException while the server-side membership flag is off (TM-623), or when
+     *                                   the caller has no subscription at all
      */
     @Transactional
     public Subscription cancel(VerifiedUser caller) {
+        requireMembershipEnabled();
         User user = users.provision(caller);
         users.lockForUpdate(user.getId());
         Subscription subscription = subscriptions
@@ -224,6 +281,13 @@ public class SubscriptionService {
 
     /** One account's subscription state (nullable — never subscribed) + charge history for the admin console. */
     public record AdminView(Subscription subscription, List<SubscriptionCharge> charges) {}
+
+    /** 404 unless the server-side membership flag is on (TM-623) — money paths do not exist while off. */
+    private void requireMembershipEnabled() {
+        if (!membershipProps.enabled()) {
+            throw new ResourceNotFoundException(MEMBERSHIP_OFF);
+        }
+    }
 
     /**
      * The webhook-confirmed first charge: create (or reset, on a re-subscribe) the account's one
@@ -267,10 +331,15 @@ public class SubscriptionService {
                 Map.of(
                         "tier", charge.getTier().name(),
                         "periodEnd", subscription.getCurrentPeriodEnd().toString()));
+        // Charge-id sourceRef (TM-623): the old ref embedded currentPeriodStart — a per-transaction
+        // timestamp that differed between two racing duplicate deliveries by milliseconds, so the
+        // notification dedupe never matched and the user got duplicate "You're subscribed!" rows
+        // (NotificationWriter commits in REQUIRES_NEW, surviving the loser's rollback). The charge id
+        // is stable across deliveries of the same event.
         notifier.subscriptionStarted(
                 user.getId(),
                 charge.getTier(),
-                "subscription:" + user.getId() + ":started:" + subscription.getCurrentPeriodStart());
+                "subscription-charge:" + charge.getId() + ":started");
     }
 
     /**
@@ -280,6 +349,11 @@ public class SubscriptionService {
      * money moved, so the period it bought must exist), and a webhook overtaking a slow sync response.
      * The period-window comparison keeps it idempotent: only a charge buying time BEYOND the current
      * period end extends anything.
+     *
+     * <p><strong>A CANCELED subscription is never resurrected (TM-623).</strong> The heal extends the
+     * paid window via {@link Subscription#extendPeriodTo}, which grants the time but keeps a CANCELED
+     * status CANCELED — flipping it back to ACTIVE would re-arm auto-renewal against a card whose owner
+     * explicitly cancelled (the classic dunning-notification → user cancels → late settle sequence).
      */
     private void healRenewal(SubscriptionCharge charge, Instant now) {
         Subscription subscription =
@@ -290,9 +364,20 @@ public class SubscriptionService {
             return; // nothing to extend (subscription gone) — the payment is still recorded as PAID
         }
         if (charge.getPeriodEnd().isAfter(subscription.getCurrentPeriodEnd())) {
-            subscription.extendPeriod(now);
-            // Re-grant the tier in case dunning already downgraded the account before this settle arrived.
-            User user = users.getById(charge.getUserId());
+            subscription.extendPeriodTo(charge.getPeriodStart(), charge.getPeriodEnd(), now);
+            // Re-grant the tier in case dunning already downgraded the account before this settle
+            // arrived. Tombstone-safe (TM-623): for a soft-deleted (or vanished) account the paid
+            // window is recorded but nothing is granted or notified — the old getById threw here,
+            // 500-ing the webhook into an endless redelivery loop.
+            User user = users.findAnyById(charge.getUserId()).orElse(null);
+            if (user == null || user.isDeleted()) {
+                log.warn(
+                        "Healed subscription charge {} for deleted/missing account {} — window recorded, "
+                                + "no tier granted (TM-623).",
+                        charge.getId(),
+                        charge.getUserId());
+                return;
+            }
             memberships.applyTierForSubscription(user.getId(), subscription.getTier(), user.getFirebaseUid());
             audit.record(
                     user.getFirebaseUid(),
@@ -306,7 +391,17 @@ public class SubscriptionService {
             notifier.renewalSucceeded(
                     user.getId(),
                     subscription.getTier(),
-                    "subscription:" + user.getId() + ":renewed:" + subscription.getCurrentPeriodEnd());
+                    "subscription-charge:" + charge.getId() + ":renewed");
+        } else {
+            // Settled money that bought no NEW time: the window was already covered by another charge.
+            // With one charge row per window this should not happen — flag it loudly as a potential
+            // double payment needing a manual refund (TM-623), rather than silently absorbing it.
+            log.warn(
+                    "Settled subscription charge {} (provider order {}) bought no new period for user {} "
+                            + "— possible duplicate payment; verify against the provider and refund if so.",
+                    charge.getId(),
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
         }
     }
 }
