@@ -304,6 +304,40 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(findByBody(body, "original question").get("replyTo").isNull()).isTrue();
     }
 
+    // ------------------------------------------------------------------ own-message flag (TM-589)
+
+    @Test
+    void threadFlagsTheCallersOwnMessagesAsMineAndOthersAndSystemAsNotMine() throws Exception {
+        String uid = "conv-mine-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+        String otherUid = "conv-mine-other-" + UUID.randomUUID();
+        Long otherId = newUser(otherUid);
+
+        Long thread = newBroadcastThread();
+        addMember(thread, userId, MemberRole.MEMBER, MuteState.NONE);
+        addMember(thread, otherId, MemberRole.MEMBER, MuteState.NONE);
+
+        // One message from the caller, one from the other member, one system ("from TeamMarhaba").
+        messages.save(Message.fromUser(thread, userId, "written by me"));
+        messages.save(Message.fromUser(thread, otherId, "written by them"));
+        messages.save(Message.fromSystem(thread, "from TeamMarhaba", null));
+
+        // For the caller: their own message is mine=true; the other member's and the null-sender system
+        // message are mine=false. Identity is server-derived from the verified token — the client never
+        // sends its own id, so it can't be spoofed.
+        JsonNode asCaller = getJson("/api/v1/conversations/" + thread + "/messages", caller(uid));
+        assertThat(findByBody(asCaller, "written by me").get("mine").asBoolean()).isTrue();
+        assertThat(findByBody(asCaller, "written by them").get("mine").asBoolean()).isFalse();
+        JsonNode systemAsCaller = findByBody(asCaller, "from TeamMarhaba");
+        assertThat(systemAsCaller.get("senderId").isNull()).isTrue(); // a null-sender message is never "mine"
+        assertThat(systemAsCaller.get("mine").asBoolean()).isFalse();
+
+        // The SAME rows read by the OTHER member flip: `mine` is per-caller, resolved from THEIR token.
+        JsonNode asOther = getJson("/api/v1/conversations/" + thread + "/messages", caller(otherUid));
+        assertThat(findByBody(asOther, "written by me").get("mine").asBoolean()).isFalse();
+        assertThat(findByBody(asOther, "written by them").get("mine").asBoolean()).isTrue();
+    }
+
     // ------------------------------------------------------------------ unread + mark-read
 
     @Test

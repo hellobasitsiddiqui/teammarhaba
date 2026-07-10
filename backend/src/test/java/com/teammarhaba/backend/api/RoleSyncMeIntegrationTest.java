@@ -47,17 +47,20 @@ class RoleSyncMeIntegrationTest extends AbstractIntegrationTest {
     void assigningAdminIsReflectedByMe() throws Exception {
         var who = caller("uid-rolesync");
 
-        // First call provisions the account — default role USER.
+        // First call provisions the account — default role USER, so the admin flag (TM-589) is false.
         mockMvc.perform(get("/api/v1/me").with(who))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.role").value("USER"));
+                .andExpect(jsonPath("$.role").value("USER"))
+                .andExpect(jsonPath("$.admin").value(false));
 
         // Assign ADMIN: the claim write is a no-op on the mock, but the DB row must be synced.
         roleService.assignRole("uid-rolesync", Role.ADMIN);
 
-        // /me now reflects ADMIN (the TM-140 fix).
+        // /me now reflects ADMIN (the TM-140 fix) — and the derived admin flag (TM-589) flips to true, so
+        // the client can gate app-admin UI (e.g. the TM-449 moderation controls) on it.
         mockMvc.perform(get("/api/v1/me").with(who))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.role").value("ADMIN"));
+                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andExpect(jsonPath("$.admin").value(true));
     }
 }

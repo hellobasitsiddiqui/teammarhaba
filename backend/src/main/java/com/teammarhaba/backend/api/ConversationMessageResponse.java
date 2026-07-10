@@ -34,9 +34,26 @@ import java.util.List;
  * excerpt, or an "unavailable" marker when the parent was removed) and, like reactions and the receipt,
  * rides the same page (batch-resolved, no N+1). See {@link QuotedMessage}.
  *
+ * <p><b>{@code mine}</b> is the server-computed own-message flag (TM-589) — {@code true} when this
+ * message's {@code senderId} equals the <em>verified</em> caller's resolved {@code users.id}, so the
+ * thread UI (TM-448) can align the caller's own messages out-going (right) vs. others' incoming (left)
+ * and show read ticks on its own, without the client ever supplying — or having to know — its own numeric
+ * id. Identity is strictly server-derived from the token (see {@link
+ * com.teammarhaba.backend.chat.ConversationReadService#messages}), never client-asserted. A system /
+ * admin message ({@code senderId == null}) is never the caller's, so {@code mine == false} there.
+ *
+ * <p><b>{@code mine} is nullable on purpose</b>, mirroring {@code readReceipt} / {@code replyTo}: it is
+ * {@code null} <em>only</em> on the caller-independent SSE broadcast frame (TM-464), which fans one
+ * payload out to every connected member and so has no single caller to resolve "mine" against. The
+ * thread read and the poster's own POST echo always carry a concrete {@code true} / {@code false}; a
+ * live subscriber re-syncs the authoritative value from the read API. Clients treat {@code mine == true}
+ * as own and anything else ({@code false} or the broadcast's {@code null}) as other.
+ *
  * @param id          the message's surrogate id
  * @param senderId    the author's {@code users.id}; {@code null} = a system / admin message
  * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
+ * @param mine        server-computed: {@code senderId == the verified caller's id} (TM-589) — drives
+ *                    own-vs-other alignment; {@code null} only on the caller-independent broadcast frame
  * @param body        the message text
  * @param deepLink    optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
  * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
@@ -48,6 +65,7 @@ public record ConversationMessageResponse(
         Long id,
         Long senderId,
         boolean system,
+        Boolean mine,
         String body,
         String deepLink,
         Instant createdAt,
@@ -56,21 +74,26 @@ public record ConversationMessageResponse(
         QuotedMessage replyTo) {
 
     /**
-     * Map a persisted {@link Message} plus its reaction summary, (nullable) read receipt and (nullable)
-     * quoted-parent snippet to its wire form. {@code readReceipt} is {@code null} unless the message is
-     * the caller's own; {@code replyTo} is {@code null} for a non-reply message. This full overload is
-     * the one the thread read (which resolves both per page, no N+1) and the POST echo (empty receipt +
-     * resolved quote) call.
+     * Map a persisted {@link Message} plus its reaction summary, (nullable) read receipt, (nullable)
+     * quoted-parent snippet and the caller-context {@code mine} flag to its wire form. {@code
+     * readReceipt} is {@code null} unless the message is the caller's own; {@code replyTo} is {@code
+     * null} for a non-reply message; {@code mine} is the server-computed own-message flag (TM-589) —
+     * {@code true} when the message's sender is the verified caller, or {@code null} on the
+     * caller-independent broadcast that can't resolve it. This full overload is the one the thread read
+     * (which resolves all of them per page, no N+1) and the POST echo (empty receipt + resolved quote +
+     * {@code mine == true}, since a poster's own message is definitionally theirs) call.
      */
     public static ConversationMessageResponse from(
             Message message,
             List<EmojiReactionCount> reactions,
             MessageReadReceipt readReceipt,
-            QuotedMessage replyTo) {
+            QuotedMessage replyTo,
+            Boolean mine) {
         return new ConversationMessageResponse(
                 message.getId(),
                 message.getSenderId(),
                 message.isSystem(),
+                mine,
                 message.getBody(),
                 message.getDeepLink(),
                 message.getCreatedAt(),
@@ -80,15 +103,16 @@ public record ConversationMessageResponse(
     }
 
     /**
-     * Convenience overload for the paths that can't resolve a per-caller receipt or the quoted parent:
-     * the SSE live-broadcast (TM-464), whose single payload fans out to every connected member and so
-     * can't carry one member's private "read by" view, and whose post-commit hook doesn't re-load the
-     * reply parent. Maps with {@code readReceipt == null} ("not resolved / not yours") AND {@code
-     * replyTo == null}; a subscriber that turns out to be the sender still gets the authoritative receipt
-     * — and any reply quote — from the read API (and from its own POST echo), so nothing is lost by
-     * omitting them from the broadcast frame.
+     * Convenience overload for the paths that can't resolve a per-caller receipt, the quoted parent, or
+     * the {@code mine} flag: the SSE live-broadcast (TM-464), whose single payload fans out to every
+     * connected member and so can't carry one member's private "read by" view — nor whose message is
+     * "mine" — and whose post-commit hook doesn't re-load the reply parent. Maps with {@code readReceipt
+     * == null} ("not resolved / not yours"), {@code replyTo == null} AND {@code mine == null} ("not
+     * resolved — caller-independent frame"); a subscriber that turns out to be the sender still gets the
+     * authoritative receipt, reply quote and {@code mine} value from the read API (and from its own POST
+     * echo), so nothing is lost by omitting them from the broadcast frame.
      */
     public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
-        return from(message, reactions, null, null);
+        return from(message, reactions, null, null, null);
     }
 }

@@ -241,13 +241,21 @@ public class ConversationReadService {
                 : messages.findAllById(parentIds).stream().collect(Collectors.toMap(Message::getId, Function.identity()));
 
         // Every message carries: its reaction chips (TM-461), a read receipt if it's the caller's own
-        // (TM-463, else null), and a quoted-parent snippet if it's a reply (TM-466, else null) — all
-        // batch-resolved above, so the timeline renders with no N+1 and no second round-trip.
+        // (TM-463, else null), a quoted-parent snippet if it's a reply (TM-466, else null), and the
+        // own-message flag (TM-589) — all batch-resolved / computed here, so the timeline renders with no
+        // N+1 and no second round-trip.
+        //
+        // `mine` (TM-589) is computed server-side from the VERIFIED caller's resolved id (`userId`, from
+        // UserService.provision above) vs. the message's senderId — never a client-supplied id, so a
+        // caller can't spoof authorship. A null senderId (a system / admin message) never equals the
+        // caller, so `mine` is false there. This lets the thread UI (TM-448) align own-vs-other without
+        // the client knowing its own numeric id.
         return PageResponse.from(page, message -> ConversationMessageResponse.from(
                 message,
                 summaries.getOrDefault(message.getId(), List.of()),
                 receipts.get(message.getId()),
-                quotedParent(message, parents)));
+                quotedParent(message, parents),
+                userId.equals(message.getSenderId())));
     }
 
     /**

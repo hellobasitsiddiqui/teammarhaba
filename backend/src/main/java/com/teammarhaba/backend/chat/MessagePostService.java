@@ -207,8 +207,15 @@ public class MessagePostService {
         // the live-broadcast payload is rebuilt in the stream listener from the same message (with a null
         // receipt + null quote — a broadcast is caller-independent and re-syncs over the read API), so
         // the poster's own optimistic echo is the richest view and nothing diverges lossily.
+        // `mine == true` (TM-589): the poster's own freshly-created message is definitionally theirs
+        // (senderId == userId), so the optimistic echo already renders out-going/own-aligned without a
+        // round-trip through the read API.
         return ConversationMessageResponse.from(
-                saved, List.of(), MessageReadReceipt.empty(), QuotedMessage.resolve(replyToMessageId, parent));
+                saved,
+                List.of(),
+                MessageReadReceipt.empty(),
+                QuotedMessage.resolve(replyToMessageId, parent),
+                true);
     }
 
     /**
