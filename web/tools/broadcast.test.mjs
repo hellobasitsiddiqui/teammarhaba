@@ -17,6 +17,7 @@ import {
   NO_ROUTE,
   validateBroadcast,
   routeOptionsFrom,
+  humanizeRoute,
   summariseBroadcast,
   maskPhone,
   uidPrefix,
@@ -129,6 +130,32 @@ test("routeOptionsFrom ignores non-string / blank entries", () => {
 
 test("routeOptionsFrom with neither payload nor fallback is an empty list (never throws)", () => {
   assert.deepEqual(routeOptionsFrom(undefined), []);
+});
+
+// --- humanizeRoute: the friendly fallback for an unlabeled route (TM-617) ---------------------
+
+test("humanizeRoute turns a raw hash token into a sentence-cased label", () => {
+  // The core fix: an unmapped route must read as words, not a "#/…" token, in the picker.
+  assert.equal(humanizeRoute("#/event-detail"), "Event detail");
+  assert.equal(humanizeRoute("#/home"), "Home");
+});
+
+test("humanizeRoute treats /, - and _ as word breaks and collapses whitespace", () => {
+  assert.equal(humanizeRoute("#/events/detail"), "Events detail");
+  assert.equal(humanizeRoute("#/my_saved-events"), "My saved events");
+});
+
+test("humanizeRoute never returns a raw token or a blank string for degenerate input", () => {
+  // "#/", empty and non-string all land on the app's default label — never a token, never blank.
+  assert.equal(humanizeRoute("#/"), "App home");
+  assert.equal(humanizeRoute(""), "App home");
+  assert.equal(humanizeRoute(null), "App home");
+  assert.equal(humanizeRoute(undefined), "App home");
+});
+
+test("humanizeRoute tolerates a token missing the leading hash or slash", () => {
+  assert.equal(humanizeRoute("events"), "Events");
+  assert.equal(humanizeRoute("/profile"), "Profile");
 });
 
 // --- summariseBroadcast: the honest result line ----------------------------------------------

@@ -34,7 +34,7 @@ import { ADMIN_MESSAGES_ROUTE } from "./admin-message-route.js";
 // Reused from the broadcast module (all pure, browser-safe): the full-account page walk, the
 // display-identity fallback chain (so a phone-only account is never a blank, unfindable row — TM-372),
 // the search haystack, and the deep-link option normaliser (the single source of truth for the picker).
-import { fetchAllUsers, displayIdentifier, searchHaystack, routeOptionsFrom } from "./broadcast.js";
+import { fetchAllUsers, displayIdentifier, searchHaystack, routeOptionsFrom, humanizeRoute } from "./broadcast.js";
 // Reused from the events form module (pure): render an event's start instant in its own timezone.
 import { formatEventWhen } from "./event-form.js";
 import {
@@ -66,7 +66,8 @@ const MAX_EVENT_PAGES = 50; // runaway guard for the event walk (mirrors admin-e
 const USER_RESULTS_LIMIT = 8; // how many search matches the user picker shows at once (a focused list)
 
 // Human labels for the deep-link routes in the picker, so the admin reads "Home" not "#/home" (mirrors
-// admin.js ROUTE_LABELS). An unmapped-but-valid route falls back to its raw value.
+// admin.js ROUTE_LABELS). An unmapped-but-valid route falls back to a humanised label (TM-617) —
+// "Event detail", not a raw "#/event-detail" token — via the shared humanizeRoute helper.
 const ROUTE_LABELS = Object.freeze({
   "#/home": "Home",
   "#/profile": "Profile",
@@ -78,7 +79,7 @@ const ROUTE_LABELS = Object.freeze({
 });
 
 function routeLabel(route) {
-  return ROUTE_LABELS[route] || route;
+  return ROUTE_LABELS[route] || humanizeRoute(route);
 }
 
 // ---- state --------------------------------------------------------------------------------
