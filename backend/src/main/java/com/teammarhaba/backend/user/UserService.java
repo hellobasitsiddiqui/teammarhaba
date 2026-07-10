@@ -51,10 +51,12 @@ public class UserService {
 
     private final UserRepository users;
     private final AuditService audit;
+    private final UserProvisioner provisioner;
 
-    public UserService(UserRepository users, AuditService audit) {
+    public UserService(UserRepository users, AuditService audit, UserProvisioner provisioner) {
         this.users = users;
         this.audit = audit;
+        this.provisioner = provisioner;
     }
 
     /**
@@ -70,10 +72,19 @@ public class UserService {
         return PageResponse.from(users.search(trimmed, role, enabled, pageable), UserSummary::from);
     }
 
-    /** Find the caller's account, creating (or reactivating) it on first sight. Concurrency-safe. */
+    /**
+     * Find the caller's account, creating (or reactivating) it on first sight (TM-112). Safe to call
+     * from a read-only transaction and under a concurrent first-request burst (TM-597).
+     *
+     * <p>The common path is a plain read — harmless in any caller transaction, read-only included. Only
+     * when no active row exists do we fall through to {@link #createOrReactivate}, which does the write
+     * in its own writable {@code REQUIRES_NEW} transaction (via {@link UserProvisioner}) and re-reads
+     * the result into <em>this</em> transaction, so the entity handed back is managed here and later
+     * dirty-check updates (e.g. {@link #provisionAndTouch}'s {@code last_active_at}) still flush.
+     */
     @Transactional
     public User provision(VerifiedUser caller) {
-        return users.findByFirebaseUid(caller.uid()).orElseGet(() -> reactivateOrInsert(caller));
+        return users.findByFirebaseUid(caller.uid()).orElseGet(() -> createOrReactivate(caller));
     }
 
     /**
@@ -375,27 +386,31 @@ public class UserService {
         return user;
     }
 
-    /** No active row: reactivate a soft-deleted tombstone for this uid if one exists, else insert. */
-    private User reactivateOrInsert(VerifiedUser caller) {
-        return users.findAnyByFirebaseUid(caller.uid())
-                .map(tombstone -> {
-                    tombstone.restore(); // returning user — bring their account back, don't duplicate
-                    audit.record(caller.uid(), AuditAction.ACCOUNT_REACTIVATED, TARGET_USER, caller.uid());
-                    return tombstone;
-                })
-                .orElseGet(() -> insertOrGet(caller));
-    }
-
-    private User insertOrGet(VerifiedUser caller) {
+    /**
+     * No active row: create (or reactivate) it, then re-read into this transaction (TM-597).
+     *
+     * <p>The write is delegated to {@link UserProvisioner#createOrReactivate} — a separate bean so the
+     * {@code REQUIRES_NEW} advice actually fires (a self-invocation would skip the proxy) — which runs
+     * it in a fresh <em>writable</em> transaction. That both lets provisioning work when the caller's
+     * transaction is read-only and means a losing first-request race rolls back only that inner
+     * transaction, never this one.
+     *
+     * <p>Two callers can race here: both see no row, both enter the writable path, one INSERT wins and
+     * the other throws {@link DataIntegrityViolationException} (unique {@code firebase_uid}). We swallow
+     * that and re-read — the winner's row is committed and visible — so both callers return the same
+     * single row and neither errors. The re-read (rather than returning the inner transaction's entity)
+     * also re-attaches the row to this transaction's persistence context, keeping the returned entity
+     * managed for the caller's subsequent updates.
+     */
+    private User createOrReactivate(VerifiedUser caller) {
         try {
-            User created = users.saveAndFlush(new User(caller.uid(), caller.email(), null));
-            audit.record(caller.uid(), AuditAction.ACCOUNT_PROVISIONED, TARGET_USER, caller.uid());
-            return created;
+            provisioner.createOrReactivate(caller);
         } catch (DataIntegrityViolationException race) {
-            // A concurrent first-request won the insert (unique firebase_uid) — treat as found.
-            // No audit row: the winning request already recorded ACCOUNT_PROVISIONED.
-            return users.findByFirebaseUid(caller.uid())
-                    .orElseThrow(() -> race); // genuinely absent ⇒ not the race we expected
+            // A concurrent first-request won the unique-firebase_uid insert; its REQUIRES_NEW
+            // transaction committed the row and rolled back ours cleanly. Fall through and re-read it.
         }
+        return users.findByFirebaseUid(caller.uid())
+                .orElseThrow(() -> new IllegalStateException(
+                        "provision: users row still absent after create for uid " + caller.uid()));
     }
 }
