@@ -1111,6 +1111,28 @@
         },
         "type" : "object"
       },
+      "MembershipResponse" : {
+        "properties" : {
+          "firstEventCreditAvailable" : {
+            "type" : "boolean"
+          },
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "MembershipTierRequest" : {
+        "properties" : {
+          "tier" : {
+            "enum" : [ "PAY_PER_EVENT", "MONTHLY", "DIAMOND" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "tier" ],
+        "type" : "object"
+      },
       "MessageReactionSummary" : {
         "properties" : {
           "messageId" : {
@@ -3296,6 +3318,52 @@
           }
         },
         "tags" : [ "me-controller" ]
+      }
+    },
+    "/api/v1/me/membership" : {
+      "get" : {
+        "operationId" : "membership",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "membership-controller" ]
+      }
+    },
+    "/api/v1/me/membership/tier" : {
+      "post" : {
+        "operationId" : "switchTier",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MembershipTierRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "membership-controller" ]
       }
     },
     "/api/v1/me/notifications" : {
