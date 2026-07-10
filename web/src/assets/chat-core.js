@@ -266,14 +266,6 @@ export function toConversationRows(items, now = new Date()) {
   return sortConversations((Array.isArray(items) ? items : []).map((s) => toConversationRow(s, now)));
 }
 
-/** Total unread across a set of conversation rows (or raw summaries) — a single tested reducer. */
-export function totalUnread(rowsOrItems) {
-  return (Array.isArray(rowsOrItems) ? rowsOrItems : []).reduce(
-    (sum, c) => sum + Math.max(0, Math.trunc(Number(c?.unread ?? c?.unreadCount) || 0)),
-    0,
-  );
-}
-
 /* ─────────────────────────────── Thread message adapters ──────────────────────────────────────── */
 
 /**

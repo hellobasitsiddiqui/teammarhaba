@@ -16,8 +16,11 @@
 // paged conversation LIST's per-thread `unreadCount`, which only ever saw the first page and so
 // UNDERCOUNTED a caller with more than one page of threads (the TM-439 badge gap this ticket closes).
 // It clears as threads are read because marking a thread read (POST /conversations/{id}/read) lowers
-// that thread's unread on the server, and the badge re-reads the total on the next refresh (route
-// change / poll / foreground-push) — no local mutation needed, the server total is the source of truth.
+// that thread's unread on the server, and the badge re-reads the total on the next refresh (poll /
+// foreground-push / a route change that doesn't race the mark-read). The server total stays the source
+// of truth; on the SAME open that marks a thread read, the DOM half also applies a clamped OPTIMISTIC
+// decrement (decrementUnreadTotal) so the badge drops immediately rather than waiting for that POST to
+// commit + the next poll — the TM-585 GET/POST race — then reconciles against the server total.
 //
 // The visible chip TEXT (capped "9+") + the show/hide gate are the SAME badge primitive the header
 // notification bell uses, so the two badges cap identically (the TM-439 clarification the bell core's
@@ -54,6 +57,24 @@ function safeCount(value) {
  */
 export function unreadTotalOf(payload) {
   return safeCount(payload && payload.total);
+}
+
+/**
+ * Optimistically lower the painted tab total by a just-opened thread's own unread, clamped at zero
+ * (TM-585). Opening a thread marks it read (POST /conversations/{id}/read) — but the router's concurrent
+ * unread-total GET usually resolves BEFORE that POST commits, so it re-reads the PRE-mark total and the
+ * badge doesn't drop on that navigation (it self-heals only on the next 60s poll). Subtracting the
+ * thread's cached unread from the current total lets the badge drop straight away, before the round-trip.
+ * Both inputs are coerced to safe non-negative integers and the result is floored at 0, so a stale /
+ * duplicate open (a thread already counted as read) can never push the total negative — the AC's "no
+ * negative total under repeated open/close". The server aggregate (`unread-total`) still reconciles the
+ * badge on the next refresh, so any local drift self-corrects (no double-count over time).
+ * @param {number} total the currently-painted tab total.
+ * @param {number} threadUnread the opened thread's cached unread (its per-row badge count).
+ * @returns {number} the new non-negative total.
+ */
+export function decrementUnreadTotal(total, threadUnread) {
+  return Math.max(0, safeCount(total) - safeCount(threadUnread));
 }
 
 /**

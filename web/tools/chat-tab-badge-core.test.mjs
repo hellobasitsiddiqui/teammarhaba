@@ -10,6 +10,7 @@ import { test } from "node:test";
 
 import {
   unreadTotalOf,
+  decrementUnreadTotal,
   chatTabAriaLabel,
   badgeText,
   hasBadge,
@@ -37,6 +38,31 @@ test("unreadTotalOf: tolerant of a missing / malformed payload (never throws, ne
   assert.equal(unreadTotalOf({ total: "nope" }), 0); // junk → 0
   assert.equal(unreadTotalOf({ total: 1.9 }), 1); // fractional floors → 1
   assert.equal(unreadTotalOf("nope"), 0);
+});
+
+test("decrementUnreadTotal: optimistic mark-read drop subtracts a thread's unread, clamped at zero", () => {
+  // Opening a thread with 3 unread out of a 10 total drops the tab total to 7 straight away (TM-585),
+  // before the mark-read POST commits — no waiting for the racing server GET / the 60s poll.
+  assert.equal(decrementUnreadTotal(10, 3), 7);
+  assert.equal(decrementUnreadTotal(3, 3), 0); // the only unread thread → badge clears to 0
+});
+
+test("decrementUnreadTotal: never goes negative under a stale / repeated open (AC: no negative total)", () => {
+  // A duplicate open (the thread already counted as read → its cached unread is 0) is a no-op, and a
+  // thread whose cached unread somehow exceeds the total can't push the badge below zero.
+  assert.equal(decrementUnreadTotal(2, 0), 2); // already-read reopen: unchanged
+  assert.equal(decrementUnreadTotal(1, 5), 0); // over-subtract clamps at 0, never negative
+  assert.equal(decrementUnreadTotal(0, 4), 0); // nothing to drop
+});
+
+test("decrementUnreadTotal: tolerant of malformed inputs (coerces to safe non-negative integers)", () => {
+  assert.equal(decrementUnreadTotal(undefined, 2), 0); // no base → 0 floor, never NaN
+  assert.equal(decrementUnreadTotal(9, undefined), 9); // no delta → unchanged
+  assert.equal(decrementUnreadTotal(-4, 2), 0); // junk base → 0
+  assert.equal(decrementUnreadTotal(8, -3), 8); // negative delta → treated as 0, never ADDS
+  assert.equal(decrementUnreadTotal(8.9, 1.9), 7); // fractional inputs floor → 8 - 1 = 7
+  assert.equal(decrementUnreadTotal("10", "4"), 6); // numeric strings coerce
+  assert.equal(decrementUnreadTotal("nope", "nope"), 0); // total junk → 0
 });
 
 test("badgeText (re-exported): empty at zero, exact up to the cap, then '9+'", () => {
