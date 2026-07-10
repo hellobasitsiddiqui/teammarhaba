@@ -23,6 +23,10 @@
          restyles with Paper + the per-user accent without touching styles.css. Inert while the
          membership feature flag is OFF (the screen it styles stays hidden). -->
     <link rel="stylesheet" href="/assets/membership-tier.css" />
+    <!-- My tickets / purchases + receipts screen styles (TM-481). Its own stylesheet (token-only) so it
+         restyles with Paper + the per-user accent without touching styles.css, and never collides with
+         the sibling membership screens. Inert while the membership feature flag is OFF. -->
+    <link rel="stylesheet" href="/assets/membership-receipts.css" />
 </head>
 <body>
     <!-- Web boot screen (TM-381): a lightweight Paper-themed loading beat shown between the native-splash
@@ -114,6 +118,10 @@
                      TM-480; kept `hidden` and revealed by membership-tier.js only when the membership
                      feature flag is ON (config.flags.membership, shipped OFF), so it's inert for now. -->
                 <a id="nav-membership" href="#/membership" hidden>Membership</a>
+                <!-- My tickets / purchases link (TM-481): the #/receipts order-history screen. Nav hook
+                     owned by TM-481; kept `hidden` and revealed by membership-receipts.js only when the
+                     membership feature flag is ON (config.flags.membership, shipped OFF), so it's inert. -->
+                <a id="nav-receipts" href="#/receipts" hidden>My tickets</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
                 <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN. -->
@@ -407,6 +415,14 @@
              never collides with the sibling membership-tier screen (TM-480). -->
         <section id="membership-checkout-screen" class="membership-checkout-view" aria-label="Checkout" hidden></section>
 
+        <!-- My tickets / purchases + receipts screen (TM-481, epic group-membership). Lists the caller's
+             checkout orders (M4 / TM-477) newest-first — event, amount, status, date — and swaps in a
+             simple per-order receipt when one is opened. membership-receipts.js (the module script below)
+             paints it into this container on its #/receipts route and holds its own hashchange listener,
+             so it needs no router.js edit. Stays hidden behind the OFF membership flag until the epic
+             ships. Its own distinct spot so it never collides with the sibling membership screens. -->
+        <section id="membership-receipts-screen" class="membership-receipts-view" aria-label="My tickets and purchases" hidden></section>
+
         <!-- Build/version stamp (TM-142): build-info.js fills this with the web build SHA + the
              backend's /version, so you can see which build is live (and spot a stale surface). -->
         <footer class="app-footer">
@@ -617,6 +633,12 @@
          runtime off window.tmApi (loaded above), never a static import of symbols TM-474 hasn't added
          on this branch yet (contract TM-457). -->
     <script type="module" src="/assets/membership-tier.js"></script>
+    <!-- My tickets / purchases + receipts (TM-481): the #/receipts order-history screen. ES module wired
+         into the boot graph like the other DOM modules; import-safe + a no-op while the membership
+         feature flag is OFF (config.flags.membership), so it ships inert. Reads the api namespace at
+         runtime off window.tmApi (loaded above) — getMyOrders() resolved at call time, never a static
+         import (contract TM-457). -->
+    <script type="module" src="/assets/membership-receipts.js"></script>
     <!-- Native splash screen (TM-299): inside the Capacitor Android shell the launch splash covers the
          blank flash while the hosted SPA loads over the network; this hides it once the app has
          actually painted (real ready, not a timer — capacitor.config sets launchAutoHide:false so the

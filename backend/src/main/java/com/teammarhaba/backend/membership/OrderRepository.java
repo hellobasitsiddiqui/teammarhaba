@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.membership;
 
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -13,4 +14,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByUserIdAndEventId(Long userId, Long eventId);
+
+    /**
+     * Every order belonging to one caller, newest first (TM-481) — the "my tickets / purchases" history.
+     * Ordered by {@code createdAt} descending, with {@code id} descending as a deterministic tiebreak:
+     * the DB default {@code now()} is the transaction timestamp, so two orders committed in the same
+     * transaction share a {@code createdAt}, and the higher (later-inserted) id then wins — a stable
+     * newest-first ordering the endpoint's contract can rely on.
+     */
+    List<Order> findByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 }

@@ -1,0 +1,207 @@
+/* My tickets / purchases + receipts screen (TM-481, epic group-membership).
+ *
+ * Ships in its OWN stylesheet (linked from index.html) rather than touching the shared styles.css, so
+ * this screen never conflicts with the sibling membership-tier / membership-checkout screens or anything
+ * else in the epic. Token-only: every colour / size / radius reads a semantic Paper token (--surface-*,
+ * --fg, --muted, --accent, --on-accent, --success, --warning, --danger, --border, --space-*, --fs-*,
+ * --radius-*, --shadow-*), so it renders natively across the clean/sketchy Paper axes (TM-529) and
+ * light/dark — no hard-coded colours. The `.tm-wobble` hand-drawn edge (from styles.css) is applied to
+ * the rows / cards in markup, so they pick up the sketchy wobble like the other Paper surfaces. The whole
+ * screen sits behind the OFF membership flag, so these rules are inert until the epic ships. */
+
+/* The screen container (revealed by membership-receipts.js on its #/receipts route; hidden by the
+ * [hidden] attribute until then). A centred column matching the app's other pushed screens. */
+.membership-receipts-view {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+}
+
+.tm-receipts-title {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--fs-4);
+  line-height: 1.2;
+}
+
+/* --- The purchases list ------------------------------------------------------------------------- */
+
+.tm-receipts-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Each purchase is a full-width button (the whole row opens the receipt). Reset the button chrome and
+ * lay the event/date on the left, the amount/status on the right. */
+.tm-receipt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4);
+  text-align: left;
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.tm-receipt-row:hover {
+  border-color: var(--accent);
+}
+
+.tm-receipt-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.tm-receipt-row-event {
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  line-height: 1.2;
+}
+
+.tm-receipt-row-date {
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+
+.tm-receipt-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.tm-receipt-amount {
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  line-height: 1.1;
+}
+
+/* --- Status pill -------------------------------------------------------------------------------- */
+
+.tm-receipt-status {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-1);
+  line-height: 1.1;
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border);
+  white-space: nowrap;
+}
+
+/* Confirmed — settled, the calm success look. */
+.tm-receipt-status-confirmed {
+  color: var(--on-accent);
+  background: var(--success);
+  border-color: var(--success);
+}
+
+/* Awaiting payment — attention, but not an error. */
+.tm-receipt-status-pending {
+  color: var(--on-accent);
+  background: var(--warning);
+  border-color: var(--warning);
+}
+
+/* Refund due — money owed back; the danger accent, outlined so it reads as informational not alarming. */
+.tm-receipt-status-refund {
+  color: var(--danger);
+  background: transparent;
+  border-color: var(--danger);
+}
+
+/* Cancelled / unknown — muted, de-emphasised. */
+.tm-receipt-status-cancelled,
+.tm-receipt-status-unknown {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+/* --- Empty / loading / error states ------------------------------------------------------------- */
+
+.tm-receipts-empty,
+.tm-receipts-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--surface-2);
+  border: var(--border-width) dashed var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.tm-receipts-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+}
+
+.tm-receipts-empty-body,
+.tm-receipts-error-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+.tm-receipts-loading {
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+.tm-receipts-retry {
+  align-self: center;
+  margin-top: var(--space-2);
+}
+
+/* --- The receipt view -------------------------------------------------------------------------- */
+
+.tm-receipt-back {
+  margin-bottom: var(--space-4);
+}
+
+.tm-receipt-card {
+  padding: var(--space-5);
+  background: var(--surface-card);
+  color: var(--fg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.tm-receipt-title {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--fs-4);
+  line-height: 1.2;
+}
+
+/* The label/value receipt lines — a two-column definition list. */
+.tm-receipt-lines {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.tm-receipt-line-label {
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+.tm-receipt-line-value {
+  margin: 0;
+  text-align: right;
+  font-size: var(--fs-2);
+}
