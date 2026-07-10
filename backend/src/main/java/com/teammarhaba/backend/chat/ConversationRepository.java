@@ -22,4 +22,13 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
 
     /** Whether an event already has a group thread — the create-lazily guard for the fan-out. */
     boolean existsByEventId(Long eventId);
+
+    /**
+     * A user's personal {@code ADMIN_BROADCAST} channel (TM-588), if one exists. Keyed by
+     * {@code (type, owner_user_id)}; the partial-unique index {@code uq_conversation_broadcast_owner}
+     * makes this a genuine {@code Optional} (0 or 1). The admin-broadcast bridge
+     * ({@code AdminBroadcastChatBridge}) resolves each recipient's channel this way, creating it lazily
+     * on their first broadcast and reusing it thereafter.
+     */
+    Optional<Conversation> findByTypeAndOwnerUserId(ConversationType type, Long ownerUserId);
 }
