@@ -59,7 +59,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ env.DEPLOY_SHA }}   # deploy the real main merge commit, not the PR test-merge (TM-156)
-          fetch-depth: 0   # full history + tags so `git describe` can name the build (TM-155)
+          fetch-depth: 0   # full history so `git rev-parse HEAD` resolves the deployed commit (TM-610)
 
       # Build seam: mirrors web/Dockerfile's build stage (src/ -> dist/). Today a
       # plain copy; a real bundler (Vite/esbuild) drops in here without changing
@@ -105,16 +105,16 @@ jobs:
           sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/status/status-config.js
           grep apiBaseUrl web/dist/status/status-config.js
 
-      # Stamp the web build name into the built config.js (same seam as the backend URL above),
-      # so the live first page shows which build it was deployed from (TM-142/TM-155). Uses
-      # `git describe --tags` — a readable name from the nearest release tag, or the bare short
-      # SHA until anything is tagged (`--always`, so it never fails on a tag-less repo). The
-      # checkout above fetches full history + tags. Never hardcoded.
+      # Stamp the web build's short commit SHA into the built config.js (same seam as the backend
+      # URL above), so the live first page shows which commit it was deployed from (TM-142/TM-610).
+      # Uses `git rev-parse --short HEAD` — a single stable id that maps 1:1 to the deployed commit,
+      # replacing the old `git describe` string that compounded every release (TM-610). The checkout
+      # above uses ref DEPLOY_SHA, so HEAD here is the exact commit being deployed. Never hardcoded.
       - name: Inject web build version into config.js
         run: |
-          DESCRIBE="$(git describe --tags --always --long)"
-          echo "Build version: ${DESCRIBE}"
-          sed -i "s/buildVersion: \"dev\"/buildVersion: \"${DESCRIBE}\"/" web/dist/assets/config.js
+          BUILD_SHA="$(git rev-parse --short HEAD)"
+          echo "Build version: ${BUILD_SHA}"
+          sed -i "s/buildVersion: \"dev\"/buildVersion: \"${BUILD_SHA}\"/" web/dist/assets/config.js
           grep buildVersion web/dist/assets/config.js
 
       # Inject the operations-console identifiers into the built config.js — the SAME deploy-time seam as

@@ -9,11 +9,11 @@
 // production auth behaviour is unchanged. `storageEmulatorHost` is the exact same idea for the
 // Firebase Storage emulator (TM-166 avatar uploads): null everywhere except e2e.
 //
-// `buildVersion` is `git describe --tags` output for the web bundle (TM-155) — a readable build
-// name from the nearest release tag (e.g. v1.4.0-12-ged338a9), or the bare short SHA until
-// anything is tagged. It stays "dev" locally; the deploy injects the real value into this file
-// the same way it injects `apiBaseUrl` (TM-142), so the live first page can show which build it
-// is — and reveal a stale surface at a glance.
+// `buildVersion` is the web bundle's short commit SHA (TM-610: `git rev-parse --short HEAD`) — a
+// single, stable build id that maps 1:1 to the deployed commit, replacing the old compounding
+// `git describe` string (TM-155) that snowballed every release. It stays "dev" locally; the deploy
+// injects the real short SHA into this file the same way it injects `apiBaseUrl` (TM-142), so the
+// live first page can show which build it is — and reveal a stale surface at a glance.
 //
 // NOTE (TM-529): there is no longer a `theme` config key. The multi-theme family system
 // (clean/doodle/sketch) is retired — Paper is the single app theme. The only look the user can
