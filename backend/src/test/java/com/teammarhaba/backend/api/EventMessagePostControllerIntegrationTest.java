@@ -142,6 +142,96 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
                 .andExpect(jsonPath("$.body").value(maxBody));
     }
 
+    // ── reply / quote (TM-466) ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void replyQuotesTheParentAndPersistsTheLink() throws Exception {
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-ok")));
+        activeMember(thread, "r-sender", "tok-r-sender"); // the replier
+        activeMember(thread, "r-other", "tok-r-other"); // fan-out recipient
+
+        // A parent message (by another member) to reply to.
+        long parentAuthor = provision("r-parent-author");
+        Long parentId = messages
+                .saveAndFlush(Message.fromUser(thread.getId(), parentAuthor, "who's bringing the ball?"))
+                .getId();
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("r-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"I'll bring it\",\"replyToMessageId\":" + parentId + "}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.body").value("I'll bring it"))
+                // The echo carries the quoted-parent snippet (author + excerpt) so the client renders the
+                // quote optimistically without a refetch.
+                .andExpect(jsonPath("$.replyTo.id").value(parentId.intValue()))
+                .andExpect(jsonPath("$.replyTo.available").value(true))
+                .andExpect(jsonPath("$.replyTo.senderId").value((int) parentAuthor))
+                .andExpect(jsonPath("$.replyTo.excerpt").value("who's bringing the ball?"));
+
+        // The reply row persisted with the parent link.
+        Message reply = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId())
+                .stream()
+                .filter(m -> "I'll bring it".equals(m.getBody()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(reply.getReplyToMessageId()).isEqualTo(parentId);
+    }
+
+    @Test
+    void replyToAMessageInAnotherThreadIsRejectedAsBadRequest() throws Exception {
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-foreign")));
+        activeMember(thread, "rf-sender", "tok-rf");
+
+        // A parent that lives in a DIFFERENT conversation — replying to it must be rejected, and must not
+        // leak that thread's existence (uniform 400, same as a made-up id).
+        Conversation other = conversations.save(Conversation.forEvent(openEvent("reply-foreign-other")));
+        Long foreignParent = messages
+                .saveAndFlush(Message.fromUser(other.getId(), provision("rf-other-author"), "over here"))
+                .getId();
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("rf-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"replying across threads\",\"replyToMessageId\":" + foreignParent + "}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .isEmpty();
+        assertThat(sender.deliveries()).isEmpty();
+    }
+
+    @Test
+    void replyToASoftDeletedMessageIsRejectedAsBadRequest() throws Exception {
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-deleted")));
+        activeMember(thread, "rd-sender", "tok-rd");
+
+        Message parent = messages.saveAndFlush(Message.fromUser(thread.getId(), provision("rd-parent"), "gone soon"));
+        parent.softDelete(Instant.now()); // moderation-removed before the reply lands
+        messages.saveAndFlush(parent);
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("rd-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"too late to reply\",\"replyToMessageId\":" + parent.getId() + "}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .isEmpty();
+    }
+
+    @Test
+    void replyToANonExistentMessageIsRejectedAsBadRequest() throws Exception {
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-missing")));
+        activeMember(thread, "rn-sender", "tok-rn");
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("rn-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"reply to nothing\",\"replyToMessageId\":9999999}"))
+                .andExpect(status().isBadRequest());
+    }
+
     // ── membership gate ──────────────────────────────────────────────────────────────────────────
 
     @Test

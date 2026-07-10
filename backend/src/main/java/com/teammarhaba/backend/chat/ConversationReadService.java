@@ -5,6 +5,7 @@ import com.teammarhaba.backend.api.ConversationSummaryResponse;
 import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MarkReadResponse;
 import com.teammarhaba.backend.api.MessageReadReceipt;
+import com.teammarhaba.backend.api.QuotedMessage;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.Event;
@@ -118,11 +119,21 @@ public class ConversationReadService {
 
     /**
      * A page of one thread's messages (TM-436), chronological (oldest→newest), members-only, each with
-     * its reaction summary (TM-461). The {@code pageable} carries the window and the chronological sort
-     * the controller fixes; the query filters {@code deletedAt IS NULL}, so moderation-removed messages
-     * never surface. A non-member (or a removed member, or an unknown thread id) is a {@code 403} — see
-     * {@link #requireMember}. This is the single thread-read endpoint: reactions ride the same page as
-     * the messages so the timeline renders chips without a second round-trip.
+     * its reaction summary (TM-461), a read receipt when it's the caller's OWN message (TM-463), and —
+     * for a reply — its quoted-parent snippet (TM-466). The {@code pageable} carries the window and the
+     * chronological sort the controller fixes; the query filters {@code deletedAt IS NULL}, so
+     * moderation-removed messages never surface. A non-member (or a removed member, or an unknown thread
+     * id) is a {@code 403} — see {@link #requireMember}. This is the single thread-read endpoint:
+     * reactions, read receipts AND reply quotes all ride the same page as the messages so the timeline
+     * renders chips, receipts and quotes without a second round-trip, each resolved in its own batch (no
+     * N+1) — see {@link #readReceipts} and the reply-quote batch below.
+     *
+     * <p><b>Reply quotes</b> are resolved in one batch (no N+1): collect the page's distinct reply-parent
+     * ids, load those parents in a single {@code findAllById} (which — unlike the timeline query —
+     * intentionally does NOT filter {@code deletedAt}, so a soft-deleted parent is still found and
+     * rendered as "message unavailable" rather than silently dropped), then map each reply to its {@link
+     * QuotedMessage}. A parent can sit outside this page (an older message), which is exactly why it's a
+     * keyed lookup rather than a scan of the page's own rows.
      */
     @Transactional(readOnly = true)
     public PageResponse<ConversationMessageResponse> messages(
@@ -135,13 +146,40 @@ public class ConversationReadService {
         // batched query for the page (no N+1), reusing the reaction service's shared summariser.
         Map<Long, List<EmojiReactionCount>> summaries =
                 reactionSummaries.summariesFor(userId, page.getContent().stream().map(Message::getId).toList());
+
         // Read receipts (TM-463) for the caller's OWN messages on this page — also one query for the
         // whole page (the thread roster), no N+1. Absent (null) for messages the caller didn't send.
         Map<Long, MessageReadReceipt> receipts = readReceipts(userId, conversationId, page.getContent());
+
+        // Resolve the quoted parents for any replies on this page in ONE batch (TM-466). Parents are
+        // fetched WITHOUT the deletedAt filter so a soft-deleted parent surfaces as "message unavailable"
+        // (QuotedMessage.resolve), and a parent may live outside this page — hence a keyed load.
+        Set<Long> parentIds = page.getContent().stream()
+                .map(Message::getReplyToMessageId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, Message> parents = parentIds.isEmpty()
+                ? Map.of()
+                : messages.findAllById(parentIds).stream().collect(Collectors.toMap(Message::getId, Function.identity()));
+
+        // Every message carries: its reaction chips (TM-461), a read receipt if it's the caller's own
+        // (TM-463, else null), and a quoted-parent snippet if it's a reply (TM-466, else null) — all
+        // batch-resolved above, so the timeline renders with no N+1 and no second round-trip.
         return PageResponse.from(page, message -> ConversationMessageResponse.from(
                 message,
                 summaries.getOrDefault(message.getId(), List.of()),
-                receipts.get(message.getId())));
+                receipts.get(message.getId()),
+                quotedParent(message, parents)));
+    }
+
+    /**
+     * The quoted-parent snippet for one message (TM-466): {@code null} when it isn't a reply (so the
+     * {@code parents} map — which is {@link Map#of()} on a page with no replies — is never keyed with a
+     * {@code null}), otherwise resolved from the pre-loaded parent (or "unavailable" when it's gone).
+     */
+    private static QuotedMessage quotedParent(Message message, Map<Long, Message> parents) {
+        Long replyToId = message.getReplyToMessageId();
+        return replyToId == null ? null : QuotedMessage.resolve(replyToId, parents.get(replyToId));
     }
 
     /**

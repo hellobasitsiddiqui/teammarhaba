@@ -34,6 +34,11 @@ import {
   threadSignature,
   createSseParser,
   parseSseFrame,
+  MESSAGE_UNAVAILABLE,
+  QUOTE_EXCERPT_MAX,
+  quoteExcerpt,
+  toQuotedPreview,
+  replyTargetFrom,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -471,4 +476,64 @@ test("createSseParser handles the server's initial open frame then live messages
     ["open", "message"],
   );
   assert.equal(JSON.parse(events[1].data).body, "hi");
+});
+
+/* ─────────────────────────────── reply / quote (TM-466) ────────────────────────────────────────── */
+
+test("quoteExcerpt: collapses whitespace, trims, and truncates with an ellipsis", () => {
+  assert.equal(quoteExcerpt("  hi   team  "), "hi team");
+  assert.equal(quoteExcerpt("line one\n\nline two"), "line one line two");
+  assert.equal(quoteExcerpt(""), "");
+  assert.equal(quoteExcerpt(null), "");
+  const long = "a".repeat(QUOTE_EXCERPT_MAX + 50);
+  const cut = quoteExcerpt(long);
+  assert.equal(cut.length, QUOTE_EXCERPT_MAX);
+  assert.ok(cut.endsWith("…"));
+  // At the cap exactly → untouched, no ellipsis.
+  const exact = "b".repeat(QUOTE_EXCERPT_MAX);
+  assert.equal(quoteExcerpt(exact), exact);
+});
+
+test("toQuotedPreview: maps a live parent snippet, null for a non-reply", () => {
+  assert.equal(toQuotedPreview(null), null);
+  assert.equal(toQuotedPreview(undefined), null);
+  const live = toQuotedPreview({ id: 7, senderId: 3, system: false, excerpt: "who's in?", available: true });
+  assert.deepEqual(live, { id: "7", system: false, available: true, excerpt: "who's in?" });
+});
+
+test("toQuotedPreview: a removed parent is 'message unavailable' with no leaked excerpt", () => {
+  // available:false — the backend withholds the excerpt (null); we substitute the AC's copy.
+  const gone = toQuotedPreview({ id: 9, senderId: null, system: false, excerpt: null, available: false });
+  assert.equal(gone.available, false);
+  assert.equal(gone.excerpt, MESSAGE_UNAVAILABLE);
+  assert.equal(gone.id, "9"); // id kept for tap-to-scroll / provenance
+});
+
+test("toThreadMessage: carries the quoted parent through as replyTo (null when absent)", () => {
+  const reply = toThreadMessage({
+    id: 5, body: "answer", createdAt: "2026-07-09T10:00:00Z",
+    replyTo: { id: 4, senderId: 2, system: false, excerpt: "question?", available: true },
+  });
+  assert.equal(reply.replyTo.id, "4");
+  assert.equal(reply.replyTo.excerpt, "question?");
+  assert.equal(reply.replyTo.available, true);
+  // A normal (non-reply) message → null replyTo.
+  assert.equal(toThreadMessage({ id: 6, body: "hi", createdAt: "2026-07-09T10:01:00Z" }).replyTo, null);
+});
+
+test("replyTargetFrom: builds a composer reply target (id + local excerpt) from a message VM", () => {
+  const target = replyTargetFrom({ id: 12, body: "  bring   the ball  ", system: false });
+  assert.deepEqual(target, { id: "12", excerpt: "bring the ball", system: false, available: true });
+  // A message with no id can't be a reply target.
+  assert.equal(replyTargetFrom({ body: "no id" }), null);
+  assert.equal(replyTargetFrom(null), null);
+});
+
+test("pendingMessage: carries the reply preview so the optimistic echo shows the quote", () => {
+  const preview = { id: "4", excerpt: "question?", system: false, available: true };
+  const echo = pendingMessage("my answer", { localId: "p1", replyTo: preview });
+  assert.equal(echo.pending, true);
+  assert.deepEqual(echo.replyTo, preview);
+  // Default (no reply) → null replyTo, same as a plain send.
+  assert.equal(pendingMessage("plain", { localId: "p2" }).replyTo, null);
 });

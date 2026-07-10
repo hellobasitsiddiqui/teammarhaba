@@ -69,7 +69,11 @@ const THREAD_POLL_MS = 15000;
 // API can't tell us which are "mine", so this is best-effort within the session). `sending` pauses the
 // poll during a send so it can't race the optimistic echo. `bodyEl` is repainted on change; the composer
 // input persists across body repaints.
-const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sending: false, poll: null, bodyEl: null };
+const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sending: false, poll: null, bodyEl: null,
+  // Reply / quote (TM-466): `replyTo` is the composer's active reply target ({ id, excerpt, ... } from
+  // core.replyTargetFrom) or null; `composerInput` / `replyPreviewEl` are refs so beginReply/clearReply
+  // can toggle the composer's quoted-preview bar and re-focus the input across body repaints.
+  replyTo: null, composerInput: null, replyPreviewEl: null };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
@@ -249,12 +253,16 @@ async function renderThread(view, id) {
   }
   if (mine !== renderToken) return;
 
-  // Fresh thread state — a new open resets the optimistic queue + the "mine" memory.
+  // Fresh thread state — a new open resets the optimistic queue + the "mine" memory + any reply target.
   thread.id = id;
   thread.messages = core.toThreadMessages(data?.items);
   thread.pending = [];
   thread.mineIds = new Set();
   thread.sending = false;
+  thread.replyTo = null; // no reply-in-progress carried across a thread open (TM-466)
+  thread.canCompose = false; // set by buildComposer; gates the per-message reply affordance
+  thread.composerInput = null;
+  thread.replyPreviewEl = null;
 
   const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
   thread.bodyEl = body;
@@ -338,6 +346,7 @@ function repaintBody() {
  */
 function buildComposer(id, meta) {
   const avail = core.composeAvailability({ type: meta.typeKey });
+  thread.canCompose = avail.canPost; // gates the per-message reply affordance (TM-466)
   if (!avail.canPost) return disabledComposer(avail.reason);
 
   const input = el("input", {
@@ -354,7 +363,13 @@ function buildComposer(id, meta) {
     { class: "tm-chat-send", type: "submit", "aria-label": "Send", disabled: true, "data-testid": "chat-send" },
     [el("span", { class: "tm-chat-send-glyph", "aria-hidden": "true" }, [lineIcon("send", { size: 20 })])],
   );
-  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [input, sendBtn]);
+  // Reply / quote (TM-466): a quoted-preview bar shown above the input while replying; hidden otherwise.
+  // Kept as a persistent node (like the input) so it survives message-list repaints.
+  const replyPreview = el("div", { class: "tm-chat-reply-bar", hidden: true, "data-testid": "chat-reply-bar" });
+  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [replyPreview, input, sendBtn]);
+  thread.composerInput = input;
+  thread.replyPreviewEl = replyPreview;
+  paintReplyPreview(); // reflect any pre-existing reply target (normally none on a fresh composer)
 
   const syncEnabled = () => { sendBtn.disabled = !core.validateDraft(input.value).canSend; };
   input.addEventListener("input", syncEnabled);
@@ -363,6 +378,62 @@ function buildComposer(id, meta) {
     send(id, form, input, sendBtn);
   });
   return form;
+}
+
+/**
+ * Begin replying to a thread message (TM-466): set the composer's reply target, show the quoted-preview
+ * bar and focus the input. A no-op if the message can't be resolved to a target.
+ */
+function beginReply(m) {
+  const target = core.replyTargetFrom(m);
+  if (!target) return;
+  thread.replyTo = target;
+  paintReplyPreview();
+  if (thread.composerInput) thread.composerInput.focus();
+}
+
+/** Cancel the in-progress reply (TM-466) — clear the target and hide the quoted-preview bar. */
+function clearReply() {
+  thread.replyTo = null;
+  paintReplyPreview();
+}
+
+/**
+ * Render (or hide) the composer's quoted-preview bar from `thread.replyTo`: the quoted excerpt plus a
+ * cancel (✕) button. Purely reflects state, so beginReply/clearReply just repaint through here.
+ */
+function paintReplyPreview() {
+  const bar = thread.replyPreviewEl;
+  if (!bar) return;
+  clear(bar);
+  const target = thread.replyTo;
+  if (!target) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  bar.append(
+    el("span", { class: "tm-chat-reply-bar-glyph", "aria-hidden": "true" }, [lineIcon("chat", { size: 14, strokeWidth: 1.6 })]),
+    el("div", { class: "tm-chat-reply-bar-text" }, [
+      el("span", { class: "tm-chat-reply-bar-label", text: "Replying to" }),
+      el("span", { class: "tm-chat-reply-bar-excerpt", text: target.excerpt || core.MESSAGE_UNAVAILABLE }),
+    ]),
+    el("button", {
+      class: "tm-chat-reply-cancel", type: "button", "aria-label": "Cancel reply",
+      "data-testid": "chat-reply-cancel", onClick: clearReply, text: "✕",
+    }),
+  );
+}
+
+/** Scroll the thread to the quoted original (TM-466) and briefly highlight it, if it's currently loaded. */
+function scrollToMessage(messageId) {
+  const body = thread.bodyEl;
+  if (!body || !messageId) return;
+  const target = body.querySelector(`[data-msg-id="${CSS && CSS.escape ? CSS.escape(String(messageId)) : messageId}"]`);
+  if (!target) return; // the original isn't on this page (older message) — nothing to scroll to
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("tm-chat-msg--flash");
+  window.setTimeout(() => target.classList.remove("tm-chat-msg--flash"), 1200);
 }
 
 /** The disabled compose state: a clear, quiet reason line in place of the input (muted/removed/closed/admin). */
@@ -384,15 +455,21 @@ async function send(id, form, input, sendBtn) {
   const draft = core.validateDraft(input.value);
   if (!draft.canSend) return;
 
+  // Capture (and clear) the reply target for this send (TM-466): the id goes to the POST, and a local
+  // quote preview rides the optimistic echo so the quote shows immediately. Cleared up-front so a second
+  // send doesn't inadvertently re-quote; a failure restores it below so the caller can retry the reply.
+  const replyTarget = thread.replyTo;
+  clearReply();
+
   thread.sending = true;
   sendBtn.disabled = true;
   input.value = "";
   const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  thread.pending.push(core.pendingMessage(draft.value, { localId }));
+  thread.pending.push(core.pendingMessage(draft.value, { localId, replyTo: replyTarget }));
   repaintBody(); // optimistic echo, dimmed + "Sending…"
 
   try {
-    const saved = await postConversationMessage(id, draft.value);
+    const saved = await postConversationMessage(id, draft.value, { replyToMessageId: replyTarget?.id });
     if (thread.id !== String(id)) return; // navigated away mid-send — drop silently
     thread.pending = thread.pending.filter((p) => p.id !== localId);
     const model = core.toThreadMessage(saved);
@@ -408,6 +485,7 @@ async function send(id, form, input, sendBtn) {
     } else {
       input.value = draft.value; // restore the draft so the caller can retry / fix
       sendBtn.disabled = !core.validateDraft(input.value).canSend;
+      if (replyTarget) { thread.replyTo = replyTarget; paintReplyPreview(); } // restore the reply target too (TM-466)
       toast(outcome.message, { type: "error" });
     }
     repaintBody();
@@ -524,7 +602,12 @@ function messageRow(m, mine = false) {
   const row = el("div", {
     class: m.pending ? `${side} tm-chat-msg--pending` : side,
     "data-testid": m.pending ? "chat-msg-pending" : "chat-msg",
+    // Anchor for tap-to-scroll from a reply's quote (TM-466).
+    "data-msg-id": m.id || null,
   });
+  // Reply / quote (TM-466): render the quoted parent above the body — tap it to scroll to the original;
+  // a removed original shows "message unavailable" (core already substitutes the copy) and isn't tappable.
+  if (m.replyTo) row.append(quoteBlock(m.replyTo));
   row.append(el("div", { class: "tm-chat-bub", text: m.body }));
   if (m.pending) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
   else if (m.timeLabel) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: m.timeLabel })]));
@@ -538,6 +621,15 @@ function messageRow(m, mine = false) {
   // Read receipt (TM-463): a "read by N" indicator (not a tick) on the caller's OWN messages — the
   // server sends `readReceipt` only for those, so its presence gates this. Tap it to see who's read it.
   if (m.readReceipt && !m.pending) row.append(readReceiptIndicator(m.readReceipt));
+  // Reply affordance (TM-466): a tap target on a confirmed message that starts a reply quoting it.
+  // Not on a pending echo (no server id yet), and only where the caller can actually post (an
+  // admin-broadcast/announcement thread is read-only, so replying there is pointless).
+  if (!m.pending && m.id && thread.canCompose) {
+    row.append(el("button", {
+      class: "tm-chat-reply-btn", type: "button", "aria-label": "Reply",
+      "data-testid": "chat-reply", onClick: () => beginReply(m),
+    }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]));
+  }
   return row;
 }
 
@@ -617,6 +709,30 @@ function showReaders(receipt) {
     );
   }
   modal(core.readReceiptLabel(receipt), [list]);
+}
+
+/**
+ * The quoted-parent block shown above a reply (TM-466): the quoted excerpt, tappable to scroll to the
+ * original when it's still available. A removed original renders as a muted, non-interactive "message
+ * unavailable" (the excerpt already carries that copy from core.toQuotedPreview).
+ */
+function quoteBlock(preview) {
+  const gone = !preview.available;
+  const block = el("div", {
+    class: gone ? "tm-chat-quote tm-chat-quote--gone" : "tm-chat-quote",
+    "data-testid": "chat-quote",
+    role: gone ? null : "button",
+    tabindex: gone ? null : "0",
+    "aria-label": gone ? "Quoted message unavailable" : "Show quoted message",
+  }, [el("span", { class: "tm-chat-quote-excerpt", text: preview.excerpt || core.MESSAGE_UNAVAILABLE })]);
+  if (!gone && preview.id) {
+    const jump = () => scrollToMessage(preview.id);
+    block.addEventListener("click", jump);
+    block.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(); }
+    });
+  }
+  return block;
 }
 
 // Bridge for the router (which imports this) + ad-hoc use / QA.

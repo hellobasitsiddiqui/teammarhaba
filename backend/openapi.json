@@ -453,6 +453,9 @@
           "readReceipt" : {
             "$ref" : "#/components/schemas/MessageReadReceipt"
           },
+          "replyTo" : {
+            "$ref" : "#/components/schemas/QuotedMessage"
+          },
           "senderId" : {
             "format" : "int64",
             "type" : "integer"
@@ -1417,6 +1420,10 @@
             "maxLength" : 500,
             "minLength" : 0,
             "type" : "string"
+          },
+          "replyToMessageId" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "required" : [ "body" ],
@@ -1439,6 +1446,28 @@
           "targeted" : {
             "format" : "int32",
             "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "QuotedMessage" : {
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "excerpt" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "senderId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "system" : {
+            "type" : "boolean"
           }
         },
         "type" : "object"
