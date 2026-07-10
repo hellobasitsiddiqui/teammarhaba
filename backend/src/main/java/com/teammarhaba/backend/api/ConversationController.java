@@ -3,6 +3,7 @@ package com.teammarhaba.backend.api;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.chat.ConversationMembershipService;
 import com.teammarhaba.backend.chat.ConversationReadService;
+import com.teammarhaba.backend.chat.MessageAuthorService;
 import com.teammarhaba.backend.chat.MessagePostService;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
@@ -11,7 +12,9 @@ import java.util.Set;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,6 +42,14 @@ import org.springframework.web.bind.annotation.RestController;
  *       stricter than reading — only an active (non-removed, non-muted) member may post, and only
  *       while the thread is open (a closed / read-only thread is a {@code 409}). Returns the created
  *       message ({@code 201}) and fans a push out to the thread's other active members.</li>
+ *   <li>{@code PATCH /conversations/{id}/messages/{messageId}} — edit your OWN message (TM-467):
+ *       owner-scoped (a non-author is a {@code 403}), only while the thread is open ({@code 409}
+ *       closed) and only within the ~5-minute edit window ({@code 409} once locked). Rewrites the body
+ *       + stamps {@code editedAt}, returns the edited message, and re-renders it live over the SSE
+ *       transport (TM-464) — no push.</li>
+ *   <li>{@code DELETE /conversations/{id}/messages/{messageId}} — delete your OWN message (TM-467):
+ *       owner-scoped (a non-author is a {@code 403}), allowed anytime. Soft-deletes it (so it drops
+ *       out of the timeline like an admin moderation removal) and drops it live over SSE.</li>
  *   <li>{@code POST /conversations/{id}/read} — advance the caller's read cursor; returns the fresh
  *       cursor + recomputed unread count.</li>
  *   <li>{@code POST /conversations/{id}/mute} · {@code /unmute} · {@code /leave} · {@code /rejoin} —
@@ -62,14 +73,17 @@ public class ConversationController {
 
     private final ConversationReadService conversations;
     private final MessagePostService posts;
+    private final MessageAuthorService authorMessages;
     private final ConversationMembershipService memberships;
 
     ConversationController(
             ConversationReadService conversations,
             MessagePostService posts,
+            MessageAuthorService authorMessages,
             ConversationMembershipService memberships) {
         this.conversations = conversations;
         this.posts = posts;
+        this.authorMessages = authorMessages;
         this.memberships = memberships;
     }
 
@@ -120,6 +134,36 @@ public class ConversationController {
             @PathVariable Long id,
             @Valid @RequestBody PostMessageRequest body) {
         return posts.post(caller, id, body.body(), body.replyToMessageId());
+    }
+
+    /**
+     * Edit the caller's OWN message (TM-467). Owner-scoped in the service — a non-author is a {@code 403}
+     * — and additionally gated on the thread being open ({@code 409} closed) and the edit being within
+     * the ~5-minute window ({@code 409} once locked); a message that isn't a live message of this thread
+     * is a {@code 404}. The replacement body is validated (non-blank, ≤ 500) before it gets here. Returns
+     * the edited message (with its {@code editedAt} now set) and re-renders it live over SSE (TM-464).
+     */
+    @PatchMapping("/conversations/{id}/messages/{messageId}")
+    ConversationMessageResponse editMessage(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @PathVariable Long id,
+            @PathVariable Long messageId,
+            @Valid @RequestBody EditMessageRequest body) {
+        return authorMessages.editOwnMessage(caller, id, messageId, body.body());
+    }
+
+    /**
+     * Delete the caller's OWN message (TM-467). Owner-scoped in the service — a non-author is a {@code
+     * 403} — and allowed anytime (no open-thread / window gate); a message that isn't a live message of
+     * this thread is a {@code 404}. Soft-deletes it (it drops out of the timeline) and drops it live over
+     * SSE. Returns a thin acknowledgement ({@link RemovedMessageResponse}).
+     */
+    @DeleteMapping("/conversations/{id}/messages/{messageId}")
+    RemovedMessageResponse deleteMessage(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @PathVariable Long id,
+            @PathVariable Long messageId) {
+        return authorMessages.deleteOwnMessage(caller, id, messageId);
     }
 
     /** Advance the caller's read cursor for the thread; returns the fresh cursor + unread count. */

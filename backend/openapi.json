@@ -455,6 +455,10 @@
           "deepLink" : {
             "type" : "string"
           },
+          "editedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
           "id" : {
             "format" : "int64",
             "type" : "integer"
@@ -660,6 +664,17 @@
             "type" : "string"
           }
         },
+        "type" : "object"
+      },
+      "EditMessageRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "body" ],
         "type" : "object"
       },
       "EmailCodeRequest" : {
@@ -2673,6 +2688,84 @@
               }
             },
             "description" : "Created"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/messages/{messageId}" : {
+      "delete" : {
+        "operationId" : "deleteMessage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "messageId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RemovedMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      },
+      "patch" : {
+        "operationId" : "editMessage",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "messageId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EditMessageRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMessageResponse"
+                }
+              }
+            },
+            "description" : "OK"
           }
         },
         "tags" : [ "conversation-controller" ]

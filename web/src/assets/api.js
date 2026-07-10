@@ -581,6 +581,62 @@ export async function postConversationMessage(id, body, { replyToMessageId = nul
 }
 
 /**
+ * PATCH /api/v1/conversations/{id}/messages/{messageId} — edit the caller's OWN message (TM-467). `body`
+ * is the replacement text (backend bounds it non-blank, ≤500; the inline editor validates the same rule
+ * first). Returns the edited ConversationMessageResponse (200) — carrying the new body + a set `editedAt`
+ * — so the caller can reconcile its optimistic edit.
+ *
+ * <p>Throws an {@link ApiError} carrying the HTTP `.status` + the backend's problem `detail`, because the
+ * inline editor must distinguish outcomes: a 403 (not your message), a 409 (thread closed OR the
+ * ~5-minute edit window has passed — the message is locked), a 404 (message gone), a 400 (blank / >500).
+ * A 401 will already have refreshed/redirected via {@link apiFetch}.
+ * @param {number|string} id the conversation id.
+ * @param {number|string} messageId the message to edit (must be the caller's own).
+ * @param {string} body the replacement text (≤500 chars, non-blank).
+ * @returns {Promise<Object>} the edited ConversationMessageResponse.
+ * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason.
+ */
+export async function editConversationMessage(id, messageId, body) {
+  const response = await apiFetch(
+    `/api/v1/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ body }),
+    },
+  );
+  if (!response.ok) {
+    throw await toApiError(response, `Couldn't edit your message (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
+ * DELETE /api/v1/conversations/{id}/messages/{messageId} — delete the caller's OWN message (TM-467). A
+ * soft-delete: the message drops out of the timeline (like an admin moderation removal). Owner-scoped and
+ * allowed anytime. Returns a thin RemovedMessageResponse (`{ messageId, conversationId, removed,
+ * removedAt }`).
+ *
+ * <p>Throws an {@link ApiError} carrying `.status` + the backend's problem `detail` (a 403 if it isn't the
+ * caller's message, a 404 if it's already gone), so the caller can surface an honest reason and roll its
+ * optimistic removal back. A 401 will already have refreshed/redirected via {@link apiFetch}.
+ * @param {number|string} id the conversation id.
+ * @param {number|string} messageId the message to delete (must be the caller's own).
+ * @returns {Promise<Object>} the RemovedMessageResponse.
+ * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason.
+ */
+export async function deleteConversationMessage(id, messageId) {
+  const response = await apiFetch(
+    `/api/v1/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
+  );
+  if (!response.ok) {
+    throw await toApiError(response, `Couldn't delete your message (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/conversations/{id}/typing — signal that the caller is (or, with {@code typing:false}, has
  * stopped) typing in a thread (TM-465). The server fans a transient {@code typing} SSE event out to the
  * thread's OTHER connected members; nothing is persisted.
@@ -750,11 +806,18 @@ export async function unreactFromMessage(messageId, emoji) {
  * typists. The typist is excluded server-side from their own broadcast, so `onTyping` never fires for
  * the caller's own typing.
  *
+ * <p><b>Edit / delete (TM-467).</b> The stream also carries {@code message-edited} (an author reworded a
+ * message — payload the edited ConversationMessageResponse, applied as a body/{@code editedAt} PATCH) and
+ * {@code message-deleted} (an author took a message back — payload a small {@code { messageId }}). When
+ * one arrives `onEdited` / `onDeleted` fires. Both are best-effort like `message`: a client that misses
+ * them re-syncs the corrected timeline over the read API on its next poll (the read filters deleted rows
+ * out and carries the current body).
+ *
  * @param {number|string} id the conversation id to subscribe to.
- * @param {{onMessage?: (msg: Object) => void, onTyping?: (sig: Object) => void, onOpen?: () => void, onError?: (err: Error) => void}} [handlers]
+ * @param {{onMessage?: (msg: Object) => void, onEdited?: (msg: Object) => void, onDeleted?: (ack: Object) => void, onTyping?: (sig: Object) => void, onOpen?: () => void, onError?: (err: Error) => void}} [handlers]
  * @returns {{close: () => void}} a handle; call `close()` to end the stream (e.g. on leaving the thread).
  */
-export function openConversationStream(id, { onMessage, onTyping, onOpen, onError } = {}) {
+export function openConversationStream(id, { onMessage, onEdited, onDeleted, onTyping, onOpen, onError } = {}) {
   // AbortController lets close() actually tear down the underlying HTTP connection, not just stop reading.
   const controller = new AbortController();
   let closed = false;
@@ -787,9 +850,15 @@ export function openConversationStream(id, { onMessage, onTyping, onOpen, onErro
         const { value, done } = await reader.read();
         if (done || closed) break;
         for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-          // We dispatch two frame types: `message` (a new bubble) and `typing` (TM-465, a transient
+          // We dispatch four frame types: `message` (a new bubble), `message-edited` / `message-deleted`
+          // (TM-467, an author reworded / took back their message), and `typing` (TM-465, a transient
           // indicator). `open` / `:keep-alive` heartbeats carry no payload and are ignored.
-          if (event.event !== "message" && event.event !== "typing") continue;
+          if (
+            event.event !== "message"
+            && event.event !== "message-edited"
+            && event.event !== "message-deleted"
+            && event.event !== "typing"
+          ) continue;
           let payload;
           try {
             payload = JSON.parse(event.data);
@@ -797,6 +866,8 @@ export function openConversationStream(id, { onMessage, onTyping, onOpen, onErro
             continue; // a malformed frame is skipped, never fatal
           }
           if (event.event === "typing") onTyping?.(payload);
+          else if (event.event === "message-edited") onEdited?.(payload);
+          else if (event.event === "message-deleted") onDeleted?.(payload);
           else onMessage?.(payload);
         }
       }
@@ -1091,6 +1162,8 @@ if (typeof window !== "undefined") {
     getConversationMessages,
     markConversationRead,
     postConversationMessage,
+    editConversationMessage,
+    deleteConversationMessage,
     signalTyping,
     openConversationStream,
     muteConversation,

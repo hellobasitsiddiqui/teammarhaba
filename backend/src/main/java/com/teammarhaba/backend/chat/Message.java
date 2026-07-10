@@ -11,8 +11,10 @@ import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
 
 /**
- * One posted message in a {@link Conversation} (TM-435). Immutable once written except for the
- * moderation soft-delete — the chat epics never hard-delete a message.
+ * One posted message in a {@link Conversation} (TM-435). Immutable once written except for two
+ * one-way, first-moment / last-write transitions: the soft-delete ({@code deletedAt}) and — new in
+ * TM-467 — the author's own edit ({@code body} rewrite + {@code editedAt} stamp). The chat epics
+ * never hard-delete a message.
  *
  * <p>Schema is owned by Flyway ({@code V27__conversation_message_model}); Hibernate runs
  * validate-only, so this mapping must match the table exactly. {@code createdAt} is DB-authoritative
@@ -25,10 +27,21 @@ import org.hibernate.generator.EventType;
  * system notice); a human author is always resolved through {@code UserRepository}, never assumed
  * present here. Accounts are only ever soft-deleted, so the sender FK never fires.
  *
- * <p><b>Moderation soft-delete</b> — {@link #softDelete(Instant)} stamps {@code deletedAt}
- * (one-way, first-moment-wins) so an admin can remove a message without vanishing it: the row is
- * kept as a struck-through "message removed" placeholder, and every timeline/unread read filters
- * {@code deletedAt IS NULL}.
+ * <p><b>Soft-delete</b> — {@link #softDelete(Instant)} stamps {@code deletedAt} (one-way,
+ * first-moment-wins) so a message can be removed without vanishing it: the row is kept and every
+ * timeline/unread read filters {@code deletedAt IS NULL}, so it drops out of the timeline. Two callers
+ * share this one lever — admin moderation (TM-449) and, new in TM-467, an author removing their OWN
+ * message (author-gated in {@link MessageAuthorService}, allowed anytime) — the entity doesn't
+ * distinguish who removed it.
+ *
+ * <p><b>Author edit</b> (TM-467) — {@link #edit(String, Instant)} rewrites the {@code body} in place
+ * and stamps {@code editedAt} (last-write-wins), so an author can fix a typo or reword. It is
+ * author-gated and time-boxed (the ~5-minute edit window) by {@link MessageAuthorService}, never here;
+ * the entity only exposes the mutation. An edit REPLACES the text — there is no version history (the
+ * AC is "fix a typo / take something back", not an audit trail) — and a live edit re-renders over the
+ * SSE transport (TM-464) so other members see the new body without a reload. {@code editedAt} is
+ * surfaced on {@link com.teammarhaba.backend.api.ConversationMessageResponse} so the client shows an
+ * "edited" tag. A soft-deleted message can't be edited (it's already gone from the timeline).
  *
  * <p><b>Reply / quote</b> (TM-466) — {@code replyToMessageId} is an optional self-reference to an
  * earlier message in the <em>same</em> thread this one replies to ({@code null} = a normal, non-reply
@@ -53,7 +66,11 @@ public class Message {
     @Column(name = "sender_id", updatable = false)
     private Long senderId;
 
-    @Column(name = "body", nullable = false, updatable = false)
+    /**
+     * The message text. Updatable since TM-467 so an author can {@link #edit(String, Instant)} it in
+     * place (a rewrite, not a new row); it was insert-only before self-edit existed.
+     */
+    @Column(name = "body", nullable = false)
     private String body;
 
     /** Optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none. */
@@ -72,9 +89,23 @@ public class Message {
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 
-    /** Moderation soft-delete; {@code null} = live, non-null = removed by an admin. */
+    /**
+     * Soft-delete instant; {@code null} = live, non-null = removed. Set by admin moderation (TM-449)
+     * OR by the author removing their own message (TM-467) — the same one-way lever, indistinguishable
+     * here. Every timeline / unread read filters {@code deletedAt IS NULL}, so a removed message drops
+     * out of the timeline.
+     */
     @Column(name = "deleted_at")
     private Instant deletedAt;
+
+    /**
+     * When the author last edited the body (TM-467); {@code null} = never edited. Set by
+     * {@link #edit(String, Instant)} (author-gated + within the edit window in
+     * {@link MessageAuthorService}); surfaced on the read DTO so the client renders an "edited" tag.
+     * Updatable/nullable to match the {@code edited_at} column added by migration V34.
+     */
+    @Column(name = "edited_at")
+    private Instant editedAt;
 
     /**
      * The earlier message in the SAME thread this one replies to (TM-466); {@code null} = a normal,
@@ -131,6 +162,23 @@ public class Message {
         }
     }
 
+    /**
+     * Author edit (TM-467): rewrite the {@code body} in place and stamp {@code editedAt} to {@code
+     * when} (last-write-wins — a re-edit re-stamps it). No-op on an already soft-deleted message (a
+     * removed message can't be edited). The author gate and the ~5-minute edit window are enforced by
+     * {@link MessageAuthorService} before this is called; this method is the pure mutation.
+     *
+     * @param newBody the replacement text (already validated non-blank + ≤ the length cap at the edge)
+     * @param when    the edit instant to stamp {@code editedAt} with
+     */
+    public void edit(String newBody, Instant when) {
+        if (this.deletedAt != null) {
+            return; // a removed message is gone from the timeline — nothing to edit
+        }
+        this.body = newBody;
+        this.editedAt = when;
+    }
+
     public Long getId() {
         return id;
     }
@@ -159,6 +207,11 @@ public class Message {
         return deletedAt;
     }
 
+    /** When the author last edited this message (TM-467), or {@code null} if it was never edited. */
+    public Instant getEditedAt() {
+        return editedAt;
+    }
+
     /** The id of the message this one replies to (TM-466), or {@code null} for a non-reply message. */
     public Long getReplyToMessageId() {
         return replyToMessageId;
@@ -169,8 +222,13 @@ public class Message {
         return senderId == null;
     }
 
-    /** {@code true} once the message has been soft-deleted by moderation. */
+    /** {@code true} once the message has been soft-deleted (by moderation or its author). */
     public boolean isDeleted() {
         return deletedAt != null;
+    }
+
+    /** {@code true} once the author has edited this message at least once (TM-467). */
+    public boolean isEdited() {
+        return editedAt != null;
     }
 }

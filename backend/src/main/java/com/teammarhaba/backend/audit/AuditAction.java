@@ -99,6 +99,27 @@ public enum AuditAction {
     EVENT_CHAT_MESSAGE_REMOVED,
 
     /**
+     * An author edited their OWN chat message via {@code PATCH
+     * /api/v1/conversations/{conversationId}/messages/{messageId}} (TM-467, epic Event Chat). One row
+     * per edit carrying the conversation id as the target and the edited message id in its metadata;
+     * the durable (new) message text lives in the {@code message} row, never in the audit log. Distinct
+     * from {@link #EVENT_CHAT_MESSAGE_REMOVED} (admin moderation) and {@link #EVENT_CHAT_MESSAGE_DELETED}
+     * (author self-delete) so the log tells author self-service apart from moderation.
+     */
+    EVENT_CHAT_MESSAGE_EDITED,
+
+    /**
+     * An author deleted their OWN chat message via {@code DELETE
+     * /api/v1/conversations/{conversationId}/messages/{messageId}} (TM-467, epic Event Chat) — a
+     * soft-delete (the {@code message} row is kept, {@code deletedAt} stamped, so it drops out of every
+     * timeline read). One row per delete carrying the conversation id as the target and the removed
+     * message id in its metadata. Distinct from {@link #EVENT_CHAT_MESSAGE_REMOVED} (the SAME soft-delete
+     * done by admin moderation, TM-449) so the log distinguishes an author taking their own message back
+     * from a moderator removing someone else's.
+     */
+    EVENT_CHAT_MESSAGE_DELETED,
+
+    /**
      * An app admin changed a thread member's mute / removal state via {@code POST
      * /api/v1/admin/conversations/{conversationId}/members/{userId}/mute} (TM-449, epic Event Chat).
      * One row per change carrying the conversation id as the target, and the affected {@code userId}
