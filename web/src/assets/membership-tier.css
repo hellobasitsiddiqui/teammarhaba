@@ -1,0 +1,146 @@
+/* Membership tier-management screen (TM-480). Ships its OWN stylesheet (not styles.css — nobody edits
+   that in this slice, per contract TM-457). Token-only: every colour / space / radius comes from the
+   Paper theme custom properties, so the screen re-tints with the per-user accent and picks up the
+   wavy/sketchy toggle automatically, and renders on web, mobile-web and the Android WebView with no
+   change. Scoped under #membership-tier-screen so it can't leak into other screens. */
+
+#membership-tier-screen {
+  display: block;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+.tm-membership-title {
+  font-size: var(--fs-4);
+  margin: 0 0 var(--space-3);
+  color: var(--fg);
+}
+
+/* Current-plan summary card. */
+.tm-membership-current {
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.tm-membership-current-label {
+  margin: 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tm-membership-current-tier {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-3);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.tm-membership-current-tagline {
+  margin: var(--space-1) 0 0;
+  color: var(--fg);
+}
+
+/* First-event-credit reflection line. Muted when used, accent-soft highlight when available. */
+.tm-membership-credit {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-1);
+  color: var(--muted);
+}
+
+.tm-membership-credit-on {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/* Tier options grid — responsive: cards flow and stack on narrow screens. */
+.tm-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-3);
+}
+
+.tm-tier-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
+}
+
+/* The plan the caller is already on — accented border so it reads as active. */
+.tm-tier-card-current {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.tm-tier-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.tm-tier-name {
+  margin: 0;
+  font-size: var(--fs-2);
+  color: var(--fg);
+}
+
+.tm-tier-badge {
+  font-size: var(--fs-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  white-space: nowrap;
+}
+
+/* Coming-soon badge is quieter — it's a future tier, not the active one. */
+.tm-tier-badge-soon {
+  background: var(--surface-2);
+  color: var(--muted);
+  border: var(--border-width) solid var(--border);
+}
+
+.tm-tier-tagline {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+
+.tm-tier-includes {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-3);
+  color: var(--fg);
+  flex: 1 1 auto; /* push the action row to the bottom so cards line up */
+}
+
+.tm-tier-includes li {
+  margin-bottom: var(--space-1);
+}
+
+.tm-tier-note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-1);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tm-tier-actions {
+  margin-top: auto;
+}
+
+.tm-tier-actions .tm-btn {
+  width: 100%;
+}
