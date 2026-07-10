@@ -726,7 +726,12 @@ function buildCompose() {
 // ---- rendering ----------------------------------------------------------------------------
 
 function roleBadge(role) {
-  return el("span", { class: `tm-badge tm-badge-role-${role.toLowerCase()}`, text: role });
+  // TM-612: render a human-friendly label ("Admin"/"User") rather than the raw enum token
+  // ("ADMIN"/"USER"). This matches statusBadge ("Enabled"/"Disabled") and the role filter's
+  // friendly options ("Users"/"Admins") just below, so the console reads consistently. The raw
+  // role still drives the CSS class (`tm-badge-role-admin`/`-user`), so styling is unchanged.
+  const label = role === "ADMIN" ? "Admin" : "User";
+  return el("span", { class: `tm-badge tm-badge-role-${role.toLowerCase()}`, text: label });
 }
 
 function statusBadge(enabled) {
