@@ -18,6 +18,7 @@ import {
 } from "./auth.js";
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 import { isWebViewEnv } from "./auth-env.js";
+import { authErrorMessage } from "./login-error.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -57,27 +58,11 @@ const els = {
   signOut: $("signout-btn"),
 };
 
-// Firebase / backend error code -> friendly message; fall back to the raw message.
-const MESSAGES = {
-  "auth/invalid-email": "That email address looks invalid.",
-  "auth/missing-password": "Please enter a password.",
-  "auth/weak-password": "Password is too weak (at least 6 characters).",
-  "auth/email-already-in-use": "That email is already registered — try signing in.",
-  "auth/user-not-found": "No account for that email — try signing up.",
-  "auth/wrong-password": "Incorrect email or password.",
-  "auth/invalid-credential": "Incorrect email or password.",
-  "auth/too-many-requests": "Too many attempts — please try again later.",
-  "auth/popup-closed-by-user": "Google sign-in was cancelled.",
-  "auth/invalid-phone-number": "That phone number looks invalid — include the country code (e.g. +1…).",
-  "auth/invalid-verification-code": "That code is not valid.",
-  "auth/code-expired": "That code has expired — request a new one.",
-  "auth/operation-not-allowed":
-    "This sign-in method isn't enabled for the project (enable it in the Firebase console).",
-};
-
 function showError(err) {
-  // ApiError (from the backend) and "" both already carry a human message; Firebase errors map by code.
-  const msg = err ? MESSAGES[err.code] ?? err.message ?? String(err) : "";
+  // Friendly-message resolution lives in login-error.js: coded Firebase errors map by code (with a
+  // generic fallback for unmapped codes — never the raw Firebase string), backend ApiErrors keep
+  // their own human message, and a falsy err clears the banner.
+  const msg = authErrorMessage(err);
   els.error.textContent = msg;
   els.error.hidden = !msg;
 }
