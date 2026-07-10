@@ -1,0 +1,140 @@
+/* Subscribe checkout screen + manage-subscription panel (TM-620). Ships its OWN stylesheet like the
+   sibling membership screens (contract TM-457 — nobody edits styles.css). Token-only: every colour /
+   space / radius comes from the Paper theme custom properties, so it re-tints with the per-user accent
+   and picks up the wavy/sketchy toggle automatically. Scoped under #membership-subscribe-screen (the
+   subscribe checkout) plus the .tm-subscription-* classes the tier screen's manage panel uses. */
+
+#membership-subscribe-screen {
+  display: block;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+.tm-subscribe-title {
+  font-size: var(--fs-4);
+  margin: 0 0 var(--space-3);
+  color: var(--fg);
+}
+
+/* What-you're-buying summary card: price, tagline, includes, terms. */
+.tm-subscribe-summary {
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.tm-subscribe-price {
+  margin: 0;
+  font-size: var(--fs-4);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.tm-subscribe-tagline {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+}
+
+.tm-subscribe-includes {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-3);
+  color: var(--fg);
+}
+
+.tm-subscribe-includes li {
+  margin-bottom: var(--space-1);
+}
+
+.tm-subscribe-terms {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+}
+
+/* The payment area: the Revolut card-field host, the action button and the live status line. */
+.tm-subscribe-pay {
+  margin-bottom: var(--space-3);
+}
+
+.tm-subscribe-widget {
+  margin-bottom: var(--space-2);
+}
+
+.tm-subscribe-widget:empty {
+  display: none; /* nothing mounted yet — no stray gap above the button */
+}
+
+.tm-subscribe-status {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+  min-height: 1.2em; /* keep the layout stable while the copy changes */
+}
+
+.tm-subscribe-done {
+  margin: 0 0 var(--space-3);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.tm-subscribe-back {
+  display: inline-block;
+  margin-top: var(--space-2);
+  color: var(--muted);
+}
+
+/* --- Manage-subscription panel (rendered on the tier screen by membership-tier.js) --- */
+
+.tm-subscription-panel {
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.tm-subscription-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.tm-subscription-title {
+  margin: 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tm-subscription-status {
+  font-size: var(--fs-1);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Dunning: the payment-problem status reads as a warning, not a calm accent. */
+.tm-subscription-status-problem {
+  color: var(--danger, #b3261e);
+}
+
+.tm-subscription-price {
+  margin: var(--space-1) 0 0;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.tm-subscription-renewal {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+}
+
+.tm-subscription-actions {
+  margin-top: var(--space-2);
+}

@@ -47,6 +47,63 @@ public interface PaymentProvider {
     PaymentOrder createOrder(int amountMinor, String currency, String reference);
 
     /**
+     * Create (or register) a customer with the provider (TM-620) — the container a saved payment method
+     * hangs off. Called once, lazily, by the Subscribe checkout: the first charge's provider order is
+     * created against this customer so the card the widget saves ({@code savePaymentMethodFor: merchant})
+     * is attached to it, and every off-session renewal charges through it.
+     *
+     * @param email    the account's email (may be {@code null}/blank for a phone-only account — the
+     *                 adapter sends what it has)
+     * @param fullName the account's display name (may be {@code null}/blank)
+     * @return the provider's permanent customer id (persisted on the subscription,
+     *         {@code provider_customer_id})
+     * @throws PaymentProviderException if the provider rejects the request or is unreachable
+     */
+    String createCustomer(String email, String fullName);
+
+    /**
+     * Open a payment order for {@code amountMinor} attached to an existing provider customer (TM-620).
+     * Identical to {@link #createOrder} except the order carries the customer, which is what lets the
+     * checkout widget SAVE the card against that customer (first charge) and what lets a renewal order be
+     * paid with that customer's saved method (off-session).
+     *
+     * @param amountMinor the charge in minor units (pence for GBP)
+     * @param currency    the ISO-4217 currency code
+     * @param reference   an opaque merchant reference for reconciliation
+     * @param customerId  the provider customer id from {@link #createCustomer}
+     * @return the created order's permanent id + temporary client token
+     * @throws PaymentProviderException if the provider rejects the request or is unreachable
+     */
+    PaymentOrder createOrderForCustomer(int amountMinor, String currency, String reference, String customerId);
+
+    /**
+     * Charge an existing provider order with a saved payment method, off-session (TM-620) — the
+     * merchant-initiated transaction (MIT) behind every subscription renewal. No SCA challenge is run:
+     * the mandate was authenticated by the customer on the first, in-browser payment, and the provider
+     * flags the charge as merchant-initiated ({@code initiator: merchant}) so the issuer applies the MIT
+     * exemption.
+     *
+     * @param providerOrderId the provider order id to pay (from {@link #createOrderForCustomer})
+     * @param paymentMethodId the saved payment method id (from {@link #findMerchantSavedPaymentMethod})
+     * @return the reduced synchronous outcome — settled, or a decline the dunning path handles
+     * @throws PaymentProviderException if the provider is unreachable or rejects the request outright
+     *                                  (treated as a failed attempt by the renewal engine)
+     */
+    SavedMethodCharge payWithSavedMethod(String providerOrderId, String paymentMethodId);
+
+    /**
+     * The customer's payment method saved for MERCHANT-initiated use, if any (TM-620). Called after the
+     * first checkout settles (to persist the ref on the subscription) and as a renewal-time fallback when
+     * no ref is stored. Empty when the customer has no merchant-saved method — the renewal engine treats
+     * that as a failed attempt (dunning), never as an error.
+     *
+     * @param customerId the provider customer id
+     * @return the saved payment method id usable off-session, or empty
+     * @throws PaymentProviderException if the provider is unreachable
+     */
+    Optional<String> findMerchantSavedPaymentMethod(String customerId);
+
+    /**
      * Verify and interpret an inbound webhook (TM-478). Returns the reduced {@link PaymentWebhookEvent}
      * only when the signature checks out and the body is a recognised order event; returns
      * {@link Optional#empty()} for a bad/absent signature, an unparseable body, or an event the confirm

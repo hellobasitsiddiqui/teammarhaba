@@ -13,7 +13,11 @@ import com.teammarhaba.backend.audit.AuditEvent;
 import com.teammarhaba.backend.audit.AuditRepository;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.membership.MembershipRepository;
+import com.teammarhaba.backend.membership.MembershipTier;
+import com.teammarhaba.backend.membership.Subscription;
+import com.teammarhaba.backend.membership.SubscriptionRepository;
 import com.teammarhaba.backend.user.UserRepository;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,10 +28,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
- * {@code /api/v1/me/membership} (TM-474): an authenticated caller reads their membership — enrolled
- * just-in-time onto {@code PAY_PER_EVENT} on first read — and self-switches tiers; an anonymous caller
- * gets the uniform {@code 401}. The authenticated case injects a {@link VerifiedUser} principal directly
- * (token verification is exercised separately), mirroring {@link MeControllerIntegrationTest}.
+ * {@code /api/v1/me/membership} (TM-474, payment-gated by TM-620): an authenticated caller reads their
+ * membership — enrolled just-in-time onto {@code PAY_PER_EVENT} on first read — and self-switches
+ * tiers; an anonymous caller gets the uniform {@code 401}. Since TM-620 switching INTO a paid tier
+ * requires an active subscription covering it (a {@code 402} without one — the old free-upgrade
+ * shortcut is gone), and leaving a paid tier while the subscription still renews is a {@code 409}
+ * pointing at cancel; the tests seed {@code subscriptions} rows directly to exercise both sides of the
+ * gate. The authenticated case injects a {@link VerifiedUser} principal directly (token verification is
+ * exercised separately), mirroring {@link MeControllerIntegrationTest}.
  */
 @AutoConfigureMockMvc
 class MembershipControllerIntegrationTest extends AbstractIntegrationTest {
@@ -44,8 +52,17 @@ class MembershipControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private AuditRepository audit;
 
+    @Autowired
+    private SubscriptionRepository subscriptions;
+
     private static RequestPostProcessor caller(String uid, String email) {
         return authentication(new UsernamePasswordAuthenticationToken(new VerifiedUser(uid, email), null, List.of()));
+    }
+
+    /** Seed an ACTIVE subscription for {@code uid}'s account — the TM-620 key that unlocks a paid tier. */
+    private Subscription seedActiveSubscription(String uid, MembershipTier tier) {
+        Long userId = users.findByFirebaseUid(uid).orElseThrow().getId();
+        return subscriptions.save(new Subscription(userId, tier, "revolut", "cust-it", Instant.now()));
     }
 
     /** POST /me/membership/tier {tier} — the self-serve switch body helper. */
@@ -92,46 +109,86 @@ class MembershipControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void switchToEachTierPersistsAndReturnsIt() throws Exception {
-        var who = caller("uid-mem-switch", "leo@example.com");
-
-        // Enrol (defaults to PAY_PER_EVENT), then walk every tier: each switch returns and persists it.
-        for (String tier : List.of("MONTHLY", "DIAMOND", "PAY_PER_EVENT")) {
-            mockMvc.perform(post("/api/v1/me/membership/tier")
-                            .with(who)
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"tier\":\"" + tier + "\"}"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.tier").value(tier))
-                    .andExpect(jsonPath("$.firstEventCreditAvailable").value(true));
-
-            Long userId = users.findByFirebaseUid("uid-mem-switch").orElseThrow().getId();
-            assertThat(memberships.findByUserId(userId).orElseThrow().getTier().name())
-                    .isEqualTo(tier);
+    void switchIntoPaidTierWithoutSubscriptionIs402() throws Exception {
+        // TM-620: the free-upgrade shortcut is GONE — a paid tier without an active subscription is a
+        // 402 Payment Required, and nothing changes on the membership row.
+        var who = caller("uid-mem-gated", "leo@example.com");
+        for (String tier : List.of("MONTHLY", "DIAMOND")) {
+            switchTier(who, tier, org.springframework.http.HttpStatus.PAYMENT_REQUIRED);
         }
+        Long userId = users.findByFirebaseUid("uid-mem-gated").orElseThrow().getId();
+        assertThat(memberships.findByUserId(userId).orElseThrow().getTier().name())
+                .isEqualTo("PAY_PER_EVENT");
+    }
 
-        // And a fresh GET reads the last tier back from the database.
+    @Test
+    void switchIntoPaidTierWithActiveSubscriptionPersistsAndReturnsIt() throws Exception {
+        var who = caller("uid-mem-switch", "leo2@example.com");
+        // Enrol the account first (GET), then seed the subscription the switch requires (TM-620).
+        mockMvc.perform(get("/api/v1/me/membership").with(who)).andExpect(status().isOk());
+        seedActiveSubscription("uid-mem-switch", MembershipTier.MONTHLY);
+
+        mockMvc.perform(post("/api/v1/me/membership/tier")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tier\":\"MONTHLY\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tier").value("MONTHLY"))
+                .andExpect(jsonPath("$.firstEventCreditAvailable").value(true));
+
+        Long userId = users.findByFirebaseUid("uid-mem-switch").orElseThrow().getId();
+        assertThat(memberships.findByUserId(userId).orElseThrow().getTier().name())
+                .isEqualTo("MONTHLY");
+
+        // The MONTHLY subscription does NOT unlock DIAMOND (tier must match exactly).
+        switchTier(who, "DIAMOND", org.springframework.http.HttpStatus.PAYMENT_REQUIRED);
+
+        // And dropping to the free base while the subscription still renews is a 409 (cancel first).
+        switchTier(who, "PAY_PER_EVENT", org.springframework.http.HttpStatus.CONFLICT);
+
+        // A fresh GET still reads MONTHLY back from the database.
         mockMvc.perform(get("/api/v1/me/membership").with(who))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.tier").value("PAY_PER_EVENT"));
+                .andExpect(jsonPath("$.tier").value("MONTHLY"));
+    }
+
+    @Test
+    void switchDownIsAllowedOnceTheSubscriptionIsCanceled() throws Exception {
+        var who = caller("uid-mem-cancel-down", "mira@example.com");
+        mockMvc.perform(get("/api/v1/me/membership").with(who)).andExpect(status().isOk());
+        Subscription subscription = seedActiveSubscription("uid-mem-cancel-down", MembershipTier.MONTHLY);
+        switchTier(who, "MONTHLY", org.springframework.http.HttpStatus.OK);
+
+        // Cancel stops renewals — the free base becomes reachable again (the paid access itself runs to
+        // the period end server-side; switching down early is the caller's choice).
+        subscription.cancelAtPeriodEnd(Instant.now());
+        subscriptions.save(subscription);
+        switchTier(who, "PAY_PER_EVENT", org.springframework.http.HttpStatus.OK);
+
+        Long userId = users.findByFirebaseUid("uid-mem-cancel-down").orElseThrow().getId();
+        assertThat(memberships.findByUserId(userId).orElseThrow().getTier().name())
+                .isEqualTo("PAY_PER_EVENT");
     }
 
     @Test
     void switchTierWorksBeforeAnyGet() throws Exception {
-        // A switch before ever reading /membership still works — the endpoint enrols first, then switches.
+        // A switch before ever reading /membership still works — the endpoint enrols first, then applies
+        // the TM-620 gate: without a subscription the paid switch is a 402 (the enrol itself succeeded).
         var who = caller("uid-mem-switch-first", "nyx@example.com");
-        switchTier(who, "DIAMOND", org.springframework.http.HttpStatus.OK);
+        switchTier(who, "DIAMOND", org.springframework.http.HttpStatus.PAYMENT_REQUIRED);
 
         Long userId = users.findByFirebaseUid("uid-mem-switch-first").orElseThrow().getId();
         assertThat(memberships.findByUserId(userId).orElseThrow().getTier().name())
-                .isEqualTo("DIAMOND");
+                .isEqualTo("PAY_PER_EVENT");
     }
 
     @Test
     void switchTierRecordsMembershipTierChangedAudit() throws Exception {
         var who = caller("uid-mem-audit", "rumi@example.com");
 
-        // PAY_PER_EVENT (enrol default) -> MONTHLY is a real change, so it is audited.
+        // Enrol + seed the covering subscription (TM-620), then the real change is audited.
+        mockMvc.perform(get("/api/v1/me/membership").with(who)).andExpect(status().isOk());
+        seedActiveSubscription("uid-mem-audit", MembershipTier.MONTHLY);
         switchTier(who, "MONTHLY", org.springframework.http.HttpStatus.OK);
 
         List<AuditEvent> events = audit.findByActorUidOrderByCreatedAtDesc("uid-mem-audit").stream()

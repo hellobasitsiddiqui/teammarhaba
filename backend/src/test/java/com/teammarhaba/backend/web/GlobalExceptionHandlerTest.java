@@ -178,6 +178,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.payments.PaymentWebhookService paymentWebhookService;
 
+    // SubscriptionController + SubscriptionAdminController (TM-620) need a SubscriptionService — supply
+    // it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.membership.SubscriptionService subscriptionService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

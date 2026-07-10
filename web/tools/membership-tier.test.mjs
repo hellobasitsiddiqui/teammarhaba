@@ -1,12 +1,13 @@
-// Tests for the membership tier-management pure core (TM-480). Framework-free — Node's built-in test
-// runner, picked up by the CI glob `node --test web/tools/*.test.mjs`.
+// Tests for the membership tier-management pure core (TM-480, subscription-aware since TM-620).
+// Framework-free — Node's built-in test runner, picked up by the CI glob `node --test web/tools/*.test.mjs`.
 //
 // The screen's decisions all live in DOM-free, api-free functions (the AC's "pure parts tested"): the
-// tier catalogue, the switch-availability state machine (which tiers are switchable now vs gated
-// behind the card step vs a coming-soon future tier), the first-event-credit reflection, and the
+// tier catalogue, the switch-availability state machine (SINCE TM-620: paid tiers are SUBSCRIBE
+// actions pointing at the Subscribe checkout unless a subscription already covers them, and the free
+// base is BLOCKED while a subscription still renews), the first-event-credit reflection, and the
 // runtime switch action. performSwitch is exercised against a MOCK api (contract TM-457: the frontend
-// resolves api at runtime, tests mock it) so we can assert it calls switchTier for the free base and
-// NEVER touches the network for a gated / coming-soon tier — with no browser.
+// resolves api at runtime, tests mock it) so we can assert it calls switchTier only when the switch is
+// genuinely free — and NEVER touches the network for a subscribe/blocked/coming-soon tier.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -27,6 +28,18 @@ import {
   performSwitch,
 } from "../src/assets/membership-tier.js";
 
+// Subscription fixtures (the GET /me/subscription shapes the state machine keys off — TM-620).
+const NO_SUB = { subscribed: false };
+const ACTIVE_MONTHLY = {
+  subscribed: true,
+  tier: "MONTHLY",
+  status: "ACTIVE",
+  renewing: true,
+  currentPeriodEnd: "2026-08-10T12:00:00Z",
+};
+const PAST_DUE_MONTHLY = { ...ACTIVE_MONTHLY, status: "PAST_DUE" };
+const CANCELED_MONTHLY = { ...ACTIVE_MONTHLY, status: "CANCELED", renewing: false };
+
 // --- Catalogue -----------------------------------------------------------------------------------
 
 test("TIERS: the three contract tiers in display order, PAY_PER_EVENT the free base first", () => {
@@ -34,7 +47,7 @@ test("TIERS: the three contract tiers in display order, PAY_PER_EVENT the free b
   assert.equal(DEFAULT_TIER, "PAY_PER_EVENT");
   assert.equal(TIERS[0].paid, false, "the base is free");
   assert.equal(TIERS[1].paid, true, "Monthly is paid");
-  assert.equal(TIERS[2].comingSoon, true, "Diamond is a coming-soon future tier");
+  assert.equal(TIERS[2].comingSoon, false, "Diamond went live with subscriptions (TM-620)");
   // Every tier carries a non-empty "what it includes" list (AC1).
   for (const t of TIERS) assert.ok(t.includes.length > 0, `${t.id} lists what it includes`);
 });
@@ -66,51 +79,76 @@ test("normalizeMembership: coerces garbage / partial responses to a safe shape",
   assert.equal(normalizeMembership({ firstEventCreditAvailable: "yes" }).firstEventCreditAvailable, false);
 });
 
-// --- Switch availability state machine (the AC) --------------------------------------------------
+// --- Switch availability state machine (TM-620) --------------------------------------------------
 
-test("isSwitchableNow: only the free base is self-serve without the card step (AC2)", () => {
-  assert.equal(isSwitchableNow("PAY_PER_EVENT"), true);
-  assert.equal(isSwitchableNow("MONTHLY"), false);
-  assert.equal(isSwitchableNow("DIAMOND"), false);
+test("isSwitchableNow: without a subscription only the free base is switchable — paid tiers need the checkout", () => {
+  assert.equal(isSwitchableNow("PAY_PER_EVENT", NO_SUB), true);
+  assert.equal(isSwitchableNow("PAY_PER_EVENT", undefined), true, "absent subscription = none");
+  assert.equal(isSwitchableNow("MONTHLY", NO_SUB), false);
+  assert.equal(isSwitchableNow("DIAMOND", NO_SUB), false);
 });
 
-test("optionState: current is CURRENT; free base SWITCHABLE; paid GATED; Diamond COMING_SOON", () => {
-  // Caller on the free base.
-  assert.equal(optionState("PAY_PER_EVENT", "PAY_PER_EVENT"), OptionState.CURRENT);
-  assert.equal(optionState("PAY_PER_EVENT", "MONTHLY"), OptionState.GATED, "paid upgrade gated behind M5");
-  assert.equal(optionState("PAY_PER_EVENT", "DIAMOND"), OptionState.COMING_SOON, "Diamond is future");
-
-  // Caller on Monthly can drop back to the free base right now (AC2), and Monthly is their CURRENT.
-  assert.equal(optionState("MONTHLY", "PAY_PER_EVENT"), OptionState.SWITCHABLE);
-  assert.equal(optionState("MONTHLY", "MONTHLY"), OptionState.CURRENT);
-
-  // Coming-soon precedence: even though Diamond is also paid, it's COMING_SOON, never GATED.
-  assert.equal(optionState("MONTHLY", "DIAMOND"), OptionState.COMING_SOON);
+test("isSwitchableNow: a covering subscription unlocks its paid tier; a renewing one blocks the free base", () => {
+  // The MONTHLY subscription covers MONTHLY (e.g. switching back after a manual downgrade)…
+  assert.equal(isSwitchableNow("MONTHLY", ACTIVE_MONTHLY), true);
+  // …but never the OTHER paid tier.
+  assert.equal(isSwitchableNow("DIAMOND", ACTIVE_MONTHLY), false);
+  // While renewals still run (ACTIVE or dunning) the free base is blocked — cancel first.
+  assert.equal(isSwitchableNow("PAY_PER_EVENT", ACTIVE_MONTHLY), false);
+  assert.equal(isSwitchableNow("PAY_PER_EVENT", PAST_DUE_MONTHLY), false);
+  // A cancelled subscription no longer renews, so dropping to the free base is fine again.
+  assert.equal(isSwitchableNow("PAY_PER_EVENT", CANCELED_MONTHLY), true);
 });
 
-test("switchOptionFor: descriptor carries label, disabled flag and note per state", () => {
-  const current = switchOptionFor("PAY_PER_EVENT", "PAY_PER_EVENT");
+test("optionState: current is CURRENT; paid without a sub is SUBSCRIBE; free base blocked while renewing", () => {
+  // Caller on the free base, never subscribed: both paid tiers offer the Subscribe checkout.
+  assert.equal(optionState("PAY_PER_EVENT", "PAY_PER_EVENT", NO_SUB), OptionState.CURRENT);
+  assert.equal(optionState("PAY_PER_EVENT", "MONTHLY", NO_SUB), OptionState.SUBSCRIBE);
+  assert.equal(optionState("PAY_PER_EVENT", "DIAMOND", NO_SUB), OptionState.SUBSCRIBE);
+
+  // Caller on Monthly with an active subscription: Monthly is CURRENT, the free base is BLOCKED
+  // (cancel first), and Diamond is a SUBSCRIBE (a different subscription).
+  assert.equal(optionState("MONTHLY", "MONTHLY", ACTIVE_MONTHLY), OptionState.CURRENT);
+  assert.equal(optionState("MONTHLY", "PAY_PER_EVENT", ACTIVE_MONTHLY), OptionState.BLOCKED);
+  assert.equal(optionState("MONTHLY", "DIAMOND", ACTIVE_MONTHLY), OptionState.SUBSCRIBE);
+
+  // After a cancel the free base becomes SWITCHABLE again (access runs to the period end server-side).
+  assert.equal(optionState("MONTHLY", "PAY_PER_EVENT", CANCELED_MONTHLY), OptionState.SWITCHABLE);
+});
+
+test("switchOptionFor: descriptor carries label, disabled flag, price and navigation per state", () => {
+  const current = switchOptionFor("PAY_PER_EVENT", "PAY_PER_EVENT", NO_SUB);
   assert.equal(current.isCurrent, true);
   assert.equal(current.disabled, true);
   assert.match(current.actionLabel, /current/i);
 
-  const gated = switchOptionFor("PAY_PER_EVENT", "MONTHLY");
-  assert.equal(gated.state, OptionState.GATED);
-  assert.equal(gated.disabled, true, "paid upgrade is shown but not clickable yet (AC2)");
-  assert.ok(gated.note, "gated option explains the card step");
+  // A paid tier without a covering subscription: an ENABLED Subscribe action that navigates to the
+  // Subscribe checkout with the price on the label (TM-620).
+  const subscribe = switchOptionFor("PAY_PER_EVENT", "MONTHLY", NO_SUB);
+  assert.equal(subscribe.state, OptionState.SUBSCRIBE);
+  assert.equal(subscribe.disabled, false, "Subscribe is a live action, not a placeholder");
+  assert.match(subscribe.actionLabel, /subscribe/i);
+  assert.match(subscribe.actionLabel, /£9\.99\/month/, "Monthly is £9.99/mo (locked price)");
+  assert.equal(subscribe.subscribeHref, "#/membership/subscribe/MONTHLY");
+  assert.equal(subscribe.price, "£9.99/month");
 
-  const soon = switchOptionFor("PAY_PER_EVENT", "DIAMOND");
-  assert.equal(soon.state, OptionState.COMING_SOON);
-  assert.equal(soon.disabled, true);
-  assert.match(soon.actionLabel, /coming soon/i);
+  const diamond = switchOptionFor("PAY_PER_EVENT", "DIAMOND", NO_SUB);
+  assert.match(diamond.actionLabel, /£19\.99\/month/, "Diamond is £19.99/mo (locked price)");
+  assert.equal(diamond.subscribeHref, "#/membership/subscribe/DIAMOND");
 
-  const switchable = switchOptionFor("MONTHLY", "PAY_PER_EVENT");
+  // The free base while the subscription renews: shown but disabled, pointing at cancel.
+  const blocked = switchOptionFor("MONTHLY", "PAY_PER_EVENT", ACTIVE_MONTHLY);
+  assert.equal(blocked.state, OptionState.BLOCKED);
+  assert.equal(blocked.disabled, true);
+  assert.ok(blocked.note, "blocked option explains that cancel comes first");
+
+  const switchable = switchOptionFor("MONTHLY", "PAY_PER_EVENT", CANCELED_MONTHLY);
   assert.equal(switchable.state, OptionState.SWITCHABLE);
-  assert.equal(switchable.disabled, false, "switching to the free base works now (AC2)");
+  assert.equal(switchable.disabled, false, "switching to the free base works once cancelled");
 });
 
 test("tierOptions: one descriptor per tier in order, exactly one marked current", () => {
-  const opts = tierOptions({ tier: "MONTHLY" });
+  const opts = tierOptions({ tier: "MONTHLY" }, ACTIVE_MONTHLY);
   assert.deepEqual(opts.map((o) => o.tier), TIER_IDS);
   assert.equal(opts.filter((o) => o.isCurrent).length, 1);
   assert.equal(opts.find((o) => o.isCurrent).tier, "MONTHLY");
@@ -152,7 +190,7 @@ test("performSwitch: calls api.switchTier for the free base and returns the norm
   assert.deepEqual(events, ["start", ["success", "PAY_PER_EVENT"]]);
 });
 
-test("performSwitch: NEVER calls the endpoint for a gated / coming-soon tier", async () => {
+test("performSwitch: NEVER calls the endpoint for a paid tier without a covering subscription", async () => {
   let called = false;
   const api = {
     switchTier: async () => {
@@ -162,12 +200,32 @@ test("performSwitch: NEVER calls the endpoint for a gated / coming-soon tier", a
   };
   for (const tier of ["MONTHLY", "DIAMOND"]) {
     const errors = [];
-    const result = await performSwitch(api, tier, { onError: (e) => errors.push(e) });
-    assert.equal(result.ok, false, `${tier} is not switchable now`);
+    const result = await performSwitch(api, tier, { onError: (e) => errors.push(e) }, NO_SUB);
+    assert.equal(result.ok, false, `${tier} needs the Subscribe checkout, not a free switch`);
     assert.equal(result.reason, "not-switchable");
     assert.equal(errors.length, 1, "the caller is told why via onError");
   }
   assert.equal(called, false, "no network call for a non-switchable tier");
+});
+
+test("performSwitch: allows a paid tier the subscription covers, blocks the free base while renewing", async () => {
+  const calls = [];
+  const api = {
+    switchTier: async (tier) => {
+      calls.push(tier);
+      return { tier, firstEventCreditAvailable: false };
+    },
+  };
+  // Covered paid tier → the endpoint IS called (the backend gate would also allow it).
+  const covered = await performSwitch(api, "MONTHLY", {}, ACTIVE_MONTHLY);
+  assert.equal(covered.ok, true);
+  assert.deepEqual(calls, ["MONTHLY"]);
+
+  // Free base while renewing → blocked client-side (the backend would 409 with "cancel first").
+  const blocked = await performSwitch(api, "PAY_PER_EVENT", {}, ACTIVE_MONTHLY);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, "not-switchable");
+  assert.deepEqual(calls, ["MONTHLY"], "no second network call");
 });
 
 test("performSwitch: surfaces an api failure via onError without throwing", async () => {

@@ -1,13 +1,19 @@
-// Membership tier management (TM-480) — view the caller's current tier + self-serve switch.
+// Membership tier management (TM-480, subscriptions TM-620) — view the caller's current tier,
+// self-serve switch, and manage the recurring subscription behind a paid tier.
 //
 // Part of the Membership slice (contract TM-457, wave-0). This screen shows the caller's current
-// membership tier, what each tier includes, and a Switch action per tier. Backed by the API TM-474
+// membership tier, what each tier includes, and the right action per tier. Backed by the API TM-474
 // owns: GET /api/v1/me/membership -> { tier, firstEventCreditAvailable } and
-// POST /api/v1/me/membership/tier { tier } -> the same shape. This ticket owns ONLY this module, its
-// CSS (membership-tier.css), its test (web/tools/membership-tier.test.mjs), its bits of index.html
-// (a <link>, a <section id="membership-tier-screen">, a nav hook) and — as the flag owner — the
-// `flags.membership` key in the web config (config.js). It does NOT touch api.js / openapi / styles.css
-// / membership-checkout.* (other tickets own those).
+// POST /api/v1/me/membership/tier { tier } -> the same shape — plus, since TM-620, the subscription
+// surface: GET /me/subscription (the manage panel), POST /me/subscription/cancel, and the Subscribe
+// checkout screen at #/membership/subscribe/{TIER} (membership-subscribe.js) the paid tiers link to.
+//
+// SINCE TM-620 the paid tiers are REAL subscriptions (MONTHLY £9.99/mo, DIAMOND £19.99/mo): switching
+// into one requires an active subscription (the backend answers 402 without one), so the paid tier
+// cards now carry a Subscribe action that navigates to the Subscribe checkout instead of the old
+// disabled "card step coming soon" placeholder; Diamond is live (all-access incl. premium), no longer
+// coming-soon. Dropping back to the free base while a subscription still renews is blocked in favour
+// of Cancel (the backend answers 409) — the manage panel owns the cancel.
 //
 // WHY the api namespace is read at RUNTIME off `window.tmApi` rather than a static namespace import of
 // api.js (import-star), per contract TM-457:
@@ -32,7 +38,13 @@
 // decide, via ui.js's XSS-safe el() (textContent only, never innerHTML), using theme tokens so it
 // renders correctly under Paper + the per-user accent / sketchy toggle.
 
-import { el, clear, toast } from "./ui.js";
+import { el, clear, toast, confirmDialog } from "./ui.js";
+import {
+  describeSubscription,
+  normalizeSubscription,
+  subscribeRoute,
+  subscriptionPriceLabel,
+} from "./membership-subscribe-core.js";
 
 // --- Tier catalogue ------------------------------------------------------------------------------
 
@@ -75,14 +87,15 @@ export const TIERS = Object.freeze([
   Object.freeze({
     id: "DIAMOND",
     label: "Diamond",
-    tagline: "Everything in Monthly, plus concierge perks.",
+    tagline: "All-access — every event, premium included.",
     includes: Object.freeze([
       "Everything in Monthly",
-      "Concierge event picks",
+      "Premium events included, no surcharge",
       "Exclusive Diamond-only events",
     ]),
     paid: true,
-    comingSoon: true,
+    // Live since TM-620: Diamond is a real £19.99/mo subscription, no longer a future placeholder.
+    comingSoon: false,
   }),
 ]);
 
@@ -120,63 +133,98 @@ export function normalizeMembership(resp) {
 // --- Switch availability (the heart of the AC) ---------------------------------------------------
 
 /**
- * The four states a tier option can be in on this screen:
+ * The five states a tier option can be in on this screen (TM-480, reshaped by TM-620):
  *   • CURRENT     — the tier the caller is already on (no switch, shown as the active plan).
- *   • SWITCHABLE  — can switch to it right now with no payment (the free base, PAY_PER_EVENT). AC2.
- *   • GATED       — a paid upgrade: SHOWN but disabled until the card step (M5 / TM-479) lands. AC2.
- *   • COMING_SOON — a future tier not yet launched (Diamond). AC3. Never switchable.
+ *   • SWITCHABLE  — can switch to it right now via the free tier-switch endpoint: the free base (when
+ *                   no subscription still renews), or a paid tier the caller's subscription already
+ *                   covers (e.g. switching back after a manual downgrade).
+ *   • SUBSCRIBE   — a paid tier with no covering subscription: the action navigates to the Subscribe
+ *                   checkout (#/membership/subscribe/{TIER}) — first charge + card save (TM-620).
+ *   • BLOCKED     — the free base while a subscription still renews: dropping the paid tier without
+ *                   cancelling would keep the billing — the manage panel's Cancel is the way out.
+ *   • COMING_SOON — a future tier not yet launched. No current tier uses it (Diamond went live in
+ *                   TM-620); kept for the next future tier.
  */
 export const OptionState = Object.freeze({
   CURRENT: "current",
   SWITCHABLE: "switchable",
-  GATED: "gated",
+  SUBSCRIBE: "subscribe",
+  BLOCKED: "blocked",
   COMING_SOON: "coming_soon",
 });
 
 /**
- * True iff a switch to `targetTier` can be performed self-serve RIGHT NOW (no payment). In this slice
- * only the free base is switchable without the card step — paid upgrades wait for M5 (TM-479) and the
- * Revolut flow (TM-478). This is the single guard both the UI and performSwitch key off.
+ * Whether the caller's subscription covers `tier` right now: subscribed to exactly that tier and not
+ * yet lapsed (ACTIVE, dunning PAST_DUE, or CANCELED with paid time left — the client trusts the server
+ * to have lapsed/downgraded an expired one; the backend gate is authoritative either way).
  */
-export function isSwitchableNow(targetTier) {
-  return targetTier === "PAY_PER_EVENT";
+function subscriptionCovers(subscription, tier) {
+  const sub = normalizeSubscription(subscription);
+  return sub.subscribed && sub.tier === tier;
 }
 
 /**
- * Decide the OptionState for offering `targetTier` to a caller currently on `currentTier`.
- * Precedence: the caller's current tier is always CURRENT; a future tier is always COMING_SOON (even
- * though it's also paid); the free base is SWITCHABLE now; any other paid tier is GATED behind M5.
+ * True iff a switch to `targetTier` can be performed via the free tier-switch endpoint RIGHT NOW
+ * (TM-620): the free base — unless a subscription still renews (cancel first) — or a paid tier the
+ * caller's subscription already covers. A paid tier without a covering subscription is NOT switchable
+ * (the backend answers 402): it needs the Subscribe checkout. This is the single guard both the UI and
+ * performSwitch key off.
+ * @param {string} targetTier
+ * @param {unknown} [subscription] the caller's GET /me/subscription state (absent = no subscription)
  */
-export function optionState(currentTier, targetTier) {
+export function isSwitchableNow(targetTier, subscription) {
+  const sub = normalizeSubscription(subscription);
+  if (targetTier === "PAY_PER_EVENT") {
+    // Leaving a paid tier while still being billed is blocked in favour of cancel (backend: 409).
+    return !(sub.subscribed && sub.renewing);
+  }
+  return subscriptionCovers(subscription, targetTier);
+}
+
+/**
+ * Decide the OptionState for offering `targetTier` to a caller currently on `currentTier` with
+ * `subscription` (TM-620). Precedence: the caller's current tier is always CURRENT; a future tier is
+ * always COMING_SOON; then the switchability rule above decides SWITCHABLE, and what is not switchable
+ * is SUBSCRIBE for a paid tier (go pay) or BLOCKED for the free base (go cancel).
+ */
+export function optionState(currentTier, targetTier, subscription) {
   if (targetTier === currentTier) return OptionState.CURRENT;
   if (tierMeta(targetTier).comingSoon) return OptionState.COMING_SOON;
-  if (isSwitchableNow(targetTier)) return OptionState.SWITCHABLE;
-  return OptionState.GATED; // a paid upgrade, shown but gated until the card step lands
+  if (isSwitchableNow(targetTier, subscription)) return OptionState.SWITCHABLE;
+  return targetTier === "PAY_PER_EVENT" ? OptionState.BLOCKED : OptionState.SUBSCRIBE;
 }
 
 /**
- * The full descriptor the UI renders for one tier option, given the caller's current membership.
- * Bundles the catalogue metadata with the resolved state + the action button's label / disabled flag /
- * secondary note, so the DOM half is a dumb painter.
+ * The full descriptor the UI renders for one tier option, given the caller's current membership and
+ * subscription. Bundles the catalogue metadata with the resolved state + the action's label / disabled
+ * flag / navigation target / secondary note, so the DOM half is a dumb painter.
  * @returns {{tier: string, label: string, tagline: string, includes: string[], state: string,
- *   isCurrent: boolean, actionLabel: string, disabled: boolean, note: string|null}}
+ *   isCurrent: boolean, actionLabel: string, disabled: boolean, note: string|null,
+ *   price: string|null, subscribeHref: string|null}}
  */
-export function switchOptionFor(currentTier, targetTier) {
+export function switchOptionFor(currentTier, targetTier, subscription) {
   const meta = tierMeta(targetTier);
-  const state = optionState(currentTier, targetTier);
+  const state = optionState(currentTier, targetTier, subscription);
+  const price = meta.paid ? subscriptionPriceLabel(targetTier) : null;
   let actionLabel;
   let note = null;
+  let subscribeHref = null;
   switch (state) {
     case OptionState.CURRENT:
       actionLabel = "Current plan";
       break;
     case OptionState.SWITCHABLE:
-      // Reachable now: from a paid tier back down to the free base (or staying free is CURRENT).
       actionLabel = "Switch to this plan";
       break;
-    case OptionState.GATED:
-      actionLabel = "Add a card to upgrade";
-      note = "Card payment is coming soon.";
+    case OptionState.SUBSCRIBE:
+      // The paid path (TM-620): navigate to the Subscribe checkout — first charge + card save.
+      actionLabel = price ? `Subscribe · ${price}` : "Subscribe";
+      subscribeHref = subscribeRoute(targetTier);
+      note = "Billed monthly. Cancel anytime.";
+      break;
+    case OptionState.BLOCKED:
+      actionLabel = "Cancel subscription to switch";
+      note = "Cancel your subscription first — your paid tier stays until the period end.";
       break;
     case OptionState.COMING_SOON:
     default:
@@ -191,20 +239,24 @@ export function switchOptionFor(currentTier, targetTier) {
     includes: meta.includes,
     state,
     isCurrent: state === OptionState.CURRENT,
-    // Only the SWITCHABLE option has an enabled button; everything else is shown but not clickable.
+    // SWITCHABLE runs the switch; SUBSCRIBE navigates (enabled link); the rest are shown, not clickable.
     actionLabel,
-    disabled: state !== OptionState.SWITCHABLE,
+    disabled: state !== OptionState.SWITCHABLE && state !== OptionState.SUBSCRIBE,
     note,
+    price,
+    subscribeHref,
   };
 }
 
 /**
- * The list of tier-option descriptors to render, in catalogue order, for a given membership.
+ * The list of tier-option descriptors to render, in catalogue order, for a given membership +
+ * subscription (TM-620).
  * @param {{tier: string, firstEventCreditAvailable?: boolean}} membership
+ * @param {unknown} [subscription] the caller's GET /me/subscription state
  */
-export function tierOptions(membership) {
+export function tierOptions(membership, subscription) {
   const { tier } = normalizeMembership(membership);
-  return TIER_IDS.map((id) => switchOptionFor(tier, id));
+  return TIER_IDS.map((id) => switchOptionFor(tier, id, subscription));
 }
 
 // --- First-event credit reflection ---------------------------------------------------------------
@@ -228,19 +280,21 @@ export function firstEventCreditNote(membership) {
 // --- Runtime switch action (calls api.switchTier) ------------------------------------------------
 
 /**
- * Perform a self-serve tier switch. Guards on isSwitchableNow so a gated / coming-soon tier never hits
- * the network, then calls `api.switchTier(targetTier)` and normalises the response. Best-effort hooks
- * let the DOM reflect progress without this function knowing anything about the DOM (so it's unit
- * testable with a mock api and no browser).
+ * Perform a self-serve tier switch. Guards on isSwitchableNow so a non-switchable tier (a paid tier
+ * with no covering subscription, or the free base while a subscription still renews — TM-620) never
+ * hits the network, then calls `api.switchTier(targetTier)` and normalises the response. Best-effort
+ * hooks let the DOM reflect progress without this function knowing anything about the DOM (so it's
+ * unit testable with a mock api and no browser).
  * @param {{switchTier: (tier: string) => Promise<object>}} api the api namespace (mock in tests, `window.tmApi` at runtime)
  * @param {string} targetTier
  * @param {{onStart?: Function, onSuccess?: (m: object) => void, onError?: (e: unknown) => void}} [hooks]
+ * @param {unknown} [subscription] the caller's GET /me/subscription state (absent = no subscription)
  * @returns {Promise<{ok: boolean, membership?: object, reason?: string, error?: unknown}>}
  */
-export async function performSwitch(api, targetTier, hooks = {}) {
+export async function performSwitch(api, targetTier, hooks = {}, subscription) {
   const { onStart, onSuccess, onError } = hooks;
-  if (!isSwitchableNow(targetTier)) {
-    // A paid / coming-soon tier can't be switched to in this slice — never call the endpoint.
+  if (!isSwitchableNow(targetTier, subscription)) {
+    // Not free to switch (subscribe / cancel first) — never call the endpoint.
     const reason = "not-switchable";
     if (typeof onError === "function") onError(new Error(reason));
     return { ok: false, reason };
@@ -271,18 +325,29 @@ function includesList(includes) {
 }
 
 /**
- * Render one tier-option card into the options grid.
+ * Render one tier-option card into the options grid. A SUBSCRIBE option renders a NAVIGATION link to
+ * the Subscribe checkout (styled as the primary button — the checkout takes the payment, TM-620);
+ * everything else renders the switch button (enabled only for SWITCHABLE).
  * @param {object} option a descriptor from switchOptionFor()
  * @param {(tier: string) => void} onPick called when the (enabled) switch button is clicked
  */
 function optionCard(option, onPick) {
-  const button = el("button", {
-    type: "button",
-    class: `tm-btn ${option.isCurrent ? "" : "tm-btn-primary"}`.trim(),
-    text: option.actionLabel,
-    onClick: () => onPick(option.tier),
-  });
-  button.disabled = option.disabled;
+  let action;
+  if (option.state === OptionState.SUBSCRIBE) {
+    action = el("a", {
+      class: "tm-btn tm-btn-primary tm-tier-subscribe",
+      href: option.subscribeHref,
+      text: option.actionLabel,
+    });
+  } else {
+    action = el("button", {
+      type: "button",
+      class: `tm-btn ${option.isCurrent ? "" : "tm-btn-primary"}`.trim(),
+      text: option.actionLabel,
+      onClick: () => onPick(option.tier),
+    });
+    action.disabled = option.disabled;
+  }
 
   return el(
     "div",
@@ -299,21 +364,82 @@ function optionCard(option, onPick) {
           : null,
       ]),
       el("p", { class: "tm-tier-tagline", text: option.tagline }),
+      option.price ? el("p", { class: "tm-tier-price", text: option.price }) : null,
       includesList(option.includes),
       option.note ? el("p", { class: "tm-tier-note", text: option.note }) : null,
-      el("div", { class: "tm-tier-actions" }, [button]),
+      el("div", { class: "tm-tier-actions" }, [action]),
     ],
   );
 }
 
 /**
- * Paint the whole membership screen into `container`: the current tier summary (+ first-event-credit
- * reflection) and the grid of tier options with their Switch actions. Re-renders itself after a
- * successful switch. `api` is injected (mock in tests, resolved from `window.tmApi` at runtime).
- * @param {HTMLElement} container
- * @param {{membership: object, api: {switchTier: Function}, onChange?: (m: object) => void}} opts
+ * The manage-subscription panel (TM-620): status, price, the renewal/end line, and Cancel while
+ * renewals still run. Renders nothing when the caller has no subscription (the tier cards' Subscribe
+ * actions are the entry point). Cancel asks for confirmation (the styled dialog, never native
+ * confirm()), calls the API and re-renders through `onCancelled` with the fresh subscription state.
+ * @param {unknown} subscription the GET /me/subscription state.
+ * @param {{cancelSubscription?: () => Promise<object>}} api
+ * @param {(subscription: object) => void} onCancelled re-render hook with the updated state.
+ * @returns {HTMLElement|null}
  */
-export function renderMembership(container, { membership, api, onChange } = {}) {
+function subscriptionPanel(subscription, api, onCancelled) {
+  const view = describeSubscription(subscription);
+  if (!view.subscribed) return null;
+
+  const children = [
+    el("div", { class: "tm-subscription-head" }, [
+      el("p", { class: "tm-subscription-title", text: "Your subscription" }),
+      el("span", {
+        class: `tm-subscription-status${view.paymentProblem ? " tm-subscription-status-problem" : ""}`,
+        text: view.statusLabel,
+      }),
+    ]),
+    view.priceLine
+      ? el("p", { class: "tm-subscription-price", text: `${tierMeta(view.tier).label} · ${view.priceLine}` })
+      : null,
+    el("p", { class: "tm-subscription-renewal", text: view.renewalLine }),
+  ];
+
+  if (view.canCancel) {
+    const cancelBtn = el("button", {
+      type: "button",
+      class: "tm-btn tm-subscription-cancel",
+      text: "Cancel subscription",
+      onClick: async () => {
+        const sure = await confirmDialog({
+          title: "Cancel your subscription?",
+          message:
+            "Renewals stop immediately. You keep your current plan until the end of the period you've already paid for, then move to pay-per-event.",
+          confirmLabel: "Cancel subscription",
+          cancelLabel: "Keep it",
+          danger: true,
+        });
+        if (!sure) return;
+        try {
+          const updated = await api.cancelSubscription();
+          toast("Subscription cancelled — your plan stays until the period end.", { type: "success" });
+          onCancelled(updated);
+        } catch (err) {
+          toast(err?.message || "Couldn't cancel your subscription. Please try again.", { type: "error" });
+        }
+      },
+    });
+    children.push(el("div", { class: "tm-subscription-actions" }, [cancelBtn]));
+  }
+
+  return el("div", { class: "tm-subscription-panel tm-wobble" }, children);
+}
+
+/**
+ * Paint the whole membership screen into `container`: the current tier summary (+ first-event-credit
+ * reflection), the manage-subscription panel (TM-620, when subscribed) and the grid of tier options
+ * with their Switch/Subscribe actions. Re-renders itself after a successful switch or cancel. `api` is
+ * injected (mock in tests, resolved from `window.tmApi` at runtime).
+ * @param {HTMLElement} container
+ * @param {{membership: object, subscription?: object, api: {switchTier: Function,
+ *   cancelSubscription?: Function}, onChange?: (m: object) => void}} opts
+ */
+export function renderMembership(container, { membership, subscription, api, onChange } = {}) {
   if (!container) return;
   const current = normalizeMembership(membership);
   clear(container);
@@ -337,23 +463,34 @@ export function renderMembership(container, { membership, api, onChange } = {}) 
   }
   container.appendChild(summary);
 
+  // Manage-subscription panel (TM-620): renewal date + cancel, only when a subscription exists. A
+  // cancel re-renders the whole screen with the fresh state so the tier cards' actions follow suit.
+  const panel = subscriptionPanel(subscription, api, (updated) =>
+    renderMembership(container, { membership, subscription: updated, api, onChange }),
+  );
+  if (panel) container.appendChild(panel);
+
   // Clicking an enabled (SWITCHABLE) option's button runs the switch, then re-renders with the new
-  // membership so the "Current" marker + credit note move to the new tier.
+  // membership so the "Current" marker + credit note move to the new tier. (SUBSCRIBE options are
+  // links to the Subscribe checkout and never come through here.)
   const onPick = async (tier) => {
-    const result = await performSwitch(api, tier, {
-      onError: () => toast("Couldn't change your plan. Please try again.", { type: "error" }),
-    });
+    const result = await performSwitch(
+      api,
+      tier,
+      { onError: () => toast("Couldn't change your plan. Please try again.", { type: "error" }) },
+      subscription,
+    );
     if (result.ok) {
       toast(`You're now on ${tierMeta(result.membership.tier).label}.`, { type: "success" });
       if (typeof onChange === "function") onChange(result.membership);
-      renderMembership(container, { membership: result.membership, api, onChange });
+      renderMembership(container, { membership: result.membership, subscription, api, onChange });
     }
   };
 
   const grid = el(
     "div",
     { class: "tm-tier-grid" },
-    tierOptions(current).map((option) => optionCard(option, onPick)),
+    tierOptions(current, subscription).map((option) => optionCard(option, onPick)),
   );
   container.appendChild(grid);
 }
@@ -397,12 +534,20 @@ export async function enterMembershipTier() {
   const section = document.getElementById(SCREEN_ID);
   if (!section) return;
   let membership = { tier: DEFAULT_TIER, firstEventCreditAvailable: false };
+  let subscription = { subscribed: false };
+  const api = getApi();
   try {
-    const api = getApi();
     if (typeof api.getMembership === "function") membership = await api.getMembership();
   } catch (err) {
     // Fall back to a safe default view rather than failing the screen.
     console.warn("[membership-tier] GET /me/membership failed:", err?.message ?? err);
   }
-  renderMembership(section, { membership, api: getApi() });
+  try {
+    // The subscription state drives the paid tiers' Subscribe vs Switch actions and the manage panel
+    // (TM-620). A failed read falls back to "no subscription" — the backend gate stays authoritative.
+    if (typeof api.getSubscription === "function") subscription = await api.getSubscription();
+  } catch (err) {
+    console.warn("[membership-tier] GET /me/subscription failed:", err?.message ?? err);
+  }
+  renderMembership(section, { membership, subscription, api });
 }

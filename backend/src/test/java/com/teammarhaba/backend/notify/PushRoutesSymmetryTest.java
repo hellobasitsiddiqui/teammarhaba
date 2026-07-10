@@ -31,14 +31,18 @@ import org.junit.jupiter.api.Test;
  */
 class PushRoutesSymmetryTest {
 
-    /** The exact v1 deep-link allow-list — must match client {@code KNOWN_ROUTES} (TM-360). */
+    /**
+     * The exact pinned deep-link allow-list — must match client {@code KNOWN_ROUTES} (TM-360).
+     * {@code #/membership} joined in TM-620: subscription renewal/dunning/downgrade notifications
+     * deep-link to the membership screen.
+     */
     private static final Set<String> EXPECTED_V1 =
-            Set.of("#/home", "#/profile", "#/admin", "#/help", "#/onboarding", "#/login");
+            Set.of("#/home", "#/profile", "#/admin", "#/help", "#/onboarding", "#/login", "#/membership");
 
     @Test
     void knownIsExactlyTheSixV1Routes() {
         assertThat(PushRoutes.KNOWN)
-                .as("backend deep-link allow-list must be the exact v1 set (keep in lock-step with "
+                .as("backend deep-link allow-list must be the exact pinned set (keep in lock-step with "
                         + "web/src/assets/push-deeplink.js KNOWN_ROUTES — TM-360)")
                 .containsExactlyInAnyOrderElementsOf(EXPECTED_V1);
     }

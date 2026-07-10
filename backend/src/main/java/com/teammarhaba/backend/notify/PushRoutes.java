@@ -29,7 +29,7 @@ public final class PushRoutes {
      * here (and vice versa) so the backend never emits a route the client can't resolve.
      */
     public static final Set<String> KNOWN = Set.of(
-            "#/home", "#/profile", "#/admin", "#/help", "#/onboarding", "#/login");
+            "#/home", "#/profile", "#/admin", "#/help", "#/onboarding", "#/login", "#/membership");
 
     /**
      * The one allow-listed route <em>pattern</em> (TM-394, on the TM-360 mechanism): the event

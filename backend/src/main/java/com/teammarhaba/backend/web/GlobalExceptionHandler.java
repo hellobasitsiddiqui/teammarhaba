@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuthException;
 import com.teammarhaba.backend.auth.EmailCodeException;
 import com.teammarhaba.backend.auth.EmailVerificationException;
 import com.teammarhaba.backend.common.InvalidListQueryException;
+import com.teammarhaba.backend.membership.SubscriptionRequiredException;
 import com.teammarhaba.backend.membership.UpgradeRequiredException;
 import com.teammarhaba.backend.notify.BroadcastCooldownException;
 import java.util.List;
@@ -164,6 +165,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(UpgradeRequiredException.class)
     public ProblemDetail handleUpgradeRequired(UpgradeRequiredException ex) {
         return Problems.forbidden(ex.getMessage());
+    }
+
+    /**
+     * A tier switch blocked because the target paid tier has no active subscription behind it (TM-620)
+     * -> 402 Payment Required with the honest "subscribe first" copy. The free self-switch endpoint can
+     * no longer grant MONTHLY/DIAMOND — only the Subscribe checkout activating a subscription does.
+     */
+    @ExceptionHandler(SubscriptionRequiredException.class)
+    public ProblemDetail handleSubscriptionRequired(SubscriptionRequiredException ex) {
+        return Problems.of(HttpStatus.PAYMENT_REQUIRED, "Subscription required", ex.getMessage());
     }
 
     /**

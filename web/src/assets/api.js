@@ -335,11 +335,13 @@ export async function getMembership() {
 }
 
 /**
- * POST /api/v1/me/membership/tier — self-switch the caller's membership `tier` (TM-474). No payment
- * gate in this slice (paid upgrades come later, TM-478), so any tier is selectable. Idempotent
- * server-side: switching to the tier already held returns the unchanged membership. Returns the
- * resulting `{ tier, firstEventCreditAvailable }`; a bad/unknown tier is a 400 carrying per-field
- * `errors`. Identity comes from the Bearer token, never the body.
+ * POST /api/v1/me/membership/tier — self-switch the caller's membership `tier` (TM-474). PAYMENT-GATED
+ * since TM-620: switching into a paid tier (MONTHLY/DIAMOND) requires an active subscription for that
+ * tier — without one the server answers 402 ("Subscription required") and the client should send the
+ * user to the Subscribe checkout instead; leaving a paid tier while the subscription still renews is a
+ * 409 pointing at cancel. Idempotent server-side: switching to the tier already held returns the
+ * unchanged membership. Returns the resulting `{ tier, firstEventCreditAvailable }`; a bad/unknown tier
+ * is a 400 carrying per-field `errors`. Identity comes from the Bearer token, never the body.
  *
  * @param {"PAY_PER_EVENT"|"MONTHLY"|"DIAMOND"} tier the tier to switch to.
  * @returns {Promise<{tier: string, firstEventCreditAvailable: boolean}>} the resulting membership.
@@ -357,6 +359,89 @@ export async function switchTier(tier) {
     const message = problem.detail || problem.title || `Switch tier failed (${response.status})`;
     throw new ApiError(response.status, message, fieldErrors);
   }
+  return response.json();
+}
+
+/**
+ * GET /api/v1/me/subscription — the caller's recurring subscription state (TM-620). Always a 200: a
+ * caller who never subscribed gets the well-defined none-state `{ subscribed: false }` (everything else
+ * null), so the manage-subscription screen renders off one shape. When subscribed, returns
+ * `{ subscribed, tier, status, currentPeriodStart, currentPeriodEnd, renewing, amountPence }` where
+ * `status` is `ACTIVE | PAST_DUE | CANCELED` and `renewing` says whether renewals still run
+ * ("Renews on …" vs "Ends on …" copy).
+ *
+ * @returns {Promise<{subscribed: boolean, tier?: string, status?: string, currentPeriodStart?: string,
+ *   currentPeriodEnd?: string, renewing?: boolean, amountPence?: number}>}
+ * @throws {ApiError}
+ */
+export async function getSubscription() {
+  const response = await apiFetch("/api/v1/me/subscription", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not load your subscription (${response.status}).`);
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/subscription/checkout — open the Subscribe checkout for a paid tier (TM-620): the
+ * first monthly charge (£9.99 MONTHLY / £19.99 DIAMOND) plus the card save for off-session renewals.
+ * Returns `{ tier, amountPence, paymentToken, provider }`; the client mounts the Revolut card widget
+ * with the single-use `paymentToken` and `savePaymentMethodFor: "merchant"`. The subscription itself is
+ * activated server-side by the verified payment webhook — never by the client claiming success. A 409
+ * means an active subscription already exists; a 400 means the free base tier was requested. The price
+ * is resolved server-side from the locked table — `amountPence` here is display-only.
+ *
+ * @param {"MONTHLY"|"DIAMOND"} tier the paid tier to subscribe to.
+ * @returns {Promise<{tier: string, amountPence: number, paymentToken: string, provider: string}>}
+ * @throws {ApiError}
+ */
+export async function subscriptionCheckout(tier) {
+  const response = await apiFetch("/api/v1/me/subscription/checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ tier }),
+  });
+  if (!response.ok) throw await toApiError(response, "Could not start the subscription checkout.");
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/subscription/cancel — stop renewals (TM-620). The paid tier survives until the end
+ * of the already-paid period (`currentPeriodEnd`), then the account downgrades to pay-per-event
+ * server-side. Idempotent: cancelling an already-cancelled subscription returns it unchanged. A 404
+ * means there is no subscription to cancel. Returns the updated subscription state (same shape as
+ * {@link getSubscription}).
+ *
+ * @returns {Promise<{subscribed: boolean, tier?: string, status?: string, currentPeriodEnd?: string,
+ *   renewing?: boolean}>}
+ * @throws {ApiError}
+ */
+export async function cancelSubscription() {
+  const response = await apiFetch("/api/v1/me/subscription/cancel", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, "Could not cancel your subscription.");
+  return response.json();
+}
+
+/**
+ * GET /api/v1/admin/users/{id}/subscription — ADMIN read of one account's subscription state + billing
+ * history (TM-620), the data behind the admin users console's subscription panel. Returns
+ * `{ subscription, charges }`: `subscription` is the same shape as {@link getSubscription} (the
+ * none-state when the account never subscribed) and `charges` is the charge-attempt ledger newest-first
+ * (`{ id, kind, status, tier, amountPence, provider, providerOrderId, periodStart, periodEnd,
+ * createdAt }`). A non-admin gets a 403.
+ *
+ * @param {number|string} userId the account id.
+ * @returns {Promise<{subscription: object, charges: Array<object>}>}
+ * @throws {ApiError}
+ */
+export async function adminGetUserSubscription(userId) {
+  const response = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/subscription`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw await toApiError(response, `Could not load the subscription (${response.status}).`);
   return response.json();
 }
 
@@ -1266,6 +1351,10 @@ if (typeof window !== "undefined") {
     acceptTerms,
     getMembership,
     switchTier,
+    getSubscription,
+    subscriptionCheckout,
+    cancelSubscription,
+    adminGetUserSubscription,
     getMyOrders,
     resendVerification,
     requestEmailCode,
