@@ -38,6 +38,12 @@ import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
+// Membership tier screen (TM-480 built the screen; TM-606 wires it live through this router). The screen
+// + its pure logic live in membership-tier.js; router.js now owns its show/hide + mount lifecycle (the
+// screen's old self-managed hashchange listener was removed in TM-606). `membershipEnabled()` reads the
+// single `config.flags.membership` flag (shipped OFF) so the WHOLE route is gated in one place — with the
+// flag off, `#/membership` isn't a known route here and falls through to the auth default, staying inert.
+import { enterMembershipTier, membershipEnabled } from "./membership-tier.js";
 import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
@@ -98,6 +104,14 @@ const CHAT = "#/chat";
 // nav "Notifications" link (the bottom nav's four tabs have no room; the wireframe shows it as a
 // pushed screen with a back-to-home button).
 const NOTIFICATIONS = "#/notifications";
+// Membership tier management (TM-480 screen, wired live TM-606) — protected, available to any signed-in,
+// onboarded user (per-user self-serve tier switch; NOT admin-only). membership-tier.js paints it into
+// #membership-tier-screen and exposes enterMembershipTier(); the WHOLE route is gated behind the
+// membership feature flag (config.flags.membership, shipped OFF) via isMembershipRoute() below — while
+// the flag is off `#/membership` is not a known route, so it falls through to the auth default and the
+// screen stays inert. Kept OUT of the static PROTECTED set (which is flag-independent) and handled by the
+// flag-aware isMembershipRoute() instead, so a flag-off build never even treats it as a membership route.
+const MEMBERSHIP = "#/membership";
 const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
@@ -124,6 +138,12 @@ function chatThreadId(hash) {
   const rest = hash.slice(CHAT.length + 1);
   return rest ? decodeURIComponent(rest) : null;
 }
+/** True for the membership tier screen route (TM-606) — but ONLY a known route while the membership
+ *  feature flag is ON. With the flag OFF this is always false, so `#/membership` is treated as an unknown
+ *  hash (falls through to the auth default) and the whole screen stays inert until the flag flips. */
+function isMembershipRoute(hash) {
+  return membershipEnabled() && hash === MEMBERSHIP;
+}
 /** A route requires sign-in when it's in the exact protected set, a profile route, the events or chat
  *  area, or the admin event form (ADMIN-only, so protected too) — union of TM-514 + TM-515. */
 function isProtected(route) {
@@ -134,7 +154,9 @@ function isProtected(route) {
     isChatRoute(route) ||
     isAdminEventFormRoute(route) ||
     // Admin message compose (TM-443) — ADMIN-only, so protected too.
-    isAdminMessageComposeRoute(route)
+    isAdminMessageComposeRoute(route) ||
+    // Membership tier screen (TM-606) — protected (any signed-in user) when the flag is on.
+    isMembershipRoute(route)
   );
 }
 
@@ -181,6 +203,11 @@ let chatRouteEntered = null;
 // Same lifecycle as the edit-profile view for the notifications feed (TM-515): mount + rebuild on
 // entry, reset on leaving so a future entry re-enters with a fresh feed.
 let notificationsActive = false;
+// Membership tier screen (TM-606): whether it's currently mounted, so we mount + fetch the caller's
+// membership once on entry into #/membership and reset on leaving so a future entry re-fetches (a fresh
+// tier after a switch made elsewhere). Only ever entered while the flag is on. Same single-route,
+// mount-once lifecycle as the notifications feed above.
+let membershipActive = false;
 // Home feed (TM-512): mount the "Events near you" feed / empty-home into #auth-signed-in on entry,
 // reset on leaving so returning to Home re-fetches (fresh counts / RSVP state after acting elsewhere).
 let homeActive = false;
@@ -215,6 +242,10 @@ function currentRoute() {
   if (isAdminEventFormRoute(hash)) return hash;
   // Admin message compose (TM-443): the exact #/admin/messages/new route.
   if (isAdminMessageComposeRoute(hash)) return hash;
+  // Membership tier screen (TM-606): the exact #/membership route, but ONLY when the membership flag is
+  // ON — with the flag off this predicate is false, so #/membership falls through to the auth default
+  // below and the screen stays inert.
+  if (isMembershipRoute(hash)) return hash;
   // Unknown/empty hash: default by auth state.
   return currentUser() ? HOME : LOGIN;
 }
@@ -269,6 +300,17 @@ function render() {
   if (chatView) chatView.hidden = !isChatRoute(route);
   // Notifications feed (TM-515) — shown for the exact #/notifications route.
   if (notificationsView) notificationsView.hidden = route !== NOTIFICATIONS;
+  // Membership tier screen (TM-606) — shown for the exact #/membership route. `route` is only ever
+  // MEMBERSHIP while the flag is on (isMembershipRoute gates currentRoute()), so with the flag off this
+  // stays hidden and the screen is inert.
+  const membershipView = $("membership-tier-screen");
+  if (membershipView) membershipView.hidden = route !== MEMBERSHIP;
+  // Membership checkout (TM-479) is a per-event CONTEXTUAL overlay opened via
+  // window.tmMembershipCheckout.open(event) — it has no hash route of its own. Router hygiene: hide it on
+  // every (re)render so a stale checkout is dismissed whenever we navigate. open() runs on a user click
+  // and never triggers render(), so this never fights it. Inert while the flag is OFF — nothing opens it.
+  const checkoutView = $("membership-checkout-screen");
+  if (checkoutView) checkoutView.hidden = true;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
   // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
@@ -294,6 +336,11 @@ function render() {
   // The Notifications link (TM-515) follows the same rule — any signed-in, onboarded user.
   const navNotifications = $("nav-notifications");
   if (navNotifications) navNotifications.hidden = !signedIn || gated;
+  // The Membership link (TM-480 screen, wired live TM-606) — shown for any signed-in, onboarded user, but
+  // ONLY while the membership feature flag is on (config.flags.membership, shipped OFF). Hidden signed-out,
+  // while gated, and whenever the flag is off, so it stays inert until the flag flips (TM-478).
+  const navMembership = $("nav-membership");
+  if (navMembership) navMembership.hidden = !(signedIn && membershipEnabled()) || gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
   // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
@@ -516,6 +563,19 @@ function guard() {
     }
   } else {
     notificationsActive = false;
+  }
+  // Membership tier screen (TM-606): mount + fetch the caller's membership on entry into #/membership,
+  // reset on leaving so a future entry re-fetches. `route === MEMBERSHIP` is only ever true while the flag
+  // is on (currentRoute gates it via isMembershipRoute), and a signed-out user is already bounced to login
+  // by the isProtected() check above, so this only mounts for a signed-in user with the flag on. Same
+  // mount-once lifecycle as the notifications feed.
+  if (route === MEMBERSHIP) {
+    if (!membershipActive) {
+      membershipActive = true;
+      enterMembershipTier();
+    }
+  } else {
+    membershipActive = false;
   }
   // Home feed (TM-512): mount the "Events near you" feed / empty-home on entry into #/home, reset on
   // leaving so re-entering (e.g. tapping the Home tab after RSVPing elsewhere) re-fetches. Repeated
