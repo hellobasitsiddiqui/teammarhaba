@@ -11,11 +11,16 @@
 // Router-driven, exactly like the bottom tab bar (tabbar.js) and the header notification bell
 // (notification-bell.js): router.js already computes the single source of truth (signedIn / gated /
 // route) on every render() and calls `updateChatTabBadge()` here, so this badge rides that one state
-// machine instead of running a second, drifting auth/route listener. That gives two ACs for free:
-//   • "refreshes on route change" — render() runs on every hashchange, so navigating anywhere (and in
-//     particular INTO a thread `#/chat/{id}`, which marks it read) re-reads the total and the count drops.
-//   • "clears as threads are read" — the server total is the source of truth; a mark-read lowers that
-//     thread's unread, and the very next refresh reflects it. No local mutation to keep in sync.
+// machine instead of running a second, drifting auth/route listener:
+//   • "refreshes on route change" — render() runs on every hashchange, so navigating anywhere re-reads
+//     the server total and the count reflects any threads read elsewhere.
+//   • "clears as threads are read" — the server total is the source of truth. BUT the route-change
+//     refresh alone does NOT reliably drop the badge on the SAME navigation that opens a thread: opening
+//     `#/chat/{id}` fires the mark-read POST and this GET concurrently, and the GET usually resolves
+//     BEFORE the POST commits, so it re-reads the PRE-mark total (the TM-585 GET/POST race — the drop
+//     used to self-heal only on the next 60s poll). So chat.js drives the drop explicitly on open:
+//     `noteThreadRead()` decrements this total optimistically the moment a thread is read, and
+//     `refreshChatTabBadge()` reconciles with the authoritative server total once the POST has committed.
 // On top of that we refresh on a gentle poll while visible (a message arriving elsewhere surfaces
 // without a nav) and on a foreground-push signal (the `tm:notification` window event notification-
 // center.js fires on the TM-374 foreground path) so a chat push that lands while the app is open bumps
@@ -29,7 +34,7 @@
 
 import { getConversationsUnreadTotal } from "./api.js";
 import { shouldShowTabbar } from "./tabbar-core.js";
-import { unreadTotalOf, chatTabAriaLabel, badgeText, hasBadge } from "./chat-tab-badge-core.js";
+import { unreadTotalOf, decrementUnreadTotal, chatTabAriaLabel, badgeText, hasBadge } from "./chat-tab-badge-core.js";
 
 const TAB_ID = "tab-chat"; // the Chat tab <a> — carries the aria-label announcing the count
 const BADGE_ID = "tab-chat-badge"; // the .app-tab-badge chip seam inside it (TM-434)
@@ -42,6 +47,8 @@ let inFlight = false; // a conversations GET is running — dedupe overlapping r
 let epoch = 0; // monotonic generation, bumped on sign-out so a late in-flight result is dropped
 let pollTimer = null; // the active-only poll interval handle
 let wired = false; // the foreground-push listener is attached exactly once
+let painted = 0; // the last total we painted — the base the optimistic mark-read decrement subtracts from (TM-585)
+let readMark = 0; // bumped on each optimistic mark-read so a stale in-flight (pre-mark) GET can't raise the count back
 
 /** The Chat tab <a>, or null if the markup isn't present / no DOM (defensive — never throw). */
 function tabEl() {
@@ -61,6 +68,7 @@ function badgeEl() {
  * @param {number} total
  */
 function paintCount(total) {
+  painted = total; // remember what we last showed so an optimistic mark-read can decrement from it (TM-585)
   const chip = badgeEl();
   if (chip) {
     const show = hasBadge(total);
@@ -84,9 +92,13 @@ async function refresh() {
   if (!active || inFlight) return;
   inFlight = true;
   const gen = epoch;
+  const readGen = readMark; // TM-585: snapshot the mark-read generation before the GET goes out
   try {
     const payload = await getConversationsUnreadTotal();
-    if (gen === epoch && active) paintCount(unreadTotalOf(payload)); // still current → paint; else drop
+    // Paint only if still current (not signed-out) AND no thread was marked read while this GET was in
+    // flight — a mark-read that raced this fetch means its total predates the mark (the GET/POST race),
+    // so dropping it here avoids re-raising the count the optimistic decrement just dropped (TM-585).
+    if (gen === epoch && active && readGen === readMark) paintCount(unreadTotalOf(payload));
   } catch (err) {
     console.warn("[chat-tab-badge] refresh failed:", err?.message ?? err);
   } finally {
@@ -143,7 +155,32 @@ export function updateChatTabBadge({ signedIn, gated } = {}) {
   }
 }
 
+/**
+ * Optimistically drop the Chat-tab badge when a thread is opened + marked read (TM-585), BEFORE the
+ * mark-read POST commits. chat.js's markThreadRead calls this with the thread's cached unread; we
+ * subtract it from the painted total (clamped at zero) and repaint straight away, and bump `readMark`
+ * so the router's concurrent unread-total GET — which read the PRE-mark server total (the GET/POST
+ * race this fixes) — can't raise the count back when it resolves. The POST-resolve reconcile
+ * ({@link refreshChatTabBadge}) then re-reads the authoritative server total. A no-op when the badge
+ * isn't active (signed-out / gated), so it's always safe to call.
+ * @param {number} threadUnread the opened thread's cached unread (its per-row badge count).
+ */
+export function noteThreadRead(threadUnread) {
+  if (!active) return;
+  readMark += 1; // invalidate any in-flight pre-mark GET before we drop the count
+  paintCount(decrementUnreadTotal(painted, threadUnread));
+}
+
+/**
+ * Reconcile the Chat-tab badge with the authoritative server unread-total (TM-585). Called by chat.js
+ * once a thread's mark-read POST has COMMITTED, so this GET now reflects the lowered total (unlike the
+ * router's concurrent pre-mark GET). Delegates to the shared, deduped, epoch-guarded {@link refresh}.
+ */
+export function refreshChatTabBadge() {
+  refresh();
+}
+
 // Debug/QA seam (mirrors window.tmNotificationBell): drive a refresh / update without a real message.
 if (typeof window !== "undefined") {
-  window.tmChatTabBadge = { refresh, update: updateChatTabBadge };
+  window.tmChatTabBadge = { refresh, update: updateChatTabBadge, noteThreadRead, refreshChatTabBadge };
 }

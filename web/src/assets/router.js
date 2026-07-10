@@ -317,8 +317,9 @@ function render() {
 
   // Chat-tab unread badge (TM-439): the unread pill over the bottom-nav Chat tab, gated to the SAME
   // signed-in, un-gated user as the bar. Driven from here so it shares router's single source of truth
-  // — this gives the "refresh on route change" AC for free (render() runs on every hashchange + auth
-  // change, so navigating INTO a thread, which marks it read, re-reads the read API and the count drops).
+  // — this gives the "refresh on route change" AC (render() runs on every hashchange + auth change).
+  // NOTE (TM-585): this route-change refresh does NOT reliably drop the badge on the same open that
+  // marks a thread read (its GET races the mark-read POST) — chat.js drives that drop explicitly instead.
   updateChatTabBadge({ signedIn, gated });
 
   // Notification bell (TM-455): the top-right header bell + unread badge, shown for the SAME

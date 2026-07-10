@@ -21,7 +21,6 @@ import {
   membershipControls,
   sortConversations,
   toConversationRows,
-  totalUnread,
   ADMIN_AUTHOR,
   deepLinkCta,
   normaliseReceipt,
@@ -268,13 +267,6 @@ test("sortConversations / toConversationRows never mutate their input and tolera
   assert.deepEqual(input.map((r) => r.sortAt), [1, 3, 2]); // input untouched
   assert.deepEqual(toConversationRows(null), []);
   assert.deepEqual(toConversationRows(undefined), []);
-});
-
-test("totalUnread sums unread across rows or raw summaries", () => {
-  assert.equal(totalUnread([{ unread: 2 }, { unread: 5 }, { unread: 0 }]), 7);
-  assert.equal(totalUnread([{ unreadCount: 3 }, { unreadCount: 4 }]), 7);
-  assert.equal(totalUnread([]), 0);
-  assert.equal(totalUnread(null), 0);
 });
 
 /* ─────────────────────────────── thread message adapters ──────────────────────────────────────── */

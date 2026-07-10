@@ -51,6 +51,10 @@ import {
   unreactFromMessage,
 } from "./api.js";
 import * as core from "./chat-core.js";
+// TM-585: drive the Chat-tab unread badge's drop from the mark-read path itself. Opening a thread marks
+// it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
+// so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
+import { noteThreadRead, refreshChatTabBadge } from "./chat-tab-badge.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -327,6 +331,12 @@ function listRow(row) {
             })
           : null,
         row.timeLabel ? el("span", { class: "tm-chat-row-time", text: row.timeLabel }) : null,
+        // Per-row unread count. This IN-LIST badge caps at 99+ (the shared `badge()` component's
+        // convention) — DELIBERATELY higher than the bottom-nav Chat-tab badge + the header notification
+        // bell, which cap at 9+ (BADGE_CAP, notification-bell-core.js). The difference is intentional
+        // (TM-586): the tab/bell are glanceable NAV CHROME pills where a low 9+ cap keeps a tiny chip
+        // readable and the two stay in deliberate parity, whereas a per-conversation row shows a fuller
+        // count (e.g. "42") because the extra precision is useful when scanning the list itself.
         row.unread > 0 ? badge(row.unread) : null,
       ]),
     ],
@@ -807,11 +817,21 @@ function threadMeta(id) {
 /** Mark the opened thread read (fire-and-forget) and clear its cached unread so back-nav reflects it. */
 function markThreadRead(id) {
   const row = state.rows.find((r) => r.id === String(id));
+  const wasUnread = row ? row.unread : 0; // this thread's contribution to the Chat-tab total (TM-585)
   if (row) row.unread = 0;
-  Promise.resolve(markConversationRead(id)).catch((err) => {
-    // Non-fatal: the badge just stays until the next list refresh. Never surfaces to the user.
-    console.warn("[chat] mark-read failed:", err?.message ?? err);
-  });
+  // TM-585: drop the Chat-tab badge straight away by this thread's own unread (optimistic), so it falls on
+  // THIS navigation instead of waiting for the POST to commit + the next 60s poll. Without it the router's
+  // concurrent unread-total GET re-reads the pre-mark total (the GET/POST race) and the badge doesn't drop.
+  noteThreadRead(wasUnread);
+  Promise.resolve(markConversationRead(id))
+    // Once the mark-read has COMMITTED, reconcile the badge with the authoritative server total (this GET
+    // now reflects the drop, unlike the router's concurrent pre-mark one) — this also self-corrects any
+    // local decrement drift over repeated open/close, so the total never double-counts or goes negative.
+    .then(() => refreshChatTabBadge())
+    .catch((err) => {
+      // Non-fatal: the optimistic drop stands and the next poll reconciles. Never surfaces to the user.
+      console.warn("[chat] mark-read failed:", err?.message ?? err);
+    });
 }
 
 /** The "no messages yet" empty thread state. */
