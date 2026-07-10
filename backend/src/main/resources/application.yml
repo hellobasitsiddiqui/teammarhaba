@@ -99,6 +99,15 @@ springdoc:
 # Prod can tighten any value via the environment. A non-positive ttl/length/limit fails startup
 # loudly (Bean Validation in EmailCodeProperties) rather than silently weakening the flow.
 app:
+  # Test-data seed hook (TM-587). A profile/env-GATED, non-prod-only endpoint that populates a
+  # signed-in caller's chat (a couple of event group threads + an admin "from TeamMarhaba" channel,
+  # each with messages + unread state) so the Event Chat foundation screens (TM-438/TM-439) can be
+  # rendered/asserted against a LIVE backend instead of route-mocked fixtures (the TM-564 evidence
+  # gap). DISABLED by default here (safe): prod inherits this `false` AND the seed beans additionally
+  # carry `@Profile("!prod")`, so the endpoint can never exist in production. Turned ON only in the
+  # dev + test profiles (application-{dev,test}.yml) where the browser-e2e / integration suites run.
+  test-seed:
+    enabled: ${APP_TEST_SEED_ENABLED:false}
   # Event reminder scan (TM-394): a fixed-delay @Scheduled tick that pushes the T-24h and T-1h
   # nudges to an event's GOING attendees. `enabled: false` skips creating the scheduler bean
   # entirely (the test profile does this so integration tests stay deterministic and drive the

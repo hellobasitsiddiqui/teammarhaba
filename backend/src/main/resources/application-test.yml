@@ -1,6 +1,11 @@
 # Automated tests — isolated, no external services. Defaults keep the context
 # bootable; the Testcontainers Postgres harness lands in TM-57.
 app:
+  # Enable the TM-587 chat seed hook under the test profile so the seed endpoint's own integration
+  # test (ChatSeedControllerIntegrationTest) can exercise it. The prod-disabled guard is proven by
+  # ChatSeedDisabledIntegrationTest, which overrides this back to `false` (as prod inherits it).
+  test-seed:
+    enabled: true
   db:
     name: teammarhaba_test
     user: test

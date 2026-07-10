@@ -8,6 +8,11 @@ spring:
     password: ${DB_PASSWORD:devpassword}
 
 app:
+  # Enable the TM-587 chat seed hook for local dev + the browser-e2e backend (which runs on this
+  # `dev` profile — see .github/workflows/e2e.yml). Lets the chat foundation screens be seeded and
+  # rendered against a live backend. Prod leaves it off (base default + the beans' @Profile("!prod")).
+  test-seed:
+    enabled: true
   db:
     name: teammarhaba
     user: app

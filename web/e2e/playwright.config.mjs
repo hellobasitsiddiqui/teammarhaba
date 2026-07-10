@@ -25,12 +25,13 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
-    // Desktop project runs every spec EXCEPT the mobile-only responsive one (which needs the phone
-    // viewport from the mobile-chromium project below).
+    // Desktop project runs every spec EXCEPT the mobile-only ones (which need the phone viewport from
+    // the mobile-chromium project below): the responsive layout spec and the chat-foundation evidence
+    // spec (TM-587, captured at the Pixel 5 surface TM-564 uses).
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /responsive-mobile\.spec\.mjs/,
+      testIgnore: /(responsive-mobile|chat-foundation)\.spec\.mjs/,
     },
     // Mobile viewport project (TM-229) — a phone profile (Pixel 5 ≈ 393px wide) so the responsive
     // specs exercise the real narrow-screen layout: hamburger nav, no horizontal page scroll, the
@@ -41,7 +42,7 @@ export default defineConfig({
     {
       name: "mobile-chromium",
       use: { ...devices["Pixel 5"] },
-      testMatch: /(responsive-mobile|golden-path|broadcast-admin|events)\.spec\.mjs/,
+      testMatch: /(responsive-mobile|golden-path|broadcast-admin|events|chat-foundation)\.spec\.mjs/,
     },
   ],
   // Serve the static web app (with e2e config injected). The backend + emulator are external.

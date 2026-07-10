@@ -126,6 +126,12 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.MessagePostService messagePostService;
 
+    // ChatSeedController (TM-587, the non-prod test seed hook) needs a ChatSeedService — supply it so the
+    // web slice can load. That controller is @ConditionalOnProperty(app.test-seed.enabled) + @Profile
+    // ("!prod"); this slice runs on the default `dev` profile where the flag is on, so it IS loaded here.
+    @MockitoBean
+    private com.teammarhaba.backend.testsupport.ChatSeedService chatSeedService;
+
     // ChatModerationAdminController (TM-449) needs a ChatModerationService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.chat.ChatModerationService chatModerationService;
