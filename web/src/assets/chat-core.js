@@ -665,3 +665,97 @@ export function parseSseFrame(frame) {
   if (dataLines.length === 0) return null; // no payload -> not a dispatchable event
   return { event, data: dataLines.join("\n"), id };
 }
+
+/* ─────────────────────────────── Typing indicators (TM-465) ──────────────────────────────────────
+ * "X is typing…" over the live SSE transport (TM-464), EPHEMERAL — never stored. This is the PURE half:
+ * the debounce decision (how often the client signals up), and the receiver-side typist state machine
+ * (fold each `typing` event in, expire it a few seconds after the last signal, and render the aggregated
+ * label). No DOM/fetch, so it unit-tests in plain Node exactly like the SSE parser above; api.js owns the
+ * POST + the SSE read, chat.js turns the label into a line under the thread.
+ *
+ * The two ends are deliberately decoupled by time: the sender DEBOUNCES to at most one signal every
+ * TYPING_DEBOUNCE_MS while composing (never per-keystroke), and the receiver EXPIRES a typist
+ * TYPING_TTL_MS after their last signal. TTL > debounce leaves a grace margin so a still-typing person's
+ * indicator never flickers between two debounced signals, yet clears within a few seconds once they stop.
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Minimum gap between typing signals the client sends UP while someone composes (the debounce). At most
+ * one POST per this window, never per-keystroke — cheap on the wire and on the server fan-out.
+ */
+export const TYPING_DEBOUNCE_MS = 3000;
+
+/**
+ * How long a received typist stays shown after their LAST signal before expiring (the receiver-side TTL).
+ * Comfortably above {@link TYPING_DEBOUNCE_MS} so a continuously-typing person (who re-signals every
+ * debounce window) never lapses, while a stopped one clears within a few seconds.
+ */
+export const TYPING_TTL_MS = 5000;
+
+/** A display name for a typist, falling back to a generic label when the server sent none (a nameless account). */
+export function typistName(name) {
+  const trimmed = (name == null ? "" : String(name)).trim();
+  return trimmed || "Someone";
+}
+
+/**
+ * Whether the client should send a typing signal NOW, given when it last sent one (the debounce gate).
+ * True if it has never signalled ({@code lastSentAt} falsy) or at least {@code interval} ms have passed —
+ * so a burst of keystrokes collapses to one signal per window.
+ * @param {number} lastSentAt epoch-ms of the last sent signal (0/null = never).
+ * @param {number} now epoch-ms now.
+ * @param {number} [interval] the debounce window (defaults to TYPING_DEBOUNCE_MS).
+ * @returns {boolean}
+ */
+export function shouldSignalTyping(lastSentAt, now, interval = TYPING_DEBOUNCE_MS) {
+  return !lastSentAt || now - lastSentAt >= interval;
+}
+
+/**
+ * Fold one received {@code typing} event into the typist list, keyed by user id (so repeated signals from
+ * the same person REFRESH one entry, never stack). A start (`typing !== false`) upserts the typist with a
+ * fresh expiry ({@code now + ttl}); an explicit stop (`typing === false`) removes them at once. An event
+ * with no user id is ignored (can't be keyed/de-duped). Returns a NEW array (never mutates the input), so
+ * a caller can compare/replace by reference.
+ * @param {Array<{userId: string, name: string, expiresAt: number}>} typists the current list.
+ * @param {{userId: (string|number), name?: string, typing?: boolean}} event the received typing event.
+ * @param {number} now epoch-ms now.
+ * @param {number} [ttl] the receiver-side TTL (defaults to TYPING_TTL_MS).
+ * @returns {Array<{userId: string, name: string, expiresAt: number}>}
+ */
+export function applyTypingEvent(typists, event, now, ttl = TYPING_TTL_MS) {
+  const list = Array.isArray(typists) ? typists : [];
+  const uid = event && event.userId != null ? String(event.userId) : "";
+  if (!uid) return list.slice(); // no key → can't track this signal; leave the list unchanged (copy)
+  // Drop any existing entry for this person first — a start re-adds it (refreshed), a stop leaves it gone.
+  const without = list.filter((t) => t.userId !== uid);
+  if (event.typing === false) return without; // explicit "stopped" → remove immediately
+  without.push({ userId: uid, name: typistName(event.name), expiresAt: now + ttl });
+  return without;
+}
+
+/** Drop typists whose last signal has expired (expiry at/-before {@code now}). Returns a new array. */
+export function pruneTypists(typists, now) {
+  const list = Array.isArray(typists) ? typists : [];
+  return list.filter((t) => t.expiresAt > now);
+}
+
+/**
+ * The aggregated "who's typing" label for the thread, after expiring stale typists (TM-465 group
+ * aggregation). Empty string when nobody is typing (the caller hides the line); otherwise:
+ *   • 1 → "X is typing…"
+ *   • 2 → "X and Y are typing…"
+ *   • 3+ → "X, Y and N others are typing…" (N = the rest)
+ * @param {Array<{userId: string, name: string, expiresAt: number}>} typists
+ * @param {number} now epoch-ms now.
+ * @returns {string}
+ */
+export function typingLabel(typists, now) {
+  const active = pruneTypists(typists, now);
+  const names = active.map((t) => t.name);
+  if (names.length === 0) return "";
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  const extra = names.length - 2;
+  return `${names[0]}, ${names[1]} and ${extra} ${extra === 1 ? "other" : "others"} are typing…`;
+}

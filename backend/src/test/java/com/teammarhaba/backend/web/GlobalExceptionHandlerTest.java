@@ -140,6 +140,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.ConversationMembershipService conversationMembershipService;
 
+    // ConversationTypingController (TM-465) needs a TypingSignalService — supply it so the web slice can
+    // load. Its other collaborators (ConversationReadService, ChatStreamService) are already mocked above.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.TypingSignalService typingSignalService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

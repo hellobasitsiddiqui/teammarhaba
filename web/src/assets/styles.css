@@ -4171,6 +4171,18 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
 /* The send button is disabled until the draft is valid (non-blank, ≤500) — dim it + drop the pointer. */
 .tm-chat-send:disabled { opacity: 0.45; cursor: not-allowed; filter: none; box-shadow: none; }
 
+/* Typing indicator (TM-465): a quiet, italic "X is typing…" line between the message body and the
+   composer. Ephemeral + best-effort — the [hidden] attr collapses it entirely when nobody's typing. */
+.tm-chat-typing {
+    margin-top: var(--space-2);
+    padding: 0 var(--space-2);
+    font-size: var(--fs-2);
+    font-style: italic;
+    color: var(--muted);
+}
+.tm-chat-typing[hidden] { display: none; }
+.tm-chat-typing-text { display: inline-block; }
+
 /* An optimistic bubble (TM-448) — shown the instant the caller hits send, dimmed + "Sending…" until the
    POST confirms (then it's replaced by the server's message) or is rolled back on failure. */
 .tm-chat-msg--pending { opacity: 0.6; }

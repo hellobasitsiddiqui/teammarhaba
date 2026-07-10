@@ -580,6 +580,35 @@ export async function postConversationMessage(id, body, { replyToMessageId = nul
   return response.json();
 }
 
+/**
+ * POST /api/v1/conversations/{id}/typing — signal that the caller is (or, with {@code typing:false}, has
+ * stopped) typing in a thread (TM-465). The server fans a transient {@code typing} SSE event out to the
+ * thread's OTHER connected members; nothing is persisted.
+ *
+ * <p><b>Best-effort, never throws.</b> A typing hint is pure sugar over the real chat, so a failed signal
+ * must never surface an error or break composing — this swallows any failure (returning {@code false})
+ * exactly like {@link openConversationStream} swallows a dropped socket. Callers DEBOUNCE it client-side
+ * (chat-core {@code shouldSignalTyping}) so it's at most one call every few seconds, never per-keystroke.
+ *
+ * @param {number|string} id the conversation id.
+ * @param {boolean} [typing=true] {@code true} = started/continuing; {@code false} = explicitly stopped.
+ * @returns {Promise<boolean>} whether the signal was accepted (resolves, never rejects).
+ */
+export async function signalTyping(id, typing = true) {
+  try {
+    const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/typing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ typing: typing !== false }),
+    });
+    return response.ok;
+  } catch (err) {
+    // Non-fatal: a typing hint that didn't send changes nothing the user relies on.
+    console.warn("[api] typing signal failed:", err?.message ?? err);
+    return false;
+  }
+}
+
 /* ─────────────────────────────── Conversations (chat) — self-service (TM-471) ───────────────────
  * Member-facing levers over the caller's OWN thread membership, WITHOUT touching their event RSVP:
  * mute / unmute this thread's push, and leave / rejoin the thread. Each POSTs to the owner-scoped
@@ -714,11 +743,18 @@ export async function unreactFromMessage(messageId, emoji) {
  * `onError` (best-effort) and stops. The caller keeps its fetched history and, on the next open /
  * reconnect, re-syncs via {@link getConversationMessages}. Nothing is delivered ONLY over the socket.
  *
+ * <p><b>Typing indicators (TM-465).</b> The same stream also carries transient {@code typing} events
+ * (a small {@code { userId, name, typing }} signal); when one arrives `onTyping` fires with it. Like
+ * `message` it's best-effort — a client that never connects simply shows no typing hints — but unlike
+ * `message` it is EPHEMERAL (never persisted, nothing to re-sync): a reconnect just starts with no
+ * typists. The typist is excluded server-side from their own broadcast, so `onTyping` never fires for
+ * the caller's own typing.
+ *
  * @param {number|string} id the conversation id to subscribe to.
- * @param {{onMessage?: (msg: Object) => void, onOpen?: () => void, onError?: (err: Error) => void}} [handlers]
+ * @param {{onMessage?: (msg: Object) => void, onTyping?: (sig: Object) => void, onOpen?: () => void, onError?: (err: Error) => void}} [handlers]
  * @returns {{close: () => void}} a handle; call `close()` to end the stream (e.g. on leaving the thread).
  */
-export function openConversationStream(id, { onMessage, onOpen, onError } = {}) {
+export function openConversationStream(id, { onMessage, onTyping, onOpen, onError } = {}) {
   // AbortController lets close() actually tear down the underlying HTTP connection, not just stop reading.
   const controller = new AbortController();
   let closed = false;
@@ -751,14 +787,17 @@ export function openConversationStream(id, { onMessage, onOpen, onError } = {}) 
         const { value, done } = await reader.read();
         if (done || closed) break;
         for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-          if (event.event !== "message") continue; // ignore `open` / heartbeat frames
-          let message;
+          // We dispatch two frame types: `message` (a new bubble) and `typing` (TM-465, a transient
+          // indicator). `open` / `:keep-alive` heartbeats carry no payload and are ignored.
+          if (event.event !== "message" && event.event !== "typing") continue;
+          let payload;
           try {
-            message = JSON.parse(event.data);
+            payload = JSON.parse(event.data);
           } catch {
             continue; // a malformed frame is skipped, never fatal
           }
-          onMessage?.(message);
+          if (event.event === "typing") onTyping?.(payload);
+          else onMessage?.(payload);
         }
       }
     } catch (err) {
@@ -1052,6 +1091,7 @@ if (typeof window !== "undefined") {
     getConversationMessages,
     markConversationRead,
     postConversationMessage,
+    signalTyping,
     openConversationStream,
     muteConversation,
     unmuteConversation,

@@ -67,6 +67,8 @@ public class ConversationStreamController {
         // Gate first (synchronous): only a member of this thread may subscribe. Throws AccessDeniedException
         // (-> 403) before the request goes async, so a non-member never opens a stream.
         conversations.assertMember(caller, id);
-        return streams.open(id);
+        // Register the stream under the caller's uid so a typing broadcast (TM-465) can exclude the
+        // typist's own stream — the only use of the owner; message broadcasts still reach every stream.
+        return streams.open(id, caller.uid());
     }
 }

@@ -42,6 +42,13 @@ import {
   quoteExcerpt,
   toQuotedPreview,
   replyTargetFrom,
+  TYPING_DEBOUNCE_MS,
+  TYPING_TTL_MS,
+  typistName,
+  shouldSignalTyping,
+  applyTypingEvent,
+  pruneTypists,
+  typingLabel,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -646,4 +653,96 @@ test("pendingMessage: carries the reply preview so the optimistic echo shows the
   assert.deepEqual(echo.replyTo, preview);
   // Default (no reply) → null replyTo, same as a plain send.
   assert.equal(pendingMessage("plain", { localId: "p2" }).replyTo, null);
+});
+
+/* ─────────────────────────────── Typing indicators (TM-465) ──────────────────────────────────────── */
+
+test("typistName: trims a real name, falls back to 'Someone' for a blank/absent one", () => {
+  assert.equal(typistName("  Amina  "), "Amina");
+  assert.equal(typistName(""), "Someone");
+  assert.equal(typistName("   "), "Someone");
+  assert.equal(typistName(null), "Someone");
+  assert.equal(typistName(undefined), "Someone");
+});
+
+test("shouldSignalTyping: debounces to at most one signal per window", () => {
+  // Never signalled yet → send.
+  assert.equal(shouldSignalTyping(0, 10_000), true);
+  assert.equal(shouldSignalTyping(null, 10_000), true);
+  // Within the window since the last signal → hold.
+  assert.equal(shouldSignalTyping(10_000, 10_000 + TYPING_DEBOUNCE_MS - 1), false);
+  // At/after the window → send again.
+  assert.equal(shouldSignalTyping(10_000, 10_000 + TYPING_DEBOUNCE_MS), true);
+  // Custom interval respected.
+  assert.equal(shouldSignalTyping(0, 5, 1000), true);
+  assert.equal(shouldSignalTyping(5, 500, 1000), false);
+});
+
+test("applyTypingEvent: upserts a typist keyed by user id with a fresh expiry, never mutating input", () => {
+  const now = 1000;
+  const start = applyTypingEvent([], { userId: 7, name: "Amina", typing: true }, now);
+  assert.deepEqual(start, [{ userId: "7", name: "Amina", expiresAt: now + TYPING_TTL_MS }]);
+
+  // A second signal from the SAME person refreshes the single entry (keyed by id), never stacks.
+  const refreshed = applyTypingEvent(start, { userId: "7", name: "Amina", typing: true }, now + 2000);
+  assert.equal(refreshed.length, 1);
+  assert.equal(refreshed[0].expiresAt, now + 2000 + TYPING_TTL_MS);
+
+  // The input array is not mutated (returns a new array).
+  assert.equal(start[0].expiresAt, now + TYPING_TTL_MS);
+});
+
+test("applyTypingEvent: an explicit stop (typing:false) removes that typist immediately", () => {
+  const now = 0;
+  let list = applyTypingEvent([], { userId: 1, name: "A", typing: true }, now);
+  list = applyTypingEvent(list, { userId: 2, name: "B", typing: true }, now);
+  assert.equal(list.length, 2);
+  list = applyTypingEvent(list, { userId: 1, typing: false }, now);
+  assert.deepEqual(list.map((t) => t.userId), ["2"]);
+});
+
+test("applyTypingEvent: a signal with no user id is ignored (can't be keyed)", () => {
+  const list = applyTypingEvent([{ userId: "9", name: "Z", expiresAt: 999 }], { name: "nobody", typing: true }, 0);
+  assert.deepEqual(list, [{ userId: "9", name: "Z", expiresAt: 999 }]); // unchanged (a copy)
+});
+
+test("pruneTypists: drops entries whose expiry has passed", () => {
+  const list = [
+    { userId: "1", name: "A", expiresAt: 100 },
+    { userId: "2", name: "B", expiresAt: 300 },
+  ];
+  assert.deepEqual(pruneTypists(list, 200).map((t) => t.userId), ["2"]); // A expired, B lives
+  assert.deepEqual(pruneTypists(list, 50).map((t) => t.userId), ["1", "2"]); // both live
+  assert.deepEqual(pruneTypists(list, 300), []); // at expiry → gone (strict >)
+});
+
+test("typingLabel: aggregates 0 / 1 / 2 / 3+ typists, expiring stale ones first", () => {
+  const now = 0;
+  const at = (n) => now + TYPING_TTL_MS; // all fresh
+  assert.equal(typingLabel([], now), "");
+  assert.equal(typingLabel([{ userId: "1", name: "Amina", expiresAt: at() }], now), "Amina is typing…");
+  assert.equal(
+    typingLabel([
+      { userId: "1", name: "Amina", expiresAt: at() },
+      { userId: "2", name: "Bilal", expiresAt: at() },
+    ], now),
+    "Amina and Bilal are typing…",
+  );
+  // 3 → "and 1 other"; 4 → "and 2 others".
+  const three = [
+    { userId: "1", name: "Amina", expiresAt: at() },
+    { userId: "2", name: "Bilal", expiresAt: at() },
+    { userId: "3", name: "Carmen", expiresAt: at() },
+  ];
+  assert.equal(typingLabel(three, now), "Amina, Bilal and 1 other are typing…");
+  assert.equal(typingLabel([...three, { userId: "4", name: "Dan", expiresAt: at() }], now), "Amina, Bilal and 2 others are typing…");
+});
+
+test("typingLabel: a typist whose signal expired is dropped from the label", () => {
+  const list = [
+    { userId: "1", name: "Amina", expiresAt: 100 },
+    { userId: "2", name: "Bilal", expiresAt: 5000 },
+  ];
+  // At now=200, Amina expired → only Bilal remains.
+  assert.equal(typingLabel(list, 200), "Bilal is typing…");
 });

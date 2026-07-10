@@ -98,6 +98,15 @@ public class ChatStreamService {
     /** The SSE event name carrying a newly-created chat message (the payload is a ConversationMessageResponse). */
     public static final String EVENT_MESSAGE = "message";
 
+    /**
+     * The SSE event name carrying a transient <b>typing indicator</b> (TM-465) — an ephemeral "X is
+     * typing…" signal fanned out to the thread's other connected members. Unlike {@link #EVENT_MESSAGE}
+     * it is <b>never persisted</b>: it rides the live socket only, expires client-side, and re-sync over
+     * the read API never replays it (there is nothing stored to replay). The payload is a small
+     * {@link com.teammarhaba.backend.api.TypingSignal} ({@code userId}, {@code name}, {@code typing}).
+     */
+    public static final String EVENT_TYPING = "typing";
+
     /** The event name of the initial confirmation frame sent the instant a stream opens. */
     private static final String EVENT_OPEN = "open";
 
@@ -107,6 +116,17 @@ public class ChatStreamService {
      * Empty sets are pruned by the heartbeat, so a quiet thread leaves no residue.
      */
     private final Map<Long, Collection<SseEmitter>> streamsByConversation = new ConcurrentHashMap<>();
+
+    /**
+     * emitter → the Firebase uid of the member who opened it, so a broadcast can <b>exclude a specific
+     * member's own stream</b> (TM-465: a typing signal must reach the thread's OTHER members, never echo
+     * back to the typist). A side map rather than a value on {@link #streamsByConversation} keeps the
+     * message-broadcast path (which addresses every stream) untouched — owner tracking is purely additive
+     * and only consulted by {@link #broadcastExcluding}. Entries are removed in lock-step with the emitter
+     * ({@link #remove} / {@link #dropQuietly}) so a closed stream leaves no owner residue. A stream opened
+     * without an owner (the legacy {@link #open(long)} path) simply isn't keyed here and is never excluded.
+     */
+    private final Map<SseEmitter, String> streamOwner = new ConcurrentHashMap<>();
 
     /**
      * Open a live stream for {@code conversationId} and register it for broadcasts. The caller
@@ -121,8 +141,23 @@ public class ChatStreamService {
      * @return the open {@link SseEmitter} for the controller to return to Spring MVC
      */
     public SseEmitter open(long conversationId) {
+        return open(conversationId, null);
+    }
+
+    /**
+     * Open a live stream and register it under {@code ownerUid} so a later {@link #broadcastExcluding}
+     * can skip this member's own stream (TM-465). Behaves exactly like {@link #open(long)} otherwise —
+     * the owner is only ever consulted to exclude the typist from their own typing broadcast; message
+     * broadcasts still reach it. {@code ownerUid} may be {@code null} (an anonymous/legacy open), in
+     * which case the stream is never excluded.
+     *
+     * @param conversationId the thread the caller is a member of
+     * @param ownerUid       the Firebase uid of the connecting member, or {@code null}
+     * @return the open {@link SseEmitter} for the controller to return to Spring MVC
+     */
+    public SseEmitter open(long conversationId, String ownerUid) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT);
-        register(conversationId, emitter);
+        register(conversationId, emitter, ownerUid);
         try {
             // A first frame confirms the stream end-to-end and flushes headers through any proxy.
             emitter.send(SseEmitter.event()
@@ -141,9 +176,21 @@ public class ChatStreamService {
      * so a unit test can register a fake/mock emitter without going through the servlet stack.
      */
     void register(long conversationId, SseEmitter emitter) {
+        register(conversationId, emitter, null);
+    }
+
+    /**
+     * As {@link #register(long, SseEmitter)}, additionally recording {@code ownerUid} (when non-null) so
+     * {@link #broadcastExcluding} can skip this member's own stream (TM-465). Package-private so a unit
+     * test can register a fake/mock emitter with an owner without going through the servlet stack.
+     */
+    void register(long conversationId, SseEmitter emitter, String ownerUid) {
         streamsByConversation
                 .computeIfAbsent(conversationId, key -> new CopyOnWriteArraySet<>())
                 .add(emitter);
+        if (ownerUid != null) {
+            streamOwner.put(emitter, ownerUid);
+        }
         // Any terminal state removes the stream from the registry so broadcasts never touch a dead one.
         emitter.onCompletion(() -> remove(conversationId, emitter));
         emitter.onError(error -> remove(conversationId, emitter));
@@ -165,12 +212,34 @@ public class ChatStreamService {
      *     case on an instance that holds no subscriber for this thread)
      */
     public int broadcast(long conversationId, String eventName, Object data) {
+        return broadcastExcluding(conversationId, eventName, data, null);
+    }
+
+    /**
+     * Broadcast {@code data} as a named SSE event to every stream open <em>on this instance</em> for
+     * {@code conversationId} <b>except</b> the one owned by {@code excludeUid} (TM-465). This is the
+     * transport half of the typing indicator: the typing signal fans out to the thread's OTHER connected
+     * members and is deliberately never echoed back to the typist's own stream, so a client never renders
+     * "you are typing". A {@code null} {@code excludeUid} excludes nobody, so {@link #broadcast} is just
+     * this with no exclusion. Delivery is otherwise identical to {@link #broadcast}: best-effort and
+     * single-instance, a stream that rejects the write is dropped in place, and 0 open streams (the common
+     * Cloud Run case) is a no-op.
+     *
+     * @param excludeUid the Firebase uid whose own stream must NOT receive this event, or {@code null} to
+     *     deliver to everyone. Matched against the owner recorded at {@link #open(long, String)}.
+     * @return how many streams the event was delivered to (excluding the sender's own)
+     */
+    public int broadcastExcluding(long conversationId, String eventName, Object data, String excludeUid) {
         Collection<SseEmitter> streams = streamsByConversation.get(conversationId);
         if (streams == null || streams.isEmpty()) {
             return 0; // nobody connected here — the offline path (push + fetch-on-open) still delivers
         }
         int delivered = 0;
         for (SseEmitter emitter : streams) {
+            // Skip the sender's own stream(s): a typing signal must reach OTHERS, never echo to the typist.
+            if (excludeUid != null && excludeUid.equals(streamOwner.get(emitter))) {
+                continue;
+            }
             try {
                 emitter.send(SseEmitter.event().name(eventName).data(data, MediaType.APPLICATION_JSON));
                 delivered++;
@@ -218,6 +287,7 @@ public class ChatStreamService {
     /** Complete + forget a stream, swallowing any error from an already-dead emitter. */
     private void dropQuietly(Collection<SseEmitter> streams, SseEmitter emitter) {
         streams.remove(emitter);
+        streamOwner.remove(emitter); // forget the owner in lock-step so no residue survives the stream
         try {
             emitter.complete();
         } catch (Exception ignored) {
@@ -231,5 +301,6 @@ public class ChatStreamService {
         if (streams != null) {
             streams.remove(emitter);
         }
+        streamOwner.remove(emitter); // forget the owner in lock-step so no residue survives the stream
     }
 }
