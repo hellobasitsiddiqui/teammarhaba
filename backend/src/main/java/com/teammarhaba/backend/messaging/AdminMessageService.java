@@ -101,6 +101,7 @@ public class AdminMessageService {
     private final DeviceTokenRepository deviceTokens;
     private final UserRepository users;
     private final AdminMessageRepository adminMessages;
+    private final AdminBroadcastChatBridge chatBridge;
     private final AuditService audit;
 
     public AdminMessageService(
@@ -111,6 +112,7 @@ public class AdminMessageService {
             DeviceTokenRepository deviceTokens,
             UserRepository users,
             AdminMessageRepository adminMessages,
+            AdminBroadcastChatBridge chatBridge,
             AuditService audit) {
         this.recipientResolver = recipientResolver;
         this.notificationWriter = notificationWriter;
@@ -119,6 +121,7 @@ public class AdminMessageService {
         this.deviceTokens = deviceTokens;
         this.users = users;
         this.adminMessages = adminMessages;
+        this.chatBridge = chatBridge;
         this.audit = audit;
     }
 
@@ -174,6 +177,17 @@ public class AdminMessageService {
         int notified = notificationWriter.writeAdminMessageInCurrentTransaction(
                 recipients, title, body, deepLink, sourceRef, false);
 
+        // 4b. Bridge into the chat section (TM-588). Also persist the broadcast as a re-readable system
+        // message in each recipient's personal "from TeamMarhaba" ADMIN_BROADCAST channel, so it appears
+        // in the chat section (TM-445) driven off real data — not just as a bell notification. This joins
+        // the current transaction (no tx of its own), so the chat copies commit or roll back together with
+        // the header + inbox rows + audit (TM-554 atomicity). It AUGMENTS, and does not replace, the
+        // notification path above — and it sends NO push of its own: the recipients are already notified by
+        // step 5's fan-out, so re-firing the TM-437 chat fan-out here would double-notify (see the bridge's
+        // class doc). "Existing notification delivery is unaffected" (the AC) precisely because this only
+        // adds durable chat rows and touches neither the inbox write above nor the push below.
+        int bridgedToChat = chatBridge.bridgeToChat(recipients, body, deepLink);
+
         // 5. Best-effort push on top of the durable inbox, respecting the opt-out / skip-disabled rails.
         PushMessage pushMessage = new PushMessage(title, pushPreview(body), deepLink);
         PushTally tally = fanOutPush(recipients, pushMessage);
@@ -198,14 +212,15 @@ public class AdminMessageService {
                         Map.entry("route", deepLink == null ? "" : deepLink)));
 
         log.info(
-                "Admin message {} by {}: target={}({}), recipients={}, notified={}, push[targeted={}, "
-                        + "delivered={}, pruned={}, failed={}, skipped={}]",
+                "Admin message {} by {}: target={}({}), recipients={}, notified={}, bridgedToChat={}, "
+                        + "push[targeted={}, delivered={}, pruned={}, failed={}, skipped={}]",
                 campaign.getId(),
                 actorUid,
                 targetType,
                 targetRef,
                 recipients.size(),
                 notified,
+                bridgedToChat,
                 tally.targeted,
                 tally.delivered,
                 tally.pruned,

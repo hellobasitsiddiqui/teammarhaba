@@ -46,6 +46,16 @@ public class Conversation {
     @Column(name = "event_id", updatable = false)
     private Long eventId;
 
+    /**
+     * The owner of a per-user {@code ADMIN_BROADCAST} channel (TM-588) — the recipient whose personal
+     * "from TeamMarhaba" thread this is; {@code null} for an {@code EVENT_GROUP} thread and for an
+     * owner-less broadcast row (the no-arg {@link #adminBroadcast()} factory). A partial-unique index
+     * ({@code uq_conversation_broadcast_owner}, V33) makes this a singleton per user, so the bridge
+     * resolves a user's channel by {@code (type, owner_user_id)} and creates it at most once.
+     */
+    @Column(name = "owner_user_id", updatable = false)
+    private Long ownerUserId;
+
     /** DB-authoritative creation instant ({@code DEFAULT now()}); read-only on the entity. */
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
@@ -58,9 +68,10 @@ public class Conversation {
     protected Conversation() {
     }
 
-    private Conversation(ConversationType type, Long eventId) {
+    private Conversation(ConversationType type, Long eventId, Long ownerUserId) {
         this.type = type;
         this.eventId = eventId;
+        this.ownerUserId = ownerUserId;
     }
 
     /**
@@ -68,12 +79,24 @@ public class Conversation {
      * {@code event_id} rejects a second one (surfaced as a {@code DataIntegrityViolationException}).
      */
     public static Conversation forEvent(Long eventId) {
-        return new Conversation(ConversationType.EVENT_GROUP, eventId);
+        return new Conversation(ConversationType.EVENT_GROUP, eventId, null);
     }
 
     /** A new admin broadcast thread — no event, its messages are system-sent (null sender). */
     public static Conversation adminBroadcast() {
-        return new Conversation(ConversationType.ADMIN_BROADCAST, null);
+        return new Conversation(ConversationType.ADMIN_BROADCAST, null, null);
+    }
+
+    /**
+     * A new per-user admin broadcast channel (TM-588) — one user's personal "from TeamMarhaba" thread,
+     * keyed by {@code ownerUserId}, into which every broadcast targeted at them is appended as a system
+     * message. No event; its messages are system-sent (null sender). The partial-unique index on
+     * {@code owner_user_id} (V33) makes this a singleton per user — a second create for the same owner
+     * is rejected as a {@code DataIntegrityViolationException} — so the bridge creates it lazily on the
+     * user's first broadcast and reuses it thereafter.
+     */
+    public static Conversation adminBroadcast(Long ownerUserId) {
+        return new Conversation(ConversationType.ADMIN_BROADCAST, null, ownerUserId);
     }
 
     /**
@@ -97,6 +120,14 @@ public class Conversation {
 
     public Long getEventId() {
         return eventId;
+    }
+
+    /**
+     * The owner of a per-user {@code ADMIN_BROADCAST} channel (TM-588), or {@code null} for an
+     * {@code EVENT_GROUP} / owner-less broadcast thread.
+     */
+    public Long getOwnerUserId() {
+        return ownerUserId;
     }
 
     public Instant getCreatedAt() {
