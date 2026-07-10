@@ -62,7 +62,14 @@
 
     <main class="app">
         <h1>TeamMarhaba</h1>
-        <p class="tagline">Find your people. Plan the meetup. Make it happen.</p>
+        <!-- TM-596: the minimal centered brand lockup — the wordmark above ONE tagline, both
+             centred by `.app { text-align:center }`. The decorative "hello"/marhaba wave that used
+             to sit beside the wordmark and the wavy "hello!" divider that used to sit under this
+             tagline (both injected by doodle-decor.js under the TM-529 sketchy skin) are removed, so
+             the header is a clean wordmark + single line on every surface. No background is set here
+             or on `.app`/`.tagline`, so the lockup inherits each surface's Paper background (the
+             per-user accent + wavy/sketchy toggle) rather than imposing a fixed colour. -->
+        <p class="tagline">Find Your People - Make it happen</p>
         <p id="status" class="status">loading…</p>
 
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out.
@@ -157,7 +164,15 @@
                               stroke="currentColor" stroke-width="2.2" stroke-linecap="round" opacity="0.6" />
                     </svg>
                     <h2>Sign in</h2>
-                    <p class="auth-subtitle">Find your people. Plan the meetup.</p>
+                    <!-- TM-596: the login card uses the SAME single tagline as the main header, so the
+                         front door and the app read as one lockup. The auth-mark above (the two-figures
+                         "find your people" brand mark) is kept — it's the auth surface's own brand mark,
+                         the counterpart to the boot screen's cup mark, and is neither the hand nor the
+                         wavy line this ticket removes. What IS removed here is the decorative "hello"
+                         wave doodle-decor.js used to prepend to the "Sign in" heading, so the auth head
+                         is a clean centred mark + heading + one tagline. `.auth-head` centres it and sets
+                         no background, so it inherits the card/surface theme. -->
+                    <p class="auth-subtitle">Find Your People - Make it happen</p>
                 </div>
 
                 <!-- Step 1 — default: ask for the email to send a 6-digit code to. -->
