@@ -156,6 +156,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.TypingSignalService typingSignalService;
 
+    // MembershipController (TM-474) needs a MembershipService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.membership.MembershipService membershipService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

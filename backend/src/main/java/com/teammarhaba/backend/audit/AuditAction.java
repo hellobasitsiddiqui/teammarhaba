@@ -127,5 +127,14 @@ public enum AuditAction {
      * thread, {@code NONE} = reinstated) in its metadata. Muting never touches the member's event RSVP —
      * a removed member is still "going" to the event, they just lose thread access.
      */
-    EVENT_CHAT_MEMBER_MUTED
+    EVENT_CHAT_MEMBER_MUTED,
+
+    /**
+     * A user self-switched their membership tier via {@code POST /api/v1/me/membership/tier} (TM-474 /
+     * epic Membership). One row per <em>actual</em> change (switching to the tier already held is a
+     * no-op and not recorded), carrying the account's {@code user_id} as the target and the
+     * {@code from → to} tier transition in its metadata. No payment gate in this slice — the paid-
+     * upgrade billing gate (Revolut) lands later (TM-478).
+     */
+    MEMBERSHIP_TIER_CHANGED
 }

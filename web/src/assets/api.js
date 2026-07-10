@@ -315,6 +315,52 @@ export async function acceptTerms(version) {
 }
 
 /**
+ * GET /api/v1/me/membership — the caller's membership (TM-474). The account is enrolled just-in-time
+ * onto the default `PAY_PER_EVENT` tier on first read, so this always resolves for an authenticated
+ * caller. Returns `{ tier, firstEventCreditAvailable }`: `tier` is one of
+ * `PAY_PER_EVENT | MONTHLY | DIAMOND`, and `firstEventCreditAvailable` is whether the account's
+ * first-event freebie is still available. Identity comes from the Bearer token, never the body.
+ *
+ * @returns {Promise<{tier: string, firstEventCreditAvailable: boolean}>} the caller's membership.
+ * @throws {Error} on a non-2xx response (a 401 will already have refreshed/redirected via apiFetch).
+ */
+export async function getMembership() {
+  const response = await apiFetch("/api/v1/me/membership", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/membership failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/membership/tier — self-switch the caller's membership `tier` (TM-474). No payment
+ * gate in this slice (paid upgrades come later, TM-478), so any tier is selectable. Idempotent
+ * server-side: switching to the tier already held returns the unchanged membership. Returns the
+ * resulting `{ tier, firstEventCreditAvailable }`; a bad/unknown tier is a 400 carrying per-field
+ * `errors`. Identity comes from the Bearer token, never the body.
+ *
+ * @param {"PAY_PER_EVENT"|"MONTHLY"|"DIAMOND"} tier the tier to switch to.
+ * @returns {Promise<{tier: string, firstEventCreditAvailable: boolean}>} the resulting membership.
+ * @throws {ApiError} on a non-2xx response (a 401 will already have refreshed/redirected via apiFetch).
+ */
+export async function switchTier(tier) {
+  const response = await apiFetch("/api/v1/me/membership/tier", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ tier }),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
+    const message = problem.detail || problem.title || `Switch tier failed (${response.status})`;
+    throw new ApiError(response.status, message, fieldErrors);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
  * FCM/APNs registration `token` and `platform` (TM-279 client → TM-283 endpoint), so the send-push
  * service (TM-284) can target it. Identity comes from the Bearer token, never the body. Re-sending
@@ -1148,6 +1194,8 @@ if (typeof window !== "undefined") {
     submitOnboarding,
     completeOnboarding,
     acceptTerms,
+    getMembership,
+    switchTier,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,
