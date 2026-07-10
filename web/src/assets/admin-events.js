@@ -394,7 +394,7 @@ async function cancelEvent(event) {
     render();
     toast("Event cancelled. Attendees will be notified.", { type: "success" });
   } catch (err) {
-    toast(err instanceof ApiError ? err.message : "Could not cancel the event.", { type: "error" });
+    toast(err instanceof ApiError ? err.message : "Couldn't cancel the event.", { type: "error" });
   }
 }
 
@@ -786,7 +786,7 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
         }
         toast(leftover.length ? leftover.join(" ") : "Please fix the highlighted fields.", { type: "error" });
       } else {
-        toast(err instanceof ApiError ? err.message : "Could not save the event.", { type: "error" });
+        toast(err instanceof ApiError ? err.message : "Couldn't save the event.", { type: "error" });
       }
       setBusy(false);
     }

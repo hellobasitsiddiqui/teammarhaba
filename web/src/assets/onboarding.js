@@ -169,7 +169,7 @@ async function submit(event) {
       }
       toast(leftover.length ? leftover.join(" ") : "Please fix the highlighted fields.", { type: "error" });
     } else {
-      const msg = err instanceof ApiError ? err.message : "Could not save your profile. Please try again.";
+      const msg = err instanceof ApiError ? err.message : "Couldn't save your profile. Please try again.";
       toast(msg, { type: "error" });
     }
   } finally {

@@ -303,7 +303,7 @@ async function save(event) {
         { type: "error" },
       );
     } else {
-      const msg = err instanceof ApiError ? err.message : "Could not save your profile.";
+      const msg = err instanceof ApiError ? err.message : "Couldn't save your profile.";
       toast(msg, { type: "error" });
     }
   } finally {
@@ -420,7 +420,7 @@ function buildAvatar() {
       onAvatarChanged(); // repaint the nav avatar from the new photoURL.
       toast("Avatar updated.", { type: "success" });
     } catch (err) {
-      const msg = err?.message || "Could not upload your avatar.";
+      const msg = err?.message || "Couldn't upload your avatar.";
       setError(msg);
       toast(msg, { type: "error" });
     } finally {
@@ -599,7 +599,7 @@ async function doSignOut() {
   try {
     await signOut();
   } catch (err) {
-    toast(err?.message || "Could not sign out.", { type: "error" });
+    toast(err?.message || "Couldn't sign out.", { type: "error" });
   }
 }
 

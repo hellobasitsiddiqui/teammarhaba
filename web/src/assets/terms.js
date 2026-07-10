@@ -83,7 +83,7 @@ async function accept() {
     // guard, which re-checks gating and routes the user on to their intended route / home.
     onComplete();
   } catch (err) {
-    const msg = err instanceof ApiError ? err.message : "Could not record your acceptance. Please try again.";
+    const msg = err instanceof ApiError ? err.message : "Couldn't record your acceptance. Please try again.";
     toast(msg, { type: "error" });
     shell.acceptBtn.disabled = false;
     shell.acceptBtn.textContent = original;

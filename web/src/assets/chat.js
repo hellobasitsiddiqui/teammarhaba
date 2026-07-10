@@ -201,7 +201,7 @@ function buildThreadActions(id, typeKey) {
       if (row) row.muted = muted;
       muteText.textContent = muted ? "Unmute" : "Mute";
       muteBtn.setAttribute("aria-label", muted ? "Unmute notifications" : "Mute notifications");
-      toast(muted ? "Notifications muted for this chat" : "Notifications back on", { type: "success" });
+      toast(muted ? "Notifications muted for this chat." : "Notifications back on.", { type: "success" });
     } catch (err) {
       toast("Couldn't update notifications. Please try again.", { type: "error" });
       console.warn("[chat] mute toggle failed:", err?.status ?? "", err?.message ?? err);
