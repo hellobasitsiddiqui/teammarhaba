@@ -1,6 +1,7 @@
-// Doodle decoration for the STATIC page panels (TM-215). index.html's landing header, the login
-// card, and the signed-in "home" card are plain markup (not built by the el() kit), so this small
-// module mounts a few tasteful doodles from the TM-214 pack into them once the DOM is ready.
+// Doodle decoration for the STATIC page panels (TM-215). index.html's signed-in "home" card is
+// plain markup (not built by the el() kit), so this small module mounts a couple of tasteful
+// doodles from the TM-214 pack into it once the DOM is ready. (TM-596 removed the landing-header
+// and login-card decorations so the brand lockup stays a clean centred wordmark + one tagline.)
 //
 // Visual-only: it never reads user data, changes layout flow (doodles are decorative inline SVG),
 // or touches app logic. The doodles are authored with stroke="currentColor" and are sized/spaced by
@@ -33,16 +34,14 @@ function dividerAfter(node, { tag = false } = {}) {
 function decorate() {
   const $ = (id) => document.getElementById(id);
 
-  // 1) Landing header — a "hello"/marhaba wave beside the app title, then a hello! divider under
-  //    the tagline. This is the first thing an unconfigured (now doodle-default) deploy shows.
-  decorateHeader(document.querySelector(".app h1"), "hello", "Marhaba — welcome");
-  dividerAfter(document.querySelector(".app .tagline"), { tag: true });
+  // TM-596: the landing header and the login-card heading no longer get doodle decoration. The
+  // "hello"/marhaba wave that used to sit beside the ".app h1" wordmark (the "hand"), the wavy
+  // "hello!" divider that used to sit under the ".app .tagline" (the TM-529 wavy motif), and the
+  // small wave on the "Sign in" heading are all removed here so the brand lockup is a clean centred
+  // wordmark + single tagline on every surface (web / mobile-web / Android WebView). The signed-in
+  // home card below is out of scope for that lockup and keeps its welcome flourish.
 
-  // 2) Login card — a small wave on the "Sign in" heading. Decorative: no title (it would just
-  //    repeat the "Sign in" heading text), so it renders aria-hidden.
-  decorateHeader($("auth-signed-out")?.querySelector("h2"), "hello");
-
-  // 3) Signed-in home card — a celebration on the "Signed in" heading, then a divider before the
+  // 1) Signed-in home card — a celebration on the "Signed in" heading, then a divider before the
   //    admin link block so the card reads as a little welcome.
   const homeCard = $("auth-signed-in");
   decorateHeader(homeCard?.querySelector("h2"), "celebrate", "You're in");
