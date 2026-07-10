@@ -628,6 +628,55 @@ export async function rejoinConversation(id) {
   return conversationMembershipAction(id, "rejoin");
 }
 
+/* ─────────────────────────────── Message reactions (TM-461 / TM-462) ─────────────────────────────
+ * Toggle an emoji reaction on a single message. These are MESSAGE-scoped (not conversation-scoped) —
+ * the path key is the message id. Both return the message's AUTHORITATIVE MessageReactionSummary
+ * (`{ messageId, reactions: EmojiReactionCount[] }`) so the caller can reconcile its optimistic chip
+ * math (chat-core.applyReactionToggle) with the server's true per-emoji counts + `mine` flags. They
+ * throw an {@link ApiError} carrying `.status` + the backend's problem detail so the UI can roll the
+ * optimistic change back and surface an honest reason.
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * POST /api/v1/messages/{messageId}/reactions — add the caller's `emoji` reaction to a message (TM-461).
+ * Body is a ReactionRequest (`{ emoji }`, maxLength 32). Returns the fresh MessageReactionSummary.
+ * @param {number|string} messageId the message to react to.
+ * @param {string} emoji the reaction glyph (one of chat-core REACTION_EMOJIS).
+ * @returns {Promise<{messageId: number, reactions: {emoji: string, count: number, mine: boolean}[]}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function reactToMessage(messageId, emoji) {
+  const response = await apiFetch(`/api/v1/messages/${encodeURIComponent(messageId)}/reactions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ emoji: String(emoji ?? "") }),
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Couldn't add your reaction (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
+ * DELETE /api/v1/messages/{messageId}/reactions?emoji=… — remove the caller's `emoji` reaction from a
+ * message (TM-461). The emoji is a query param (the endpoint's contract). Returns the fresh summary.
+ * @param {number|string} messageId the message to un-react from.
+ * @param {string} emoji the reaction glyph to remove.
+ * @returns {Promise<{messageId: number, reactions: {emoji: string, count: number, mine: boolean}[]}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function unreactFromMessage(messageId, emoji) {
+  const query = emoji ? `?emoji=${encodeURIComponent(emoji)}` : "";
+  const response = await apiFetch(`/api/v1/messages/${encodeURIComponent(messageId)}/reactions${query}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Couldn't remove your reaction (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
 /**
  * GET /api/v1/conversations/{id}/stream — open the LIVE chat stream for a thread (TM-464). This is the
  * live-while-online path: while the connection is up, `onMessage` fires with each newly-posted

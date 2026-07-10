@@ -11,6 +11,8 @@ import { test } from "node:test";
 import {
   REACTION_EMOJIS,
   pickReaction,
+  normaliseReactions,
+  applyReactionToggle,
   receiptState,
   conversationBadge,
   avatarGlyph,
@@ -60,9 +62,77 @@ test("receiptState is defensive about bad / degenerate inputs", () => {
 
 test("the reaction set + pickReaction produce a fresh single-select pill", () => {
   assert.deepEqual([...REACTION_EMOJIS], ["👍", "❤️", "😂", "🎉", "🙌"]);
+  // A "like" (👍) leads the picker so it's the prominent common reaction — no special like gesture.
+  assert.equal(REACTION_EMOJIS[0], "👍");
   for (const emoji of REACTION_EMOJIS) assert.deepEqual(pickReaction(emoji), { emoji, count: 1 });
   assert.deepEqual(pickReaction(undefined), { emoji: "", count: 1 });
   assert.deepEqual(pickReaction(null), { emoji: "", count: 1 });
+});
+
+/* ─────────────────────────────── reactions: normalise + toggle (TM-462) ────────────────────────── */
+
+test("normaliseReactions cleans chips: drops empty emoji, clamps count, coerces mine", () => {
+  assert.deepEqual(
+    normaliseReactions([
+      { emoji: "👍", count: 3, mine: true },
+      { emoji: "", count: 9 }, // dropped: no emoji
+      { emoji: "🎉", count: -2, mine: 0 }, // count clamps to 0, mine coerces to false
+      { emoji: "❤️", count: 1.9, mine: 1 }, // count truncates to 1, mine coerces to true
+      null, // dropped: not an object
+    ]),
+    [
+      { emoji: "👍", count: 3, mine: true },
+      { emoji: "🎉", count: 0, mine: false },
+      { emoji: "❤️", count: 1, mine: true },
+    ],
+  );
+  assert.deepEqual(normaliseReactions(null), []);
+  assert.deepEqual(normaliseReactions(undefined), []);
+});
+
+test("applyReactionToggle: a fresh emoji adds a mine chip and calls react (POST)", () => {
+  const { reactions, action } = applyReactionToggle([], "👍");
+  assert.equal(action, "react");
+  assert.deepEqual(reactions, [{ emoji: "👍", count: 1, mine: true }]);
+});
+
+test("applyReactionToggle: reacting to an existing not-mine chip increments + flips mine (react)", () => {
+  const { reactions, action } = applyReactionToggle(
+    [{ emoji: "👍", count: 2, mine: false }, { emoji: "🎉", count: 1, mine: true }],
+    "👍",
+  );
+  assert.equal(action, "react");
+  // Only the tapped chip changes; the other (distinct) reaction is untouched (multi-select allowed).
+  assert.deepEqual(reactions, [{ emoji: "👍", count: 3, mine: true }, { emoji: "🎉", count: 1, mine: true }]);
+});
+
+test("applyReactionToggle: un-reacting a mine chip decrements + flips mine (unreact)", () => {
+  const { reactions, action } = applyReactionToggle([{ emoji: "👍", count: 3, mine: true }], "👍");
+  assert.equal(action, "unreact");
+  assert.deepEqual(reactions, [{ emoji: "👍", count: 2, mine: false }]);
+});
+
+test("applyReactionToggle: un-reacting the last count removes the chip entirely", () => {
+  const { reactions, action } = applyReactionToggle(
+    [{ emoji: "👍", count: 1, mine: true }, { emoji: "❤️", count: 4, mine: false }],
+    "👍",
+  );
+  assert.equal(action, "unreact");
+  assert.deepEqual(reactions, [{ emoji: "❤️", count: 4, mine: false }]); // 👍 gone, ❤️ untouched
+});
+
+test("applyReactionToggle: a blank glyph is a no-op (never creates an empty chip)", () => {
+  const before = [{ emoji: "👍", count: 1, mine: true }];
+  const { reactions, action } = applyReactionToggle(before, "");
+  assert.equal(action, "react");
+  assert.deepEqual(reactions, before);
+});
+
+test("applyReactionToggle does not mutate its input array or entries", () => {
+  const before = [{ emoji: "👍", count: 2, mine: false }];
+  const snapshot = JSON.parse(JSON.stringify(before));
+  applyReactionToggle(before, "👍");
+  assert.deepEqual(before, snapshot); // input untouched (pure)
 });
 
 /* ─────────────────────────────── conversation type badge ──────────────────────────────────────── */

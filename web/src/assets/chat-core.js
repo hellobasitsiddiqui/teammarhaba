@@ -44,21 +44,76 @@
 import { safeRoute } from "./notification-panel-core.js";
 
 /**
- * The five reaction emoji the (future) reaction picker offers. Kept here as the single source of truth
- * shared by any reaction UI and its tests. Reactions themselves are read-only in TM-438 — the API
- * returns a per-message `reactions` array we DISPLAY; adding/removing a reaction is a later ticket.
+ * The five reaction emoji the picker offers (TM-462), in display order. The single source of truth
+ * shared by the reaction UI and its tests. A "like" is deliberately just a common emoji — 👍 leads and
+ * ❤️ follows, offered prominently at the head of the picker — so there is NO special like gesture; the
+ * react button + this set is the whole affordance (the AC's "no double-tap-to-like").
  */
 export const REACTION_EMOJIS = Object.freeze(["👍", "❤️", "😂", "🎉", "🙌"]);
 
 /**
  * The inline reaction-pill data produced when a picker emoji is chosen for a message. A fresh react is
- * always `{ emoji, count: 1 }` (single-select, replaces any prior pill). Kept as a pure, unit-tested
- * rule so a future reactions ticket wires the DOM to one tested source rather than re-deriving it.
+ * always `{ emoji, count: 1 }`. Retained as a pure, unit-tested primitive; the interactive toggle UI
+ * (TM-462) drives the richer {@link applyReactionToggle} below, which also carries the `mine` flip and
+ * the multi-chip optimistic maths.
  * @param {string} emoji the chosen glyph (one of REACTION_EMOJIS).
  * @returns {{emoji: string, count: number}}
  */
 export function pickReaction(emoji) {
   return { emoji: String(emoji ?? ""), count: 1 };
+}
+
+/**
+ * Normalise a raw reactions array into the clean chip view-models the thread renders: drop entries with
+ * no emoji, clamp `count` to a non-negative integer, coerce `mine` to a boolean. Both the loaded thread
+ * (a ConversationMessageResponse's `reactions[]`) and the react/un-react endpoints' reply (TM-461's
+ * MessageReactionSummary `reactions[]`) carry the SAME EmojiReactionCount shape, so {@link toThreadMessage}
+ * and the toggle's server-reconcile step both derive chips from this ONE tested rule.
+ * @param {Array<{emoji?: string, count?: number, mine?: boolean}>} raw
+ * @returns {Array<{emoji: string, count: number, mine: boolean}>}
+ */
+export function normaliseReactions(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .filter((r) => r && r.emoji)
+    .map((r) => ({
+      emoji: String(r.emoji),
+      count: Math.max(0, Math.trunc(Number(r.count) || 0)),
+      mine: Boolean(r.mine),
+    }));
+}
+
+/**
+ * The OPTIMISTIC chip math for tapping a reaction `emoji` on a message (TM-462): applied immediately —
+ * before the react/un-react round-trip (TM-461) — then reconciled with the server's authoritative summary
+ * on success, or rolled back to the prior chips on failure. Returns the NEW chip list to paint plus which
+ * endpoint the DOM must call:
+ *   • the emoji is already the caller's (`mine`) → un-react: DELETE; count−1 and `mine`→false, and the
+ *                                                   chip DISAPPEARS if that was its last count (→ 0).
+ *   • the emoji is present but not the caller's   → react:   POST;  count+1 and `mine`→true.
+ *   • the emoji is absent entirely                → react:   POST;  a fresh `{emoji, count:1, mine:true}` chip.
+ * Multi-select is allowed — a caller may hold several DISTINCT reactions on one message — so chips for the
+ * OTHER emoji are left untouched; only the tapped emoji's chip changes. Pure + non-mutating (returns a new
+ * array); an empty/blank glyph is a no-op (never creates an empty chip).
+ * @param {Array<{emoji, count, mine}>} reactions the message's current reaction chips.
+ * @param {string} emoji the tapped glyph (a picker choice, or an existing chip).
+ * @returns {{reactions: Array<{emoji: string, count: number, mine: boolean}>, action: ("react"|"unreact")}}
+ */
+export function applyReactionToggle(reactions, emoji) {
+  const glyph = String(emoji ?? "");
+  const list = normaliseReactions(reactions);
+  if (!glyph) return { reactions: list, action: "react" }; // defensive: never toggle on a blank glyph
+  const existing = list.find((r) => r.emoji === glyph);
+  const mine = Boolean(existing && existing.mine);
+  const action = mine ? "unreact" : "react";
+  if (!existing) {
+    return { reactions: [...list, { emoji: glyph, count: 1, mine: true }], action };
+  }
+  const next = list
+    .map((r) => (r.emoji === glyph
+      ? { emoji: r.emoji, count: mine ? r.count - 1 : r.count + 1, mine: !mine }
+      : r))
+    .filter((r) => r.count > 0); // a chip decremented to zero is removed entirely
+  return { reactions: next, action };
 }
 
 /**
@@ -349,13 +404,7 @@ export function toQuotedPreview(replyTo) {
  */
 export function toThreadMessage(msg, now = new Date()) {
   const m = msg || {};
-  const reactions = (Array.isArray(m.reactions) ? m.reactions : [])
-    .filter((r) => r && r.emoji)
-    .map((r) => ({
-      emoji: String(r.emoji),
-      count: Math.max(0, Math.trunc(Number(r.count) || 0)),
-      mine: Boolean(r.mine),
-    }));
+  const reactions = normaliseReactions(m.reactions);
   const deepLink = m.deepLink ? String(m.deepLink) : null;
   return {
     id: String(m.id ?? ""),
