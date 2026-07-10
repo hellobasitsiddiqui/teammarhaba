@@ -42,6 +42,10 @@ import {
   markConversationRead,
   postConversationMessage,
   openConversationStream,
+  muteConversation,
+  unmuteConversation,
+  leaveConversation,
+  rejoinConversation,
 } from "./api.js";
 import * as core from "./chat-core.js";
 
@@ -112,12 +116,15 @@ function listHeader() {
 }
 
 /**
- * The thread top bar: back to the list + the conversation title + a type sub-line. For a known admin
- * broadcast (TM-445) the head also carries the "Admin" type badge next to the title and an accent
- * modifier class, so the one-way "from TeamMarhaba" channel is visibly distinct from an event chat
- * (mirrors the type badge the unified list already shows on each row).
+ * The thread top bar: back to the list + the conversation title + a type sub-line, and — on the loaded
+ * thread — the self-service actions (mute / leave, TM-471). For a known admin broadcast (TM-445) the
+ * head also carries the "Admin" type badge next to the title and an accent modifier class, so the
+ * one-way "from TeamMarhaba" channel is visibly distinct from an event chat (mirrors the type badge the
+ * unified list already shows on each row). `actions` is a node or null (the loading/error states pass
+ * none, as does an admin thread which has no self-service controls), and `el()` skips null children so
+ * it's safely optional.
  */
-function threadHeader(meta) {
+function threadHeader(meta, actions = null) {
   const admin = meta.typeKey === "admin";
   const heading = el("div", { class: "tm-chat-thread-heading" }, [
     el("div", { class: "tm-chat-thread-titlerow" }, [
@@ -131,7 +138,85 @@ function threadHeader(meta) {
       el("span", { class: "tm-chat-back-glyph", "aria-hidden": "true", text: "←" }),
     ]),
     heading,
+    actions,
   ]);
+}
+
+/**
+ * The thread self-service controls (TM-471): a mute/unmute toggle, plus (for an event chat) a leave
+ * button. State is seeded from the cached list row (best-effort on a cold deep-link — the endpoints are
+ * the source of truth and each returns the fresh state, so a wrong-way default self-corrects on the
+ * first action). Muting keeps the caller a full member (this thread's push is just silenced); leaving
+ * hides the thread and returns the caller to the list (their event RSVP is untouched).
+ */
+function buildThreadActions(id, typeKey) {
+  const row = state.rows.find((r) => r.id === String(id));
+  const controls = core.membershipControls({ muted: row?.muted, left: row?.left });
+  let muted = controls.muted;
+
+  const muteText = el("span", { class: "tm-chat-thread-action-text", text: muted ? "Unmute" : "Mute" });
+  const muteBtn = el(
+    "button",
+    {
+      class: "tm-chat-thread-action",
+      type: "button",
+      "data-testid": "chat-mute",
+      "aria-label": muted ? "Unmute notifications" : "Mute notifications",
+      onClick: () => toggleMute(),
+    },
+    [muteText],
+  );
+
+  async function toggleMute() {
+    muteBtn.disabled = true;
+    try {
+      const fresh = muted ? await unmuteConversation(id) : await muteConversation(id);
+      muted = Boolean(fresh.notificationsMuted);
+      if (row) row.muted = muted;
+      muteText.textContent = muted ? "Unmute" : "Mute";
+      muteBtn.setAttribute("aria-label", muted ? "Unmute notifications" : "Mute notifications");
+      toast(muted ? "Notifications muted for this chat" : "Notifications back on", { type: "success" });
+    } catch (err) {
+      toast("Couldn't update notifications. Please try again.", { type: "error" });
+      console.warn("[chat] mute toggle failed:", err?.status ?? "", err?.message ?? err);
+    } finally {
+      muteBtn.disabled = false;
+    }
+  }
+
+  // Leaving an announcements channel makes no sense (you can only mute it), so the leave button is
+  // event-chat-only; a cold deep-link (unknown type) still offers it since it's most likely an event.
+  const leaveBtn =
+    typeKey === "admin"
+      ? null
+      : el(
+          "button",
+          {
+            class: "tm-chat-thread-action tm-chat-thread-action--leave",
+            type: "button",
+            "data-testid": "chat-leave",
+            "aria-label": "Leave this chat",
+            onClick: (e) => doLeave(e.currentTarget),
+          },
+          [el("span", { class: "tm-chat-thread-action-text", text: "Leave" })],
+        );
+
+  async function doLeave(btn) {
+    btn.disabled = true;
+    try {
+      await leaveConversation(id);
+      if (row) row.left = true;
+      toast("You left this chat. You're still going to the event.", { type: "success" });
+      if (typeof location !== "undefined") location.hash = "#/chat"; // back to the list (now a rejoin row)
+    } catch (err) {
+      btn.disabled = false;
+      // A 409 carries an honest reason (e.g. the organiser can't leave their own thread).
+      toast(err?.message || "Couldn't leave this chat. Please try again.", { type: "error" });
+      console.warn("[chat] leave failed:", err?.status ?? "", err?.message ?? err);
+    }
+  }
+
+  return el("div", { class: "tm-chat-thread-actions", "data-testid": "chat-thread-actions" }, [muteBtn, leaveBtn]);
 }
 
 /**
@@ -193,6 +278,9 @@ function emptyList() {
 
 /** One conversation row — a link into the thread, with a type badge, preview, time and unread badge. */
 function listRow(row) {
+  // A thread the caller has self-left (TM-471) is rendered as a de-emphasised "you left — rejoin" row
+  // (the AC's rejoin affordance) rather than an openable link — opening it would 403 until they rejoin.
+  if (row.left) return leftRow(row);
   return el(
     "a",
     {
@@ -213,11 +301,60 @@ function listRow(row) {
         ]),
       ]),
       el("div", { class: "tm-chat-row-meta" }, [
+        // A muted thread (TM-471) shows a small bell-off glyph so the silence is discoverable.
+        row.muted
+          ? el("span", {
+              class: "tm-chat-row-muted",
+              "aria-label": "Notifications muted",
+              title: "Notifications muted",
+              text: "🔕",
+            })
+          : null,
         row.timeLabel ? el("span", { class: "tm-chat-row-time", text: row.timeLabel }) : null,
         row.unread > 0 ? badge(row.unread) : null,
       ]),
     ],
   );
+}
+
+/** A row for a thread the caller has self-left (TM-471): shows the title + a Rejoin button, not a link. */
+function leftRow(row) {
+  const rejoinBtn = el(
+    "button",
+    { class: "tm-btn tm-chat-rejoin", type: "button", "data-testid": "chat-rejoin", onClick: (e) => rejoin(row, e.currentTarget) },
+    "Rejoin",
+  );
+  return el(
+    "div",
+    { class: "tm-chat-row tm-chat-row--left", "data-testid": "chat-row-left", dataset: { threadId: row.id, type: row.type.key } },
+    [
+      avatar(row.avatar),
+      el("div", { class: "tm-chat-row-mid" }, [
+        el("div", { class: "tm-chat-row-name" }, [
+          el("span", { class: "tm-chat-row-name-text", text: row.title }),
+          typeBadge(row.type),
+        ]),
+        el("span", { class: "tm-chat-row-preview" }, [
+          el("span", { class: "tm-chat-row-preview-text", text: "You left this chat" }),
+        ]),
+      ]),
+      el("div", { class: "tm-chat-row-meta" }, [rejoinBtn]),
+    ],
+  );
+}
+
+/** Rejoin a self-left thread (TM-471), then open it. A 409 (no longer attending) surfaces as a toast. */
+async function rejoin(row, btn) {
+  btn.disabled = true;
+  try {
+    await rejoinConversation(row.id);
+    row.left = false;
+    if (typeof location !== "undefined") location.hash = `#/chat/${encodeURIComponent(row.id)}`;
+  } catch (err) {
+    btn.disabled = false;
+    toast(err?.message || "Couldn't rejoin this chat. Please try again.", { type: "error" });
+    console.warn("[chat] rejoin failed:", err?.status ?? "", err?.message ?? err);
+  }
 }
 
 /** The event/admin type badge — the shared `tag()` component with a per-type accent class. */
@@ -268,7 +405,8 @@ async function renderThread(view, id) {
   thread.bodyEl = body;
   const compose = buildComposer(id, meta);
 
-  clear(view).append(threadHeader(meta), body, compose);
+  // The loaded thread carries the self-service actions (mute / leave, TM-471) in its header.
+  clear(view).append(threadHeader(meta, buildThreadActions(id, meta.typeKey)), body, compose);
   repaintBody(); // paints the loaded messages (or the empty state) + scrolls to the newest
   wirePush(); // foreground-push → immediate poll while a thread is open
   startThreadPoll(id);

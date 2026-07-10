@@ -36,6 +36,11 @@ import java.time.Instant;
  * @param lastMessageAt     when that newest live message was posted; {@code null} while silent
  * @param unreadCount       live messages newer than the caller's read cursor (see class doc)
  * @param lastActiveAt      the thread's last-activity instant — the list's sort key (see class doc)
+ * @param notificationsMuted whether the caller has self-muted THIS thread's push (TM-471) — the row
+ *                          still shows (they see the thread), just flagged so the UI can mark it muted
+ * @param left              whether the caller has self-left this thread (TM-471) while still attending;
+ *                          the row is kept so the list can offer a rejoin affordance, but it renders as
+ *                          a de-emphasised "you left — rejoin" row rather than an openable thread
  */
 public record ConversationSummaryResponse(
         Long id,
@@ -45,7 +50,9 @@ public record ConversationSummaryResponse(
         String lastMessagePreview,
         Instant lastMessageAt,
         long unreadCount,
-        Instant lastActiveAt) {
+        Instant lastActiveAt,
+        boolean notificationsMuted,
+        boolean left) {
 
     /** The fixed title for an {@code ADMIN_BROADCAST} thread — the "from TeamMarhaba" channel. */
     public static final String ADMIN_BROADCAST_TITLE = "TeamMarhaba";
@@ -60,14 +67,17 @@ public record ConversationSummaryResponse(
      * Assemble a list row from its parts. {@code title} and {@code unreadCount} are computed by the
      * service (they need the event aggregate / the caller's cursor); {@code lastMessage} is the
      * thread's newest live message ({@code null} while silent) and drives both the preview and
-     * {@code lastMessageAt}; {@code lastActiveAt} is the pre-computed sort key.
+     * {@code lastMessageAt}; {@code lastActiveAt} is the pre-computed sort key; {@code
+     * notificationsMuted}/{@code left} are the caller's own self-service membership flags (TM-471).
      */
     public static ConversationSummaryResponse of(
             Conversation conversation,
             String title,
             Message lastMessage,
             long unreadCount,
-            Instant lastActiveAt) {
+            Instant lastActiveAt,
+            boolean notificationsMuted,
+            boolean left) {
         return new ConversationSummaryResponse(
                 conversation.getId(),
                 conversation.getType(),
@@ -76,7 +86,9 @@ public record ConversationSummaryResponse(
                 lastMessage == null ? null : preview(lastMessage.getBody()),
                 lastMessage == null ? null : lastMessage.getCreatedAt(),
                 unreadCount,
-                lastActiveAt);
+                lastActiveAt,
+                notificationsMuted,
+                left);
     }
 
     /** Truncate a message body to {@link #MAX_PREVIEW_LENGTH}, appending an ellipsis when clipped. */

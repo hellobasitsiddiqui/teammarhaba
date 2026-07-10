@@ -90,19 +90,37 @@ class NewMessageNotifierIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void removedAndReadOnlyMembersAreSkipped() {
+    void removedReadOnlyAndLeftMembersAreSkipped() {
         Conversation thread = conversations.save(Conversation.forEvent(newEvent("chat-mute")));
         long author = member(thread, "m-sender", NotificationPref.BOTH, "tok-m-sender");
         long active = member(thread, "m-active", NotificationPref.BOTH, "tok-m-active");
         member(thread, "m-removed", NotificationPref.BOTH, "tok-m-removed", MuteState.REMOVED);
         member(thread, "m-readonly", NotificationPref.BOTH, "tok-m-readonly", MuteState.READ_ONLY);
+        member(thread, "m-left", NotificationPref.BOTH, "tok-m-left", MuteState.LEFT); // self-left (TM-471)
 
         notifier.onMessageCreated(messages.save(Message.fromUser(thread.getId(), author, "roll call")));
 
-        // Only the active, non-sender member is pushed — REMOVED (the AC's explicit skip) and READ_ONLY
-        // are both excluded, and the author never self-notifies.
+        // Only the active, non-sender member is pushed — REMOVED (the AC's explicit skip), READ_ONLY and
+        // LEFT (a self-left member, TM-471) are all excluded, and the author never self-notifies.
         assertThat(deliveredTokens()).containsExactly("tok-m-active");
         assertThat(active).isNotEqualTo(author);
+    }
+
+    @Test
+    void selfMutedMembersAreSkippedEvenThoughStillActive() {
+        // A self-muted (TM-471) member is still a NONE (active) member — they can read + post and the
+        // thread stays in their list — but they have silenced THIS thread's push, so the new-message
+        // fan-out skips them. This is the case a MuteState alone can't express (mute keeps posting).
+        Conversation thread = conversations.save(Conversation.forEvent(newEvent("chat-selfmute")));
+        long author = member(thread, "sm-sender", NotificationPref.BOTH, "tok-sm-sender");
+        long active = member(thread, "sm-active", NotificationPref.BOTH, "tok-sm-active");
+        long muted = mutedMember(thread, "sm-muted", NotificationPref.BOTH, "tok-sm-muted");
+
+        notifier.onMessageCreated(messages.save(Message.fromUser(thread.getId(), author, "roll call")));
+
+        // The self-muted member is skipped; only the other active, non-sender member is pushed.
+        assertThat(deliveredTokens()).containsExactly("tok-sm-active");
+        assertThat(active).isNotEqualTo(muted);
     }
 
     @Test
@@ -185,6 +203,16 @@ class NewMessageNotifierIntegrationTest extends AbstractIntegrationTest {
         long userId = newUser(uid, pref);
         ConversationMember m = new ConversationMember(thread.getId(), userId, MemberRole.MEMBER);
         m.setMute(mute);
+        members.save(m);
+        deviceTokens.saveAndFlush(new DeviceToken(userId, token, DevicePlatform.ANDROID, Instant.now()));
+        return userId;
+    }
+
+    /** Add an active member who has SELF-MUTED this thread's push (TM-471) — still NONE, push silenced. */
+    private long mutedMember(Conversation thread, String uid, NotificationPref pref, String token) {
+        long userId = newUser(uid, pref);
+        ConversationMember m = new ConversationMember(thread.getId(), userId, MemberRole.MEMBER);
+        m.muteNotifications();
         members.save(m);
         deviceTokens.saveAndFlush(new DeviceToken(userId, token, DevicePlatform.ANDROID, Instant.now()));
         return userId;

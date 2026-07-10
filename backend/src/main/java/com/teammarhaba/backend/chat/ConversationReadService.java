@@ -89,8 +89,12 @@ public class ConversationReadService {
     public PageResponse<ConversationSummaryResponse> list(VerifiedUser caller, Pageable pageable) {
         Long userId = users.provision(caller).getId();
 
-        // Only threads the caller can actually read: a REMOVED (kicked) membership is excluded from
-        // their list, mirroring the access gate on the thread + mark-read routes.
+        // Which memberships surface in the list: a REMOVED (kicked) membership is excluded outright
+        // (mirroring the read/mark-read access gate). A self-LEFT membership (TM-471) IS kept, but
+        // flagged (see summary → `left`), so the list can render it as a de-emphasised "you left —
+        // rejoin" row: that is where the AC's "rejoin affordance" lives, and it is the ONLY way a left
+        // member can act on a thread they've hidden. A self-muted membership stays a normal row (the
+        // member still sees the thread) and is flagged `notificationsMuted` so the row can show it.
         List<ConversationMember> memberships = members.findByUserIdOrderByJoinedAtDesc(userId).stream()
                 .filter(m -> m.getMute() != MuteState.REMOVED)
                 .toList();
@@ -287,10 +291,10 @@ public class ConversationReadService {
     /**
      * Assert the caller is an active member of the thread, or throw a {@code 403} — the shared access
      * gate reused by the live-chat SSE subscription (TM-464). Resolves the reader from the verified
-     * principal (never a client id) and applies the same "membership present and not REMOVED" rule as
-     * {@link #messages} / {@link #markRead}, so a non-member, a kicked member, and an unknown/foreign
-     * thread are indistinguishable ({@code 403}) — the live stream can't be used to probe thread ids.
-     * Read-only so it never opens a write transaction just to gate a subscription.
+     * principal (never a client id) and applies the same visibility rule as {@link #messages} / {@link
+     * #markRead}, so a non-member, a kicked member, a self-left member and an unknown/foreign thread are
+     * indistinguishable ({@code 403}) — the live stream can't be used to probe thread ids. Read-only so
+     * it never opens a write transaction just to gate a subscription.
      *
      * @throws AccessDeniedException {@code 403} if the caller is not an active member of the thread
      */
@@ -301,13 +305,17 @@ public class ConversationReadService {
     }
 
     /**
-     * The caller's active membership of the thread, or a {@code 403}. Absent membership and a {@link
-     * MuteState#REMOVED} (kicked) membership are treated identically — and identically to an unknown
-     * thread — so thread existence can't be probed across accounts.
+     * The caller's readable membership of the thread, or a {@code 403}. A member may read only while
+     * the thread is <em>visible</em> to them — {@link MuteState#NONE} (including a self-muted member,
+     * whose mute only silences push) or {@link MuteState#READ_ONLY}. Absent membership, a {@link
+     * MuteState#REMOVED} (kicked) membership and a {@link MuteState#LEFT} (self-left, TM-471) membership
+     * are all treated identically — and identically to an unknown thread — so thread existence can't be
+     * probed across accounts, and a member who left must rejoin (which un-hides the thread) before they
+     * can read it again.
      */
     private ConversationMember requireMember(Long conversationId, Long userId) {
         return members.findByConversationIdAndUserId(conversationId, userId)
-                .filter(m -> m.getMute() != MuteState.REMOVED)
+                .filter(m -> m.getMute() == MuteState.NONE || m.getMute() == MuteState.READ_ONLY)
                 .orElseThrow(() -> new AccessDeniedException("Not a member of this conversation."));
     }
 
@@ -323,8 +331,16 @@ public class ConversationReadService {
         // Last activity = the newest live message's instant, or the thread's own creation while silent.
         Instant lastActiveAt = lastMessage != null ? lastMessage.getCreatedAt() : thread.getCreatedAt();
         long unread = messages.countUnread(thread.getId(), member.getLastReadAt());
+        // Carry the caller's own self-service membership state (TM-471) so the list can render the right
+        // control: `notificationsMuted` → show a muted indicator; `left` → render a rejoin row.
         return ConversationSummaryResponse.of(
-                thread, title(thread, eventHeadingsById), lastMessage, unread, lastActiveAt);
+                thread,
+                title(thread, eventHeadingsById),
+                lastMessage,
+                unread,
+                lastActiveAt,
+                member.isNotificationsMuted(),
+                member.hasLeft());
     }
 
     /**

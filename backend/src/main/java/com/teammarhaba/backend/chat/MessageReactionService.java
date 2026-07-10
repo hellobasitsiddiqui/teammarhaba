@@ -184,15 +184,17 @@ public class MessageReactionService {
      * member of that thread — and if they are <em>not</em>, raise the <em>identical</em> {@code 404}
      * ("message … not found") a missing message returns rather than a {@code 403}. That makes a real
      * message the caller can't see indistinguishable from one that never existed, so these endpoints
-     * can't be walked as an existence oracle over sequential message ids. A genuine non-removed member
-     * (including {@link MuteState#READ_ONLY}) gets the thread id back.
+     * can't be walked as an existence oracle over sequential message ids. A genuine member who can see
+     * the thread (an active {@link MuteState#NONE} member, including {@link MuteState#READ_ONLY}) gets
+     * the thread id back; a {@link MuteState#LEFT} (self-left, TM-471) or {@link MuteState#REMOVED}
+     * member — for whom the thread is hidden — is treated exactly like a non-member (the same 404).
      */
     private Long requireReactableMessageThread(Long messageId, Long userId) {
         Long conversationId = requireLiveMessageThread(messageId);
-        boolean nonRemovedMember = members.findByConversationIdAndUserId(conversationId, userId)
-                .map(member -> member.getMute() != MuteState.REMOVED)
+        boolean visibleMember = members.findByConversationIdAndUserId(conversationId, userId)
+                .map(member -> member.getMute() == MuteState.NONE || member.getMute() == MuteState.READ_ONLY)
                 .orElse(false);
-        if (!nonRemovedMember) {
+        if (!visibleMember) {
             throw new ResourceNotFoundException("message " + messageId + " not found");
         }
         return conversationId;

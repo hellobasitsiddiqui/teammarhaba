@@ -124,7 +124,12 @@ public class EventChatLifecycleService {
         conversations
                 .findByEventId(event.getId())
                 .flatMap(conversation -> members.findByConversationIdAndUserId(conversation.getId(), userId))
-                .filter(member -> member.getMute() != MuteState.REMOVED)
+                // Only transition an active-ish member to REMOVED. A member who already has no live
+                // presence in the thread — REMOVED (already kicked/dropped) or LEFT (self-left, TM-471)
+                // — is skipped: overwriting a self-LEFT with REMOVED would erase the "self-left" fact and
+                // let a subsequent re-RSVP silently reactivate them (ensureMember reactivates REMOVED but
+                // NOT LEFT). Skipping here keeps self-leave sticky across an un-RSVP.
+                .filter(member -> member.getMute() == MuteState.NONE || member.getMute() == MuteState.READ_ONLY)
                 .ifPresent(member -> {
                     member.setMute(MuteState.REMOVED);
                     members.save(member);
@@ -217,10 +222,17 @@ public class EventChatLifecycleService {
 
     /**
      * Add {@code userId} to the thread as {@code role}, or — if they already have a membership row —
-     * reactivate it (clear any {@code READ_ONLY}/{@code REMOVED} mute) and, for the host, upgrade a
+     * reactivate it (clear a {@code READ_ONLY}/{@code REMOVED} mute) and, for the host, upgrade a
      * MEMBER row to ADMIN. Never downgrades an existing ADMIN (so a host who also RSVPs as an
      * attendee keeps their ADMIN role). The kept-row-plus-reactivate pattern is why {@code onLeave}
      * uses {@code REMOVED} rather than deleting: a rejoin is a clean flip back to active.
+     *
+     * <p><b>Self-leave is sticky (TM-471).</b> A {@link MuteState#LEFT} member — one who explicitly
+     * left the chat while staying GOING — is deliberately NOT reactivated here: re-confirming
+     * attendance (a fresh GOING landing, or a re-RSVP after un-RSVPing) must never silently drag a
+     * member back into a thread they chose to leave. They return only via the explicit rejoin
+     * endpoint. {@code REMOVED} (kicked, or dropped by un-RSVP) still reactivates as before, so the
+     * ordinary un-RSVP→re-RSVP round-trip is unchanged.
      */
     private void ensureMember(Long conversationId, Long userId, MemberRole role) {
         Optional<ConversationMember> existing = members.findByConversationIdAndUserId(conversationId, userId);
@@ -230,7 +242,8 @@ public class EventChatLifecycleService {
         }
         ConversationMember member = existing.get();
         boolean changed = false;
-        if (member.getMute() != MuteState.NONE) {
+        // Reactivate a REMOVED / READ_ONLY member, but leave a self-LEFT member LEFT (sticky, TM-471).
+        if (member.getMute() == MuteState.REMOVED || member.getMute() == MuteState.READ_ONLY) {
             member.setMute(MuteState.NONE); // reactivate a previously removed / read-only member
             changed = true;
         }

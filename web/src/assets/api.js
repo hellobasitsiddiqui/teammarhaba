@@ -561,6 +561,73 @@ export async function postConversationMessage(id, body, { replyToMessageId = nul
   return response.json();
 }
 
+/* ─────────────────────────────── Conversations (chat) — self-service (TM-471) ───────────────────
+ * Member-facing levers over the caller's OWN thread membership, WITHOUT touching their event RSVP:
+ * mute / unmute this thread's push, and leave / rejoin the thread. Each POSTs to the owner-scoped
+ * endpoint and returns the caller's fresh membership state (`{ conversationId, notificationsMuted,
+ * left }`) so the Chat view can reflect the new control without a refetch. They throw an {@link
+ * ApiError} carrying `.status` + the backend's problem `detail`, so the caller can surface the honest
+ * reason — notably rejoin's 409 ("you're no longer attending this event") and leave's 409 ("the
+ * organiser can't leave"). A 401 will already have refreshed/redirected via {@link apiFetch}.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** POST a self-service membership action ({@code mute|unmute|leave|rejoin}); returns the fresh state. */
+async function conversationMembershipAction(id, action) {
+  const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Couldn't ${action} this chat (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/conversations/{id}/mute — self-mute this thread's push (TM-471). The caller stays an
+ * active, visible member (still reads + posts); only new-message push is silenced.
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<{conversationId: number, notificationsMuted: boolean, left: boolean}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function muteConversation(id) {
+  return conversationMembershipAction(id, "mute");
+}
+
+/**
+ * POST /api/v1/conversations/{id}/unmute — restore this thread's push (TM-471), the inverse of
+ * {@link muteConversation}.
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<{conversationId: number, notificationsMuted: boolean, left: boolean}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function unmuteConversation(id) {
+  return conversationMembershipAction(id, "unmute");
+}
+
+/**
+ * POST /api/v1/conversations/{id}/leave — self-leave this thread (TM-471): hide/exit it while the
+ * caller's event RSVP is unchanged (still GOING). A 409 means the caller is the organiser (who can't
+ * leave their own thread).
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<{conversationId: number, notificationsMuted: boolean, left: boolean}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function leaveConversation(id) {
+  return conversationMembershipAction(id, "leave");
+}
+
+/**
+ * POST /api/v1/conversations/{id}/rejoin — rejoin a thread the caller had left (TM-471), available
+ * while they still attend the event. A 409 carries the "you're no longer attending" reason.
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<{conversationId: number, notificationsMuted: boolean, left: boolean}>}
+ * @throws {ApiError} on a non-2xx response.
+ */
+export async function rejoinConversation(id) {
+  return conversationMembershipAction(id, "rejoin");
+}
+
 /**
  * GET /api/v1/conversations/{id}/stream — open the LIVE chat stream for a thread (TM-464). This is the
  * live-while-online path: while the connection is up, `onMessage` fires with each newly-posted
@@ -917,6 +984,10 @@ if (typeof window !== "undefined") {
     markConversationRead,
     postConversationMessage,
     openConversationStream,
+    muteConversation,
+    unmuteConversation,
+    leaveConversation,
+    rejoinConversation,
     getPushRoutes,
     adminBroadcastPush,
     sendAdminMessage,

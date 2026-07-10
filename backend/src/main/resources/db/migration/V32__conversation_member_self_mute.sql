@@ -1,0 +1,26 @@
+-- V32__conversation_member_self_mute — the MEMBER-facing self-mute flag for event chat (TM-471)
+--
+-- TM-471 gives an attendee two self-service levers over an event's group thread WITHOUT touching
+-- their event RSVP (they stay GOING):
+--   • self-LEAVE — hide/exit the thread. Modelled by a new value on the EXISTING `mute` column
+--     (MuteState.LEFT, a VARCHAR value like NONE/READ_ONLY/REMOVED), so it needs NO schema change —
+--     `mute` is a plain VARCHAR(16) with no CHECK constraint (see V27). LEFT is distinct from the
+--     admin-imposed REMOVED so (a) a self-left member may self-REJOIN whereas a kicked one may not,
+--     and (b) the RSVP re-sync (EventChatLifecycleService) treats a self-leave as sticky and never
+--     silently re-adds them on the next GOING landing.
+--   • self-MUTE — silence THIS thread's push notifications while STILL an active, visible member who
+--     can read AND post. That last part is why mute can't reuse MuteState: READ_ONLY forbids posting
+--     and REMOVED/LEFT hide the thread, but self-mute must keep the member fully active — only push is
+--     suppressed. So it is an ORTHOGONAL per-member boolean, added here.
+--
+-- Flyway owns this DDL; Hibernate runs validate-only, so ConversationMember must map this column
+-- (`notificationsMuted`). Additive and back-fill-safe: NOT NULL DEFAULT false means every existing
+-- membership starts un-muted (unchanged push behaviour), and no existing row is rewritten.
+--
+--   notifications_muted  Whether the member has self-muted THIS thread's new-message push (TM-471).
+--                        false (default) = receives push like today; true = the new-message fan-out
+--                        (NewMessageNotifier, TM-437) and any @everyone/@here mention fan-out (TM-469)
+--                        skip them — but they remain a NONE (active) member: the thread stays in their
+--                        list, and they can still read and post. Enforced in the service layer, never
+--                        by the DB.
+ALTER TABLE conversation_member ADD COLUMN notifications_muted BOOLEAN NOT NULL DEFAULT false;

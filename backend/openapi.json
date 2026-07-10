@@ -428,6 +428,21 @@
         },
         "type" : "object"
       },
+      "ConversationMembershipResponse" : {
+        "properties" : {
+          "conversationId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "left" : {
+            "type" : "boolean"
+          },
+          "notificationsMuted" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
       "ConversationMessageResponse" : {
         "properties" : {
           "body" : {
@@ -486,6 +501,12 @@
           },
           "lastMessagePreview" : {
             "type" : "string"
+          },
+          "left" : {
+            "type" : "boolean"
+          },
+          "notificationsMuted" : {
+            "type" : "boolean"
           },
           "title" : {
             "type" : "string"
@@ -1059,7 +1080,7 @@
             "type" : "integer"
           },
           "mute" : {
-            "enum" : [ "NONE", "READ_ONLY", "REMOVED" ],
+            "enum" : [ "NONE", "READ_ONLY", "LEFT", "REMOVED" ],
             "type" : "string"
           },
           "userId" : {
@@ -1103,7 +1124,7 @@
       "MuteMemberRequest" : {
         "properties" : {
           "state" : {
-            "enum" : [ "NONE", "READ_ONLY", "REMOVED" ],
+            "enum" : [ "NONE", "READ_ONLY", "LEFT", "REMOVED" ],
             "type" : "string"
           }
         },
@@ -2529,6 +2550,33 @@
         "tags" : [ "email-code-controller" ]
       }
     },
+    "/api/v1/conversations/{id}/leave" : {
+      "post" : {
+        "operationId" : "leave",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
     "/api/v1/conversations/{id}/messages" : {
       "get" : {
         "operationId" : "messages",
@@ -2607,6 +2655,33 @@
         "tags" : [ "conversation-controller" ]
       }
     },
+    "/api/v1/conversations/{id}/mute" : {
+      "post" : {
+        "operationId" : "mute",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
     "/api/v1/conversations/{id}/read" : {
       "post" : {
         "operationId" : "markRead_1",
@@ -2625,6 +2700,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/MarkReadResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/rejoin" : {
+      "post" : {
+        "operationId" : "rejoin",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMembershipResponse"
                 }
               }
             },
@@ -2659,6 +2761,33 @@
           }
         },
         "tags" : [ "conversation-stream-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/unmute" : {
+      "post" : {
+        "operationId" : "unmute",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
       }
     },
     "/api/v1/events" : {
