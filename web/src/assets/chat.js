@@ -46,6 +46,8 @@ import {
   unmuteConversation,
   leaveConversation,
   rejoinConversation,
+  reactToMessage,
+  unreactFromMessage,
 } from "./api.js";
 import * as core from "./chat-core.js";
 
@@ -77,7 +79,10 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   // Reply / quote (TM-466): `replyTo` is the composer's active reply target ({ id, excerpt, ... } from
   // core.replyTargetFrom) or null; `composerInput` / `replyPreviewEl` are refs so beginReply/clearReply
   // can toggle the composer's quoted-preview bar and re-focus the input across body repaints.
-  replyTo: null, composerInput: null, replyPreviewEl: null };
+  replyTo: null, composerInput: null, replyPreviewEl: null,
+  // Reactions (TM-462): in-flight `${messageId}:${emoji}` keys, so a rapid double-tap on the same chip
+  // is ignored while its react/un-react round-trip is pending (the optimistic paint already reflects it).
+  reacting: new Set() };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
@@ -397,9 +402,10 @@ async function renderThread(view, id) {
   thread.mineIds = new Set();
   thread.sending = false;
   thread.replyTo = null; // no reply-in-progress carried across a thread open (TM-466)
-  thread.canCompose = false; // set by buildComposer; gates the per-message reply affordance
+  thread.canCompose = false; // set by buildComposer; gates the per-message reply + react affordances
   thread.composerInput = null;
   thread.replyPreviewEl = null;
+  thread.reacting = new Set(); // no in-flight reaction toggles carried across a thread open (TM-462)
 
   const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
   thread.bodyEl = body;
@@ -750,12 +756,12 @@ function messageRow(m, mine = false) {
   if (m.pending) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
   else if (m.timeLabel) row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: m.timeLabel })]));
   if (m.cta) row.append(messageCta(m.cta)); // an in-app deep-link on a normal message → same CTA affordance
-  // Read-only reaction pills (no picker yet): surface whatever the API returned.
-  for (const r of m.reactions) {
-    const pill = reaction(r.emoji, r.count);
-    pill.classList.add("tm-chat-reaction");
-    row.append(pill);
-  }
+  // Reactions (TM-462): the chip row + the interactive react affordance. A confirmed message in a thread
+  // the caller can post to gets toggleable chips + a "react" button that opens the emoji picker; a pending
+  // echo (no server id yet) or a read-only thread falls back to read-only chips. `interactive` reuses the
+  // same gate as the reply button — you can only react where you can post.
+  const reactions = reactionBar(m, !m.pending && Boolean(m.id) && thread.canCompose);
+  if (reactions) row.append(reactions);
   // Read receipt (TM-463): a "read by N" indicator (not a tick) on the caller's OWN messages — the
   // server sends `readReceipt` only for those, so its presence gates this. Tap it to see who's read it.
   if (m.readReceipt && !m.pending) row.append(readReceiptIndicator(m.readReceipt));
@@ -769,6 +775,143 @@ function messageRow(m, mine = false) {
     }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]));
   }
   return row;
+}
+
+/* ─────────────────────────────── Reactions (react button + picker — TM-462) ──────────────────────
+ * The interactive layer over TM-438's read-only chips: each message carries a visible react button (the
+ * affordance — no tap-gesture shortcut) that opens an emoji picker, and each existing chip toggles the
+ * caller's own reaction. All the DECISIONS (which emoji, react-vs-un-react, the optimistic count/`mine`
+ * maths) live in chat-core (`REACTION_EMOJIS`, `applyReactionToggle`, `normaliseReactions`); this half is
+ * the DOM shell + the endpoint calls (TM-461) with an optimistic paint that reconciles on the server's
+ * authoritative summary or rolls back on failure. Everything is a real <button>, so it's keyboard- and
+ * screen-reader-accessible by default. */
+
+/**
+ * The reaction row under a message: the existing chips plus (when interactive) the react button. Returns
+ * null when there's nothing to draw (a read-only context with no reactions), so the row stays clean.
+ * @param {Object} m the message view-model.
+ * @param {boolean} interactive whether the caller can toggle/add reactions here (a confirmed message in a
+ *   thread they can post to). When false the chips render read-only (no picker, no toggle).
+ */
+function reactionBar(m, interactive) {
+  const chips = Array.isArray(m.reactions) ? m.reactions : [];
+  if (chips.length === 0 && !interactive) return null;
+  const bar = el("div", { class: "tm-chat-reactions", "data-testid": "chat-reactions" });
+  for (const r of chips) bar.append(interactive ? reactionChip(m, r) : readonlyChip(r));
+  if (interactive) bar.append(reactButton(m));
+  return bar;
+}
+
+/** A read-only reaction chip (a pending echo / an announcement thread): the pill, highlighted if `mine`. */
+function readonlyChip(r) {
+  const pill = reaction(r.emoji, r.count);
+  pill.classList.add("tm-chat-reaction");
+  if (r.mine) pill.classList.add("tm-chat-reaction--mine");
+  return pill;
+}
+
+/**
+ * A toggleable reaction chip: tapping it adds or removes the caller's own reaction with that emoji. It's
+ * highlighted (`--mine`) and marked `aria-pressed` when the caller has reacted, so the toggle state is
+ * announced to screen readers and doesn't depend on colour alone.
+ */
+function reactionChip(m, r) {
+  const pill = reaction(r.emoji, r.count, { onClick: () => toggleReaction(m, r.emoji) });
+  pill.classList.add("tm-chat-reaction");
+  if (r.mine) pill.classList.add("tm-chat-reaction--mine");
+  pill.setAttribute("aria-pressed", String(Boolean(r.mine)));
+  pill.setAttribute("data-testid", "chat-reaction");
+  pill.dataset.emoji = r.emoji;
+  return pill;
+}
+
+/** The visible react affordance — a real button that opens the emoji picker (the AC's sole react entry point). */
+function reactButton(m) {
+  return el(
+    "button",
+    {
+      class: "tm-chat-react-btn", type: "button",
+      "aria-label": "Add reaction", title: "Add reaction",
+      "data-testid": "chat-react", onClick: () => openReactionPicker(m),
+    },
+    [el("span", { class: "tm-chat-react-btn-glyph", "aria-hidden": "true", text: "🙂" })],
+  );
+}
+
+/**
+ * Open the emoji picker (TM-462): a small modal offering the REACTION_EMOJIS set (a "like" — 👍 / ❤️ —
+ * leads, so it's the prominent common reaction, with no special like gesture). Choosing an emoji closes
+ * the picker and toggles that reaction. Reuses the shared `modal` (Escape / backdrop close, focus mgmt),
+ * so it's keyboard- and screen-reader-friendly for free.
+ */
+function openReactionPicker(m) {
+  const picker = el("div", {
+    class: "tm-chat-react-picker", role: "group",
+    "aria-label": "Choose a reaction", "data-testid": "chat-react-picker",
+  });
+  const dialog = modal("Add a reaction", [picker]);
+  for (const emoji of core.REACTION_EMOJIS) {
+    picker.append(
+      el(
+        "button",
+        {
+          class: "tm-chat-react-option", type: "button",
+          "aria-label": `React with ${emoji}`, dataset: { emoji },
+          onClick: () => { dialog.close(); toggleReaction(m, emoji); },
+        },
+        [el("span", { "aria-hidden": "true", text: emoji })],
+      ),
+    );
+  }
+  // Move focus into the picker so a keyboard user lands on the first option (mirrors modal focus mgmt).
+  requestAnimationFrame(() => { const first = picker.querySelector("button"); if (first) first.focus(); });
+}
+
+/**
+ * Toggle the caller's `emoji` reaction on message `m`: apply the optimistic chip math immediately, call
+ * the react / un-react endpoint (TM-461), then RECONCILE with the server's authoritative summary — or
+ * ROLL BACK to the prior chips on failure. Guards a rapid double-tap on the same chip via `thread.reacting`,
+ * and drops the reconcile if the caller navigated to another thread mid-flight.
+ * @param {Object} m the message view-model (lives in `thread.messages`, so mutating its reactions there
+ *   is what `repaintBody` re-reads).
+ * @param {string} emoji the reaction glyph.
+ */
+async function toggleReaction(m, emoji) {
+  const id = m && m.id ? String(m.id) : "";
+  if (!id || !emoji) return;
+  const key = `${id}:${emoji}`;
+  if (thread.reacting.has(key)) return; // a toggle for this chip is already in flight — ignore the double-tap
+  const threadId = thread.id;
+  const { reactions: optimistic, action } = core.applyReactionToggle(m.reactions, emoji);
+  const prev = m.reactions; // the untouched prior chips, kept for rollback
+  thread.reacting.add(key);
+  setReactionsOnMessage(id, optimistic);
+  repaintBody(); // optimistic paint: chip in/decrements + highlights instantly, before the round-trip
+
+  try {
+    const summary = action === "unreact"
+      ? await unreactFromMessage(id, emoji)
+      : await reactToMessage(id, emoji);
+    if (thread.id !== threadId) return; // navigated away mid-toggle — drop the reconcile
+    setReactionsOnMessage(id, core.normaliseReactions(summary && summary.reactions)); // reconcile with server truth
+    repaintBody();
+  } catch (err) {
+    if (thread.id === threadId) {
+      setReactionsOnMessage(id, prev); // roll the optimistic change back
+      repaintBody();
+    }
+    toast("Couldn't update your reaction. Please try again.", { type: "error" });
+    console.warn("[chat] reaction toggle failed:", err?.status ?? "", err?.message ?? err);
+  } finally {
+    thread.reacting.delete(key);
+  }
+}
+
+/** Set a loaded message's reactions in place (by id) so the next `repaintBody` reflects it. */
+function setReactionsOnMessage(id, reactions) {
+  const msg = thread.messages.find((x) => x.id === String(id));
+  if (msg) msg.reactions = reactions;
+  return Boolean(msg);
 }
 
 /**
