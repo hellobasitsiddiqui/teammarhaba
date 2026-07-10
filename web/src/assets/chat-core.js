@@ -19,8 +19,9 @@
 // API shapes consumed (see web/src/api-docs/openapi.json):
 //   • ConversationSummaryResponse — { id, type, title, eventId, lastMessagePreview, lastMessageAt,
 //                                     lastActiveAt, unreadCount }  → toConversationRow()
-//   • ConversationMessageResponse — { id, senderId, body, deepLink, system, reactions[], createdAt }
-//                                    → toThreadMessage()
+//   • ConversationMessageResponse — { id, senderId, body, deepLink, system, reactions[], createdAt,
+//                                     readReceipt? } → toThreadMessage()  (readReceipt present only on
+//                                     the caller's OWN messages — TM-463, see normaliseReceipt below)
 // Both arrive inside the shared page envelope `{ items, page, size, totalElements, totalPages }`, so
 // the DOM layer passes `data.items` straight into toConversationRows() / toThreadMessages().
 //
@@ -224,19 +225,57 @@ export function deepLinkCta(deepLink) {
 }
 
 /**
+ * Normalise a ConversationMessageResponse `readReceipt` (TM-463) into the view-model's receipt, or null.
+ *
+ * The backend attaches `readReceipt` ({ count, readerIds }) ONLY to the caller's OWN messages (only the
+ * sender sees who's read their message), so its PRESENCE is the server's authoritative "this message is
+ * mine" signal — the read API otherwise can't tell the client which loaded messages it authored (the
+ * `toThreadMessage` note below). A nullish/absent receipt therefore means "not mine" → null (no
+ * indicator). `readerIds` are stringified (they key the "who read it" rows) and `count` is clamped and
+ * never allowed below the number of ids we actually hold.
+ * @param {{count?: number, readerIds?: Array}} [receipt]
+ * @returns {{count: number, readerIds: string[]}|null}
+ */
+export function normaliseReceipt(receipt) {
+  if (!receipt || typeof receipt !== "object") return null;
+  const readerIds = (Array.isArray(receipt.readerIds) ? receipt.readerIds : [])
+    .map((id) => String(id ?? "").trim())
+    .filter(Boolean);
+  const count = Math.max(0, Math.trunc(Number(receipt.count) || 0), readerIds.length);
+  return { count, readerIds };
+}
+
+/**
+ * The "read by N" indicator label (TM-463) — NOT a tick (the AC is explicit). A receipt with no readers
+ * yet reads as "Sent" (delivered, nobody's opened it); one or more readers reads as "Read by N". Empty
+ * string for a message with no receipt (not the caller's own), so the DOM simply omits the indicator.
+ * @param {{count: number}|null} receipt a normalised receipt (from normaliseReceipt).
+ * @returns {string}
+ */
+export function readReceiptLabel(receipt) {
+  if (!receipt) return "";
+  const n = Math.max(0, Math.trunc(Number(receipt.count) || 0));
+  return n === 0 ? "Sent" : `Read by ${n}`;
+}
+
+/**
  * Map one ConversationMessageResponse to the message view-model the thread renders. The read API does
  * not expose the caller's own numeric id (GET /api/v1/me has no id), so TM-438 cannot mark a message
- * as "mine" / draw out-going ticks — it renders a flat, chronological message list. `system` messages
- * (an admin broadcast, or an in-thread notice like "You joined the event") render as a centred
- * "from TeamMarhaba" notice rather than a bubble, and — new in TM-445 — carry a pre-derived `cta` when
- * their deep-link is a safe in-app route, so chat.js can draw the tap-through affordance without
- * re-checking the link. Reactions are carried through for read-only display.
+ * as "mine" / draw out-going ticks purely from the payload. `system` messages (an admin broadcast, or an
+ * in-thread notice like "You joined the event") render as a centred "from TeamMarhaba" notice rather than
+ * a bubble, and — new in TM-445 — carry a pre-derived `cta` when their deep-link is a safe in-app route,
+ * so chat.js can draw the tap-through affordance without re-checking the link. Reactions are carried
+ * through for read-only display.
+ *
+ * <p>TM-463: `readReceipt` is carried through (normalised, or null). Because the backend only attaches it
+ * to the caller's OWN messages, a non-null `readReceipt` is now the authoritative "this message is mine"
+ * signal — letting the thread draw a loaded (not just in-session) own message as out-going.
  * @param {Object} msg a ConversationMessageResponse.
  * @param {Date} [now]
  * @returns {{id: string, body: string, system: boolean, deepLink: (string|null),
  *            cta: ({href: string, label: string}|null),
  *            reactions: Array<{emoji: string, count: number, mine: boolean}>, timeLabel: string,
- *            sortAt: number}}
+ *            sortAt: number, readReceipt: ({count: number, readerIds: string[]}|null)}}
  */
 export function toThreadMessage(msg, now = new Date()) {
   const m = msg || {};
@@ -257,6 +296,7 @@ export function toThreadMessage(msg, now = new Date()) {
     reactions,
     timeLabel: formatTimeLabel(m.createdAt, now),
     sortAt: epoch(m.createdAt),
+    readReceipt: normaliseReceipt(m.readReceipt),
   };
 }
 
@@ -381,7 +421,7 @@ export function classifyPostError(error) {
  * @param {string} body the message text.
  * @param {{localId?: string, now?: Date}} [opts]
  * @returns {{id: string, body: string, system: boolean, deepLink: null, cta: null, reactions: [],
- *            timeLabel: string, sortAt: number, pending: boolean}}
+ *            timeLabel: string, sortAt: number, pending: boolean, readReceipt: null}}
  */
 export function pendingMessage(body, { localId = "pending", now = new Date() } = {}) {
   return {
@@ -394,6 +434,8 @@ export function pendingMessage(body, { localId = "pending", now = new Date() } =
     timeLabel: formatTimeLabel(now.toISOString(), now),
     sortAt: now.getTime(),
     pending: true,
+    // No receipt on an unconfirmed echo; the server's confirmed message carries the real one (TM-463).
+    readReceipt: null,
   };
 }
 

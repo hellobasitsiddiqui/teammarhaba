@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.chat;
 
 import com.teammarhaba.backend.api.ConversationMessageResponse;
+import com.teammarhaba.backend.api.MessageReadReceipt;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
@@ -178,10 +179,12 @@ public class MessagePostService {
         // nobody is ever notified — by push or live — about a message that then disappears (TM-579).
         publisher.publishEvent(new MessageCreatedEvent(saved));
 
-        // A freshly posted message carries no reactions yet — this is the exact DTO the poster gets back
-        // (the live-broadcast payload is rebuilt identically in the stream listener from the same message,
-        // so the wire shape can never diverge between the two paths).
-        return ConversationMessageResponse.from(saved, List.of());
+        // A freshly posted message carries no reactions yet, and — as the caller's OWN message — an
+        // empty read receipt (TM-463): nobody else could have read it in the instant since it was
+        // created, so the sender immediately sees it as "sent, read by 0". This is the exact DTO the
+        // poster gets back; the live-broadcast payload is rebuilt identically in the stream listener
+        // from the same message, so the wire shape can never diverge between the two paths.
+        return ConversationMessageResponse.from(saved, List.of(), MessageReadReceipt.empty());
     }
 
     /**

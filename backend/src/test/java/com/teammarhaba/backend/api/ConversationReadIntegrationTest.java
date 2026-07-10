@@ -344,6 +344,93 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    // ------------------------------------------------------------------ read receipts (TM-463)
+
+    @Test
+    void readReceiptCountsReadersListsThemAndIsVisibleOnlyToTheSender() throws Exception {
+        String senderUid = "conv-receipt-sender-" + UUID.randomUUID();
+        Long senderId = newUser(senderUid);
+        Long thread = newBroadcastThread();
+        addMember(thread, senderId, MemberRole.MEMBER, MuteState.NONE);
+
+        String readerAUid = "conv-receipt-a-" + UUID.randomUUID();
+        Long readerA = newUser(readerAUid);
+        addMember(thread, readerA, MemberRole.MEMBER, MuteState.NONE);
+        Long readerB = newUser("conv-receipt-b-" + UUID.randomUUID());
+        addMember(thread, readerB, MemberRole.MEMBER, MuteState.NONE);
+
+        // The caller's OWN message (senderId == the caller), posted while all three are members.
+        Long msg = messages.save(Message.fromUser(thread, senderId, "did you all see this?")).getId();
+        Instant msgAt = messages.findById(msg).orElseThrow().getCreatedAt();
+
+        // Nobody has opened the thread yet → read by 0, empty reader list (but the receipt is present).
+        JsonNode node0 = messageNode(senderUid, thread, msg);
+        assertThat(node0.get("readReceipt").isNull()).isFalse();
+        assertThat(node0.get("readReceipt").get("count").asLong()).isZero();
+        assertThat(node0.get("readReceipt").get("readerIds")).isEmpty();
+
+        // readerA opens the thread (cursor reaches the message) → read by 1, listing readerA.
+        markMemberRead(thread, readerA, msgAt);
+        JsonNode node1 = messageNode(senderUid, thread, msg);
+        assertThat(node1.get("readReceipt").get("count").asLong()).isEqualTo(1);
+        assertThat(readerIds(node1)).containsExactly(readerA);
+
+        // readerB reads too → read by 2, both listed (ascending — a deterministic "who" order).
+        markMemberRead(thread, readerB, msgAt);
+        JsonNode node2 = messageNode(senderUid, thread, msg);
+        assertThat(node2.get("readReceipt").get("count").asLong()).isEqualTo(2);
+        assertThat(readerIds(node2)).containsExactly(readerA, readerB);
+
+        // Privacy: readerA is a member and can read the thread, but is NOT the sender — so the sender's
+        // message carries NO read receipt for them (only the sender sees read info on their own message).
+        JsonNode asReaderA = messageNode(readerAUid, thread, msg);
+        assertThat(asReaderA.get("readReceipt").isNull()).isTrue();
+
+        // And the sender gets no receipt on a message they did not send.
+        Long otherMsg = messages.save(Message.fromUser(thread, readerA, "yes!")).getId();
+        JsonNode otherNode = messageNode(senderUid, thread, otherMsg);
+        assertThat(otherNode.get("readReceipt").isNull()).isTrue();
+    }
+
+    @Test
+    void readReceiptGroupSemanticsLateJoinerNeverRetroCountsAndRemovedMemberDropsOut() throws Exception {
+        String senderUid = "conv-receipt-grp-" + UUID.randomUUID();
+        Long senderId = newUser(senderUid);
+        Long thread = newBroadcastThread();
+        addMember(thread, senderId, MemberRole.MEMBER, MuteState.NONE);
+
+        // Two members present WHEN the message is posted.
+        Long present1 = newUser("conv-grp-present1-" + UUID.randomUUID());
+        addMember(thread, present1, MemberRole.MEMBER, MuteState.NONE);
+        Long present2 = newUser("conv-grp-present2-" + UUID.randomUUID());
+        addMember(thread, present2, MemberRole.MEMBER, MuteState.NONE);
+
+        Long msg = messages.save(Message.fromUser(thread, senderId, "roll call")).getId();
+        Instant msgAt = messages.findById(msg).orElseThrow().getCreatedAt();
+
+        // A member who joins AFTER the message (separate txn → joinedAt is strictly later than msgAt).
+        Long lateJoiner = newUser("conv-grp-late-" + UUID.randomUUID());
+        addMember(thread, lateJoiner, MemberRole.MEMBER, MuteState.NONE);
+
+        // Everyone advances their cursor past the message — including the late joiner, whose forward-only
+        // cursor (set to "now" when they first open the thread) sweeps past this older message.
+        markMemberRead(thread, present1, msgAt);
+        markMemberRead(thread, present2, msgAt);
+        markMemberRead(thread, lateJoiner, msgAt);
+
+        // Read by 2: only the two members present at post time count. The late joiner does NOT retro-count
+        // this past message despite their cursor covering it (documented group semantics).
+        JsonNode node = messageNode(senderUid, thread, msg);
+        assertThat(node.get("readReceipt").get("count").asLong()).isEqualTo(2);
+        assertThat(readerIds(node)).containsExactly(present1, present2);
+
+        // Kick present2 — the count reflects CURRENT membership, so a removed reader drops out → read by 1.
+        setMemberMute(thread, present2, MuteState.REMOVED);
+        JsonNode afterKick = messageNode(senderUid, thread, msg);
+        assertThat(afterKick.get("readReceipt").get("count").asLong()).isEqualTo(1);
+        assertThat(readerIds(afterKick)).containsExactly(present1);
+    }
+
     // ------------------------------------------------------------------ default-deny
 
     @Test
@@ -391,6 +478,40 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         ConversationMember member = new ConversationMember(conversationId, userId, role);
         member.setMute(mute);
         members.save(member);
+    }
+
+    /** Advance a member's read cursor to {@code at} (forward-only) — how "read" is derived for receipts. */
+    private void markMemberRead(Long conversationId, Long userId, Instant at) {
+        ConversationMember member = members.findByConversationIdAndUserId(conversationId, userId).orElseThrow();
+        member.markRead(at);
+        members.save(member);
+    }
+
+    /** Change a member's mute/removal state (used to kick a reader out of the current membership). */
+    private void setMemberMute(Long conversationId, Long userId, MuteState mute) {
+        ConversationMember member = members.findByConversationIdAndUserId(conversationId, userId).orElseThrow();
+        member.setMute(mute);
+        members.save(member);
+    }
+
+    /** Fetch one message node from a caller's thread page by id (the read-receipt assertions' subject). */
+    private JsonNode messageNode(String uid, Long conversationId, Long messageId) throws Exception {
+        JsonNode page = getJson("/api/v1/conversations/" + conversationId + "/messages", caller(uid));
+        for (JsonNode item : page.get("items")) {
+            if (item.get("id").asLong() == messageId) {
+                return item;
+            }
+        }
+        throw new AssertionError("message " + messageId + " not in caller's thread page");
+    }
+
+    /** The reader ids on a message's read receipt, in the order the API returned them (ascending). */
+    private static List<Long> readerIds(JsonNode messageNode) {
+        List<Long> out = new ArrayList<>();
+        for (JsonNode id : messageNode.get("readReceipt").get("readerIds")) {
+            out.add(id.asLong());
+        }
+        return out;
     }
 
     /** A fresh broadcast thread the user is a member of, carrying one message (so it isn't silent). */

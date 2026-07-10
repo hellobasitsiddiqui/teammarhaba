@@ -4,6 +4,7 @@ import com.teammarhaba.backend.api.ConversationMessageResponse;
 import com.teammarhaba.backend.api.ConversationSummaryResponse;
 import com.teammarhaba.backend.api.EmojiReactionCount;
 import com.teammarhaba.backend.api.MarkReadResponse;
+import com.teammarhaba.backend.api.MessageReadReceipt;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.Event;
@@ -134,8 +135,81 @@ public class ConversationReadService {
         // batched query for the page (no N+1), reusing the reaction service's shared summariser.
         Map<Long, List<EmojiReactionCount>> summaries =
                 reactionSummaries.summariesFor(userId, page.getContent().stream().map(Message::getId).toList());
+        // Read receipts (TM-463) for the caller's OWN messages on this page — also one query for the
+        // whole page (the thread roster), no N+1. Absent (null) for messages the caller didn't send.
+        Map<Long, MessageReadReceipt> receipts = readReceipts(userId, conversationId, page.getContent());
         return PageResponse.from(page, message -> ConversationMessageResponse.from(
-                message, summaries.getOrDefault(message.getId(), List.of())));
+                message,
+                summaries.getOrDefault(message.getId(), List.of()),
+                receipts.get(message.getId())));
+    }
+
+    /**
+     * Read receipts (TM-463) for the caller's OWN messages on a page: for each message the caller sent,
+     * how many <em>other</em> current members have read it, plus their ids (the "read by N → who" list).
+     *
+     * <p><b>Derived from the existing {@code last_read_at} cursors — no new table.</b> A member has read
+     * a message when their forward-only read cursor (TM-436) is at/after the message's {@code created_at}.
+     *
+     * <p><b>Only the caller's own messages get a receipt</b> (privacy: only the sender sees read info on
+     * their own message), so the map is keyed by those message ids alone; every other message resolves to
+     * a {@code null} receipt on the wire. System messages ({@code null} sender) never match the caller, so
+     * they're naturally excluded.
+     *
+     * <p><b>No N+1.</b> The thread roster is fetched <em>once</em> for the whole page; each own message's
+     * readers are then found by scanning that in-memory roster (bounded by roster size × own-messages).
+     *
+     * <p><b>Group semantics (the AC).</b> Readers are the thread's current <em>non-removed</em> members
+     * other than the sender ({@code count} reflects live membership — a kicked member drops out) who were
+     * already in the thread when the message was posted, so a later joiner can't retro-change a past
+     * message's count. See {@link #hasRead}.
+     */
+    private Map<Long, MessageReadReceipt> readReceipts(
+            Long callerUserId, Long conversationId, List<Message> page) {
+        List<Message> own = page.stream()
+                .filter(message -> callerUserId.equals(message.getSenderId()))
+                .toList();
+        if (own.isEmpty()) {
+            return Map.of();
+        }
+        // ONE query for the whole page's read state: the thread's roster, minus removed members and the
+        // caller themselves (the sender is never a reader of their own message). A READ_ONLY member can
+        // still read, so the gate is "not REMOVED", mirroring the read-access gate.
+        List<ConversationMember> roster = members.findByConversationId(conversationId).stream()
+                .filter(member -> member.getMute() != MuteState.REMOVED)
+                .filter(member -> !callerUserId.equals(member.getUserId()))
+                .toList();
+        Map<Long, MessageReadReceipt> receipts = new java.util.LinkedHashMap<>();
+        for (Message message : own) {
+            List<Long> readerIds = roster.stream()
+                    .filter(member -> hasRead(member, message.getCreatedAt()))
+                    .map(ConversationMember::getUserId)
+                    .sorted() // deterministic order for the "who read it" list
+                    .toList();
+            receipts.put(message.getId(), MessageReadReceipt.of(readerIds));
+        }
+        return receipts;
+    }
+
+    /**
+     * Whether {@code member} counts as having read a message posted at {@code messageCreatedAt}. Two
+     * conditions, both required:
+     *
+     * <ul>
+     *   <li><b>Present when it was posted</b> — {@code joinedAt <= messageCreatedAt}. A member who joins
+     *       later must not retro-change a past message's read count, even though their forward-only
+     *       cursor (set to "now" the first time they open the thread) would otherwise sweep past it.
+     *   <li><b>Cursor has reached it</b> — {@code lastReadAt >= messageCreatedAt}. A {@code null} cursor
+     *       (never opened) has read nothing.
+     * </ul>
+     */
+    private static boolean hasRead(ConversationMember member, Instant messageCreatedAt) {
+        Instant joinedAt = member.getJoinedAt();
+        Instant cursor = member.getLastReadAt();
+        return joinedAt != null
+                && !joinedAt.isAfter(messageCreatedAt)
+                && cursor != null
+                && !cursor.isBefore(messageCreatedAt);
     }
 
     /**

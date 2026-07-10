@@ -23,13 +23,20 @@ import java.util.List;
  * timeline renders reaction chips inline without a second round-trip; empty when nothing has been
  * reacted. The single thread-read endpoint carries it so reactions ride the same page as the messages.
  *
- * @param id        the message's surrogate id
- * @param senderId  the author's {@code users.id}; {@code null} = a system / admin message
- * @param system    convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
- * @param body      the message text
- * @param deepLink  optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
- * @param createdAt DB-authoritative post instant — the in-thread (chronological) order
- * @param reactions the message's reaction summary, oldest-reacted emoji first; empty if none
+ * <p><b>{@code readReceipt}</b> is the read receipt (TM-463) — present <b>only</b> on the caller's own
+ * messages (privacy: only the sender sees who's read their message), so a {@code null} {@code
+ * readReceipt} means "not yours". Its {@code count} + {@code readerIds} are derived from members'
+ * {@code last_read_at} cursors and ride the same page (computed without an N+1). See {@link
+ * MessageReadReceipt}.
+ *
+ * @param id          the message's surrogate id
+ * @param senderId    the author's {@code users.id}; {@code null} = a system / admin message
+ * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
+ * @param body        the message text
+ * @param deepLink    optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
+ * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
+ * @param reactions   the message's reaction summary, oldest-reacted emoji first; empty if none
+ * @param readReceipt read receipt for the caller's OWN message (count + reader ids); {@code null} if not theirs
  */
 public record ConversationMessageResponse(
         Long id,
@@ -38,10 +45,15 @@ public record ConversationMessageResponse(
         String body,
         String deepLink,
         Instant createdAt,
-        List<EmojiReactionCount> reactions) {
+        List<EmojiReactionCount> reactions,
+        MessageReadReceipt readReceipt) {
 
-    /** Map a persisted {@link Message} plus its reaction summary to its wire form. */
-    public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
+    /**
+     * Map a persisted {@link Message} plus its reaction summary and (nullable) read receipt to its wire
+     * form. {@code readReceipt} is {@code null} unless the message is the caller's own.
+     */
+    public static ConversationMessageResponse from(
+            Message message, List<EmojiReactionCount> reactions, MessageReadReceipt readReceipt) {
         return new ConversationMessageResponse(
                 message.getId(),
                 message.getSenderId(),
@@ -49,6 +61,18 @@ public record ConversationMessageResponse(
                 message.getBody(),
                 message.getDeepLink(),
                 message.getCreatedAt(),
-                reactions);
+                reactions,
+                readReceipt);
+    }
+
+    /**
+     * Convenience overload for the paths that can't resolve a per-caller receipt: the SSE live-broadcast
+     * (TM-464), whose single payload fans out to every connected member and so can't carry one member's
+     * private "read by" view. Maps with {@code readReceipt == null} ("not resolved / not yours"); a
+     * subscriber that turns out to be the sender still gets the authoritative receipt from the read API
+     * (and from its own POST echo), so nothing is lost by omitting it from the broadcast frame.
+     */
+    public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
+        return from(message, reactions, null);
     }
 }
