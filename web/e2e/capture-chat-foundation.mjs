@@ -71,10 +71,19 @@ const ADMIN_THREAD = [
 ];
 
 const RE = {
+  // The aggregate-total route (TM-582) must come BEFORE `list` here for readability, but note that
+  // `list` (an unanchored substring match) ALSO matches the unread-total URL — so wherever both are
+  // mocked, register the unread-total handler LAST so Playwright (most-recent matching handler wins)
+  // routes `…/conversations/unread-total` to it, not to the list envelope.
+  unreadTotal: /\/api\/v1\/me\/conversations\/unread-total/,
   list: /\/api\/v1\/me\/conversations/,
   messages: /\/api\/v1\/conversations\/[^/]+\/messages/,
   read: /\/api\/v1\/conversations\/[^/]+\/read/,
 };
+
+// The caller's aggregate unread total (TM-582) the Chat-tab badge now reads from
+// GET /me/conversations/unread-total — summed from the same fixture so it stays in step with the rows.
+const UNREAD_TOTAL = CONVERSATIONS.reduce((sum, c) => sum + (c.unreadCount || 0), 0); // = 12
 const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
@@ -186,10 +195,13 @@ async function main() {
       await page.close();
     }
 
-    // 4) Unread Chat-tab BADGE — sum of per-thread unread (12 → capped "9+") over the Chat tab.
+    // 4) Unread Chat-tab BADGE — the server aggregate total (12 → capped "9+") over the Chat tab.
     {
       const page = await context.newPage();
       await page.route(RE.list, (route) => json(route, envelope(CONVERSATIONS)));
+      // Registered AFTER RE.list so it wins for the `…/unread-total` URL both regexes match (TM-582):
+      // the badge reads `{ total }` here, not the paged list envelope.
+      await page.route(RE.unreadTotal, (route) => json(route, { total: UNREAD_TOTAL }));
       await mockRead(page);
       await bootChatShell(page);
       await page.evaluate(() => window.tmChat.enterChat());

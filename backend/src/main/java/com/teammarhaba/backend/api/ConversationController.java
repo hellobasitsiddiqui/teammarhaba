@@ -84,6 +84,17 @@ public class ConversationController {
         return conversations.list(caller, PageRequests.of(page, size, null, Set.of(), Sort.unsorted()));
     }
 
+    /**
+     * The caller's aggregate unread across all their threads (TM-582) — one number for the Chat-tab
+     * badge (TM-439). A distinct, un-paged route (not a field on the paged list) so the badge is
+     * correct even when the caller has more than one page of threads: summing the list's per-thread
+     * {@code unreadCount} only ever saw the first page and undercounted. Caller-scoped like the list.
+     */
+    @GetMapping("/me/conversations/unread-total")
+    UnreadTotalResponse unreadTotal(@AuthenticationPrincipal VerifiedUser caller) {
+        return new UnreadTotalResponse(conversations.unreadTotal(caller));
+    }
+
     /** One thread's live messages, chronological and paged. Members-only ({@code 403} otherwise). */
     @GetMapping("/conversations/{id}/messages")
     PageResponse<ConversationMessageResponse> messages(

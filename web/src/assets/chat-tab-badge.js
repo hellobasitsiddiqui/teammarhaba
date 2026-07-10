@@ -2,18 +2,20 @@
 //
 // The unread-count pill over the bottom-nav Chat tab, for a signed-in, onboarded user on the mobile
 // primary nav (the CSS breakpoint keeps the whole tab bar mobile-only). It reads the caller's total
-// unread from the read API (`GET /api/v1/me/conversations`, TM-436) by SUMMING each thread's
-// `unreadCount` (the pure `sumUnread`), and paints a capped "9+" chip onto the `#tab-chat-badge` seam
-// TM-434 left in index.html — with NO nav rework (the markup + `.app-tab-badge` styling already exist).
+// unread from the server-authoritative aggregate endpoint (`GET /api/v1/me/conversations/unread-total`,
+// TM-582), which returns `{ total }` over ALL the caller's threads (the pure `unreadTotalOf` reads that
+// field), and paints a capped "9+" chip onto the `#tab-chat-badge` seam TM-434 left in index.html —
+// with NO nav rework (the markup + `.app-tab-badge` styling already exist). It used to SUM the first
+// page of the paged conversation list, which undercounted past one page — the TM-439 gap TM-582 closes.
 //
 // Router-driven, exactly like the bottom tab bar (tabbar.js) and the header notification bell
 // (notification-bell.js): router.js already computes the single source of truth (signedIn / gated /
 // route) on every render() and calls `updateChatTabBadge()` here, so this badge rides that one state
 // machine instead of running a second, drifting auth/route listener. That gives two ACs for free:
 //   • "refreshes on route change" — render() runs on every hashchange, so navigating anywhere (and in
-//     particular INTO a thread `#/chat/{id}`, which marks it read) re-reads the list and the count drops.
+//     particular INTO a thread `#/chat/{id}`, which marks it read) re-reads the total and the count drops.
 //   • "clears as threads are read" — the server total is the source of truth; a mark-read lowers that
-//     thread's unreadCount, and the very next refresh reflects it. No local mutation to keep in sync.
+//     thread's unread, and the very next refresh reflects it. No local mutation to keep in sync.
 // On top of that we refresh on a gentle poll while visible (a message arriving elsewhere surfaces
 // without a nav) and on a foreground-push signal (the `tm:notification` window event notification-
 // center.js fires on the TM-374 foreground path) so a chat push that lands while the app is open bumps
@@ -25,16 +27,12 @@
 // failed fetch (offline / transient 5xx) leaves the last painted count and logs quietly; the badge
 // must never break navigation.
 
-import { listMyConversations } from "./api.js";
+import { getConversationsUnreadTotal } from "./api.js";
 import { shouldShowTabbar } from "./tabbar-core.js";
-import { sumUnread, chatTabAriaLabel, badgeText, hasBadge } from "./chat-tab-badge-core.js";
+import { unreadTotalOf, chatTabAriaLabel, badgeText, hasBadge } from "./chat-tab-badge-core.js";
 
 const TAB_ID = "tab-chat"; // the Chat tab <a> — carries the aria-label announcing the count
 const BADGE_ID = "tab-chat-badge"; // the .app-tab-badge chip seam inside it (TM-434)
-// Fetch a single generous page: the badge only needs a total and caps at "9+", so summing the first
-// page of the caller's conversations is ample (nobody is in enough active group chats to matter, and
-// even if they were, the visible cap makes an exact >page total irrelevant). Trade-off noted on the PR.
-const PAGE_SIZE = 100;
 // Gentle background refresh while the badge is active — long enough to be near-free, short enough that
 // a message written to a thread elsewhere surfaces without a manual nav. Mirrors the bell's cadence.
 const POLL_MS = 60000;
@@ -77,7 +75,7 @@ function paintCount(total) {
 }
 
 /**
- * Fetch the latest conversations, sum the unread, and repaint. Deduped (one GET at a time) and
+ * Fetch the caller's aggregate unread total (TM-582) and repaint. Deduped (one GET at a time) and
  * epoch-guarded: if a sign-out/re-gate bumps the epoch (or clears `active`) while this GET is in
  * flight, its result is dropped rather than repainting a stale count after we've cleared. Never
  * throws — a failure leaves the last painted count and logs quietly.
@@ -87,8 +85,8 @@ async function refresh() {
   inFlight = true;
   const gen = epoch;
   try {
-    const page = await listMyConversations({ size: PAGE_SIZE });
-    if (gen === epoch && active) paintCount(sumUnread(page)); // still current → paint; else drop
+    const payload = await getConversationsUnreadTotal();
+    if (gen === epoch && active) paintCount(unreadTotalOf(payload)); // still current → paint; else drop
   } catch (err) {
     console.warn("[chat-tab-badge] refresh failed:", err?.message ?? err);
   } finally {

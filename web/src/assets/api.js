@@ -474,6 +474,25 @@ export async function listMyConversations({ page, size } = {}) {
 }
 
 /**
+ * GET /api/v1/me/conversations/unread-total — the caller's aggregate unread across ALL their threads
+ * (TM-582), as `{ total: number }`. The Chat-tab badge (TM-439) reads this single server-authoritative
+ * number instead of summing the paged list's per-thread `unreadCount` (which only ever saw the first
+ * page and undercounted a caller with more than one page of threads). A 401 will already have
+ * refreshed/redirected via {@link apiFetch}.
+ * @returns {Promise<{total: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getConversationsUnreadTotal() {
+  const response = await apiFetch("/api/v1/me/conversations/unread-total", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/conversations/unread-total failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/conversations/{id}/messages — one thread's messages, in the shared page envelope. Each
  * item is a ConversationMessageResponse (`{ id, senderId, body, deepLink, system, reactions[],
  * createdAt }`). Read by the thread view (TM-438); a 401 will already have refreshed/redirected via
@@ -980,6 +999,7 @@ if (typeof window !== "undefined") {
     listNotifications,
     markNotificationRead,
     listMyConversations,
+    getConversationsUnreadTotal,
     getConversationMessages,
     markConversationRead,
     postConversationMessage,

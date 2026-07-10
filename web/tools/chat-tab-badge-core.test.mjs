@@ -1,6 +1,6 @@
-// Unit tests for the Chat-tab unread-badge pure core (TM-439) — the count + label maths behind the
-// bottom-nav Chat tab's unread pill: summing per-thread `unreadCount` from the read API (TM-436) into
-// the caller's total, the capped "9+" chip text, and the accessible "N unread" label.
+// Unit tests for the Chat-tab unread-badge pure core (TM-439 / TM-582) — the count + label maths
+// behind the bottom-nav Chat tab's unread pill: reading the server-aggregate `total` from the
+// unread-total endpoint (TM-582), the capped "9+" chip text, and the accessible "N unread" label.
 //
 // Framework-free — Node's built-in test runner, picked up by the CI glob
 // `node --test web/tools/*.test.mjs` (ci.yml web-build job). No DOM/Firebase, like the other cores.
@@ -9,57 +9,34 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  sumUnread,
+  unreadTotalOf,
   chatTabAriaLabel,
   badgeText,
   hasBadge,
   BADGE_CAP,
 } from "../src/assets/chat-tab-badge-core.js";
 
-test("sumUnread: totals each thread's unreadCount from the read-API page envelope", () => {
-  const page = {
-    items: [
-      { id: 1, unreadCount: 2 },
-      { id: 2, unreadCount: 0 },
-      { id: 3, unreadCount: 5 },
-    ],
-    page: 0,
-    size: 100,
-    totalElements: 3,
-  };
-  assert.equal(sumUnread(page), 7);
+test("unreadTotalOf: reads the aggregate `total` from the unread-total endpoint envelope", () => {
+  // The server sums over ALL the caller's threads (TM-582), so this is already the whole-account total
+  // — no first-page undercount. It can exceed the visible cap; the chip caps it, the a11y label doesn't.
+  assert.equal(unreadTotalOf({ total: 7 }), 7);
+  assert.equal(unreadTotalOf({ total: 250 }), 250);
 });
 
-test("sumUnread: also accepts a bare array of summaries (not just the envelope)", () => {
-  assert.equal(sumUnread([{ unreadCount: 1 }, { unreadCount: 3 }]), 4);
-  assert.equal(sumUnread([]), 0); // no threads → no unread
+test("unreadTotalOf: zero when nothing is unread", () => {
+  assert.equal(unreadTotalOf({ total: 0 }), 0);
 });
 
-test("sumUnread: zero when every thread is read", () => {
-  assert.equal(sumUnread({ items: [{ unreadCount: 0 }, { unreadCount: 0 }] }), 0);
-});
-
-test("sumUnread: tolerant of a missing / malformed payload (never throws, never negative)", () => {
-  assert.equal(sumUnread(null), 0);
-  assert.equal(sumUnread(undefined), 0);
-  assert.equal(sumUnread({}), 0); // no items
-  assert.equal(sumUnread({ items: null }), 0);
-  assert.equal(sumUnread("nope"), 0);
-});
-
-test("sumUnread: junk-safe per thread — bad unreadCount contributes 0, good ones still sum", () => {
-  const page = {
-    items: [
-      { unreadCount: 3 }, // ok
-      { unreadCount: -4 }, // negative → 0
-      { unreadCount: "2" }, // numeric string coerces → 2
-      { unreadCount: "nope" }, // junk → 0
-      { unreadCount: 1.9 }, // fractional floors → 1
-      {}, // missing → 0
-      null, // a null row → 0 (no throw)
-    ],
-  };
-  assert.equal(sumUnread(page), 6); // 3 + 0 + 2 + 0 + 1 + 0 + 0
+test("unreadTotalOf: tolerant of a missing / malformed payload (never throws, never negative)", () => {
+  assert.equal(unreadTotalOf(null), 0);
+  assert.equal(unreadTotalOf(undefined), 0);
+  assert.equal(unreadTotalOf({}), 0); // no total field
+  assert.equal(unreadTotalOf({ total: null }), 0);
+  assert.equal(unreadTotalOf({ total: -4 }), 0); // negative → 0
+  assert.equal(unreadTotalOf({ total: "2" }), 2); // numeric string coerces → 2
+  assert.equal(unreadTotalOf({ total: "nope" }), 0); // junk → 0
+  assert.equal(unreadTotalOf({ total: 1.9 }), 1); // fractional floors → 1
+  assert.equal(unreadTotalOf("nope"), 0);
 });
 
 test("badgeText (re-exported): empty at zero, exact up to the cap, then '9+'", () => {
@@ -85,10 +62,9 @@ test("chatTabAriaLabel: plain 'Chat' at zero, EXACT uncapped count otherwise", (
   assert.equal(chatTabAriaLabel(-5), "Chat"); // junk → plain label, never throws
 });
 
-test("end-to-end: a page of threads maps to the chip text + aria-label the DOM will paint", () => {
-  // 6 + 5 = 11 unread across two threads → capped chip "9+", but the a11y label keeps the exact 11.
-  const page = { items: [{ unreadCount: 6 }, { unreadCount: 5 }] };
-  const total = sumUnread(page);
+test("end-to-end: the aggregate total maps to the chip text + aria-label the DOM will paint", () => {
+  // 11 unread across all the caller's threads → capped chip "9+", but the a11y label keeps the exact 11.
+  const total = unreadTotalOf({ total: 11 });
   assert.equal(total, 11);
   assert.equal(hasBadge(total), true);
   assert.equal(badgeText(total), "9+");
