@@ -728,6 +728,23 @@
         },
         "type" : "object"
       },
+      "Entitlement" : {
+        "properties" : {
+          "amountPence" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "decision" : {
+            "enum" : [ "FREE", "INCLUDED", "PAY", "UPGRADE" ],
+            "type" : "string"
+          },
+          "reason" : {
+            "enum" : [ "FIRST_EVENT_FREE", "FREE_EVENT", "INCLUDED_MONTHLY", "INCLUDED_DIAMOND", "PAY_STANDARD", "PAY_PREMIUM" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "EventCard" : {
         "properties" : {
           "capacity" : {
@@ -3037,6 +3054,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RsvpResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/events/{id}/entitlement" : {
+      "get" : {
+        "operationId" : "entitlement",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Entitlement"
                 }
               }
             },
