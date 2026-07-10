@@ -29,9 +29,28 @@ public record SavedMethodCharge(String state, boolean settled) {
      */
     private static final Set<String> SETTLED_STATES = Set.of("completed", "captured", "authorised");
 
+    /**
+     * Provider states that are NOT final (TM-623): the charge is still in flight — the money may yet be
+     * taken. Treating these as a terminal failure would let a dunning retry open a SECOND charge for the
+     * same window while the first one settles (a real double-charge). The renewal engine leaves such a
+     * charge {@code PENDING} (the settle webhook is the authority) and re-checks later against the SAME
+     * provider order, never a fresh one.
+     */
+    private static final Set<String> INDETERMINATE_STATES =
+            Set.of("pending", "processing", "created", "authorisation_started", "awaiting_payment");
+
     /** Reduce a raw provider state string to a {@link SavedMethodCharge}. Null-safe (null = not settled). */
     public static SavedMethodCharge fromState(String state) {
         String normalised = state == null ? "" : state.trim().toLowerCase(Locale.ROOT);
         return new SavedMethodCharge(normalised, SETTLED_STATES.contains(normalised));
+    }
+
+    /**
+     * Whether the outcome is still in flight — neither settled nor a definitive decline. The caller
+     * must NOT treat this as a failed attempt that a fresh charge could remedy: the money may still be
+     * captured for THIS attempt.
+     */
+    public boolean indeterminate() {
+        return !settled && INDETERMINATE_STATES.contains(state);
     }
 }

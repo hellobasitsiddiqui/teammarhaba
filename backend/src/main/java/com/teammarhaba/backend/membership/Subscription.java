@@ -152,9 +152,28 @@ public class Subscription {
      * dunning state. The next charge is due at the new period end.
      */
     public void extendPeriod(Instant now) {
-        this.currentPeriodStart = this.currentPeriodEnd;
-        this.currentPeriodEnd = plusOneMonth(this.currentPeriodEnd);
-        this.status = SubscriptionStatus.ACTIVE;
+        extendPeriodTo(this.currentPeriodEnd, plusOneMonth(this.currentPeriodEnd), now);
+    }
+
+    /**
+     * Grant an explicitly-bounded paid window (TM-623) — the charge-stamped window the webhook heal
+     * settles, or a catch-up window the renewal engine re-anchored at "now" after a long scheduler gap.
+     *
+     * <p><strong>A CANCELED subscription stays CANCELED.</strong> Extending the paid window is about
+     * money that really moved (the user gets the time they paid for); flipping the row back to ACTIVE
+     * would silently resurrect auto-renewal against a card whose owner explicitly withdrew consent —
+     * the exact TM-623 healRenewal bug. A CANCELED row therefore keeps its status and {@code canceledAt},
+     * with {@code nextChargeAt} parked at the NEW period end as the downgrade pointer (the scheduler
+     * ends the tier when the healed window runs out, charging nothing). Only ACTIVE/PAST_DUE rows
+     * return to ACTIVE.
+     */
+    public void extendPeriodTo(Instant newStart, Instant newEnd, Instant now) {
+        this.currentPeriodStart = newStart;
+        this.currentPeriodEnd = newEnd;
+        if (this.status != SubscriptionStatus.CANCELED) {
+            this.status = SubscriptionStatus.ACTIVE;
+        }
+        // ACTIVE: the next renewal charge. CANCELED: the downgrade pass. Both live at the period end.
         this.nextChargeAt = this.currentPeriodEnd;
         this.retryCount = 0;
         this.updatedAt = now;

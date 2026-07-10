@@ -5,6 +5,7 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.membership.SubscriptionRepository;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.DateTimeException;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
@@ -52,11 +54,17 @@ public class UserService {
     private final UserRepository users;
     private final AuditService audit;
     private final UserProvisioner provisioner;
+    private final SubscriptionRepository subscriptions;
 
-    public UserService(UserRepository users, AuditService audit, UserProvisioner provisioner) {
+    public UserService(
+            UserRepository users,
+            AuditService audit,
+            UserProvisioner provisioner,
+            SubscriptionRepository subscriptions) {
         this.users = users;
         this.audit = audit;
         this.provisioner = provisioner;
+        this.subscriptions = subscriptions;
     }
 
     /**
@@ -116,6 +124,19 @@ public class UserService {
     public User getById(Long userId) {
         return users.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("No user for id " + userId));
+    }
+
+    /**
+     * Load an account by surrogate id <em>including soft-deleted rows</em> (TM-623) — the lifecycle
+     * check for money-moving background paths. The renewal engine calls this BEFORE any provider call:
+     * a tombstoned account's card must never be charged, and the restricted {@link #getById} can't tell
+     * "soft-deleted" from "never existed" (it throws for both — previously AFTER the charge had already
+     * gone out, rolling back the ledger and retrying the charge every tick). Callers check
+     * {@link User#isDeleted()} and choose the terminal, charge-free path for tombstoned accounts.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<User> findAnyById(Long userId) {
+        return users.findAnyById(userId);
     }
 
     /**
@@ -376,12 +397,26 @@ public class UserService {
         users.findByFirebaseUid(firebaseUid).ifPresent(user -> user.setRole(role));
     }
 
-    /** Soft-delete an active account: it is then hidden from normal queries but recoverable. */
+    /**
+     * Soft-delete an active account: it is then hidden from normal queries but recoverable.
+     *
+     * <p>Any recurring subscription lapses in the same transaction (TM-623): tombstoning only the
+     * account previously left the subscription live — its {@code nextChargeAt} kept the renewal engine
+     * charging the deleted account's saved card every cycle (V38's {@code ON DELETE CASCADE} only fires
+     * on a hard delete). Lapsing here stops all future charges and clears the "due" pointer, so the
+     * scheduler never even scans the row again. Restoring the account does NOT resurrect the
+     * subscription — the user re-subscribes if they want it back (a fresh SCA-authenticated mandate).
+     */
     @Transactional
     public User softDelete(String firebaseUid) {
         User user = users.findByFirebaseUid(firebaseUid)
                 .orElseThrow(() -> new ResourceNotFoundException("No active account for uid " + firebaseUid));
-        user.markDeleted(Instant.now()); // dirty-checking flushes on commit
+        Instant now = Instant.now();
+        user.markDeleted(now); // dirty-checking flushes on commit
+        subscriptions
+                .findByUserId(user.getId())
+                .filter(sub -> sub.isRenewing() || sub.getNextChargeAt() != null)
+                .ifPresent(sub -> sub.lapse(now)); // stop renewals + unschedule; flushes on commit
         audit.record(firebaseUid, AuditAction.ACCOUNT_SOFT_DELETED, TARGET_USER, firebaseUid);
         return user;
     }

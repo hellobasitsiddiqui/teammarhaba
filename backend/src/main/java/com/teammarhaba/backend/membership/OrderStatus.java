@@ -32,6 +32,12 @@ public enum OrderStatus {
     /** Reversed in-window with nothing to refund; any first-event credit was returned. */
     CANCELLED,
 
-    /** Reversed in-window on a paid order — the money refund is owed and handled by TM-478. */
-    REFUND_DUE
+    /** Reversed in-window on a paid order — a money refund is owed (issued by TM-623's refund path). */
+    REFUND_DUE,
+
+    /**
+     * The owed money was returned (TM-623): the provider refund call succeeded and the commitment is
+     * fully unwound. Terminal — nothing further is owed in either direction.
+     */
+    REFUNDED
 }

@@ -3,12 +3,14 @@ package com.teammarhaba.backend.membership;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,18 +47,21 @@ public class MembershipService {
     private final MembershipProvisioner provisioner;
     private final AuditService audit;
     private final SubscriptionRepository subscriptions;
+    private final MembershipProperties membershipProps;
 
     public MembershipService(
             MembershipRepository memberships,
             UserService users,
             MembershipProvisioner provisioner,
             AuditService audit,
-            SubscriptionRepository subscriptions) {
+            SubscriptionRepository subscriptions,
+            MembershipProperties membershipProps) {
         this.memberships = memberships;
         this.users = users;
         this.provisioner = provisioner;
         this.audit = audit;
         this.subscriptions = subscriptions;
+        this.membershipProps = membershipProps;
     }
 
     /**
@@ -113,6 +118,14 @@ public class MembershipService {
      * blocked in favour of cancelling (which keeps the paid tier to the period end, then downgrades).
      */
     private void requireSwitchAllowed(Long userId, MembershipTier target) {
+        // Server-side membership flag (TM-623): while the paid feature is OFF, no caller may switch
+        // INTO a paid tier at all — 403, not 402, because there is nothing they could subscribe to.
+        // (Transitively enforced anyway — checkout is 404 so no subscription can exist — but this
+        // keeps the gate local and explicit.) Switching DOWN stays available regardless of the flag,
+        // so a feature rollback never traps anyone in a paid tier.
+        if (SubscriptionPricing.isPaidTier(target) && !membershipProps.enabled()) {
+            throw new AccessDeniedException("Paid membership tiers are not available.");
+        }
         Subscription subscription = subscriptions.findByUserId(userId).orElse(null);
         Instant now = Instant.now();
         if (SubscriptionPricing.isPaidTier(target)) {

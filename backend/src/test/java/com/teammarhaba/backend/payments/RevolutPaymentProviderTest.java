@@ -128,7 +128,7 @@ class RevolutPaymentProviderTest {
     void createCustomerPostsEmailAndFullNameAndParsesId() {
         responseBody = "{\"id\":\"cust-1\",\"email\":\"sub@example.com\"}";
 
-        String id = provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("sub@example.com", "Sub Scriber");
+        String id = provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("sub@example.com", "+447700900000", "Sub Scriber");
 
         assertThat(id).isEqualTo("cust-1");
         assertThat(capturedMethod.get()).isEqualTo("POST");
@@ -141,13 +141,13 @@ class RevolutPaymentProviderTest {
     @Test
     void createCustomerOmitsBlankFieldsAndFailsOnMissingId() {
         responseBody = "{\"id\":\"cust-2\"}";
-        provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer(null, "Phone Only");
+        provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer(null, null, "Phone Only");
         // A phone-only account has no email — the field must be absent, not an empty string.
         assertThat(readBody().has("email")).isFalse();
         assertThat(readBody().path("full_name").asText()).isEqualTo("Phone Only");
 
         responseBody = "{\"state\":\"created\"}"; // no id
-        assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("a@b.c", "X"))
+        assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer("a@b.c", null, "X"))
                 .isInstanceOf(PaymentProviderException.class);
     }
 
@@ -218,12 +218,78 @@ class RevolutPaymentProviderTest {
                 .isEmpty();
     }
 
+    @Test
+    void createCustomerSendsThePhoneForAPhoneOnlyAccount() {
+        // TM-623: a phone-only account (no email, no display name) must still register with a real
+        // identifying field — previously the request body was literally {}.
+        responseBody = "{\"id\":\"cust-3\"}";
+
+        String id = provider(SECRET_KEY, WEBHOOK_SECRET).createCustomer(null, "+447700900123", null);
+
+        assertThat(id).isEqualTo("cust-3");
+        assertThat(readBody().has("email")).isFalse();
+        assertThat(readBody().has("full_name")).isFalse();
+        assertThat(readBody().path("phone").asText()).isEqualTo("+447700900123");
+    }
+
+    @Test
+    void cancelOrderPostsToTheCancelEndpoint() {
+        responseBody = "{\"id\":\"rev-order-9\",\"state\":\"cancelled\"}";
+
+        provider(SECRET_KEY, WEBHOOK_SECRET).cancelOrder("rev-order-9");
+
+        assertThat(capturedMethod.get()).isEqualTo("POST");
+        assertThat(capturedPath.get()).isEqualTo("/api/orders/rev-order-9/cancel");
+    }
+
+    @Test
+    void cancelOrderThrowsOnNon2xxSoCallersCanLogTheBestEffortFailure() {
+        responseStatus = 422; // e.g. the order already completed — can no longer be voided
+        responseBody = "{\"message\":\"order not cancellable\"}";
+        assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).cancelOrder("rev-order-9"))
+                .isInstanceOf(PaymentProviderException.class);
+    }
+
+    @Test
+    void refundPostsTheMinorAmountToTheRefundEndpoint() {
+        responseBody = "{\"id\":\"refund-1\",\"state\":\"completed\"}";
+
+        provider(SECRET_KEY, WEBHOOK_SECRET).refund("rev-order-9", 500, "GBP", "42");
+
+        assertThat(capturedMethod.get()).isEqualTo("POST");
+        assertThat(capturedPath.get()).isEqualTo("/api/orders/rev-order-9/refund");
+        assertThat(readBody().path("amount").asInt()).isEqualTo(500);
+        assertThat(readBody().path("currency").asText()).isEqualTo("GBP");
+        assertThat(readBody().path("merchant_order_ext_ref").asText()).isEqualTo("42");
+    }
+
+    @Test
+    void refundThrowsOnNon2xxSoTheOrderStaysRefundDue() {
+        responseStatus = 400;
+        responseBody = "{\"message\":\"already refunded\"}";
+        assertThatThrownBy(() -> provider(SECRET_KEY, WEBHOOK_SECRET).refund("rev-order-9", 500, "GBP", "42"))
+                .isInstanceOf(PaymentProviderException.class);
+    }
+
+    @Test
+    void findMerchantSavedPaymentMethodPrefersTheLatestCreatedAt() {
+        // TM-623: array position is an undocumented ordering assumption — when created_at is present,
+        // the NEWEST merchant-saved card wins even if the provider lists it first.
+        responseBody = "["
+                + "{\"id\":\"pm-new\",\"type\":\"card\",\"saved_for\":\"MERCHANT\",\"created_at\":\"2026-07-01T10:00:00Z\"},"
+                + "{\"id\":\"pm-old\",\"type\":\"card\",\"saved_for\":\"MERCHANT\",\"created_at\":\"2026-01-01T10:00:00Z\"}]";
+
+        Optional<String> ref = provider(SECRET_KEY, WEBHOOK_SECRET).findMerchantSavedPaymentMethod("cust-1");
+
+        assertThat(ref).contains("pm-new");
+    }
+
     // ------------------------------------------------------------------ webhook verification
 
     @Test
     void verifiesAGenuineCompletedWebhookAsSettled() {
         String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
-        String ts = "1700000000";
+        String ts = freshTimestamp(); // must be inside the TM-623 replay window to verify
         String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + "." + body);
 
         Optional<PaymentWebhookEvent> event =
@@ -237,7 +303,7 @@ class RevolutPaymentProviderTest {
     @Test
     void verifiesANonSettleEventButFlagsItNotPaid() {
         String body = "{\"event\":\"ORDER_PAYMENT_DECLINED\",\"order_id\":\"rev-order-2\"}";
-        String ts = "1700000000";
+        String ts = freshTimestamp();
         String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + "." + body);
 
         Optional<PaymentWebhookEvent> event =
@@ -250,7 +316,7 @@ class RevolutPaymentProviderTest {
     @Test
     void rejectsATamperedSignature() {
         String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
-        String ts = "1700000000";
+        String ts = freshTimestamp();
         // A signature over a DIFFERENT body must not verify the real one.
         String wrong = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + ".{\"event\":\"tampered\"}");
 
@@ -262,14 +328,14 @@ class RevolutPaymentProviderTest {
     void rejectsAMissingSignatureOrTimestamp() {
         String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
         RevolutPaymentProvider provider = provider(SECRET_KEY, WEBHOOK_SECRET);
-        assertThat(provider.parseWebhookEvent(bytes(body), null, "1700000000")).isEmpty();
+        assertThat(provider.parseWebhookEvent(bytes(body), null, freshTimestamp())).isEmpty();
         assertThat(provider.parseWebhookEvent(bytes(body), "v1=abc", null)).isEmpty();
     }
 
     @Test
     void rejectsEveryWebhookWhenNoSigningSecretConfigured() {
         String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
-        String ts = "1700000000";
+        String ts = freshTimestamp();
         // Any signature is rejected when the app holds no signing secret (fail-closed) — it never even
         // reaches verification (the blank-secret guard short-circuits first).
         String signature = "v1=" + sign("some-attacker-secret", "v1." + ts + "." + body);
@@ -277,7 +343,62 @@ class RevolutPaymentProviderTest {
                 .isEmpty();
     }
 
+    @Test
+    void rejectsAReplayedWebhookOutsideTheFreshnessWindow() {
+        // TM-623: a captured delivery is signed FOREVER (the timestamp is inside the HMAC payload), so
+        // freshness is the only thing that stops an attacker replaying it later. Signature valid,
+        // timestamp 10 minutes old -> rejected (the controller then answers 401).
+        String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
+        String staleTs = String.valueOf(System.currentTimeMillis() - 10 * 60 * 1000);
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + staleTs + "." + body);
+
+        assertThat(provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, staleTs))
+                .isEmpty();
+    }
+
+    @Test
+    void acceptsAFreshEpochSecondsTimestamp() {
+        // Unit tolerance: a 10-digit value is treated as epoch seconds and normalised, so a provider
+        // sending seconds instead of milliseconds still verifies while fresh.
+        String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
+        String seconds = String.valueOf(System.currentTimeMillis() / 1000);
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + seconds + "." + body);
+
+        assertThat(provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, seconds))
+                .isPresent();
+    }
+
+    @Test
+    void rejectsAnUnparseableTimestamp() {
+        String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
+        String garbage = "not-a-timestamp";
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + garbage + "." + body);
+
+        assertThat(provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, garbage))
+                .isEmpty();
+    }
+
+    // ------------------------------------------------------------------ secret hygiene (TM-623)
+
+    @Test
+    void propertiesToStringNeverContainsTheSecrets() {
+        // A record's generated toString would print both secrets verbatim into any log line carrying
+        // the properties object. The override masks them to presence-only.
+        RevolutProperties props =
+                new RevolutProperties("sk_live_super_secret", baseUrl, API_VERSION, "wsk_super_secret", "GBP");
+
+        assertThat(props.toString()).doesNotContain("sk_live_super_secret").doesNotContain("wsk_super_secret");
+        assertThat(props.toString()).contains("***");
+        assertThat(new RevolutProperties(null, baseUrl, API_VERSION, null, "GBP").toString()).contains("(unset)");
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /** A timestamp inside the TM-623 freshness window — signed webhook tests must not look replayed. */
+    private static String freshTimestamp() {
+        return String.valueOf(System.currentTimeMillis());
+    }
+
 
     private JsonNode readBody() {
         try {

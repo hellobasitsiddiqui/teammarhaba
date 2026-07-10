@@ -2,10 +2,12 @@ package com.teammarhaba.backend.membership;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +22,7 @@ import com.teammarhaba.backend.payments.PaymentProviderException;
 import com.teammarhaba.backend.payments.SavedMethodCharge;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
+import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -45,6 +48,7 @@ class SubscriptionRenewalServiceTest {
     private PaymentProvider payments;
     private AuditService audit;
     private SubscriptionNotifier notifier;
+    private EntityManager entityManager;
     private SubscriptionRenewalService service;
     private User user;
 
@@ -57,15 +61,18 @@ class SubscriptionRenewalServiceTest {
         payments = mock(PaymentProvider.class);
         audit = mock(AuditService.class);
         notifier = mock(SubscriptionNotifier.class);
+        entityManager = mock(EntityManager.class); // refresh() is a no-op — race tests stub it explicitly
         // Dunning policy under test: 3 retries, 48h apart.
         service = new SubscriptionRenewalService(
                 subscriptions, charges, memberships, users, payments, audit, notifier,
-                new SubscriptionProperties(3, 48));
+                new SubscriptionProperties(3, 48), entityManager);
 
         user = mock(User.class);
         when(user.getId()).thenReturn(42L);
         when(user.getFirebaseUid()).thenReturn("uid-42");
         when(users.getById(42L)).thenReturn(user);
+        // The tombstone check (TM-623): the default account is active (mock isDeleted() = false).
+        when(users.findAnyById(42L)).thenReturn(Optional.of(user));
         when(payments.name()).thenReturn("revolut");
         when(charges.save(any(SubscriptionCharge.class))).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -259,5 +266,166 @@ class SubscriptionRenewalServiceTest {
 
         assertThat(service.processOne(7L)).isFalse();
         verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
+    }
+
+    // ------------------------------------------------------------------ double-charge race (TM-623)
+
+    @Test
+    void concurrentRenewalPassChargesExactlyOnce() {
+        // Two instances race the same due row. The loser blocks on the user lock while the winner
+        // charges + extends + commits. The loser's pre-lock load is a stale L1 snapshot (still due) —
+        // the refresh under the lock reveals the committed extension, and the loser must charge NOTHING.
+        Subscription subscription = dueActiveSubscription();
+        doAnswer(inv -> {
+                    // Simulate "the winner committed while we waited": refresh loads the extended row.
+                    subscription.extendPeriod(Instant.now());
+                    return null;
+                })
+                .when(entityManager)
+                .refresh(subscription);
+
+        boolean acted = service.processOne(7L);
+
+        assertThat(acted).isFalse(); // a clean no-op, not a duplicate charge
+        verify(payments, never()).createOrderForCustomer(anyInt(), anyString(), anyString(), anyString());
+        verify(payments, never()).payWithSavedMethod(anyString(), anyString());
+        verify(charges, never()).save(any());
+    }
+
+    // ------------------------------------------------------------------ soft-deleted accounts (TM-623)
+
+    @Test
+    void softDeletedAccountIsNeverChargedAndItsSubscriptionLapses() {
+        // The renewal engine used to charge FIRST and only then trip over the invisible account —
+        // rolling the ledger back and re-charging the card every tick. Now the tombstone check runs
+        // BEFORE any provider call: lapse, downgrade the membership, move no money, notify no one.
+        Subscription subscription = dueActiveSubscription();
+        User deleted = mock(User.class);
+        when(deleted.getId()).thenReturn(42L);
+        when(deleted.getFirebaseUid()).thenReturn("uid-42");
+        when(deleted.isDeleted()).thenReturn(true);
+        when(users.findAnyById(42L)).thenReturn(Optional.of(deleted));
+
+        boolean acted = service.processOne(7L);
+
+        assertThat(acted).isTrue();
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
+        assertThat(subscription.getNextChargeAt()).isNull(); // unscheduled — never scanned again
+        verify(payments, never()).createOrderForCustomer(anyInt(), anyString(), anyString(), anyString());
+        verify(payments, never()).payWithSavedMethod(anyString(), anyString());
+        verify(memberships).applyTierForSubscription(42L, MembershipTier.PAY_PER_EVENT, "uid-42");
+        verify(notifier, never()).subscriptionEnded(anyLong(), any(), anyBoolean(), anyString());
+    }
+
+    @Test
+    void vanishedAccountIsNeverChargedEither() {
+        Subscription subscription = dueActiveSubscription();
+        when(users.findAnyById(42L)).thenReturn(Optional.empty());
+
+        boolean acted = service.processOne(7L);
+
+        assertThat(acted).isTrue();
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
+        verify(payments, never()).payWithSavedMethod(anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------ same-window idempotency (TM-623)
+
+    @Test
+    void dunningRetryReusesTheWindowsProviderOrderInsteadOfOpeningANewOne() {
+        // The previous (ambiguous) attempt for this window already has a provider order. The retry must
+        // pay THAT order id again — the gateway rejects paying a completed order, so if the earlier
+        // attempt actually settled, the same window cannot be captured twice.
+        Subscription subscription = dueActiveSubscription();
+        subscription.markPastDue(Instant.now().minus(Duration.ofMinutes(5)), Instant.now());
+        Instant windowStart = subscription.getCurrentPeriodEnd();
+
+        SubscriptionCharge previous = new SubscriptionCharge(
+                42L, SubscriptionCharge.Kind.RENEWAL, MembershipTier.MONTHLY, 999, Instant.now());
+        previous.coverPeriod(windowStart, Subscription.plusOneMonth(windowStart), Instant.now());
+        previous.setPaymentReference("revolut", "rev-window-1", "cust-1", Instant.now());
+        previous.markFailed(Instant.now());
+        when(charges.findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
+                        42L, SubscriptionCharge.Kind.RENEWAL, windowStart))
+                .thenReturn(Optional.of(previous));
+        when(payments.payWithSavedMethod("rev-window-1", "pm-1")).thenReturn(new SavedMethodCharge("completed", true));
+
+        service.processOne(7L);
+
+        // No fresh provider order, no fresh ledger row — the window's one charge unit is reused.
+        verify(payments, never()).createOrderForCustomer(anyInt(), anyString(), anyString(), anyString());
+        verify(charges, never()).save(any());
+        assertThat(previous.getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+    }
+
+    @Test
+    void windowAlreadyPaidExtendsWithoutCharging() {
+        // A late webhook healed the window's charge between the scan and the lock: the money for this
+        // window already moved — grant the time, charge absolutely nothing.
+        Subscription subscription = dueActiveSubscription();
+        Instant windowStart = subscription.getCurrentPeriodEnd();
+
+        SubscriptionCharge paid = new SubscriptionCharge(
+                42L, SubscriptionCharge.Kind.RENEWAL, MembershipTier.MONTHLY, 999, Instant.now());
+        paid.coverPeriod(windowStart, Subscription.plusOneMonth(windowStart), Instant.now());
+        paid.markPaid(windowStart, Subscription.plusOneMonth(windowStart), Instant.now());
+        when(charges.findFirstByUserIdAndKindAndPeriodStartOrderByIdDesc(
+                        42L, SubscriptionCharge.Kind.RENEWAL, windowStart))
+                .thenReturn(Optional.of(paid));
+
+        service.processOne(7L);
+
+        assertThat(subscription.getCurrentPeriodStart()).isEqualTo(windowStart);
+        verify(payments, never()).createOrderForCustomer(anyInt(), anyString(), anyString(), anyString());
+        verify(payments, never()).payWithSavedMethod(anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------ indeterminate outcomes (TM-623)
+
+    @Test
+    void indeterminateProviderStateKeepsTheChargePendingAndSchedulesARecheck() {
+        // "pending"/"processing" is NOT a decline: the money may still be captured for THIS attempt.
+        // The charge must stay PENDING (the webhook is the authority) and the user must NOT get a
+        // false "payment problem" nudge; the scheduled re-check hits the same provider order.
+        Subscription subscription = dueActiveSubscription();
+        when(payments.createOrderForCustomer(anyInt(), anyString(), anyString(), anyString()))
+                .thenReturn(new PaymentOrder("rev-ren-7", "tok"));
+        when(payments.payWithSavedMethod("rev-ren-7", "pm-1")).thenReturn(SavedMethodCharge.fromState("processing"));
+
+        service.processOne(7L);
+
+        ArgumentCaptor<SubscriptionCharge> saved = ArgumentCaptor.forClass(SubscriptionCharge.class);
+        verify(charges).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(SubscriptionCharge.Status.PENDING);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.PAST_DUE); // re-check scheduled
+        verify(notifier, never()).renewalFailed(anyLong(), any(), anyString());
+    }
+
+    // ------------------------------------------------------------------ catch-up policy (TM-623)
+
+    @Test
+    void multiMonthArrearsChargesOnceReanchoredAtNowInsteadOfStacking() {
+        // The scheduler was down for months. Charging window-by-window would stack one back-charge per
+        // missed month, minutes apart. Policy: ONE charge, window re-anchored at now, gap forgiven.
+        Instant subscribed = Instant.now().minus(Duration.ofDays(150)); // ~5 months ago
+        Subscription subscription = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", subscribed);
+        subscription.savePaymentMethodRef("pm-1", subscribed);
+        when(subscriptions.findById(7L)).thenReturn(Optional.of(subscription));
+        when(payments.createOrderForCustomer(anyInt(), anyString(), anyString(), anyString()))
+                .thenReturn(new PaymentOrder("rev-catchup", "tok"));
+        when(payments.payWithSavedMethod("rev-catchup", "pm-1")).thenReturn(new SavedMethodCharge("completed", true));
+
+        Instant before = Instant.now();
+        service.processOne(7L);
+
+        // One charge; the new window starts ~now (re-anchored), not at the months-old period end.
+        verify(payments).payWithSavedMethod("rev-catchup", "pm-1");
+        assertThat(subscription.getCurrentPeriodStart()).isBetween(before, Instant.now());
+        assertThat(subscription.getCurrentPeriodEnd())
+                .isEqualTo(Subscription.plusOneMonth(subscription.getCurrentPeriodStart()));
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        // The row is no longer due — the very next tick performs NO second catch-up charge.
+        assertThat(subscription.getNextChargeAt()).isAfter(Instant.now());
     }
 }

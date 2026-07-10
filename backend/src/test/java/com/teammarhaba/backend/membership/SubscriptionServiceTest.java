@@ -7,21 +7,27 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.payments.PaymentOrder;
 import com.teammarhaba.backend.payments.PaymentProvider;
+import com.teammarhaba.backend.payments.PaymentProviderException;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
+import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -49,6 +55,7 @@ class SubscriptionServiceTest {
     private PaymentProvider payments;
     private AuditService audit;
     private SubscriptionNotifier notifier;
+    private EntityManager entityManager;
     private SubscriptionService service;
     private User user;
 
@@ -61,15 +68,21 @@ class SubscriptionServiceTest {
         payments = mock(PaymentProvider.class);
         audit = mock(AuditService.class);
         notifier = mock(SubscriptionNotifier.class);
-        service = new SubscriptionService(subscriptions, charges, memberships, users, payments, audit, notifier);
+        entityManager = mock(EntityManager.class); // refresh() is a no-op — race tests stub it explicitly
+        // Server-side membership flag ON here; the flag-OFF 404 behaviour has its own tests below.
+        service = new SubscriptionService(
+                subscriptions, charges, memberships, users, payments, audit, notifier,
+                new MembershipProperties(true), entityManager);
 
         user = mock(User.class);
         when(user.getId()).thenReturn(42L);
         when(user.getEmail()).thenReturn("sub@example.com");
+        when(user.getPhone()).thenReturn("+447700900000");
         when(user.getDisplayName()).thenReturn("Sub Scriber");
         when(user.getFirebaseUid()).thenReturn("uid-42");
         when(users.provision(any())).thenReturn(user);
         when(users.getById(42L)).thenReturn(user);
+        when(users.findAnyById(42L)).thenReturn(Optional.of(user)); // active account (isDeleted=false)
         when(payments.name()).thenReturn("revolut");
 
         // Repository saves echo the entity back (the DB would assign ids; the logic under test doesn't need them).
@@ -85,7 +98,7 @@ class SubscriptionServiceTest {
         when(charges.findFirstByUserIdAndKindAndStatus(
                         42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
                 .thenReturn(Optional.empty());
-        when(payments.createCustomer("sub@example.com", "Sub Scriber")).thenReturn("cust-1");
+        when(payments.createCustomer("sub@example.com", "+447700900000", "Sub Scriber")).thenReturn("cust-1");
         when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-1")))
                 .thenReturn(new PaymentOrder("rev-ord-1", "tok-1"));
 
@@ -115,7 +128,7 @@ class SubscriptionServiceTest {
     void checkoutPricesDiamondAt1999() {
         when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
         when(charges.findFirstByUserIdAndKindAndStatus(any(), any(), any())).thenReturn(Optional.empty());
-        when(payments.createCustomer(anyString(), anyString())).thenReturn("cust-1");
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
         when(payments.createOrderForCustomer(eq(1999), eq("GBP"), anyString(), eq("cust-1")))
                 .thenReturn(new PaymentOrder("rev-ord-2", "tok-2"));
 
@@ -128,7 +141,7 @@ class SubscriptionServiceTest {
     void checkoutRejectsFreeBaseTier() {
         assertThatThrownBy(() -> service.checkout(CALLER, MembershipTier.PAY_PER_EVENT))
                 .isInstanceOf(BadRequestException.class);
-        verify(payments, never()).createCustomer(anyString(), anyString());
+        verify(payments, never()).createCustomer(any(), any(), any());
     }
 
     @Test
@@ -155,7 +168,7 @@ class SubscriptionServiceTest {
         SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
 
         assertThat(result.paymentToken()).isEqualTo("tok-3");
-        verify(payments, never()).createCustomer(anyString(), anyString()); // reused, not re-registered
+        verify(payments, never()).createCustomer(any(), any(), any()); // reused, not re-registered
     }
 
     @Test
@@ -169,7 +182,7 @@ class SubscriptionServiceTest {
         when(charges.findFirstByUserIdAndKindAndStatus(
                         42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
                 .thenReturn(Optional.of(abandoned));
-        when(payments.createCustomer(anyString(), anyString())).thenReturn("cust-1");
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
         when(payments.createOrderForCustomer(eq(1999), eq("GBP"), anyString(), eq("cust-1")))
                 .thenReturn(new PaymentOrder("rev-new", "tok-new"));
 
@@ -342,5 +355,158 @@ class SubscriptionServiceTest {
         when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.cancel(CALLER)).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ------------------------------------------------------------------ server-side flag (TM-623)
+
+    /** A service wired exactly as prod-with-the-flag-off boots: money paths must not exist. */
+    private SubscriptionService gatedService() {
+        return new SubscriptionService(
+                subscriptions, charges, memberships, users, payments, audit, notifier,
+                new MembershipProperties(false), entityManager);
+    }
+
+    @Test
+    void checkoutIs404WhileTheServerSideMembershipFlagIsOff() {
+        assertThatThrownBy(() -> gatedService().checkout(CALLER, MembershipTier.MONTHLY))
+                .isInstanceOf(ResourceNotFoundException.class);
+        // The gate fires before ANYTHING happens: no provider customer, no provider order, no ledger row.
+        verifyNoInteractions(payments, charges);
+    }
+
+    @Test
+    void cancelIs404WhileTheServerSideMembershipFlagIsOff() {
+        assertThatThrownBy(() -> gatedService().cancel(CALLER))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verify(audit, never()).record(anyString(), any(), anyString(), anyString(), any(Map.class));
+    }
+
+    @Test
+    void confirmChargeStillSettlesWhileTheFlagIsOff() {
+        // A flag ROLLBACK must not strand in-flight money: a charge legitimately opened while the flag
+        // was on still settles (and activates) when its webhook arrives after the flag went off.
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-1", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-1")).thenReturn(Optional.of(charge));
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(payments.findMerchantSavedPaymentMethod("cust-1")).thenReturn(Optional.of("pm-1"));
+
+        gatedService().confirmCharge("rev-ord-1");
+
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
+        verify(memberships).applyTierForSubscription(42L, MembershipTier.MONTHLY, "uid-42");
+    }
+
+    // ------------------------------------------------------------------ re-point voids the old order (TM-623)
+
+    @Test
+    void repointVoidsTheSupersededProviderOrder() {
+        // The abandoned attempt's provider order is cancelled at the gateway BEFORE the row forgets it,
+        // so a stale open widget can no longer capture money that would reconcile to nothing.
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge abandoned =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        abandoned.setPaymentReference("revolut", "rev-old", "cust-1", earlier);
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(
+                        42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
+                .thenReturn(Optional.of(abandoned));
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
+        when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-1")))
+                .thenReturn(new PaymentOrder("rev-new", "tok-new"));
+
+        service.checkout(CALLER, MembershipTier.MONTHLY);
+
+        verify(payments).cancelOrder("rev-old");
+        assertThat(abandoned.getProviderOrderId()).isEqualTo("rev-new");
+    }
+
+    @Test
+    void repointSurvivesAFailedVoidOfTheOldOrder() {
+        // The void is best-effort: the gateway refusing it (already paid / transient) must not block
+        // the caller's new checkout — the failure is logged for manual reconciliation.
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge abandoned =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        abandoned.setPaymentReference("revolut", "rev-old", "cust-1", earlier);
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(
+                        42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
+                .thenReturn(Optional.of(abandoned));
+        doThrow(new PaymentProviderException("already completed")).when(payments).cancelOrder("rev-old");
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
+        when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-1")))
+                .thenReturn(new PaymentOrder("rev-new", "tok-new"));
+
+        SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
+
+        assertThat(result.paymentToken()).isEqualTo("tok-new");
+    }
+
+    // ------------------------------------------------------------------ heal must not resurrect (TM-623)
+
+    @Test
+    void healRenewalDoesNotResurrectAUserCanceledSubscription() {
+        // The consent sequence: renewal fails → user CANCELS (withdraws the mandate) → the provider's
+        // late webhook reports the original charge settled. The paid window must be honoured, but
+        // auto-renewal must NOT re-arm against a card whose owner explicitly cancelled.
+        Instant subscribed = Instant.now().minus(Duration.ofDays(35));
+        Subscription subscription = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", subscribed);
+        Instant oldPeriodEnd = subscription.getCurrentPeriodEnd();
+
+        Instant attemptTime = Instant.now().minus(Duration.ofHours(3));
+        SubscriptionCharge charge = new SubscriptionCharge(
+                42L, SubscriptionCharge.Kind.RENEWAL, MembershipTier.MONTHLY, 999, attemptTime);
+        charge.coverPeriod(oldPeriodEnd, Subscription.plusOneMonth(oldPeriodEnd), attemptTime);
+        charge.setPaymentReference("revolut", "rev-ren-9", "cust-1", attemptTime);
+        charge.markFailed(attemptTime);
+
+        subscription.cancelAtPeriodEnd(Instant.now().minus(Duration.ofHours(1))); // the user's cancel
+        Instant canceledAt = subscription.getCanceledAt();
+
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(subscription));
+        when(charges.findByProviderOrderId("rev-ren-9")).thenReturn(Optional.of(charge));
+
+        service.confirmCharge("rev-ren-9");
+
+        // The money moved, so the paid window exists…
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
+        assertThat(subscription.getCurrentPeriodEnd()).isEqualTo(Subscription.plusOneMonth(oldPeriodEnd));
+        // …but the cancel stands: still CANCELED, canceledAt untouched, and the "due" pointer parked at
+        // the NEW period end is the DOWNGRADE pass, not a renewal charge.
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
+        assertThat(subscription.getCanceledAt()).isEqualTo(canceledAt);
+        assertThat(subscription.getNextChargeAt()).isEqualTo(subscription.getCurrentPeriodEnd());
+    }
+
+    // ------------------------------------------------------------------ duplicate-delivery race (TM-623)
+
+    @Test
+    void concurrentDuplicateWebhookDeliveryConfirmsExactlyOnce() {
+        // Two deliveries of the same settle event race: the loser blocks on the user lock while the
+        // winner commits PAID. The loser's pre-lock read is a stale L1 snapshot (still PENDING) — only
+        // the refresh under the lock reveals the committed PAID and makes the idempotency check real.
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-1", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-1")).thenReturn(Optional.of(charge));
+        // Simulate "the other delivery committed while we waited for the lock": the refresh loads the
+        // committed PAID state into the managed instance.
+        doAnswer(inv -> {
+                    charge.markPaid(chargeTime, Subscription.plusOneMonth(chargeTime), chargeTime);
+                    return null;
+                })
+                .when(entityManager)
+                .refresh(charge);
+
+        service.confirmCharge("rev-ord-1");
+
+        // The losing delivery is a clean no-op: no second activation, no tier grant, no notification.
+        verify(subscriptions, never()).save(any());
+        verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
+        verify(notifier, never()).subscriptionStarted(anyLong(), any(), anyString());
     }
 }

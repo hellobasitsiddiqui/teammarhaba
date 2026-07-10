@@ -420,7 +420,17 @@ jobs:
           set -euo pipefail
           # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD + Revolut secrets (empty -> no stray comma).
           SECRETS="DB_PASSWORD=teammarhaba-db-app-password:latest${MAIL_SECRETS:+,${MAIL_SECRETS}}${REVOLUT_SECRETS:+,${REVOLUT_SECRETS}}"
-          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }}${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}"
+          # Money-safety flags (TM-623) — DECLARED explicitly so the prod state is never an accident of
+          # a missing variable:
+          #   MEMBERSHIP_ENABLED     the SERVER-SIDE membership flag (app.membership.enabled). The web
+          #                          `membership` flag only hides UI; this one makes the money endpoints
+          #                          actually unreachable (subscription checkout/cancel 404, paid tier
+          #                          switch + PAY checkout 403) and gates the renewal scheduler bean.
+          #                          Flip to true together with the web flag at launch.
+          #   SUBSCRIPTIONS_ENABLED  the off-session renewal/dunning scheduler's own switch (also
+          #                          requires MEMBERSHIP_ENABLED=true — both must be true for the bean
+          #                          to exist). Explicit false today: nothing charges saved cards.
+          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }},MEMBERSHIP_ENABLED=false,SUBSCRIPTIONS_ENABLED=false${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}"
 
           # --no-traffic is only meaningful when a previous revision holds traffic; on the
           # first-ever deploy of the service (fresh replay) the first revision must serve.
