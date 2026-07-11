@@ -27,6 +27,7 @@ import { el, clear } from "./ui.js";
 import {
   resolvePriceState,
   checkoutPayload,
+  createRevolutSdkLoader,
   formatPrice,
   CHECKOUT_MODE,
   PRICE_KIND,
@@ -129,45 +130,32 @@ function paymentsConfig() {
   return cfg.payments && typeof cfg.payments === "object" ? cfg.payments : {};
 }
 
-// Memoised load of the Revolut SDK so repeated pay attempts reuse one <script>.
-let revolutSdkPromise = null;
+// The one shared, memoised SDK loader — built by the node-tested core factory (TM-629) with the real
+// browser reads injected. The memoisation/retry contract lives (and is unit-tested) in
+// membership-checkout-core.js: an in-flight load is shared, but NO failure path memoises its rejection
+// — previously only `script.onerror` cleared the memo, so a missing config URL or a script that loaded
+// without exposing `RevolutCheckout` left a permanently-cached rejection and "try again" could never
+// succeed until a full page reload.
+const revolutSdkLoader = createRevolutSdkLoader({
+  getGlobal: () => (typeof window !== "undefined" ? window : undefined),
+  getDocument: () => (typeof document !== "undefined" ? document : undefined),
+  getScriptUrl: () => paymentsConfig().revolutScriptUrl,
+});
 
 /**
  * Load the Revolut checkout SDK (embed.js) from the configured sandbox CDN, once. Injects a PLAIN
  * external <script> — not a fingerprinted local ES module, so the deploy fingerprinter (TM-144) leaves
  * it untouched — and resolves with the global `RevolutCheckout(token, mode)` once available. The load
- * promise is memoised; a failed load clears it so a later attempt can retry. Rejects if the URL is
- * absent or the script fails to load.
+ * promise is memoised while in flight; EVERY failure (missing config URL, load error, SDK loaded but
+ * unusable) leaves the loader retryable rather than caching the rejection (TM-629). Rejects if the URL
+ * is absent or the script fails to load.
  *
  * Exported since TM-620: the Subscribe checkout screen (membership-subscribe.js) mounts the same
  * widget for the first subscription charge, so both screens share this one memoised loader.
  * @returns {Promise<Function>} the global RevolutCheckout loader.
  */
 export function loadRevolutSdk() {
-  if (typeof window !== "undefined" && typeof window.RevolutCheckout === "function") {
-    return Promise.resolve(window.RevolutCheckout);
-  }
-  if (revolutSdkPromise) return revolutSdkPromise;
-  const src = paymentsConfig().revolutScriptUrl;
-  revolutSdkPromise = new Promise((resolve, reject) => {
-    if (!src || typeof document === "undefined") {
-      reject(new Error("Revolut checkout SDK is not configured."));
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = () => {
-      if (typeof window.RevolutCheckout === "function") resolve(window.RevolutCheckout);
-      else reject(new Error("Revolut checkout SDK loaded but RevolutCheckout is unavailable."));
-    };
-    script.onerror = () => {
-      revolutSdkPromise = null; // allow a retry on a transient CDN failure
-      reject(new Error("Could not load the Revolut checkout SDK."));
-    };
-    document.head.appendChild(script);
-  });
-  return revolutSdkPromise;
+  return revolutSdkLoader();
 }
 
 /** Set the Pay mount's aria-live status line (progress / error copy). No-op if the mount is gone. */
