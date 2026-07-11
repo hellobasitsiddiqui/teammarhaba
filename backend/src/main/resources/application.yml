@@ -142,6 +142,21 @@ app:
     #     london: 12
     #     dubai: 6
     city-hours: {}
+  # Reliability-points economy (TM-409). Wraps the TM-414 late-cancellation strike counter
+  # (users.late_cancel_count) into an account STANDING (OK -> WARNED -> DOWNGRADED) with a real
+  # consequence: a DOWNGRADED account can no longer take a GOING spot on a capacity-limited event (it is
+  # restricted to the waitlist), enforced at RSVP/claim time with an honest 409 (EventRsvpService). Each
+  # late cancel is one strike that debits `penalty-points` in the append-only reliability ledger (the
+  # existing audit log, action RELIABILITY_PENALTY) and is surfaced in the un-RSVP pre-confirm. Standing
+  # is derived from the running strike count against the two thresholds below — no new table/column. With
+  # `enabled: false` no standing is derived and the downgrade gate never fires (only the strike counter
+  # still moves). Tunables, not secrets; prod may override any of them from the env. No-show penalties +
+  # on-time credit depend on check-in (TM-405) and are out of scope here.
+  reliability:
+    enabled: ${RELIABILITY_ENABLED:true}
+    penalty-points: ${RELIABILITY_PENALTY_POINTS:10}       # reliability points a single late cancel debits
+    warn-threshold: ${RELIABILITY_WARN_THRESHOLD:1}        # strikes at/above this -> WARNED (a nudge, no limit)
+    downgrade-threshold: ${RELIABILITY_DOWNGRADE_THRESHOLD:3}   # strikes at/above this -> DOWNGRADED (waitlist-only)
   # Event listing state (TM-412). The PUBLIC events list surfaces live events ("happening now",
   # sorted to the top) and drops finished ones; the detail endpoint 404s a finished event. An event
   # is finished once now is past its effective end: end_at when set, else start_at + default-duration

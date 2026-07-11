@@ -436,8 +436,16 @@
           "message" : {
             "type" : "string"
           },
+          "penaltyPoints" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "preview" : {
             "type" : "boolean"
+          },
+          "reliabilityStatus" : {
+            "enum" : [ "OK", "WARNED", "DOWNGRADED" ],
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -1308,6 +1316,10 @@
             "type" : "boolean"
           },
           "phone" : {
+            "type" : "string"
+          },
+          "reliabilityStatus" : {
+            "enum" : [ "OK", "WARNED", "DOWNGRADED" ],
             "type" : "string"
           },
           "role" : {
@@ -2265,11 +2277,19 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "lateCancelCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "phoneNumber" : {
             "type" : "string"
           },
           "pushEligible" : {
             "type" : "boolean"
+          },
+          "reliabilityStatus" : {
+            "enum" : [ "OK", "WARNED", "DOWNGRADED" ],
+            "type" : "string"
           },
           "role" : {
             "type" : "string"

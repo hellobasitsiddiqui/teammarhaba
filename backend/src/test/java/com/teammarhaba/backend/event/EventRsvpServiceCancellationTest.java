@@ -7,9 +7,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.CancellationWindowProperties;
 import com.teammarhaba.backend.config.MembershipProperties;
+import com.teammarhaba.backend.config.ReliabilityProperties;
 import com.teammarhaba.backend.membership.EntitlementService;
 import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
@@ -68,6 +70,9 @@ class EventRsvpServiceCancellationTest {
     /** TM-629's credit-consume-on-commitment — only exercised on a FREE-first JOIN, never on cancel. */
     @Mock private MembershipService memberships;
 
+    /** TM-409's reliability ledger sink — a late cancel appends one row; mocked (no-op) here. */
+    @Mock private AuditService audit;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
@@ -88,7 +93,12 @@ class EventRsvpServiceCancellationTest {
                 new MembershipProperties(false),
                 entitlements,
                 orders,
-                memberships);
+                memberships,
+                // A real reliability layer on the shipped defaults (penalty 10, warn @1, downgrade @3) so
+                // the cancel path exercises the true strike + ledger + standing behaviour; only the audit
+                // ledger write is mocked. Built here (not as a field) so the @Mock audit is injected first.
+                new ReliabilityService(
+                        new ReliabilityPolicy(new ReliabilityProperties(null, null, null, null)), audit));
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)

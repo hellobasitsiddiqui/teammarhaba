@@ -8,6 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.google.firebase.auth.FirebaseAuth;
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditEvent;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -46,6 +50,9 @@ class EventLateCancellationIntegrationTest extends AbstractIntegrationTest {
     private UserRepository users;
 
     @Autowired
+    private AuditService audit;
+
+    @Autowired
     private MockMvc mockMvc;
 
     /** Backs the live account-state block on GET /me (TM-164); unstubbed here, it degrades to nulls. */
@@ -70,6 +77,39 @@ class EventLateCancellationIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/me").with(caller(caller)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.lateCancelCount").value(1));
+    }
+
+    @Test
+    void lateCancelWritesReliabilityLedgerRowAndSurfacesStandingOnMe() throws Exception {
+        Event event = publishedEventStartingIn(Duration.ofHours(12)); // inside the 24h window
+        VerifiedUser caller = newCaller("ledger");
+        rsvps.rsvp(caller, event.getId()); // GOING
+
+        CancelResult result = rsvps.cancelRsvp(caller, event.getId());
+
+        // TM-409: the un-RSVP now carries the reliability cost + resulting standing (1 strike hits warn @1).
+        assertThat(result.penaltyPoints()).isEqualTo(10);
+        assertThat(result.reliabilityStatus()).isEqualTo(ReliabilityStatus.WARNED);
+        assertThat(result.message()).contains("reliability points");
+
+        // An append-only reliability ledger row was persisted, targeting the account, carrying the signed
+        // debit + reason (transactional — committed with the strike + attendance delete).
+        AuditEvent ledger = audit
+                .search(caller.uid(), "User", caller.uid(), PageRequest.of(0, 10))
+                .stream()
+                .filter(e -> e.getAction() == AuditAction.RELIABILITY_PENALTY)
+                .findFirst()
+                .orElseThrow();
+        assertThat(ledger.getMetadata())
+                .containsEntry("delta", -10)
+                .containsEntry("reason", "LATE_CANCEL")
+                .containsEntry("strikeCount", 1);
+
+        // The standing surfaces on GET /me alongside the raw strike count, so the client can warn honestly.
+        mockMvc.perform(get("/api/v1/me").with(caller(caller)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lateCancelCount").value(1))
+                .andExpect(jsonPath("$.reliabilityStatus").value("WARNED"));
     }
 
     @Test

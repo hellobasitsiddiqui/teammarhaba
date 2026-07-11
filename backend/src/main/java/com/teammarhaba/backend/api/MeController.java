@@ -9,6 +9,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.config.TermsProperties;
+import com.teammarhaba.backend.event.ReliabilityPolicy;
 import com.teammarhaba.backend.user.ProfileUpdate;
 import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
@@ -66,18 +67,21 @@ public class MeController {
     private final FirebaseAccountStateService accountStateService;
     private final AuditService auditService;
     private final TermsProperties termsProperties;
+    private final ReliabilityPolicy reliabilityPolicy;
 
     MeController(
             UserService userService,
             EmailVerificationService emailVerificationService,
             FirebaseAccountStateService accountStateService,
             AuditService auditService,
-            TermsProperties termsProperties) {
+            TermsProperties termsProperties,
+            ReliabilityPolicy reliabilityPolicy) {
         this.userService = userService;
         this.emailVerificationService = emailVerificationService;
         this.accountStateService = accountStateService;
         this.auditService = auditService;
         this.termsProperties = termsProperties;
+        this.reliabilityPolicy = reliabilityPolicy;
     }
 
     /**
@@ -216,6 +220,9 @@ public class MeController {
                 accountState,
                 user.getLastActiveAt(),
                 user.getLateCancelCount(),
+                // Reliability standing (TM-409): derived server-side from the strike count against the
+                // configured thresholds, so the client can show a warning/downgrade banner honestly.
+                reliabilityPolicy.statusFor(user.getLateCancelCount()),
                 user.getThemeAccent(),
                 user.isThemeSketchy());
     }

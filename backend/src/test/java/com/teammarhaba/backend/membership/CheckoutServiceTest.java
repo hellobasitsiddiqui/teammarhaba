@@ -19,6 +19,7 @@ import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.event.AttendanceState;
 import com.teammarhaba.backend.event.CancelResult;
 import com.teammarhaba.backend.event.EventRsvpService;
+import com.teammarhaba.backend.event.ReliabilityStatus;
 import com.teammarhaba.backend.event.RsvpResult;
 import com.teammarhaba.backend.payments.PaymentOrder;
 import com.teammarhaba.backend.payments.PaymentProvider;
@@ -235,7 +236,7 @@ class CheckoutServiceTest {
         // a widget left open in another tab can no longer capture money that would reconcile to nothing.
         Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
         order.setPaymentReference("revolut", "rev-ord-3");
-        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0));
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0, ReliabilityStatus.OK));
         when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.of(order));
         Membership membership = new Membership(42L, Instant.now());
         when(memberships.getOrEnrol(any())).thenReturn(membership);
@@ -253,7 +254,7 @@ class CheckoutServiceTest {
         // refund is issued in the same flow and the order lands REFUNDED.
         Order order = new Order(42L, 7L, 500, OrderStatus.CONFIRMED, Instant.now());
         order.setPaymentReference("revolut", "rev-ord-4");
-        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0));
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0, ReliabilityStatus.OK));
         when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.of(order));
         Membership membership = new Membership(42L, Instant.now());
         when(memberships.getOrEnrol(any())).thenReturn(membership);
@@ -268,7 +269,7 @@ class CheckoutServiceTest {
     void aFailedRefundLeavesTheOrderRefundDue() {
         Order order = new Order(42L, 7L, 500, OrderStatus.CONFIRMED, Instant.now());
         order.setPaymentReference("revolut", "rev-ord-5");
-        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0));
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0, ReliabilityStatus.OK));
         when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.of(order));
         Membership membership = new Membership(42L, Instant.now());
         when(memberships.getOrEnrol(any())).thenReturn(membership);
@@ -333,7 +334,7 @@ class CheckoutServiceTest {
         // (consumption moved into EventRsvpService, matching checkout's consume-on-commitment rule).
         // The old cancel() returned early when it found no order, silently forfeiting the credit on an
         // in-window cancel of exactly that commitment. The credit check must run before the order guard.
-        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0));
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0, ReliabilityStatus.OK));
         when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
         Membership membership = new Membership(42L, Instant.now());
         membership.consumeFirstEventCredit(7L, Instant.now()); // spent by the direct RSVP on THIS event
@@ -351,7 +352,8 @@ class CheckoutServiceTest {
     void lateCancelWithNoOrderStillForfeitsTheCredit() {
         // The forfeiture rule is unchanged (TM-629): missing the window forfeits the credit whether the
         // commitment came from checkout or from a direct FREE-first RSVP — no order means no exception.
-        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.committedLate(1));
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false)))
+                .thenReturn(CancelResult.committedLate(1, 10, ReliabilityStatus.OK));
         when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
         Membership membership = new Membership(42L, Instant.now());
         membership.consumeFirstEventCredit(7L, Instant.now());

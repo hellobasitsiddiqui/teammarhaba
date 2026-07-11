@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.event.ReliabilityPolicy;
 import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserAdminService;
@@ -60,9 +61,11 @@ public class UserAdminController {
     static final Set<String> SORTABLE = Set.of("id", "email", "displayName", "role", "enabled");
 
     private final UserAdminService adminService;
+    private final ReliabilityPolicy reliabilityPolicy;
 
-    public UserAdminController(UserAdminService adminService) {
+    public UserAdminController(UserAdminService adminService, ReliabilityPolicy reliabilityPolicy) {
         this.adminService = adminService;
+        this.reliabilityPolicy = reliabilityPolicy;
     }
 
     @GetMapping
@@ -80,14 +83,22 @@ public class UserAdminController {
         // accounts a push can't reach.
         Map<Long, Boolean> pushEligible = adminService.pushEligibilityByUserId(accounts.getContent());
         return PagedResponse.from(accounts, u -> UserResponse.from(
-                u, authPhones.get(u.getFirebaseUid()), pushEligible.getOrDefault(u.getId(), false)));
+                u,
+                authPhones.get(u.getFirebaseUid()),
+                pushEligible.getOrDefault(u.getId(), false),
+                // TM-409: derive each row's reliability standing so the console can flag warned/downgraded
+                // accounts alongside the raw strike-count score carried by UserResponse.
+                reliabilityPolicy.statusFor(u.getLateCancelCount())));
     }
 
     @GetMapping("/{id}")
     public UserResponse get(@PathVariable long id) {
         User user = adminService.get(id);
         return UserResponse.from(
-                user, adminService.authPhoneFor(user.getFirebaseUid()), adminService.isPushEligible(user));
+                user,
+                adminService.authPhoneFor(user.getFirebaseUid()),
+                adminService.isPushEligible(user),
+                reliabilityPolicy.statusFor(user.getLateCancelCount()));
     }
 
     @PatchMapping("/{id}")
@@ -97,9 +108,13 @@ public class UserAdminController {
             @AuthenticationPrincipal VerifiedUser caller) {
         User user = adminService.update(id, request.enabled(), request.role(), caller.uid());
         // Enriched like list/get: the console replaces its row with this body, so a PATCH must not
-        // silently wipe the phone identifier (TM-372) or the push-eligibility flag (TM-427) off the row.
+        // silently wipe the phone identifier (TM-372), the push-eligibility flag (TM-427) or the
+        // reliability standing (TM-409) off the row.
         return UserResponse.from(
-                user, adminService.authPhoneFor(user.getFirebaseUid()), adminService.isPushEligible(user));
+                user,
+                adminService.authPhoneFor(user.getFirebaseUid()),
+                adminService.isPushEligible(user),
+                reliabilityPolicy.statusFor(user.getLateCancelCount()));
     }
 
     /**
