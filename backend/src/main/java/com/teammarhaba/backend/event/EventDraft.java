@@ -10,7 +10,10 @@ import java.time.Instant;
  * {@code endAt}, {@code capacity}, {@code imagePath}, {@code city}, {@code locationRevealHours})
  * are {@code null} when absent. {@code city} is the coarse locality (pre-reveal hint + per-city
  * default key); {@code locationRevealHours} is the per-event reveal-window override ({@code null}
- * = inherit the city/app default) — both TM-408. {@code ageMin}/{@code ageMax} are the optional
+ * = inherit the city/app default) — both TM-408. {@code bookingCutoffHours} (TM-413) and
+ * {@code cancellationWindowHours} (TM-414) are the per-event booking-cutoff / cancellation-window
+ * overrides, each {@code null} = inherit the city/app default; {@code 0} is a meaningful override
+ * (bookable up to the start / never a late cancel), not "unset" (TM-523). {@code ageMin}/{@code ageMax} are the optional
  * age-group band (TM-415); both {@code null} = open to all ages. {@code pricePence} is the ticket
  * price in pence and {@code premium} the premium-gating flag (TM-475); both are {@code null} when the
  * admin omitted them on create, in which case {@link EventAdminService} leaves the entity defaults
@@ -31,6 +34,8 @@ public record EventDraft(
         Integer capacity,
         String imagePath,
         Integer locationRevealHours,
+        Integer bookingCutoffHours,
+        Integer cancellationWindowHours,
         Integer ageMin,
         Integer ageMax,
         Integer pricePence,

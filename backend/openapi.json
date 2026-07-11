@@ -661,6 +661,18 @@
             "minimum" : 13,
             "type" : "integer"
           },
+          "bookingCutoffHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "cancellationWindowHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
+            "type" : "integer"
+          },
           "capacity" : {
             "format" : "int32",
             "minimum" : 1,
@@ -1013,6 +1025,22 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "bookingCutoffAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "bookingCutoffHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "cancellationWindowHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "cancellationWindowOpensAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
           "capacity" : {
             "format" : "int32",
             "type" : "integer"
@@ -1030,6 +1058,14 @@
           },
           "description" : {
             "type" : "string"
+          },
+          "effectiveBookingCutoffHours" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "effectiveCancellationWindowHours" : {
+            "format" : "int32",
+            "type" : "integer"
           },
           "effectiveLocationRevealHours" : {
             "format" : "int32",
@@ -1852,6 +1888,18 @@
             "format" : "int32",
             "maximum" : 120,
             "minimum" : 13,
+            "type" : "integer"
+          },
+          "bookingCutoffHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "cancellationWindowHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
             "type" : "integer"
           },
           "capacity" : {

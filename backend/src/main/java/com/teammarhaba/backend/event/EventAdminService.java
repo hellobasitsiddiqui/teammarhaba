@@ -164,6 +164,11 @@ public class EventAdminService {
         event.setCapacity(draft.capacity());
         event.setImagePath(draft.imagePath());
         event.setLocationRevealHours(draft.locationRevealHours());
+        // Per-event booking-cutoff / cancellation-window overrides (TM-413/TM-414, wired in TM-523): a
+        // null draft value leaves the column NULL = inherit the city/app default; a value (including a
+        // meaningful 0) is honoured by BookingCutoffPolicy / CancellationPolicy.
+        event.setBookingCutoffHours(draft.bookingCutoffHours());
+        event.setCancellationWindowHours(draft.cancellationWindowHours());
         event.setAgeMin(draft.ageMin());
         event.setAgeMax(draft.ageMax());
         // Price + premium (TM-475): an omitted value leaves the entity defaults (£5 / not premium) —
@@ -232,6 +237,22 @@ public class EventAdminService {
                 event.getLocationRevealHours(),
                 event::setLocationRevealHours,
                 "locationRevealHours",
+                changed);
+        // Per-event booking-cutoff / cancellation-window overrides (TM-523): same null-means-unchanged
+        // PATCH semantics as every other field. A meaningful 0 override differs from the current value
+        // and so is applied; null leaves the override untouched (it cannot be cleared back to inherit
+        // through this API yet — the house PATCH trade-off, documented on EventPatch).
+        applyIfChanged(
+                patch.bookingCutoffHours(),
+                event.getBookingCutoffHours(),
+                event::setBookingCutoffHours,
+                "bookingCutoffHours",
+                changed);
+        applyIfChanged(
+                patch.cancellationWindowHours(),
+                event.getCancellationWindowHours(),
+                event::setCancellationWindowHours,
+                "cancellationWindowHours",
                 changed);
         applyIfChanged(patch.ageMin(), event.getAgeMin(), event::setAgeMin, "ageMin", changed);
         applyIfChanged(patch.ageMax(), event.getAgeMax(), event::setAgeMax, "ageMax", changed);

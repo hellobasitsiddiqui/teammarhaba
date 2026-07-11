@@ -309,6 +309,127 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(auditActionsFor(id)).contains(AuditAction.EVENT_UPDATED);
     }
 
+    // --- Per-event booking-cutoff & cancellation-window overrides (TM-413/TM-414/TM-523) ---
+    //
+    // These are the regression tests for TM-523: before the fix the two override columns (V16/V17)
+    // could never be set — CreateEventRequest/UpdateEventRequest/EventResponse didn't carry the
+    // fields — so BookingCutoffPolicy/CancellationPolicy always fell through to the app defaults and
+    // the columns stayed permanently NULL. The set-path tests fail on the old code (the fields don't
+    // round-trip and the columns stay null); they pass once the fields are wired end-to-end.
+
+    @Test
+    void createHonoursPerEventCutoffAndCancellationOverrides() throws Exception {
+        // A create naming explicit overrides (6h cutoff, 48h cancellation window) must persist them and
+        // the policies must RESOLVE those values — proven by the effective* fields, which are computed
+        // by the real BookingCutoffPolicy / CancellationPolicy beans, not the raw override echoed back.
+        String body = VALID_BODY.replace(
+                "\"capacity\": 40", "\"capacity\": 40, \"bookingCutoffHours\": 6, \"cancellationWindowHours\": 48");
+        String response = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-cutoff-set"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                // the raw per-event overrides round-trip in the response
+                .andExpect(jsonPath("$.bookingCutoffHours").value(6))
+                .andExpect(jsonPath("$.cancellationWindowHours").value(48))
+                // ...and the policies HONOUR them: the effective window is the override, not the 1h/24h
+                // app default it would fall back to if the override were unreachable (the old bug).
+                .andExpect(jsonPath("$.effectiveBookingCutoffHours").value(6))
+                .andExpect(jsonPath("$.effectiveCancellationWindowHours").value(48))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(response).<Number>read("$.id").longValue();
+
+        // the previously-unreachable V16/V17 columns now carry the override
+        Event saved = events.findById(id).orElseThrow();
+        assertThat(saved.getBookingCutoffHours()).isEqualTo(6);
+        assertThat(saved.getCancellationWindowHours()).isEqualTo(48);
+    }
+
+    @Test
+    void createLeavesCutoffAndCancellationUnsetSoTheyInheritTheAppDefaults() throws Exception {
+        // The default-fallback case: VALID_BODY names neither override, so the columns stay NULL
+        // (inherit) and the policies resolve to the shipped app defaults — 1h booking cutoff, 24h
+        // cancellation window. This proves "fall back to city/app default only when unset".
+        String response = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-cutoff-default"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isCreated())
+                // no override supplied → the raw fields come back null (inherit)
+                .andExpect(jsonPath("$.bookingCutoffHours").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.cancellationWindowHours").value(org.hamcrest.Matchers.nullValue()))
+                // ...and the effective window is the app default, not a per-event value
+                .andExpect(jsonPath("$.effectiveBookingCutoffHours").value(1))
+                .andExpect(jsonPath("$.effectiveCancellationWindowHours").value(24))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(response).<Number>read("$.id").longValue();
+
+        // columns stay NULL — the inherit signal the policies fall through on
+        Event saved = events.findById(id).orElseThrow();
+        assertThat(saved.getBookingCutoffHours()).isNull();
+        assertThat(saved.getCancellationWindowHours()).isNull();
+    }
+
+    @Test
+    void createHonoursAnExplicitZeroCutoffOverride() throws Exception {
+        // A meaningful 0h override ("bookable right up to the start") is distinct from null/inherit and
+        // must NOT be swallowed as "unset" — the @Min(0) bound admits it and the policy resolves 0.
+        String response = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-cutoff-zero"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"bookingCutoffHours\": 0")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.bookingCutoffHours").value(0))
+                .andExpect(jsonPath("$.effectiveBookingCutoffHours").value(0))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(response).<Number>read("$.id").longValue();
+        assertThat(events.findById(id).orElseThrow().getBookingCutoffHours()).isZero();
+    }
+
+    @Test
+    void patchUpdatesCutoffAndCancellationOverrides() throws Exception {
+        Event seeded =
+                seedEvent("Retune", Instant.parse("2030-01-01T00:00:00Z"), Instant.parse("2030-02-01T00:00:00Z"));
+        long id = seeded.getId();
+        // seeded via the constructor with no overrides → starts at inherit (null)
+        assertThat(seeded.getBookingCutoffHours()).isNull();
+        assertThat(seeded.getCancellationWindowHours()).isNull();
+
+        mockMvc.perform(patch("/api/v1/admin/events/{id}", id)
+                        .with(admin("events-admin-cutoff-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bookingCutoffHours\":3,\"cancellationWindowHours\":12}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookingCutoffHours").value(3))
+                .andExpect(jsonPath("$.cancellationWindowHours").value(12))
+                .andExpect(jsonPath("$.effectiveBookingCutoffHours").value(3))
+                .andExpect(jsonPath("$.effectiveCancellationWindowHours").value(12));
+
+        Event reloaded = events.findById(id).orElseThrow();
+        assertThat(reloaded.getBookingCutoffHours()).isEqualTo(3);
+        assertThat(reloaded.getCancellationWindowHours()).isEqualTo(12);
+        assertThat(auditActionsFor(id)).contains(AuditAction.EVENT_UPDATED);
+    }
+
+    @Test
+    void createRejectsCutoffOverrideAboveTheYearCap() throws Exception {
+        // 8760h (a year) is the accepted ceiling; 8761 is rejected at the request edge, RFC-7807.
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-cutoff-max"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace(
+                                "\"capacity\": 40", "\"capacity\": 40, \"bookingCutoffHours\": 8761")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'bookingCutoffHours')]").exists());
+    }
+
     // --- Validation (bean validation at the edge, RFC-7807 body) ---
 
     @Test

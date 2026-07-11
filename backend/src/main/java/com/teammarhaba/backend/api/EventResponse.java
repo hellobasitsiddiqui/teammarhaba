@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.api;
 
+import com.teammarhaba.backend.event.BookingCutoffPolicy;
+import com.teammarhaba.backend.event.CancellationPolicy;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.LocationRevealPolicy;
 import java.time.Instant;
@@ -19,6 +21,13 @@ import java.time.Instant;
  * inherit), {@code effectiveLocationRevealHours} is what actually applies after the
  * override→city→app fallback, and {@code locationRevealsAt} is when the public reveal happens.
  *
+ * <p>The booking-cutoff (TM-413) and cancellation-window (TM-414) policies are surfaced the same
+ * way (TM-523), so the admin form can both prefill the raw override and show what actually applies:
+ * {@code bookingCutoffHours} / {@code cancellationWindowHours} are the raw per-event overrides
+ * ({@code null} = inherit), {@code effectiveBookingCutoffHours} / {@code effectiveCancellationWindowHours}
+ * are what resolve after the override→city→app fallback, and {@code bookingCutoffAt} /
+ * {@code cancellationWindowOpensAt} are the boundary instants those windows imply.
+ *
  * @param id                           database id — the handle for the {@code /admin/events/{id}} endpoints
  * @param heading                      short display title
  * @param description                  full body text
@@ -36,6 +45,12 @@ import java.time.Instant;
  * @param locationRevealHours          per-event reveal override in hours ({@code null} = inherit)
  * @param effectiveLocationRevealHours the reveal window actually applied (override → city → app default)
  * @param locationRevealsAt            when the exact location goes public ({@code startAt − effective hours})
+ * @param bookingCutoffHours           per-event booking-cutoff override in hours ({@code null} = inherit) — TM-413/TM-523
+ * @param effectiveBookingCutoffHours  the cutoff window actually applied (override → city → app default)
+ * @param bookingCutoffAt              when new joins stop being accepted ({@code startAt − effective hours})
+ * @param cancellationWindowHours      per-event cancellation-window override in hours ({@code null} = inherit) — TM-414/TM-523
+ * @param effectiveCancellationWindowHours the cancellation window actually applied (override → city → app default)
+ * @param cancellationWindowOpensAt    when an un-RSVP starts counting as late ({@code startAt − effective hours})
  * @param ageMin                       lower edge of the target age band ({@code null} = no lower bound)
  * @param ageMax                       upper edge of the target age band ({@code null} = no upper bound;
  *     both {@code null} = open to all ages) — TM-415
@@ -67,6 +82,12 @@ public record EventResponse(
         Integer locationRevealHours,
         int effectiveLocationRevealHours,
         Instant locationRevealsAt,
+        Integer bookingCutoffHours,
+        int effectiveBookingCutoffHours,
+        Instant bookingCutoffAt,
+        Integer cancellationWindowHours,
+        int effectiveCancellationWindowHours,
+        Instant cancellationWindowOpensAt,
         Integer ageMin,
         Integer ageMax,
         int pricePence,
@@ -83,17 +104,25 @@ public record EventResponse(
      * render as a count display (it navigates back to the list, which reloads with real counts). The
      * counts come back {@code null} here, distinguishing "not computed" from a real {@code 0}.
      */
-    public static EventResponse from(Event event, LocationRevealPolicy reveal) {
-        return from(event, reveal, null, null);
+    public static EventResponse from(
+            Event event, LocationRevealPolicy reveal, BookingCutoffPolicy cutoff, CancellationPolicy cancellation) {
+        return from(event, reveal, cutoff, cancellation, null, null);
     }
 
     /**
      * Projection WITH attendance counts (TM-430) — the list and single-GET display paths. The caller
      * supplies the counts (batch-tallied for the list, per-state for the single event) so the admin
-     * console can show "N going / M waitlist" instead of "— / —".
+     * console can show "N going / M waitlist" instead of "— / —". The three policies resolve the
+     * effective reveal / booking-cutoff / cancellation windows (raw override → city → app default) so
+     * the admin form can prefill both the raw override and what actually applies (TM-408/TM-523).
      */
     public static EventResponse from(
-            Event event, LocationRevealPolicy reveal, Long goingCount, Long waitlistCount) {
+            Event event,
+            LocationRevealPolicy reveal,
+            BookingCutoffPolicy cutoff,
+            CancellationPolicy cancellation,
+            Long goingCount,
+            Long waitlistCount) {
         return new EventResponse(
                 event.getId(),
                 event.getHeading(),
@@ -112,6 +141,12 @@ public record EventResponse(
                 event.getLocationRevealHours(),
                 reveal.revealHoursFor(event),
                 reveal.revealsAt(event),
+                event.getBookingCutoffHours(),
+                cutoff.cutoffHoursFor(event),
+                cutoff.cutoffAt(event),
+                event.getCancellationWindowHours(),
+                cancellation.windowHoursFor(event),
+                cancellation.windowOpensAt(event),
                 event.getAgeMin(),
                 event.getAgeMax(),
                 event.getPricePence(),

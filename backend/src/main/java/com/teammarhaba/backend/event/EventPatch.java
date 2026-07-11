@@ -24,6 +24,8 @@ public record EventPatch(
         Integer capacity,
         String imagePath,
         Integer locationRevealHours,
+        Integer bookingCutoffHours,
+        Integer cancellationWindowHours,
         Integer ageMin,
         Integer ageMax,
         Integer pricePence,
@@ -45,6 +47,8 @@ public record EventPatch(
                 && capacity == null
                 && imagePath == null
                 && locationRevealHours == null
+                && bookingCutoffHours == null
+                && cancellationWindowHours == null
                 && ageMin == null
                 && ageMax == null
                 && pricePence == null

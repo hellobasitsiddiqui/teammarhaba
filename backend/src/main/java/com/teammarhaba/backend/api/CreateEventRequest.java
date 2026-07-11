@@ -40,6 +40,12 @@ import java.time.ZoneId;
  * @param imagePath       optional storage path of the event image ({@code event-images/…})
  * @param locationRevealHours optional per-event reveal window in hours before start (1..8760);
  *     omitted = inherit the per-city / app default (TM-408)
+ * @param bookingCutoffHours optional per-event booking-cutoff override in hours before start
+ *     (0..8760); omitted = inherit the per-city / app default (1h). {@code 0} = bookable right up to
+ *     the start. Honoured by {@link com.teammarhaba.backend.event.BookingCutoffPolicy} (TM-413/TM-523)
+ * @param cancellationWindowHours optional per-event cancellation-window override in hours before
+ *     start (0..8760); omitted = inherit the per-city / app default (24h). {@code 0} = a cancel is
+ *     never late. Honoured by {@link com.teammarhaba.backend.event.CancellationPolicy} (TM-414/TM-523)
  * @param ageMin          optional lower edge of the target age band, 13..120; omitted = no lower
  *     bound (TM-415)
  * @param ageMax          optional upper edge of the target age band, 13..120; omitted = no upper
@@ -67,6 +73,8 @@ public record CreateEventRequest(
                         message = "must be a storage object path like event-images/{eventId}")
                 String imagePath,
         @Min(1) @Max(8760) Integer locationRevealHours,
+        @Min(0) @Max(8760) Integer bookingCutoffHours,
+        @Min(0) @Max(8760) Integer cancellationWindowHours,
         @Min(13) @Max(120) Integer ageMin,
         @Min(13) @Max(120) Integer ageMax,
         @Min(0) Integer pricePence,
@@ -117,6 +125,8 @@ public record CreateEventRequest(
                 capacity,
                 imagePath,
                 locationRevealHours,
+                bookingCutoffHours,
+                cancellationWindowHours,
                 ageMin,
                 ageMax,
                 pricePence,
