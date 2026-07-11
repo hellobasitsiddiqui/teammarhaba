@@ -17,9 +17,11 @@ import org.springframework.stereotype.Service;
  * <p>Contract (drives the controller's status codes):
  *
  * <ul>
- *   <li><b>verified + settled</b> — confirm the order (idempotently) and return {@code true}.</li>
- *   <li><b>verified + not-a-settle</b> (decline/cancel/other) — a no-op that still returns {@code true}:
- *       the signature was valid, so we acknowledge with a 2xx and Revolut does not retry.</li>
+ *   <li><b>verified + settled</b> — confirm the order/charge (idempotently) and return {@code true}.</li>
+ *   <li><b>verified + failed</b> (decline/fail, TM-634) — mark the local order/charge terminal
+ *       ({@code FAILED}), never activate anything, and return {@code true}: the signature was valid, so we
+ *       acknowledge with a 2xx and the provider stops retrying.</li>
+ *   <li><b>verified + other</b> (cancel/expire/…) — a no-op that still returns {@code true}.</li>
  *   <li><b>unverifiable / unparseable</b> — return {@code false} so the controller answers 401; the payload
  *       could not be trusted (bad or absent signature).</li>
  * </ul>
@@ -56,28 +58,45 @@ public class PaymentWebhookService {
         }
 
         PaymentWebhookEvent e = event.get();
-        if (e.paid()) {
-            // A settled payment is EITHER an event-ticket order or a subscription charge — the provider
-            // order id lives in exactly one of the two ledgers, and each confirm ignores ids it does not
-            // own, so dispatching to both is safe and keeps this bridge ledger-agnostic. Both are
-            // idempotent: a repeat delivery for an already-confirmed order/charge is a no-op.
-            boolean orderMatched = checkout.confirmPayment(e.providerOrderId());
-            boolean chargeMatched = subscriptions.confirmCharge(e.providerOrderId());
-            if (orderMatched || chargeMatched) {
-                log.info("Confirmed provider order {} via webhook", e.providerOrderId());
-            } else {
-                // A VERIFIED settle that matched neither ledger (TM-625): real money was captured and
-                // we hold no record of it — the silent-money-loss signature. Still acknowledged (a
-                // retry would match nothing either), but flagged loudly with the order id so the
-                // capture can be reconciled against the provider dashboard instead of vanishing.
-                log.warn(
-                        "Settled payment webhook for provider order {} matched NO local ledger — "
-                                + "captured money with no record; reconcile against the provider (TM-625).",
-                        e.providerOrderId());
+        switch (e.outcome()) {
+            case SETTLED -> {
+                // A settled payment is EITHER an event-ticket order or a subscription charge — the provider
+                // order id lives in exactly one of the two ledgers, and each confirm ignores ids it does not
+                // own, so dispatching to both is safe and keeps this bridge ledger-agnostic. Both are
+                // idempotent: a repeat delivery for an already-confirmed order/charge is a no-op.
+                boolean orderMatched = checkout.confirmPayment(e.providerOrderId());
+                boolean chargeMatched = subscriptions.confirmCharge(e.providerOrderId());
+                if (orderMatched || chargeMatched) {
+                    log.info("Confirmed provider order {} via webhook", e.providerOrderId());
+                } else {
+                    // A VERIFIED settle that matched neither ledger (TM-625): real money was captured and
+                    // we hold no record of it — the silent-money-loss signature. Still acknowledged (a
+                    // retry would match nothing either), but flagged loudly with the order id so the
+                    // capture can be reconciled against the provider dashboard instead of vanishing.
+                    log.warn(
+                            "Settled payment webhook for provider order {} matched NO local ledger — "
+                                    + "captured money with no record; reconcile against the provider (TM-625).",
+                            e.providerOrderId());
+                }
             }
-        } else {
-            // A verified non-settle event (decline/cancel/etc.) — acknowledged (2xx) but not acted on here.
-            log.debug("Ignoring verified non-settle payment webhook event");
+            case FAILED -> {
+                // A declined/failed INITIAL widget payment (TM-634). Dispatch to BOTH ledgers exactly like a
+                // settle (the id lives in at most one), moving the local order/charge to a terminal FAILED
+                // state so it stops sitting PENDING forever — and MUST NOT activate membership/subscription.
+                // No money was captured on a decline, so an unmatched id is benign (unlike an unmatched
+                // settle) — a repeat delivery for an already-terminal record is an idempotent no-op.
+                boolean orderMatched = checkout.failPayment(e.providerOrderId());
+                boolean chargeMatched = subscriptions.failCharge(e.providerOrderId());
+                if (orderMatched || chargeMatched) {
+                    log.info("Marked provider order {} FAILED via webhook (payment declined/failed)", e.providerOrderId());
+                } else {
+                    log.debug("Failed-payment webhook for provider order {} matched no local ledger", e.providerOrderId());
+                }
+            }
+            case OTHER -> {
+                // A verified event we do not act on (cancel/expire/…) — acknowledged (2xx) but not acted on.
+                log.debug("Ignoring verified non-settle, non-fail payment webhook event");
+            }
         }
         return true;
     }

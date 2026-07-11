@@ -32,6 +32,10 @@ test("statusMeta: each order state maps to a label + tone; unknown is defensive"
   assert.deepEqual(statusMeta(ORDER_STATUS.CONFIRMED), { label: "Confirmed", tone: "confirmed" });
   assert.deepEqual(statusMeta(ORDER_STATUS.CANCELLED), { label: "Cancelled", tone: "cancelled" });
   assert.deepEqual(statusMeta(ORDER_STATUS.REFUND_DUE), { label: "Refund due", tone: "refund" });
+  assert.deepEqual(statusMeta(ORDER_STATUS.REFUNDED), { label: "Refunded", tone: "cancelled" });
+  // TM-634: the declined/failed and TTL-expired terminal states read as closed (no money taken).
+  assert.deepEqual(statusMeta(ORDER_STATUS.FAILED), { label: "Payment failed", tone: "cancelled" });
+  assert.deepEqual(statusMeta(ORDER_STATUS.EXPIRED), { label: "Expired", tone: "cancelled" });
   // An unknown / absent status never breaks the screen.
   assert.deepEqual(statusMeta("WAT"), { label: "Unknown", tone: "unknown" });
   assert.deepEqual(statusMeta(undefined), { label: "Unknown", tone: "unknown" });

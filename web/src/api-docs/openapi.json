@@ -1549,7 +1549,7 @@
             "type" : "integer"
           },
           "status" : {
-            "enum" : [ "PENDING", "CONFIRMED", "CANCELLED", "REFUND_DUE", "REFUNDED" ],
+            "enum" : [ "PENDING", "CONFIRMED", "CANCELLED", "REFUND_DUE", "REFUNDED", "FAILED", "EXPIRED" ],
             "type" : "string"
           }
         },

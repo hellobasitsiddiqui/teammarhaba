@@ -356,7 +356,9 @@ class RevolutPaymentProviderTest {
     }
 
     @Test
-    void verifiesANonSettleEventButFlagsItNotPaid() {
+    void verifiesADeclinedEventAsAFailedOutcome() {
+        // TM-634: ORDER_PAYMENT_DECLINED is a genuine terminal FAILED outcome (not merely "not paid"), so
+        // the confirm path can mark the local order FAILED instead of leaving it PENDING forever.
         String body = "{\"event\":\"ORDER_PAYMENT_DECLINED\",\"order_id\":\"rev-order-2\"}";
         String ts = freshTimestamp();
         String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + "." + body);
@@ -365,7 +367,70 @@ class RevolutPaymentProviderTest {
                 provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, ts);
 
         assertThat(event).isPresent();
+        assertThat(event.get().providerOrderId()).isEqualTo("rev-order-2");
         assertThat(event.get().paid()).isFalse();
+        assertThat(event.get().failed()).isTrue();
+        assertThat(event.get().outcome()).isEqualTo(PaymentWebhookEvent.Outcome.FAILED);
+    }
+
+    @Test
+    void verifiesAPaymentFailedEventAsAFailedOutcome() {
+        // TM-634: ORDER_PAYMENT_FAILED maps to FAILED just like ORDER_PAYMENT_DECLINED.
+        String body = "{\"event\":\"ORDER_PAYMENT_FAILED\",\"order_id\":\"rev-order-3\"}";
+        String ts = freshTimestamp();
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + "." + body);
+
+        Optional<PaymentWebhookEvent> event =
+                provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, ts);
+
+        assertThat(event).isPresent();
+        assertThat(event.get().failed()).isTrue();
+        assertThat(event.get().outcome()).isEqualTo(PaymentWebhookEvent.Outcome.FAILED);
+    }
+
+    @Test
+    void verifiesAnUnrelatedEventAsNeitherPaidNorFailed() {
+        // A lifecycle event we do not act on (neither settle nor decline) reduces to OTHER — acknowledged,
+        // but it must NOT be mistaken for a failure (which would terminate a live order).
+        String body = "{\"event\":\"ORDER_CANCELLED\",\"order_id\":\"rev-order-4\"}";
+        String ts = freshTimestamp();
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + "." + body);
+
+        Optional<PaymentWebhookEvent> event =
+                provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, ts);
+
+        assertThat(event).isPresent();
+        assertThat(event.get().paid()).isFalse();
+        assertThat(event.get().failed()).isFalse();
+        assertThat(event.get().outcome()).isEqualTo(PaymentWebhookEvent.Outcome.OTHER);
+    }
+
+    @Test
+    void failClosesOnDeclineEventsToo_tamperedSignatureRejected() {
+        // TM-634: signature verification is the SOLE authenticity guard, and it must stay fail-closed for
+        // the new decline/fail events exactly as for settles — an attacker must not be able to forge a
+        // decline (which would terminate a live PENDING order) any more than a settle.
+        String body = "{\"event\":\"ORDER_PAYMENT_DECLINED\",\"order_id\":\"rev-order-2\"}";
+        String ts = freshTimestamp();
+        RevolutPaymentProvider provider = provider(SECRET_KEY, WEBHOOK_SECRET);
+
+        // Tampered signature (signed over a different body) — rejected.
+        String wrong = "v1=" + sign(WEBHOOK_SECRET, "v1." + ts + ".{\"event\":\"tampered\"}");
+        assertThat(provider.parseWebhookEvent(bytes(body), wrong, ts)).isEmpty();
+
+        // Missing signature / timestamp — rejected.
+        assertThat(provider.parseWebhookEvent(bytes(body), null, ts)).isEmpty();
+        assertThat(provider.parseWebhookEvent(bytes(body), "v1=abc", null)).isEmpty();
+
+        // No signing secret configured — every delivery rejected, decline events included.
+        String signedByAttacker = "v1=" + sign("attacker-secret", "v1." + ts + "." + body);
+        assertThat(provider(SECRET_KEY, "").parseWebhookEvent(bytes(body), signedByAttacker, ts))
+                .isEmpty();
+
+        // Replayed outside the freshness window — rejected even with a valid signature.
+        String staleTs = String.valueOf(System.currentTimeMillis() - 10 * 60 * 1000);
+        String staleSig = "v1=" + sign(WEBHOOK_SECRET, "v1." + staleTs + "." + body);
+        assertThat(provider.parseWebhookEvent(bytes(body), staleSig, staleTs)).isEmpty();
     }
 
     @Test

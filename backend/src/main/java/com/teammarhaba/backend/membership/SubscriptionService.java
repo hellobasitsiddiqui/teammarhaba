@@ -265,6 +265,56 @@ public class SubscriptionService {
     }
 
     /**
+     * Mark a subscription charge {@code FAILED} on a verified decline/fail webhook (TM-634) — the
+     * subscription-ledger twin of {@link CheckoutService#failPayment}, dispatched to alongside it by the
+     * webhook bridge (the provider order id lives in at most one ledger). A declined INITIAL widget payment
+     * would otherwise leave a {@code PENDING} charge unresolved; this records the decline (a dunning
+     * datapoint) and — crucially — never activates the subscription.
+     *
+     * <p>Only a still-{@code PENDING} charge is failed. A {@code PAID}/{@code REFUND_DUE}/{@code REFUNDED}
+     * charge is a settled/owed record left alone, and a {@code SUPERSEDED} charge keeps its frozen provider
+     * refs (a late settle must still be able to resolve there — TM-625). A charge the sync renewal path
+     * already marked {@code FAILED} stays {@code FAILED}. No money captured on a decline, so nothing is owed.
+     * Idempotent + race-safe (same lock/refresh discipline as {@link #confirmCharge}).
+     *
+     * @param providerOrderId the payment provider's permanent order id from the webhook (the match key)
+     * @return {@code true} when {@code providerOrderId} resolved to a subscription charge (whether or not it
+     *         needed failing), {@code false} when it is not a subscription charge.
+     */
+    @Transactional
+    public boolean failCharge(String providerOrderId) {
+        Long userId = charges.findByProviderOrderId(providerOrderId)
+                .map(SubscriptionCharge::getUserId)
+                .orElse(null);
+        if (userId == null) {
+            return false; // not a subscription charge (an event order, or not ours) — nothing to do
+        }
+        users.lockForUpdate(userId);
+
+        SubscriptionCharge charge =
+                charges.findByProviderOrderId(providerOrderId).orElse(null);
+        if (charge == null) {
+            return true; // gone while we waited — ours, but nothing left to fail
+        }
+        try {
+            entityManager.refresh(charge); // committed state, not the stale L1-cache snapshot (TM-623)
+        } catch (EntityNotFoundException gone) {
+            return true; // row deleted while we waited for the lock
+        }
+        // Only a still-PENDING charge is failed; every other state is a settled/owed/frozen record we must
+        // not overwrite — and above all this must NOT activate the subscription.
+        if (charge.getStatus() == SubscriptionCharge.Status.PENDING) {
+            charge.markFailed(Instant.now());
+            log.info(
+                    "Subscription charge {} (provider order {}) marked FAILED on a declined/failed payment "
+                            + "webhook (TM-634).",
+                    charge.getId(),
+                    providerOrderId);
+        }
+        return true;
+    }
+
+    /**
      * Stop renewals (TM-620): flip the subscription to CANCELED, keeping the paid tier until the period
      * end — the scheduler (whose "due" pointer the cancel parks exactly there) performs the downgrade.
      * Idempotent: cancelling an already-CANCELED subscription returns it unchanged.

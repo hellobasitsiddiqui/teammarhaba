@@ -218,18 +218,20 @@ public class CheckoutService {
         Instant now = Instant.now();
         if (!order.confirmPaid(now)) {
             // Not PENDING any more. A repeat webhook for a CONFIRMED (or already REFUND_DUE/REFUNDED)
-            // order is a plain idempotent no-op — but a settle for a CANCELLED order with real money
-            // behind it is the cancel-vs-void race (TM-625): the in-window cancel voided the provider
-            // order best-effort, the void was refused because this very payment was completing, and the
-            // money is now provably captured for a commitment that no longer exists. Owed back.
-            if (order.getStatus() == OrderStatus.CANCELLED
+            // order is a plain idempotent no-op — but a settle for a CANCELLED order (in-window cancel,
+            // TM-625) or an EXPIRED order (the TTL sweep walked away, TM-634) with real money behind it is
+            // the settle-vs-void race: the best-effort void of the still-PENDING provider order was refused
+            // because this very payment was completing, and the money is now provably captured for a
+            // commitment that no longer exists. Owed back. (A FAILED order captured nothing — no refund.)
+            if ((order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.EXPIRED)
                     && order.getAmountPence() > 0
                     && order.getProviderOrderId() != null) {
                 log.warn(
-                        "Provider order {} settled AFTER local order {} was cancelled (void refused — "
-                                + "the cancel-vs-void race, TM-625): flagging REFUND_DUE and refunding.",
+                        "Provider order {} settled AFTER local order {} was {} (void refused — the "
+                                + "settle-vs-void race, TM-625/TM-634): flagging REFUND_DUE and refunding.",
                         providerOrderId,
-                        order.getId());
+                        order.getId(),
+                        order.getStatus());
                 order.markRefundDue(now);
                 tryRefund(order, now);
             }
@@ -274,6 +276,55 @@ public class CheckoutService {
             order.markRefundDue(now);
             tryRefund(order, now);
         }
+        return true;
+    }
+
+    /**
+     * Mark a PAY checkout {@code FAILED} on a verified decline/fail webhook (TM-634) — the terminal,
+     * non-settling counterpart of {@link #confirmPayment}. A declined/failed INITIAL widget payment fires
+     * {@code ORDER_PAYMENT_DECLINED}/{@code ORDER_PAYMENT_FAILED}; before this, the webhook path mapped only
+     * the settle events, so such an order sat {@code PENDING} forever — no RSVP, no cleanup. This moves a
+     * still-{@code PENDING} order {@code PENDING → FAILED} and performs NO RSVP (the caller is never confirmed
+     * to the event) and NO membership/subscription activation. A declined payment captured no money, so there
+     * is nothing to refund.
+     *
+     * <p><strong>Idempotent + race-safe.</strong> Same user-then-event lock + {@code refresh} discipline as
+     * {@link #confirmPayment}: only a still-{@code PENDING} order transitions, so a repeat delivery, or a
+     * decline that races a settle/cancel, is a clean no-op on the committed state.
+     *
+     * @param providerOrderId the payment provider's permanent order id from the webhook (the match key)
+     * @return {@code true} when {@code providerOrderId} resolved to an order in this ledger (whether or not
+     *         anything needed doing), {@code false} when it is not an event order — lets the webhook bridge
+     *         try the subscription ledger next.
+     */
+    @Transactional
+    public boolean failPayment(String providerOrderId) {
+        // Same resolve-then-lock-then-refresh discipline as confirmPayment so a decline racing a duplicate
+        // delivery (or a settle) serialises and evaluates the COMMITTED state under the buyer's user-row lock.
+        Long userId =
+                orders.findByProviderOrderId(providerOrderId).map(Order::getUserId).orElse(null);
+        if (userId == null) {
+            return false; // unknown provider order — not an event order (idempotent no-op for this ledger)
+        }
+        users.lockForUpdate(userId);
+
+        Order order = orders.findByProviderOrderId(providerOrderId).orElse(null);
+        if (order == null) {
+            return true; // gone while we waited — ours, but nothing left to fail
+        }
+        try {
+            entityManager.refresh(order); // committed state, not the stale L1-cache snapshot (TM-623)
+        } catch (EntityNotFoundException gone) {
+            return true; // row deleted while we waited for the lock
+        }
+        if (order.failPending(Instant.now())) {
+            log.info(
+                    "Order {} (provider order {}) marked FAILED on a declined/failed payment webhook (TM-634).",
+                    order.getId(),
+                    providerOrderId);
+        }
+        // A non-PENDING order (already CONFIRMED/CANCELLED/EXPIRED/FAILED) is left exactly as it is: a
+        // decline arriving after a settle must never undo a confirmed, paid commitment.
         return true;
     }
 
