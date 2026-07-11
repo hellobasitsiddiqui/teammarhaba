@@ -53,7 +53,7 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
     flags: Object.freeze({
         // Membership slice (TM-457): OFF until the tier (TM-480) + pricing/checkout (TM-479) screens
         // and the backend (TM-474) all land. Flip to true to reveal the membership screens.
-        membership: false,
+        membership: true,
     }),
     payments: Object.freeze({
         // Revolut SANDBOX Merchant PUBLIC key (pk_…) — public by design, ships in the client widget (TM-478).
