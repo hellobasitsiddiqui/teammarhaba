@@ -5111,6 +5111,21 @@ button.tm-c-reaction {
     font-weight: 600;
     white-space: nowrap;
 }
+/* "Manage →" is a live link to #/membership when the membership flag is on (TM-643) — ink it with the
+ * accent and drop the default browser underline so it matches the Paper affordances (a.tm-event-map et
+ * al). The muted <span> variant, shown when the flag is off, keeps its .tm-muted look. */
+a.tm-pf-go {
+    color: var(--accent);
+    text-decoration: none;
+}
+a.tm-pf-go:hover {
+    text-decoration: underline;
+}
+a.tm-pf-go:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
 
 /* Edit-profile card (paper-edit-profile) — the shipped form dropped into a kit card. A small camera
  * badge over the avatar mirrors the wireframe's "change photo" affordance (decorative; the real
