@@ -15,10 +15,14 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
  * {@code @Transactional} proxy fires), and neither a poisoned row nor a failed scan can escape the
  * tick.
  *
- * <p>Kill switch: the bean is OPT-IN on the SAME flag pair as the renewal scheduler — it exists only
- * when BOTH {@code app.subscriptions.enabled} AND {@code app.membership.enabled} are explicitly
- * {@code true} ({@code matchIfMissing = false}). The context-runner tests prove every other
- * combination (including entirely unset) produces NO sweeper.
+ * <p>Kill switch: the bean is OPT-IN on {@code app.membership.enabled} ALONE
+ * ({@code matchIfMissing = false}) — TM-630. The {@code REFUND_DUE} producers it drains are the
+ * membership-gated EVENT checkout/cancel refund paths ({@code CheckoutService}), which are live with
+ * or without subscriptions; the original TM-625 gate additionally required
+ * {@code app.subscriptions.enabled}, so the launch config (membership on, subscriptions off) had live
+ * refund producers and NO sweeper — a failed inline refund stranded captured money forever. The
+ * context-runner tests prove the bean exists whenever membership is explicitly on (whatever the
+ * subscriptions flag says) and never otherwise.
  */
 class RefundSweepSchedulerTest {
 
@@ -56,7 +60,7 @@ class RefundSweepSchedulerTest {
         new RefundSweepScheduler(refunds).tick(); // must not throw — retried next interval
     }
 
-    // ------------------------------------------------------------------ opt-in kill switch (TM-625)
+    // ------------------------------------------------- opt-in kill switch (TM-625, regated by TM-630)
 
     /** A minimal context carrying just the sweeper's bean definition + a mocked service dependency. */
     private ApplicationContextRunner contextRunner() {
@@ -66,30 +70,46 @@ class RefundSweepSchedulerTest {
     }
 
     @Test
-    void sweeperBootsOnlyWhenBothFlagsAreExplicitlyTrue() {
+    void sweeperBootsWhenBothFlagsAreExplicitlyTrue() {
         contextRunner()
                 .withPropertyValues("app.subscriptions.enabled=true", "app.membership.enabled=true")
                 .run(ctx -> assertThat(ctx).hasSingleBean(RefundSweepScheduler.class));
     }
 
     @Test
+    void sweeperBootsWhenMembershipIsOnAndSubscriptionsIsOff() {
+        // THE LAUNCH CONFIG (TM-630): MEMBERSHIP_ENABLED=true / SUBSCRIPTIONS_ENABLED=false. The EVENT
+        // checkout/cancel refund paths — the REFUND_DUE producers — are gated on membership ALONE, so
+        // the sweeper must exist here too. The old gate (BOTH flags) meant this exact configuration had
+        // live refund producers and no sweeper: one failed inline refund stranded captured customer
+        // money in REFUND_DUE with no retry — the TM-625 dead-end reopened by configuration.
+        contextRunner()
+                .withPropertyValues("app.membership.enabled=true", "app.subscriptions.enabled=false")
+                .run(ctx -> assertThat(ctx).hasSingleBean(RefundSweepScheduler.class));
+    }
+
+    @Test
+    void sweeperBootsWhenMembershipIsOnAndSubscriptionsIsUnset() {
+        // Same producers argument when the subscriptions property is never bound at all: membership
+        // explicitly on is the whole opt-in.
+        contextRunner()
+                .withPropertyValues("app.membership.enabled=true")
+                .run(ctx -> assertThat(ctx).hasSingleBean(RefundSweepScheduler.class));
+    }
+
+    @Test
     void sweeperIsAbsentWhenNothingIsConfigured() {
         // The money-mover rule (TM-623/TM-625): a context that never opted in gets NO bean —
-        // matchIfMissing=false, exactly like the renewal scheduler it is coupled to.
+        // matchIfMissing=false. It moves money (back to the customer), so it stays strictly opt-in.
         contextRunner().run(ctx -> assertThat(ctx).doesNotHaveBean(RefundSweepScheduler.class));
     }
 
     @Test
-    void sweeperIsAbsentWhenOnlyTheSubscriptionsFlagIsOn() {
+    void sweeperIsAbsentWhenMembershipIsOff() {
+        // membership=false kills the sweeper regardless of the subscriptions flag — with membership off
+        // every REFUND_DUE producer is unreachable too, so its absence strands nothing.
         contextRunner()
                 .withPropertyValues("app.subscriptions.enabled=true", "app.membership.enabled=false")
-                .run(ctx -> assertThat(ctx).doesNotHaveBean(RefundSweepScheduler.class));
-    }
-
-    @Test
-    void sweeperIsAbsentWhenOnlyTheMembershipFlagIsOn() {
-        contextRunner()
-                .withPropertyValues("app.subscriptions.enabled=false", "app.membership.enabled=true")
                 .run(ctx -> assertThat(ctx).doesNotHaveBean(RefundSweepScheduler.class));
     }
 }
