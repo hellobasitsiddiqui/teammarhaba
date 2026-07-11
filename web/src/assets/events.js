@@ -767,12 +767,19 @@ async function runCommand(view, detail, spec) {
   }
   // Leaving (cancel RSVP / leave the waitlist) confirms too, so it's not a one-tap mistake.
   if (spec.kind === "leave") {
-    const ok = await confirmDialog({
-      title: detail.myState === "GOING" ? "Cancel your RSVP?" : "Leave the waiting list?",
-      message: detail.myState === "GOING" ? "You'll give up your spot for this event." : "You'll lose your place in the queue.",
-      confirmLabel: detail.myState === "GOING" ? "Cancel RSVP" : "Leave",
-      danger: true,
-    });
+    // Pre-flight a GOING cancel with DELETE ?preview=true (TM-525): a committed spot given up inside
+    // the cancellation window is a late-cancel strike, so warn about it in the confirm dialog BEFORE
+    // the member commits. Best-effort — if the preview fails we fall back to the base copy and let the
+    // real DELETE surface any error. Only a GOING cancel can be late; a waitlist leave is always free.
+    let preview = null;
+    if (detail.myState === "GOING") {
+      try {
+        preview = await cancelEventRsvp(id, { preview: true });
+      } catch {
+        preview = null;
+      }
+    }
+    const ok = await confirmDialog(core.leaveConfirmModel({ myState: detail.myState, preview }));
     if (!ok) return;
   }
 

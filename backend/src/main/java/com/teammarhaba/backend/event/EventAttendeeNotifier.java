@@ -8,6 +8,7 @@ import com.teammarhaba.backend.notify.PushNotificationService.PushFanout;
 import com.teammarhaba.backend.user.NotificationPref;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -74,13 +75,28 @@ public class EventAttendeeNotifier {
         Map<Long, User> byId = users.findAllById(userIds).stream()
                 .collect(Collectors.toMap(User::getId, Function.identity()));
 
-        Set<String> tokens = new LinkedHashSet<>();
+        // The eligible recipients, in the caller's order (the TM-364 rails: found + not soft-deleted,
+        // enabled, and opted into push). Ineligible users' tokens are never even read.
+        List<Long> eligible = new ArrayList<>();
         for (Long userId : userIds) {
             User user = byId.get(userId);
             if (user == null || !user.isEnabled() || !isPushEligible(user.getNotificationPref())) {
                 continue; // not found/soft-deleted, suspended, or opted out of push — the TM-364 rails
             }
-            for (DeviceToken device : deviceTokens.findByUserId(user.getId())) {
+            eligible.add(userId);
+        }
+        if (eligible.isEmpty()) {
+            return new PushFanout(0, 0, 0, 0);
+        }
+
+        // One batched token read for ALL eligible recipients (TM-525: was an N+1 findByUserId per user),
+        // grouped by owner so we can still walk in the caller's order and keep the token de-dup stable.
+        Map<Long, List<DeviceToken>> tokensByUser =
+                deviceTokens.findByUserIdIn(eligible).stream().collect(Collectors.groupingBy(DeviceToken::getUserId));
+
+        Set<String> tokens = new LinkedHashSet<>();
+        for (Long userId : eligible) {
+            for (DeviceToken device : tokensByUser.getOrDefault(userId, List.of())) {
                 tokens.add(device.getToken());
             }
         }

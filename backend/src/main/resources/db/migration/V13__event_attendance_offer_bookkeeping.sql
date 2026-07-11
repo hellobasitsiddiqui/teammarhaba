@@ -1,4 +1,4 @@
--- V12__event_attendance_offer_bookkeeping — offer-cascade bookkeeping (TM-393 / events epic)
+-- V13__event_attendance_offer_bookkeeping — offer-cascade bookkeeping (TM-393 / events epic)
 --
 -- OWNER POLICY (2026-07-03, supersedes auto-promotion): when a GOING spot frees, nobody is
 -- promoted automatically. Waitlisted members are notified in FIFO order, five minutes apart

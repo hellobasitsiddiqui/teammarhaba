@@ -1308,18 +1308,29 @@ export async function rsvpToEvent(id) {
 }
 
 /**
- * DELETE /api/v1/events/{id}/rsvp — leave the event / waitlist (idempotent, 204). A change after
- * start is a 409 with honest copy, surfaced as an {@link ApiError}.
+ * DELETE /api/v1/events/{id}/rsvp — leave the event / waitlist (idempotent). A change after start is a
+ * 409 with honest copy, surfaced as an {@link ApiError}.
+ *
+ * <p>Returns the backend's CancelResult: `{ preview, lateCancel, lateCancelCount, message }` —
+ * whether leaving now is (or would be) a LATE cancellation, the resulting strike count,
+ * and honest copy to show. Pass `{ preview: true }` for a non-committing dry-run (`?preview=true`) so
+ * the UI can pre-warn about a late-cancel strike BEFORE the member confirms; the default commits the
+ * leave (TM-525 / TM-414).
+ *
  * @param {number|string} id
- * @returns {Promise<void>}
+ * @param {{preview?: boolean}} [opts]
+ * @returns {Promise<{preview: boolean, lateCancel: boolean, lateCancelCount: number, message: ?string}|null>}
  * @throws {ApiError}
  */
-export async function cancelEventRsvp(id) {
-  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}/rsvp`, {
+export async function cancelEventRsvp(id, { preview = false } = {}) {
+  const query = preview ? "?preview=true" : "";
+  const response = await apiFetch(`/api/v1/events/${encodeURIComponent(id)}/rsvp${query}`, {
     method: "DELETE",
-    headers: { Accept: "application/problem+json" },
+    headers: { Accept: "application/json" },
   });
   if (!response.ok) throw await toApiError(response, "Could not update your RSVP. Please try again.");
+  // Both the commit and the preview dry-run return a CancelResult body; tolerate an empty/204 body.
+  return response.status === 204 ? null : response.json().catch(() => null);
 }
 
 /**

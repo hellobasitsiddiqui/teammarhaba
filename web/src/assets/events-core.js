@@ -237,12 +237,14 @@ function statusOf(item) {
 }
 
 /**
- * Is this event live right now? Prefers the API's own signal (TM-412: `isHappeningNow` / `status`)
+ * Is this event live right now? Prefers the API's own signal (TM-412: `happeningNow` / `status`)
  * and derives from the instants only as a fallback (defensive: those fields may not exist yet).
  * An open-ended event that has started and is still in the listing is treated as live.
  */
 export function isHappeningNow(item, nowMs = Date.now()) {
-  if (typeof item?.isHappeningNow === "boolean") return item.isHappeningNow;
+  // The API field is `happeningNow` (EventCard/EventDetail), not `isHappeningNow` — read the real name
+  // so the preferred boolean actually matches instead of always falling through to the derivation.
+  if (typeof item?.happeningNow === "boolean") return item.happeningNow;
   const status = statusOf(item);
   if (status === "HAPPENING_NOW" || status === "LIVE" || status === "ONGOING" || status === "IN_PROGRESS") return true;
   if (status === "UPCOMING" || status === "SCHEDULED" || status === "PUBLISHED") return false;
@@ -428,6 +430,14 @@ export function ageBandLabel(item) {
 /**
  * Age-band eligibility (TM-415, ±2 years hard rule). `me.age` may be unset (null/blank) — that is a
  * distinct, fixable state ("add your age") from being outside the band.
+ *
+ * <p>When the API supplies its own verdict (`EventDetail.ageEligible`, a boolean) we PREFER it rather
+ * than re-deriving the band±tolerance test client-side: the server is the real gate (it applies the
+ * same rule authoritatively), so trusting its verdict means the two can never drift on the tolerance.
+ * The local ±tolerance computation remains only as the fallback for an item without the field — a
+ * listing card, or an older API. Age-unset is still detected locally, because the server collapses it
+ * into `ageEligible=false` whereas the UI needs the separate fixable "add your age" state.
+ *
  * @returns {{hasBand, status:"ok"|"unset"|"outside", band, tolerance, age}}
  */
 export function ageEligibility(item, me, { tolerance = 2 } = {}) {
@@ -435,9 +445,12 @@ export function ageEligibility(item, me, { tolerance = 2 } = {}) {
   if (!band) return { hasBand: false, status: "ok", band: null, tolerance, age: firstNumber(me?.age) };
   const age = firstNumber(me?.age);
   if (age == null) return { hasBand: true, status: "unset", band, tolerance, age: null };
-  const lo = band.min == null ? -Infinity : band.min - tolerance;
-  const hi = band.max == null ? Infinity : band.max + tolerance;
-  const ok = age >= lo && age <= hi;
+  const serverVerdict = item?.ageEligible;
+  const ok =
+    typeof serverVerdict === "boolean"
+      ? serverVerdict // trust the server's own verdict (EventDetail.ageEligible) — no client re-derivation
+      : age >= (band.min == null ? -Infinity : band.min - tolerance) &&
+        age <= (band.max == null ? Infinity : band.max + tolerance); // fallback: local ±tolerance test
   return { hasBand: true, status: ok ? "ok" : "outside", band, tolerance, age };
 }
 
@@ -605,6 +618,32 @@ function disabledIfClosed(bw) {
 function leaveButton(state, bw) {
   const label = state === "GOING" ? "Cancel RSVP" : "Leave the waiting list";
   return { key: "leave", kind: "leave", label, ...disabledIfClosed(bw) };
+}
+
+/**
+ * The confirm-dialog copy for leaving an event — cancelling a GOING RSVP or leaving the waiting list
+ * (TM-525). Composes the base warning with an optional late-cancellation strike notice taken from a
+ * `DELETE …?preview=true` pre-flight (the backend's CancelResult): when the pre-flight reports that
+ * leaving now IS a late cancellation, its honest server message is appended so the member sees the
+ * strike BEFORE they commit, instead of finding out only after the spot is gone. A waitlist leave (or
+ * a null/free preview) surrenders no committed spot, so no strike copy is shown.
+ *
+ * @param {object}       opts
+ * @param {string}       opts.myState  the caller's state on the event ("GOING" | "WAITLISTED" | …)
+ * @param {object|null} [opts.preview] the CancelResult from the preview call, or null if not previewed
+ * @returns {{title: string, message: string, confirmLabel: string, danger: boolean}}
+ */
+export function leaveConfirmModel({ myState, preview = null } = {}) {
+  const going = myState === "GOING";
+  const base = going ? "You'll give up your spot for this event." : "You'll lose your place in the queue.";
+  // Only giving up a committed GOING spot can incur a strike; a waitlist leave is always free.
+  const lateNote = going && preview && preview.lateCancel && preview.message ? ` ${preview.message}` : "";
+  return {
+    title: going ? "Cancel your RSVP?" : "Leave the waiting list?",
+    message: base + lateNote,
+    confirmLabel: going ? "Cancel RSVP" : "Leave",
+    danger: true,
+  };
 }
 
 // ------------------------------------------------------------------ error copy

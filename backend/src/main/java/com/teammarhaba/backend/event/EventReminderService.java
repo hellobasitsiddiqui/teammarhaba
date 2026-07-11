@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -42,7 +43,8 @@ import org.springframework.stereotype.Service;
  * BroadcastService}, TM-364): a soft-deleted/unknown account is dropped by the entity's
  * {@code @SQLRestriction}, a suspended one ({@code enabled == false}) is skipped, and
  * {@code notificationPref} is honoured exactly like broadcast does — only {@code PUSH}/{@code
- * BOTH} receive (EMAIL, the default, <em>is</em> the push opt-out). Tokens are de-duplicated
+ * BOTH} receive ({@code EMAIL} <em>is</em> the push opt-out; new accounts now default to {@code
+ * BOTH} since V19/TM-427). Tokens are de-duplicated
  * across attendees and delivered through the shared {@link PushNotificationService#sendToTokens}
  * seam, so FCM handling, {@code UNREGISTERED} pruning and outcome classification stay in one
  * place; the token table is never resolved directly from attendance rows.
@@ -272,15 +274,30 @@ public class EventReminderService {
                 users.findAllById(going.stream().map(EventAttendance::getUserId).toList()).stream()
                         .collect(Collectors.toMap(User::getId, Function.identity()));
 
-        // Union of eligible attendees' tokens, de-duplicated by value (shared/handed-down devices are
-        // pushed once) — same shape as the broadcast fan-out. Insertion-ordered for stable behaviour.
-        Set<String> tokens = new LinkedHashSet<>();
+        // The eligible recipients, in GOING order (the TM-364 rails: found + not soft-deleted, enabled,
+        // and opted into push). Ineligible attendees' tokens are never even read.
+        List<Long> eligible = new ArrayList<>();
         for (EventAttendance a : going) {
             User user = byId.get(a.getUserId());
             if (user == null || !user.isEnabled() || !isPushEligible(user.getNotificationPref())) {
                 continue; // not found/soft-deleted, suspended, or opted out of push — the TM-364 rails
             }
-            for (DeviceToken device : deviceTokens.findByUserId(user.getId())) {
+            eligible.add(user.getId());
+        }
+        if (eligible.isEmpty()) {
+            return new PushFanout(0, 0, 0, 0);
+        }
+
+        // One batched token read for ALL eligible recipients (TM-525: was an N+1 findByUserId per GOING
+        // attendee), grouped by owner so we can still walk in GOING order and keep the de-dup stable.
+        Map<Long, List<DeviceToken>> tokensByUser =
+                deviceTokens.findByUserIdIn(eligible).stream().collect(Collectors.groupingBy(DeviceToken::getUserId));
+
+        // Union of eligible attendees' tokens, de-duplicated by value (shared/handed-down devices are
+        // pushed once) — same shape as the broadcast fan-out. Insertion-ordered for stable behaviour.
+        Set<String> tokens = new LinkedHashSet<>();
+        for (Long userId : eligible) {
+            for (DeviceToken device : tokensByUser.getOrDefault(userId, List.of())) {
                 tokens.add(device.getToken());
             }
         }
@@ -290,7 +307,7 @@ public class EventReminderService {
         return push.sendToTokens(tokens, message);
     }
 
-    /** Push-eligible == the pref opted into push; EMAIL (the default) is the opt-out — as broadcast. */
+    /** Push-eligible == the pref opted into push; EMAIL is the opt-out (BOTH is the new-account default). */
     private static boolean isPushEligible(NotificationPref pref) {
         return pref == NotificationPref.PUSH || pref == NotificationPref.BOTH;
     }

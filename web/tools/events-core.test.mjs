@@ -34,6 +34,7 @@ import {
   wouldLandGoing,
   activeGoingConflict,
   rsvpControlModel,
+  leaveConfirmModel,
   commandErrorMessage,
   isFull,
   listCountPill,
@@ -145,8 +146,12 @@ test("initials: one word, two words, empty/unknown", () => {
 // ------------------------------------------------------------------ listing states (TM-412)
 
 test("isHappeningNow: API signal wins; else derived from the instants", () => {
-  assert.equal(isHappeningNow({ isHappeningNow: true }), true, "explicit bool wins");
-  assert.equal(isHappeningNow({ isHappeningNow: false, startAt: "2000-01-01T00:00:00Z" }), false);
+  // The API field is `happeningNow` (EventCard/EventDetail) — the preferred boolean must read that
+  // exact name, not `isHappeningNow` (TM-525), so a live event surfaced by the server is trusted.
+  assert.equal(isHappeningNow({ happeningNow: true }), true, "explicit bool wins");
+  assert.equal(isHappeningNow({ happeningNow: false, startAt: "2000-01-01T00:00:00Z" }), false);
+  // The old wrong key is ignored — it must fall through to the derivation, not be read as the signal.
+  assert.equal(isHappeningNow({ isHappeningNow: true, startAt: "2099-01-01T00:00:00Z" }), false, "wrong key ignored");
   assert.equal(isHappeningNow({ status: "HAPPENING_NOW" }), true);
   assert.equal(isHappeningNow({ status: "UPCOMING", startAt: "2000-01-01T00:00:00Z" }), false);
   // Derived: started an hour ago, ends in an hour → live.
@@ -315,6 +320,22 @@ test("ageEligibility: no band → ok; unset age → unset; ±2 tolerance boundar
   // Open-ended bands.
   assert.equal(ageEligibility({ ageMin: 40 }, { age: 100 }).status, "ok");
   assert.equal(ageEligibility({ ageMax: 18 }, { age: 25 }).status, "outside");
+});
+
+test("ageEligibility: prefers the server's ageEligible verdict over the local ±tolerance re-derivation (TM-525)", () => {
+  // The server's own verdict is authoritative — when present it decides ok/outside, NOT the client's
+  // band±tolerance test, so the two can never drift on the tolerance.
+  const banded = { ageMin: 25, ageMax: 30 };
+  // Age 40 sits well outside the local [23,32] window, yet a server verdict of true wins → ok.
+  assert.equal(ageEligibility({ ...banded, ageEligible: true }, { age: 40 }).status, "ok", "server true wins");
+  // Age 27 sits inside the local window, yet a server verdict of false wins → outside.
+  assert.equal(ageEligibility({ ...banded, ageEligible: false }, { age: 27 }).status, "outside", "server false wins");
+  // Unset age is still detected locally (the fixable "add your age" state), even though the server
+  // would collapse it into ageEligible=false — the UI needs the distinct state.
+  assert.equal(ageEligibility({ ...banded, ageEligible: false }, { age: null }).status, "unset", "unset stays local");
+  // A non-boolean/absent verdict (a listing card, or an older API) falls back to the local test.
+  assert.equal(ageEligibility({ ...banded, ageEligible: null }, { age: 27 }).status, "ok", "null → local fallback");
+  assert.equal(ageEligibility(banded, { age: 22 }).status, "outside", "absent → local fallback");
 });
 
 // ------------------------------------------------------------------ booking window (TM-413)
@@ -513,7 +534,7 @@ test("eventFilters: always offers All, plus data-backed status chips only when �
   const cards = [
     { myState: "GOING" },
     { myState: "WAITLISTED" },
-    { myState: "NONE", isHappeningNow: true },
+    { myState: "NONE", happeningNow: true },
   ];
   assert.deepEqual(eventFilters(cards, NOON_UTC).map((c) => c.key), ["all", "going", "waitlisted", "live"]);
   assert.deepEqual(eventFilters([], NOON_UTC), [{ key: "all", label: "All" }]);
@@ -523,7 +544,7 @@ test("filterCards: filters by status/live; 'all'/unknown returns the list unchan
   const cards = [
     { id: 1, myState: "GOING" },
     { id: 2, myState: "WAITLISTED" },
-    { id: 3, myState: "NONE", isHappeningNow: true },
+    { id: 3, myState: "NONE", happeningNow: true },
     { id: 4, myState: "NONE" },
   ];
   assert.deepEqual(filterCards(cards, "going", NOON_UTC).map((c) => c.id), [1]);
@@ -564,6 +585,40 @@ test("browseListModel: the all-finished (unfiltered) listing is the empty state,
   assert.equal(listModel.kind, "list");
   assert.deepEqual(listModel.happeningNow.map((c) => c.id), [1]);
   assert.deepEqual(listModel.upcoming.map((c) => c.id), [2]);
+});
+
+// ------------------------------------------------------------------ leave confirm copy (TM-525)
+
+test("leaveConfirmModel: waitlist leave and plain GOING cancel show the base copy, no strike", () => {
+  const wl = leaveConfirmModel({ myState: "WAITLISTED" });
+  assert.deepEqual(wl, {
+    title: "Leave the waiting list?",
+    message: "You'll lose your place in the queue.",
+    confirmLabel: "Leave",
+    danger: true,
+  });
+  // GOING with no preview, or a free (early) preview → just the base warning, no strike notice.
+  assert.equal(leaveConfirmModel({ myState: "GOING" }).message, "You'll give up your spot for this event.");
+  const free = leaveConfirmModel({ myState: "GOING", preview: { preview: true, lateCancel: false, message: null } });
+  assert.equal(free.message, "You'll give up your spot for this event.");
+  assert.equal(free.title, "Cancel your RSVP?");
+  assert.equal(free.confirmLabel, "Cancel RSVP");
+});
+
+test("leaveConfirmModel: a late-cancel preview appends the server's strike warning before confirm", () => {
+  const preview = {
+    preview: true,
+    lateCancel: true,
+    lateCancelCount: 2,
+    message: "Cancelling now would count as a late cancellation — this would be your 2nd.",
+  };
+  const m = leaveConfirmModel({ myState: "GOING", preview });
+  assert.equal(
+    m.message,
+    "You'll give up your spot for this event. Cancelling now would count as a late cancellation — this would be your 2nd.",
+  );
+  // A waitlist leave never surrenders a spot, so even a (spurious) late flag adds nothing to the queue copy.
+  assert.equal(leaveConfirmModel({ myState: "WAITLISTED", preview }).message, "You'll lose your place in the queue.");
 });
 
 // ------------------------------------------------------------------ paid per-event checkout (TM-624)
