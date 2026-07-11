@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.AccountState;
+import com.teammarhaba.backend.event.ReliabilityStatus;
 import com.teammarhaba.backend.user.NotificationPref;
 import java.time.Instant;
 
@@ -43,9 +44,15 @@ import java.time.Instant;
  *                             <strong>our</strong> DB column, stamped on every authenticated read.
  *                             {@code null} only before the very first such call.
  * @param lateCancelCount      running count of the account's late event cancellations (TM-414) —
- *                             un-RSVPs made inside an event's cancellation window. Exposed so the
- *                             client (and later TM-409 / admin) can build on it; {@code 0} until the
- *                             first late cancel. No consequence is enforced on it yet.
+ *                             un-RSVPs made inside an event's cancellation window; {@code 0} until the
+ *                             first late cancel. Since TM-409 this is the account's reliability score:
+ *                             the signal {@code reliabilityStatus} is derived from.
+ * @param reliabilityStatus    the account's reliability standing (TM-409): {@code OK}, {@code WARNED}
+ *                             (near the limit) or {@code DOWNGRADED} (limited to the waitlist for
+ *                             capacity-limited events). Derived server-side from {@code lateCancelCount}
+ *                             against the configured thresholds, so the client can surface a warning /
+ *                             downgrade banner; {@code OK} for a healthy account or when the reliability
+ *                             feature is off.
  * @param themeAccent          the chosen Paper accent swatch id (TM-529) — one of the curated palette
  *                             ids; {@code teal} (the default swatch) for a brand-new account
  * @param themeSketchy         whether the hand-drawn wavy/sketchy wobble is on (TM-529); {@code true}
@@ -73,5 +80,6 @@ public record MeResponse(
         AccountState accountState,
         Instant lastActiveAt,
         int lateCancelCount,
+        ReliabilityStatus reliabilityStatus,
         String themeAccent,
         boolean themeSketchy) {}

@@ -98,6 +98,9 @@ public class EventRsvpService {
             "Booking has closed for this event — you can no longer join this close to when it starts.";
     static final String PAYMENT_REQUIRED =
             "This event requires payment — complete checkout to book your spot.";
+    static final String RELIABILITY_DOWNGRADED =
+            "Your account is temporarily limited to the waitlist for capacity-limited events after "
+                    + "repeated late cancellations — you can still join events without a capacity limit.";
 
     /**
      * The 409 copy for the "one active event at a time" rule, naming the event the caller is still
@@ -121,6 +124,7 @@ public class EventRsvpService {
     private final EntitlementService entitlements;
     private final OrderRepository orders;
     private final MembershipService memberships;
+    private final ReliabilityService reliability;
 
     public EventRsvpService(
             EventRepository events,
@@ -135,7 +139,8 @@ public class EventRsvpService {
             MembershipProperties membershipProps,
             EntitlementService entitlements,
             OrderRepository orders,
-            MembershipService memberships) {
+            MembershipService memberships,
+            ReliabilityService reliability) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -149,6 +154,7 @@ public class EventRsvpService {
         this.entitlements = entitlements;
         this.orders = orders;
         this.memberships = memberships;
+        this.reliability = reliability;
     }
 
     /**
@@ -214,6 +220,10 @@ public class EventRsvpService {
                     AttendanceState state =
                             (spotFree && waitlisted == 0) ? AttendanceState.GOING : AttendanceState.WAITLISTED;
                     if (state == AttendanceState.GOING) {
+                        // Reliability downgrade (TM-409): a downgraded account can't grab a GOING spot on
+                        // a capacity-limited event — checked only on the GOING landing, so a downgraded
+                        // user can still join the waitlist of a full event (the "waitlist-only" limit).
+                        guardReliabilityDowngrade(directCaller, user, event);
                         guardOneActiveEvent(user.getId(), eventId, now);
                     }
                     attendance.save(new EventAttendance(eventId, user.getId(), state));
@@ -259,10 +269,13 @@ public class EventRsvpService {
      * <p><b>Late cancellation (TM-414)</b> — surrendering a spot you were {@code GOING} to hold,
      * inside the event's cancellation window (resolved event → city → app-default 24h by
      * {@link CancellationPolicy}), is a <em>late cancellation</em>: it increments the caller's
-     * running {@code late_cancel_count} in this same transaction and the {@link CancelResult} carries
-     * an honest message with the new total. Cancelling earlier — or leaving a {@code WAITLISTED} or
-     * absent slot, which surrenders no committed spot — is free and silent (no strike, no message).
-     * No consequence is enforced on the count yet; that is the deferred reliability system (TM-409).
+     * running {@code late_cancel_count} in this same transaction, appends a reliability ledger row
+     * ({@link ReliabilityService}, TM-409) and the {@link CancelResult} carries an honest message with
+     * the new total, the points it cost and the account's resulting standing. Cancelling earlier — or
+     * leaving a {@code WAITLISTED} or absent slot, which surrenders no committed spot — is free and
+     * silent (no strike, no message). The strike now carries a consequence: once the count reaches the
+     * configured downgrade threshold the account is limited to the waitlist for capacity-limited events
+     * (enforced at RSVP/claim, TM-409).
      *
      * <p>Pass {@code preview = true} for a non-committing dry-run: it resolves the same verdict and
      * the count the user <em>would</em> reach, writes nothing (no delete, no increment), and returns
@@ -286,9 +299,14 @@ public class EventRsvpService {
         boolean lateCancel = holdingSpot && cancellationPolicy.isLateCancellation(event, now);
 
         if (preview) {
-            return lateCancel
-                    ? CancelResult.previewLate(user.getLateCancelCount() + 1)
-                    : CancelResult.free(true, user.getLateCancelCount());
+            // Pre-confirm (TM-409): the transparent "cancelling now costs X points; you're at Y". The
+            // reliability standing is the one the strike WOULD reach; nothing is written on a dry-run.
+            if (lateCancel) {
+                int wouldBeCount = user.getLateCancelCount() + 1;
+                return CancelResult.previewLate(
+                        wouldBeCount, reliability.penaltyPoints(), reliability.statusFor(wouldBeCount));
+            }
+            return CancelResult.free(true, user.getLateCancelCount(), reliability.statusFor(user.getLateCancelCount()));
         }
 
         attendance.deleteByEventIdAndUserId(eventId, user.getId());
@@ -296,10 +314,14 @@ public class EventRsvpService {
         // (a no-op for the host, or someone who was never a chat member). In-transaction, so the
         // membership change commits atomically with the attendance delete.
         chatLifecycle.onLeave(event, user.getId());
-        // A committed late cancel bumps the strike counter (dirty-checking flushes on commit).
-        return lateCancel
-                ? CancelResult.committedLate(user.recordLateCancel())
-                : CancelResult.free(false, user.getLateCancelCount());
+        // A committed late cancel bumps the strike counter AND appends a reliability ledger row (TM-409),
+        // both inside this transaction (dirty-checking + the audit write flush on commit). A free cancel
+        // still reports the account's current standing so the client can keep its banner in step.
+        if (lateCancel) {
+            int newCount = reliability.recordLateCancel(user, eventId);
+            return CancelResult.committedLate(newCount, reliability.penaltyPoints(), reliability.statusFor(newCount));
+        }
+        return CancelResult.free(false, user.getLateCancelCount(), reliability.statusFor(user.getLateCancelCount()));
     }
 
     /**
@@ -345,6 +367,10 @@ public class EventRsvpService {
         // without ever paying. A paid-up member (their CONFIRMED order landed them WAITLISTED via the
         // payment webhook when the event was full) passes: their money already settled.
         Entitlement entitlement = guardPaidEventJoin(caller, user, eventId);
+        // Reliability downgrade (TM-409): a claim promotes WAITLISTED -> GOING on a capacity-limited
+        // event, so a downgraded account is blocked here exactly as it is on a fresh GOING RSVP —
+        // otherwise the waitlist-only limit would be trivially bypassed by claiming a freed spot.
+        guardReliabilityDowngrade(caller, user, event);
         guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
@@ -439,6 +465,31 @@ public class EventRsvpService {
             return;
         }
         memberships.getOrEnrol(directCaller).consumeFirstEventCredit(eventId, now);
+    }
+
+    /**
+     * Enforce the reliability downgrade (TM-409): refuse a {@code GOING} landing on a
+     * <em>capacity-limited</em> event by a downgraded account, restricting it to the waitlist. The
+     * account is downgraded once its running late-cancellation strike count reaches the configured
+     * {@code downgradeThreshold} ({@link ReliabilityService}/{@code ReliabilityPolicy}); the {@code 409}
+     * copy is honest about why and points out non-capacity-limited events remain open.
+     *
+     * <ul>
+     *   <li><b>Direct joins only</b> — the settled-order path ({@code directCaller == null}) is never
+     *       re-gated, exactly like the paid-event gate: the money settled, the landing must complete.</li>
+     *   <li><b>Capacity-limited only</b> — an unlimited event has no scarce GOING spot to protect, so a
+     *       downgraded account joins it normally.</li>
+     *   <li><b>Feature off</b> — {@link ReliabilityService#isDowngraded} is always {@code false}, so the
+     *       gate is inert and behaviour is exactly as before TM-409.</li>
+     * </ul>
+     */
+    private void guardReliabilityDowngrade(VerifiedUser directCaller, User user, Event event) {
+        if (directCaller == null || !event.hasCapacityLimit()) {
+            return; // settled-order path, or no scarce spot to protect — no reliability gate
+        }
+        if (reliability.isDowngraded(user.getLateCancelCount())) {
+            throw new ConflictException(RELIABILITY_DOWNGRADED);
+        }
     }
 
     /**

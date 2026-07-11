@@ -175,5 +175,17 @@ public enum AuditAction {
      * out. One row per lapse, carrying the account's {@code user_id} as the target and the tier + reason
      * ({@code dunning_exhausted} / {@code period_ended}) in its metadata.
      */
-    SUBSCRIPTION_LAPSED
+    SUBSCRIPTION_LAPSED,
+
+    /**
+     * A reliability penalty was applied to an account (TM-409): a late event cancellation debited the
+     * account's reliability points and bumped its strike counter ({@code users.late_cancel_count}). This
+     * is the reliability <em>ledger</em> — one immutable, append-only row per penalty, targeting the
+     * account (target {@code User} / the Firebase UID). Its metadata carries the signed points
+     * {@code delta}, the {@code reason} ({@code LATE_CANCEL}), the {@code eventId} the strike came from,
+     * and the resulting running {@code strikeCount} + {@code status}. Recorded by
+     * {@code ReliabilityService} inside the un-RSVP transaction, so the penalty and its ledger row commit
+     * together. The admin console reads a user's ledger by filtering the audit search on this target.
+     */
+    RELIABILITY_PENALTY
 }

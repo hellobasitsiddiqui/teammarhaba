@@ -168,6 +168,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.membership.MembershipService membershipService;
 
+    // MeController + UserAdminController (TM-409) resolve the reliability standing for their responses —
+    // supply the policy so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.event.ReliabilityPolicy reliabilityPolicy;
+
     // EventController's /entitlement route (TM-476) needs an EntitlementService — supply it so the web
     // slice can load.
     @MockitoBean
