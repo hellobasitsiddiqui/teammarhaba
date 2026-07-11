@@ -136,6 +136,7 @@ class CheckoutIntegrationTest extends AbstractIntegrationTest {
 
         // Stub the provider create-order: the PAY branch persists the returned id and returns the token.
         when(paymentProvider.name()).thenReturn("revolut");
+        when(paymentProvider.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
         when(paymentProvider.createOrder(anyInt(), anyString(), anyString()))
                 .thenReturn(new PaymentOrder("rev-order-pay", "tok-pay-abc"));
 
@@ -146,6 +147,8 @@ class CheckoutIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.paymentRequired").value(true))
                 .andExpect(jsonPath("$.order.status").value("PENDING"))
                 .andExpect(jsonPath("$.order.amountPence").value(PREMIUM_PRICE))
+                // Fresh PAY response carries the DB-assigned timestamp too (finding #24, TM-629).
+                .andExpect(jsonPath("$.order.createdAt").isNotEmpty())
                 .andExpect(jsonPath("$.paymentToken").value("tok-pay-abc"))
                 .andExpect(jsonPath("$.rsvp").doesNotExist());
 
@@ -165,6 +168,24 @@ class CheckoutIntegrationTest extends AbstractIntegrationTest {
                 event.getId(),
                 userId);
         assertThat(attendance).isZero();
+    }
+
+    // ------------------------------------------------------------------ fresh createdAt (TM-629)
+
+    @Test
+    void freshCheckoutResponseCarriesTheDbCreatedAtTimestamp() throws Exception {
+        // Regression for review finding #24 (TM-629): orders.created_at is DB-generated (DEFAULT now())
+        // and, without @Generated on the mapping, was never read back on insert — so a FRESH checkout
+        // serialised "createdAt": null while idempotent repeats and GET /me/orders returned the real
+        // timestamp: an inconsistent wire shape OrderView's own contract mispredicted. @Generated makes
+        // Hibernate re-read the DB value inside the same transaction, so the first response already
+        // carries it.
+        Event event = standardEvent(2, ChronoUnit.DAYS);
+
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(caller("uid-co-created-at")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.order.createdAt").isNotEmpty());
     }
 
     // ------------------------------------------------------------------ idempotency per (user, event)

@@ -84,6 +84,7 @@ class SubscriptionServiceTest {
         when(users.getById(42L)).thenReturn(user);
         when(users.findAnyById(42L)).thenReturn(Optional.of(user)); // active account (isDeleted=false)
         when(payments.name()).thenReturn("revolut");
+        when(payments.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
 
         // Repository saves echo the entity back (the DB would assign ids; the logic under test doesn't need them).
         when(charges.save(any(SubscriptionCharge.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -585,5 +586,84 @@ class SubscriptionServiceTest {
         verify(subscriptions, never()).save(any());
         verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
         verify(notifier, never()).subscriptionStarted(anyLong(), any(), anyString());
+    }
+
+    // ------------------------------------------------------------------ configured currency (TM-629)
+
+    @Test
+    void checkoutOpensTheProviderOrderInTheConfiguredCurrency() {
+        // Regression for the dead config knob (review finding #22, TM-629): the Subscribe checkout must
+        // charge in the SEAM-exposed currency, not a per-service hardcoded "GBP". On the pre-fix code
+        // the EUR-only stub below never matches (the service asks for GBP regardless of config).
+        when(payments.currency()).thenReturn("EUR");
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(any(), any(), any())).thenReturn(Optional.empty());
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-1");
+        when(payments.createOrderForCustomer(eq(999), eq("EUR"), anyString(), eq("cust-1")))
+                .thenReturn(new PaymentOrder("rev-eur", "tok-eur"));
+
+        SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
+
+        assertThat(result.paymentToken()).isEqualTo("tok-eur");
+        verify(payments).createOrderForCustomer(eq(999), eq("EUR"), anyString(), eq("cust-1"));
+        verify(payments, never()).createOrderForCustomer(anyInt(), eq("GBP"), anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------ residual paid time (TM-629)
+
+    @Test
+    void resubscribeWhileCanceledWithPaidTimeLeftCreditsTheRemainder() {
+        // Review findings #12/#19 (TM-629): "cancel day 1, re-subscribe day 2" used to reset the period
+        // at the activation instant, silently swallowing ~29 already-paid days — the customer paid twice
+        // for the overlap. The unexpired remainder must now extend the fresh period.
+        Instant subscribed = Instant.now().minus(Duration.ofDays(1));
+        Subscription existing = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", subscribed);
+        existing.cancelAtPeriodEnd(Instant.now()); // canceled with ~29 paid days left on the old window
+        Instant oldPaidUntil = existing.getCurrentPeriodEnd();
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(existing));
+
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-re", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-re")).thenReturn(Optional.of(charge));
+        when(payments.findMerchantSavedPaymentMethod("cust-1")).thenReturn(Optional.of("pm-1"));
+
+        service.confirmCharge("rev-ord-re");
+
+        assertThat(existing.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        // activate() stamped currentPeriodStart with the activation instant; the new period end must be
+        // one month from then PLUS exactly the remainder that was still paid for at that instant.
+        Instant activationStart = existing.getCurrentPeriodStart();
+        Instant expectedEnd = Subscription.plusOneMonth(activationStart)
+                .plus(Duration.between(activationStart, oldPaidUntil));
+        assertThat(existing.getCurrentPeriodEnd()).isEqualTo(expectedEnd);
+        // Sanity: that is materially LONGER than the plain one-month reset the bug produced.
+        assertThat(existing.getCurrentPeriodEnd())
+                .isAfter(Subscription.plusOneMonth(activationStart).plus(Duration.ofDays(20)));
+        assertThat(existing.getNextChargeAt()).isEqualTo(existing.getCurrentPeriodEnd());
+    }
+
+    @Test
+    void resubscribeAfterTheCanceledPeriodExpiredStartsAPlainFreshMonth() {
+        // The complement of the remainder credit (TM-629): a CANCELED subscription whose paid window
+        // already ran out has nothing left to credit — the fresh period is exactly one month.
+        Instant past = Instant.now().minus(Duration.ofDays(40));
+        Subscription existing = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", past);
+        existing.cancelAtPeriodEnd(past.plus(Duration.ofDays(5))); // period end ≈ 10 days ago
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(existing));
+
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-exp", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-exp")).thenReturn(Optional.of(charge));
+        when(payments.findMerchantSavedPaymentMethod("cust-1")).thenReturn(Optional.of("pm-1"));
+
+        service.confirmCharge("rev-ord-exp");
+
+        assertThat(existing.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        assertThat(existing.getCurrentPeriodEnd())
+                .isEqualTo(Subscription.plusOneMonth(existing.getCurrentPeriodStart()));
     }
 }

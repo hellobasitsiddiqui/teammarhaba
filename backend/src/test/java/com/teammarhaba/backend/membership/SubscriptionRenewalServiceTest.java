@@ -78,6 +78,7 @@ class SubscriptionRenewalServiceTest {
         // The tombstone check (TM-623): the default account is active (mock isDeleted() = false).
         when(users.findAnyById(42L)).thenReturn(Optional.of(user));
         when(payments.name()).thenReturn("revolut");
+        when(payments.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
         when(charges.save(any(SubscriptionCharge.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -504,5 +505,25 @@ class SubscriptionRenewalServiceTest {
         assertThat(ledger.get(0).getStatus()).isEqualTo(SubscriptionCharge.Status.PAID);
         assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
         assertThat(subscription.getNextChargeAt()).isAfter(Instant.now()); // no longer due
+    }
+
+    // ------------------------------------------------------------------ configured currency (TM-629)
+
+    @Test
+    void renewalChargesInTheProviderConfiguredCurrency() {
+        // Regression for the dead config knob (review finding #22, TM-629): the off-session renewal
+        // order must be opened in the SEAM-exposed currency, not this service's own hardcoded "GBP".
+        // On the pre-fix code the EUR-only stub never matches and the GBP-shaped verify below fails.
+        when(payments.currency()).thenReturn("EUR");
+        dueActiveSubscription();
+        when(payments.createOrderForCustomer(eq(999), eq("EUR"), anyString(), eq("cust-1")))
+                .thenReturn(new PaymentOrder("rev-ren-eur", "tok"));
+        when(payments.payWithSavedMethod("rev-ren-eur", "pm-1")).thenReturn(new SavedMethodCharge("completed", true));
+
+        boolean acted = service.processOne(7L);
+
+        assertThat(acted).isTrue();
+        verify(payments).createOrderForCustomer(eq(999), eq("EUR"), anyString(), eq("cust-1"));
+        verify(payments, never()).createOrderForCustomer(anyInt(), eq("GBP"), anyString(), anyString());
     }
 }

@@ -48,9 +48,6 @@ public class RefundSweepService {
 
     private static final Logger log = LoggerFactory.getLogger(RefundSweepService.class);
 
-    /** The single currency the money paths charge (and therefore refund) in — GBP pence (V36/V38). */
-    private static final String CURRENCY = "GBP";
-
     /** Upper bound on rows handled per pass per ledger (oldest first; the next tick takes the rest). */
     private static final int SCAN_LIMIT = 100;
 
@@ -124,7 +121,11 @@ public class RefundSweepService {
             return true;
         }
         try {
-            payments.refund(order.getProviderOrderId(), order.getAmountPence(), CURRENCY, String.valueOf(order.getId()));
+            payments.refund(
+                    order.getProviderOrderId(),
+                    order.getAmountPence(),
+                    payments.currency(),
+                    String.valueOf(order.getId()));
             order.markRefunded(now);
             log.info(
                     "Refund sweep recovered order {} (provider order {}) — refund issued.",
@@ -171,7 +172,10 @@ public class RefundSweepService {
         }
         try {
             payments.refund(
-                    charge.getProviderOrderId(), charge.getAmountPence(), CURRENCY, "sub-charge:" + charge.getId());
+                    charge.getProviderOrderId(),
+                    charge.getAmountPence(),
+                    payments.currency(),
+                    "sub-charge:" + charge.getId());
             charge.markRefunded(now);
             log.info(
                     "Refund sweep recovered subscription charge {} (provider order {}) — refund issued.",

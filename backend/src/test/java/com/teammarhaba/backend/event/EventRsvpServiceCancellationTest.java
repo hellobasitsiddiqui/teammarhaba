@@ -11,6 +11,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.CancellationWindowProperties;
 import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
@@ -64,6 +65,9 @@ class EventRsvpServiceCancellationTest {
     /** TM-625's settled-order exemption lookup — never exercised on the cancel path (leaving is never gated). */
     @Mock private OrderRepository orders;
 
+    /** TM-629's credit-consume-on-commitment — only exercised on a FREE-first JOIN, never on cancel. */
+    @Mock private MembershipService memberships;
+
     private final VerifiedUser caller = new VerifiedUser("uid-caller", "caller@example.com");
     private final CancellationPolicy policy =
             new CancellationPolicy(new CancellationWindowProperties(24, Map.of()));
@@ -83,7 +87,8 @@ class EventRsvpServiceCancellationTest {
                 // entitlement, so a flag-off properties record keeps this suite entirely gate-free.
                 new MembershipProperties(false),
                 entitlements,
-                orders);
+                orders,
+                memberships);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)

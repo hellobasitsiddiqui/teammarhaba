@@ -169,6 +169,10 @@ class EventOneActiveConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 creator.getId(),
                 now);
         event.setCapacity(capacity);
+        // Genuinely free (£0): this suite is about the one-active-event race, not payment. With the
+        // default £5 price, the FIRST direct join now consumes the caller's first-event credit
+        // (TM-629), so the racing SECOND event would resolve PAY and 402 instead of the 409 under test.
+        event.setPricePence(0);
         return events.save(event);
     }
 

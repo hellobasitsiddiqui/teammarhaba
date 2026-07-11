@@ -254,6 +254,11 @@ class EventRsvpEligibilityIntegrationTest extends AbstractIntegrationTest {
             event.setEndAt(now.plus(endIn));
         }
         event.setCapacity(capacity);
+        // Genuinely free (£0): this suite is about the eligibility guards (cutoff / one-active /
+        // age), not payment. With the default £5 price, a caller's FIRST direct join now CONSUMES
+        // their first-event credit (TM-629), so their SECOND event here would resolve PAY and the
+        // paid-join gate's 402 would fire before the guard under test.
+        event.setPricePence(0);
         return events.save(event);
     }
 

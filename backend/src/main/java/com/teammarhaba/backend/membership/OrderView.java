@@ -13,8 +13,10 @@ import java.time.Instant;
  * @param eventId     the event this order is for
  * @param amountPence what the commitment costs in pence (minor units, GBP); {@code 0} for FREE/INCLUDED
  * @param status      where the order stands ({@code PENDING|CONFIRMED|CANCELLED|REFUND_DUE})
- * @param createdAt   when the order was placed (DB {@code DEFAULT now()}); {@code null} only on an
- *                    entity not yet persisted (never on a row read back from the database)
+ * @param createdAt   when the order was placed (DB {@code DEFAULT now()}, read back on insert via
+ *                    {@code @Generated} — TM-629); non-null for every persisted order, so a FRESH
+ *                    checkout response carries the same timestamp shape as an idempotent repeat or
+ *                    {@code GET /me/orders}
  */
 public record OrderView(Long id, Long eventId, int amountPence, OrderStatus status, Instant createdAt) {
 

@@ -74,6 +74,7 @@ class SubscriptionControllerIntegrationTest extends AbstractIntegrationTest {
     @BeforeEach
     void stubProvider() {
         when(payments.name()).thenReturn("revolut");
+        when(payments.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
         // any() (not anyString()) — a JIT-provisioned account's email/phone/displayName can be null
         // at checkout time.
         when(payments.createCustomer(any(), any(), any())).thenReturn("cust-it-1");

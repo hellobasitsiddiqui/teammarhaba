@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.Instant;
+import org.hibernate.annotations.Generated;
 
 /**
  * A checkout order (TM-477): the durable record of one (user, event) commitment — what it cost and where
@@ -67,7 +68,15 @@ public class Order {
     @Column(name = "provider_order_id")
     private String providerOrderId;
 
-    /** DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity. */
+    /**
+     * DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity.
+     * {@code @Generated} (TM-629) makes Hibernate read the DB-assigned value back on insert: without it
+     * a just-persisted order still had {@code createdAt == null} inside the checkout transaction, so
+     * every FRESH {@code POST /events/{id}/checkout} response serialised {@code "createdAt": null}
+     * while idempotent repeats and {@code GET /me/orders} carried the real timestamp — an inconsistent
+     * wire shape {@link OrderView}'s contract ("never on a row read back") mispredicted.
+     */
+    @Generated
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 

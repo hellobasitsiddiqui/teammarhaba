@@ -98,6 +98,14 @@ public class RevolutPaymentProvider implements PaymentProvider {
     }
 
     @Override
+    public String currency() {
+        // The configured app.payments.revolut.currency (GBP fallback, normalised by RevolutProperties).
+        // Exposed through the seam (TM-629) so the checkout/renewal/refund services all charge in the
+        // ONE configured currency instead of each hardcoding "GBP" and dead-lettering the config knob.
+        return props.currency();
+    }
+
+    @Override
     public PaymentOrder createOrder(int amountMinor, String currency, String reference) {
         // Amount in MINOR units (pence for GBP) — Order.amountPence is already minor, so pass it through.
         // merchant_order_ext_ref carries our local order id for reconciliation (the current Merchant API

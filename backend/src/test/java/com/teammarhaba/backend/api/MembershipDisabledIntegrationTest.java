@@ -164,8 +164,12 @@ class MembershipDisabledIntegrationTest {
 
     @Test
     void refundSweepSchedulerBeanDoesNotExistWhileTheFlagIsOff() {
-        // The REFUND_DUE retry sweeper (TM-625) moves money too (provider refunds), so it is gated on
-        // the exact same opt-in pair as the renewal scheduler — no bean while membership is off.
+        // The REFUND_DUE retry sweeper (TM-625) moves money too (provider refunds), so like the renewal
+        // scheduler it requires BOTH app.subscriptions.enabled AND app.membership.enabled to be
+        // explicitly true. This context runs subscriptions.enabled=true with membership off, so it is
+        // specifically the membership half of the pair keeping the bean out here (TM-629). The rollback
+        // stops only the SCHEDULERS: the always-open webhook confirm paths can still produce (and
+        // inline-attempt) refunds while the flag is off — those rows wait for the sweep to resume.
         assertThat(context.getBeanNamesForType(com.teammarhaba.backend.membership.RefundSweepScheduler.class))
                 .as("the refund sweeper must not exist while app.membership.enabled is off")
                 .isEmpty();

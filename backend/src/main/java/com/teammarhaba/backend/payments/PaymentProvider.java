@@ -31,6 +31,14 @@ public interface PaymentProvider {
     String name();
 
     /**
+     * The ISO-4217 currency this provider account charges (and refunds) in, e.g. {@code GBP} (TM-629).
+     * The one source of truth every money path passes to {@link #createOrder}/{@link #refund}/
+     * {@link #createOrderForCustomer} — previously each service hardcoded its own {@code "GBP"} constant,
+     * which silently ignored the documented {@code app.payments.revolut.currency} config knob.
+     */
+    String currency();
+
+    /**
      * Open a payment order for {@code amountMinor} in {@code currency} (TM-478). Called server-side on the
      * PAY checkout branch; the returned {@link PaymentOrder#id() id} is persisted on the local order and
      * the {@link PaymentOrder#token() token} is returned to the client to mount the checkout widget.

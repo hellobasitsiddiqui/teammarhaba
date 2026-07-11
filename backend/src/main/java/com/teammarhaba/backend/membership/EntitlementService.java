@@ -68,10 +68,15 @@ public class EntitlementService {
                 .orElseThrow(() -> new ResourceNotFoundException(EVENT_NOT_FOUND));
 
         Membership membership = memberships.getOrEnrol(caller);
+        // The credit counts as available for the ONE event that consumed it (TM-629): the caller's
+        // entitlement to that event IS their free first event, before and after the commitment spends
+        // the credit. Without this, a free-first commitment (checkout, or the direct RSVP verb — which
+        // now also consumes on commitment) flipped the same event's entitlement to PAY the moment it
+        // was consumed — so a free-first WAITLISTED member could never pass the paid-join gate to claim
+        // a freed spot, and the entitlement display demanded payment for the event they already hold.
+        boolean creditAvailableHere = !membership.isFirstEventCreditUsed()
+                || eventId.equals(membership.getFirstEventCreditEventId());
         return EntitlementResolver.resolve(
-                membership.getTier(),
-                !membership.isFirstEventCreditUsed(),
-                event.isPremium(),
-                event.getPricePence());
+                membership.getTier(), creditAvailableHere, event.isPremium(), event.getPricePence());
     }
 }

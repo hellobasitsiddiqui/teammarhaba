@@ -195,6 +195,60 @@ class RevolutPaymentProviderTest {
     }
 
     @Test
+    void payWithSavedMethodReadsTheStateFromThePaymentsArrayEnvelope() {
+        // Regression for the flagged API-shape assumption (review finding #11, TM-629): some Merchant
+        // API versions report the payment state under payments[0] rather than at the top level. If the
+        // fallback read regressed, every renewal on that envelope would parse settled=false — quietly
+        // landing PAYING customers in dunning (and eventually downgrading them) while their cards are
+        // actually charged.
+        responseBody = "{\"id\":\"pay-3\",\"payments\":[{\"id\":\"p-1\",\"state\":\"COMPLETED\"}]}";
+
+        SavedMethodCharge result =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+
+        assertThat(result.settled()).isTrue(); // fallback envelope read + case-insensitive state reduce
+    }
+
+    @Test
+    void payWithSavedMethodTreatsInFlightStatesAsIndeterminateNotDeclined() {
+        // Regression for review finding #18 (TM-629): "pending"/"processing" are NON-final — the money
+        // may still be captured for THIS attempt. Reducing them to a plain failure is what let the
+        // dunning retry open a second provider order for the same window (a real double-charge). The
+        // engine keys off indeterminate() to keep the charge PENDING and re-check the SAME order.
+        responseBody = "{\"id\":\"pay-4\",\"state\":\"processing\"}";
+        SavedMethodCharge processing =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+        assertThat(processing.settled()).isFalse();
+        assertThat(processing.indeterminate()).isTrue();
+
+        responseBody = "{\"id\":\"pay-5\",\"state\":\"pending\"}";
+        SavedMethodCharge pending =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+        assertThat(pending.indeterminate()).isTrue();
+
+        // …while a definitive decline stays a plain failure the dunning path acts on immediately.
+        responseBody = "{\"id\":\"pay-6\",\"state\":\"declined\"}";
+        SavedMethodCharge declined =
+                provider(SECRET_KEY, WEBHOOK_SECRET).payWithSavedMethod("rev-order-9", "pm-1");
+        assertThat(declined.settled()).isFalse();
+        assertThat(declined.indeterminate()).isFalse();
+    }
+
+    @Test
+    void currencyExposesTheConfiguredValueWithAGbpFallback() {
+        // Regression for the dead config knob (review finding #22, TM-629): app.payments.revolut.currency
+        // must actually flow somewhere. The seam exposes it so the checkout/renewal/refund services all
+        // charge in the ONE configured currency; blank still normalises to the GBP default.
+        RevolutProperties eur = new RevolutProperties(SECRET_KEY, baseUrl, API_VERSION, WEBHOOK_SECRET, "EUR");
+        assertThat(new RevolutPaymentProvider(eur, json, HttpClient.newHttpClient()).currency())
+                .isEqualTo("EUR");
+
+        RevolutProperties blank = new RevolutProperties(SECRET_KEY, baseUrl, API_VERSION, WEBHOOK_SECRET, "");
+        assertThat(new RevolutPaymentProvider(blank, json, HttpClient.newHttpClient()).currency())
+                .isEqualTo("GBP");
+    }
+
+    @Test
     void findMerchantSavedPaymentMethodPicksTheMerchantSavedCard() {
         responseBody = "[" + "{\"id\":\"pm-cust\",\"type\":\"card\",\"saved_for\":\"CUSTOMER\"},"
                 + "{\"id\":\"pm-merch\",\"type\":\"card\",\"saved_for\":\"MERCHANT\"}]";

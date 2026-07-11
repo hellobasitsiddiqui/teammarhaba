@@ -34,8 +34,11 @@ import org.springframework.stereotype.Component;
  * ledgers under the membership-only gate is safe: subscription refunds only exist when subscriptions
  * are on, so the {@code subscription_charges} ledger is simply empty otherwise. It still moves money
  * (back to the customer, but still a provider mutation), so it keeps the money-mover rule: no context
- * that didn't explicitly opt in to membership ever ticks it, and a membership rollback stops it
- * together with every refund producer.
+ * that didn't explicitly opt in to membership ever ticks it. Note what a membership rollback does and
+ * does not stop (TM-629): it stops this RETRY loop and the charging side, but not every refund
+ * <em>producer</em> — the webhook confirm paths stay open by design (in-flight money must still
+ * settle) and keep attempting their inline refunds, and any row they leave {@code REFUND_DUE} simply
+ * waits, visible, until membership is re-enabled and the sweep resumes.
  */
 @Component
 @ConditionalOnProperty(name = "app.membership.enabled", havingValue = "true", matchIfMissing = false)

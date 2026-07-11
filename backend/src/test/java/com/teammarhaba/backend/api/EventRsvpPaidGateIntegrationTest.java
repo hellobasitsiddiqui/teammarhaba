@@ -3,6 +3,7 @@ package com.teammarhaba.backend.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -181,6 +182,12 @@ class EventRsvpPaidGateIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(caller("uid-gate-free-event")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("GOING"));
+
+        // A genuinely free event (reason FREE_EVENT) consumes NOTHING (TM-629): only a FIRST_EVENT_FREE
+        // landing spends the credit — the freebie is never wasted on an event that costs nothing anyway.
+        Long userId = users.findByFirebaseUid("uid-gate-free-event").orElseThrow().getId();
+        assertThat(memberships.findByUserId(userId).orElseThrow().isFirstEventCreditUsed())
+                .isFalse();
     }
 
     @Test
@@ -195,10 +202,12 @@ class EventRsvpPaidGateIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void firstEventCreditHolderStillRsvpsDirectlyOnAStandardEvent() throws Exception {
+    void firstEventCreditHolderRsvpsDirectlyAndTheCommitmentConsumesTheCredit() throws Exception {
         // A brand-new pay-per-event caller with the credit available resolves FREE on a standard event,
-        // so the direct join proceeds. (Consuming the credit on commitment stays checkout's job, TM-477 —
-        // the verb reads the entitlement, it never spends the credit.)
+        // so the direct join proceeds — and the landing is a COMMITMENT, so it spends the one
+        // first-event credit exactly as checkout does (TM-629). Pre-fix the verb only READ the
+        // entitlement: the credit stayed available, which is the free-credit abuse the next test
+        // proves is now closed.
         Event event = standardEvent();
 
         mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(caller("uid-gate-credit")))
@@ -206,9 +215,65 @@ class EventRsvpPaidGateIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.state").value("GOING"));
 
         Long userId = users.findByFirebaseUid("uid-gate-credit").orElseThrow().getId();
-        assertThat(memberships.findByUserId(userId).orElseThrow().isFirstEventCreditUsed())
-                .as("the direct verb never spends the credit — checkout does, on commitment")
-                .isFalse();
+        Membership membership = memberships.findByUserId(userId).orElseThrow();
+        assertThat(membership.isFirstEventCreditUsed())
+                .as("a FREE-first direct RSVP is a commitment — it must spend the credit (TM-629)")
+                .isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(event.getId());
+        assertThat(membership.getFirstEventCreditConsumedAt()).isNotNull();
+    }
+
+    @Test
+    void secondFreeFirstDirectRsvpIsPricedOnceTheCreditIsSpent() throws Exception {
+        // The TM-625a free-credit abuse, end to end: pre-fix, a pay-per-event caller could direct-RSVP
+        // a priced event, leave, and direct-RSVP the next priced event — each landing resolved
+        // FIRST_EVENT_FREE because nothing ever consumed the credit (the exact "repeatedly get first
+        // event free" loop). Now the first landing spends it, so the SECOND priced event resolves PAY
+        // and the gate demands checkout. (Pre-fix this sequence ended 200 GOING, not 402.)
+        Event first = standardEvent();
+        Event second = standardEvent();
+
+        mockMvc.perform(post("/api/v1/events/" + first.getId() + "/rsvp").with(caller("uid-gate-credit-2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("GOING"));
+        // Leave event one (the direct verb — leaving is never gated and does NOT return the credit),
+        // so the one-active-event rule can't mask the outcome on event two.
+        mockMvc.perform(delete("/api/v1/events/" + first.getId() + "/rsvp").with(caller("uid-gate-credit-2")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/events/" + second.getId() + "/rsvp").with(caller("uid-gate-credit-2")))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.detail").value(containsString("checkout")));
+
+        Long userId = users.findByFirebaseUid("uid-gate-credit-2").orElseThrow().getId();
+        assertThat(attendanceCount(second.getId(), userId))
+                .as("the second freebie attempt must write NO attendance row")
+                .isZero();
+        // The credit was consumed exactly once, by the FIRST event.
+        Membership membership = memberships.findByUserId(userId).orElseThrow();
+        assertThat(membership.isFirstEventCreditUsed()).isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(first.getId());
+        Mockito.verifyNoInteractions(paymentProvider);
+    }
+
+    @Test
+    void waitlistedFreeFirstMemberStillClaimsTheEventThatConsumedTheirCredit() throws Exception {
+        // The claim continuation of the consume-on-commitment rule (TM-629): a FREE-first RSVP that
+        // landed WAITLISTED already spent the credit ON THIS EVENT. When a spot frees, the claim
+        // re-resolves the entitlement — the credit must still count as available FOR THE EVENT THAT
+        // CONSUMED IT (EntitlementService), or the member's own free event would 402 them at claim
+        // time and demand payment for a place their credit already bought.
+        Event event = standardEvent();
+        Long userId = seedUser("uid-gate-credit-claim");
+        Membership membership = new Membership(userId, Instant.now());
+        membership.consumeFirstEventCredit(event.getId(), Instant.now()); // spent by the waitlist landing
+        memberships.save(membership);
+        attendance.save(new EventAttendance(event.getId(), userId, AttendanceState.WAITLISTED));
+
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/claim").with(caller("uid-gate-credit-claim")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("GOING"));
+        Mockito.verifyNoInteractions(paymentProvider); // never asked to pay for their own free event
     }
 
     // ------------------------------------------------------------------ fixtures

@@ -69,9 +69,6 @@ public class SubscriptionService {
     /** Audit {@code target_type} for subscription events. */
     static final String TARGET_SUBSCRIPTION = "Subscription";
 
-    /** The single currency subscriptions charge in — prices are defined in GBP pence (V38). */
-    private static final String CURRENCY = "GBP";
-
     /** The 404 copy when the server-side membership flag is off — the feature does not exist yet. */
     static final String MEMBERSHIP_OFF = "Subscriptions are not available.";
 
@@ -195,7 +192,7 @@ public class SubscriptionService {
         }
 
         PaymentOrder order = payments.createOrderForCustomer(
-                amountPence, CURRENCY, "sub-charge:" + charge.getId(), customerId);
+                amountPence, payments.currency(), "sub-charge:" + charge.getId(), customerId);
         charge.setPaymentReference(payments.name(), order.id(), customerId, now);
         return new SubscriptionCheckout(tier, amountPence, order.token(), payments.name());
     }
@@ -503,7 +500,7 @@ public class SubscriptionService {
             payments.refund(
                     charge.getProviderOrderId(),
                     charge.getAmountPence(),
-                    CURRENCY,
+                    payments.currency(),
                     "sub-charge:" + charge.getId());
             charge.markRefunded(now);
         } catch (PaymentProviderException e) {
