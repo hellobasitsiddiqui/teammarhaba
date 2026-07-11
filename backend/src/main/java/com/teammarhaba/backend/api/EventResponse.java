@@ -57,6 +57,10 @@ import java.time.Instant;
  * @param pricePence                   ticket price in pence (minor units, GBP); {@code 0} = free — TM-475
  * @param premium                      whether the event is gated as premium — TM-475
  * @param status                       {@code PUBLISHED} or {@code CANCELLED}
+ * @param past                         whether the event has already ended (TM-518) — the temporal
+ *     {@link com.teammarhaba.backend.event.EventPhasePolicy#isFinished finished} verdict, not the
+ *     admin status. Drives the console's "Past events" grouping and the hidden/disabled edit + cancel
+ *     controls, kept in lock-step with the server-side edit/cancel reject so the two never disagree
  * @param createdBy                    {@code users.id} of the creating admin
  * @param createdAt                    DB-authoritative creation instant
  * @param updatedAt                    last mutation instant
@@ -93,6 +97,7 @@ public record EventResponse(
         int pricePence,
         boolean premium,
         String status,
+        boolean past,
         Long createdBy,
         Instant createdAt,
         Instant updatedAt,
@@ -105,8 +110,12 @@ public record EventResponse(
      * counts come back {@code null} here, distinguishing "not computed" from a real {@code 0}.
      */
     public static EventResponse from(
-            Event event, LocationRevealPolicy reveal, BookingCutoffPolicy cutoff, CancellationPolicy cancellation) {
-        return from(event, reveal, cutoff, cancellation, null, null);
+            Event event,
+            LocationRevealPolicy reveal,
+            BookingCutoffPolicy cutoff,
+            CancellationPolicy cancellation,
+            boolean past) {
+        return from(event, reveal, cutoff, cancellation, past, null, null);
     }
 
     /**
@@ -115,12 +124,17 @@ public record EventResponse(
      * console can show "N going / M waitlist" instead of "— / —". The three policies resolve the
      * effective reveal / booking-cutoff / cancellation windows (raw override → city → app default) so
      * the admin form can prefill both the raw override and what actually applies (TM-408/TM-523).
+     * {@code past} is the caller-computed
+     * {@link com.teammarhaba.backend.event.EventPhasePolicy#isFinished} verdict (TM-518) — passed in
+     * rather than derived here so this stays a pure, time-independent mapper and "now" is fixed once
+     * per request in the controller.
      */
     public static EventResponse from(
             Event event,
             LocationRevealPolicy reveal,
             BookingCutoffPolicy cutoff,
             CancellationPolicy cancellation,
+            boolean past,
             Long goingCount,
             Long waitlistCount) {
         return new EventResponse(
@@ -152,6 +166,7 @@ public record EventResponse(
                 event.getPricePence(),
                 event.isPremium(),
                 event.getStatus().name(),
+                past,
                 event.getCreatedBy(),
                 event.getCreatedAt(),
                 event.getUpdatedAt(),

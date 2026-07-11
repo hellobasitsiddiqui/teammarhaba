@@ -3297,6 +3297,40 @@ button.tm-notif-item:hover {
     background: var(--surface-card);
     box-shadow: none;
 }
+/* Past events (TM-518): a read-only "Ended" state — muted, flat, clearly not actionable. */
+.tm-event-cta-ended {
+    color: var(--muted);
+    background: var(--surface-2);
+    box-shadow: none;
+}
+
+/* A past-event card is de-emphasised (TM-518): dimmed + muted border so it reads as history, not a
+   live affordance. Still a link (it opens the read-only detail), so it keeps hover/focus. */
+.tm-event-card-past {
+    opacity: 0.72;
+    border-color: var(--border);
+    box-shadow: none;
+}
+.tm-event-card-past:hover {
+    opacity: 0.85;
+}
+/* The "Past events" divider heading — muted, to sit quietly below the active sections. */
+.tm-event-section-past {
+    color: var(--muted);
+}
+
+/* Admin console (TM-518): the "Past events" divider row + the muted, read-only past rows below it. */
+.tm-event-past-divider td {
+    padding-top: 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border-top: var(--border-width) solid var(--border);
+}
+.tm-event-row-past {
+    opacity: 0.72;
+}
 
 /* My-state chip on the detail action area (✓ Going / Waitlisted) — .tm-badge shape via own colours. */
 .tm-event-chip {

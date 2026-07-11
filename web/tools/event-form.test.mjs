@@ -36,6 +36,8 @@ import {
   attendanceCounts,
   revealSummary,
   formatEventWhen,
+  isPastEvent,
+  partitionEventsByPast,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -337,6 +339,33 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
     ).label,
     "Unlisted",
   );
+});
+
+test("isPastEvent prefers the server `past` flag, falls back to the instants (TM-518)", () => {
+  // The authoritative signal is the projection's own `past` boolean — trusted over the instants.
+  assert.equal(isPastEvent({ past: true, startAt: "2999-01-01T00:00:00Z" }), true, "flag wins over a future start");
+  assert.equal(isPastEvent({ past: false, endAt: "2000-01-01T00:00:00Z" }), false, "flag wins over a past end");
+
+  // Fallback (no flag): ended once now ≥ endAt; open-ended uses startAt.
+  const now = "2026-07-11T00:00:00Z";
+  assert.equal(isPastEvent({ startAt: "2026-07-10T18:00:00Z", endAt: "2026-07-10T20:00:00Z" }, now), true);
+  assert.equal(isPastEvent({ startAt: "2026-07-20T18:00:00Z", endAt: "2026-07-20T20:00:00Z" }, now), false);
+  assert.equal(isPastEvent({ startAt: "2026-07-10T18:00:00Z", endAt: null }, now), true, "open-ended: past its start");
+  assert.equal(isPastEvent({}, now), false, "no dates → not past, never throws");
+});
+
+test("partitionEventsByPast splits active vs past, preserving order in each (TM-518)", () => {
+  const events = [
+    { id: 1, past: false },
+    { id: 2, past: true },
+    { id: 3, past: false },
+    { id: 4, past: true },
+  ];
+  const { upcoming, past } = partitionEventsByPast(events);
+  assert.deepEqual(upcoming.map((e) => e.id), [1, 3], "active order preserved");
+  assert.deepEqual(past.map((e) => e.id), [2, 4], "past order preserved");
+  assert.deepEqual(partitionEventsByPast([]), { upcoming: [], past: [] });
+  assert.deepEqual(partitionEventsByPast(null), { upcoming: [], past: [] }, "tolerates junk");
 });
 
 test("capacityLabel reads unlimited for a blank/null capacity", () => {

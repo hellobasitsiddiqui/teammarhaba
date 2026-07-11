@@ -46,6 +46,8 @@ import {
   attendanceCounts,
   revealSummary,
   formatEventWhen,
+  isPastEvent,
+  partitionEventsByPast,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 
@@ -242,7 +244,12 @@ function renderTable() {
   }
 
   const now = Date.now();
-  const rows = sortEvents(filteredEvents(now), now);
+  // Past events (TM-518) always sink to the BOTTOM as their own "Past events" section, regardless of
+  // the admin's chosen column sort — a stable partition preserves that sort inside each group.
+  const sorted = sortEvents(filteredEvents(now), now);
+  const { upcoming, past } = partitionEventsByPast(sorted, now);
+  const rows = [...upcoming, ...past];
+  const pastStart = upcoming.length; // index in `rows` where the past section begins
   if (!rows.length) {
     const filtered = state.events.length > 0;
     const message = filtered ? "No events match your filters." : "No events yet. Create your first one.";
@@ -277,31 +284,65 @@ function renderTable() {
     el("th", { scope: "col", text: "Actions" }),
   ]);
 
-  const body = el(
-    "tbody",
-    {},
-    pageRows.map((event) => {
-      const counts = attendanceCounts(event);
-      const attendance = `${counts.going == null ? "—" : counts.going} / ${counts.waitlist == null ? "—" : counts.waitlist}`;
-      return el("tr", { dataset: { eventId: String(event.id) } }, [
-        el("td", {}, [
-          el("span", { class: "tm-event-heading", text: event.heading || "—" }),
-          event.onlineUrl ? el("span", { class: "tm-badge tm-badge-unknown tm-event-tag", text: "Online" }) : null,
-        ]),
-        el("td", { class: "tm-muted", text: formatEventWhen(event.startAt, event.timezone) }),
-        el("td", {}, [statusPill(event, now)]),
-        el("td", { class: "tm-muted", text: attendance }),
-        el("td", { class: "tm-muted", text: capacityLabel(event.capacity) }),
-        el("td", { class: "tm-actions" }, rowActions(event)),
-      ]);
-    }),
-  );
+  // Build the page's rows, dropping a full-width "Past events" divider before the first past row that
+  // lands on this page (TM-518) — so the section header appears exactly once, at the seam.
+  const bodyRows = [];
+  pageRows.forEach((event, i) => {
+    const globalIndex = start + i;
+    if (past.length && globalIndex === pastStart) bodyRows.push(pastSectionRow());
+    bodyRows.push(eventRow(event, now));
+  });
+  const body = el("tbody", {}, bodyRows);
 
   shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
   renderPager(rows.length);
 }
 
-function rowActions(event) {
+/** One event row. A past event (TM-518) reads as muted and read-only (see rowActions). */
+function eventRow(event, now) {
+  const counts = attendanceCounts(event);
+  const attendance = `${counts.going == null ? "—" : counts.going} / ${counts.waitlist == null ? "—" : counts.waitlist}`;
+  const past = isPastEvent(event, now);
+  return el("tr", { class: past ? "tm-event-row-past" : null, dataset: { eventId: String(event.id) } }, [
+    el("td", {}, [
+      el("span", { class: "tm-event-heading", text: event.heading || "—" }),
+      event.onlineUrl ? el("span", { class: "tm-badge tm-badge-unknown tm-event-tag", text: "Online" }) : null,
+    ]),
+    el("td", { class: "tm-muted", text: formatEventWhen(event.startAt, event.timezone) }),
+    el("td", {}, [statusPill(event, now)]),
+    el("td", { class: "tm-muted", text: attendance }),
+    el("td", { class: "tm-muted", text: capacityLabel(event.capacity) }),
+    el("td", { class: "tm-actions" }, rowActions(event, now)),
+  ]);
+}
+
+/** The full-width "Past events" divider row that heads the read-only past section (TM-518). */
+function pastSectionRow() {
+  return el("tr", { class: "tm-event-past-divider", "data-testid": "admin-events-past" }, [
+    el("td", { colspan: String(COLUMNS.length + 1), class: "tm-muted" }, "Past events — read-only"),
+  ]);
+}
+
+function rowActions(event, now = Date.now()) {
+  // A past event is READ-ONLY (TM-518): both Edit and Cancel are unavailable (the server rejects them
+  // too, with a 409). Render a single DISABLED "Edit" so the control is visibly present-but-inert, and
+  // no Cancel — a finished event has nothing left to call off. Kept in lock-step with the server-side
+  // reject via the same `past` flag the projection carries.
+  if (isPastEvent(event, now)) {
+    return [
+      el(
+        "button",
+        {
+          class: "tm-btn tm-btn-sm",
+          type: "button",
+          disabled: true,
+          "aria-label": `Edit ${event.heading} (ended — read-only)`,
+          title: "This event has ended and can no longer be edited or cancelled.",
+        },
+        "Edit",
+      ),
+    ];
+  }
   const edit = el(
     "button",
     {

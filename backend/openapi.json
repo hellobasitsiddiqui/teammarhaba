@@ -1106,6 +1106,9 @@
           "onlineUrl" : {
             "type" : "string"
           },
+          "past" : {
+            "type" : "boolean"
+          },
           "premium" : {
             "type" : "boolean"
           },

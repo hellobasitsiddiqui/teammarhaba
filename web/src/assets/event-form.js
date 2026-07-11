@@ -401,6 +401,45 @@ export function eventLifecycle(event = {}, now = Date.now()) {
   return { label: "Visible", tone: "ok" };
 }
 
+/**
+ * Has this event already ENDED (TM-518)? The authoritative signal is the admin projection's own
+ * {@code past} boolean (EventResponse.past, the server's EventPhasePolicy.isFinished verdict), so this
+ * prefers it whenever it's a boolean — that keeps the console's "Past events" grouping and its
+ * hidden/disabled edit + cancel controls in lock-step with the server-side edit/cancel reject, so the
+ * two can never disagree. It falls back to deriving from the instants (ended once now ≥ endAt, or ≥
+ * startAt for an open-ended event with no endAt) only for a response that predates the flag — a plain
+ * backstop, never the primary path. Never throws.
+ *
+ * @param {object} event an EventResponse.
+ * @param {Date|number|string} [now]
+ * @returns {boolean}
+ */
+export function isPastEvent(event = {}, now = Date.now()) {
+  if (typeof event.past === "boolean") return event.past;
+  const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const startMs = new Date(event.startAt).getTime();
+  const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs;
+  return Number.isFinite(endMs) && Number.isFinite(t) && t >= endMs;
+}
+
+/**
+ * Partition an already-sorted event list into active vs past (TM-518), PRESERVING the incoming order
+ * within each group — the admin list renders active rows first, then the "Past events" section at the
+ * bottom, so it stably concatenates {@code [...upcoming, ...past]} and drops a divider at the seam.
+ * A stable partition (not a re-sort) so the admin's chosen column sort still holds inside each group.
+ *
+ * @param {object[]} events EventResponses, already in the admin's chosen sort order.
+ * @param {Date|number|string} [now]
+ * @returns {{upcoming: object[], past: object[]}}
+ */
+export function partitionEventsByPast(events = [], now = Date.now()) {
+  const list = Array.isArray(events) ? events : [];
+  const upcoming = [];
+  const past = [];
+  for (const e of list) (isPastEvent(e, now) ? past : upcoming).push(e);
+  return { upcoming, past };
+}
+
 /** "Unlimited" when capacity is null/absent, otherwise the number as a string (blank = unlimited). */
 export function capacityLabel(capacity) {
   return capacity == null || capacity === "" ? "Unlimited" : String(capacity);

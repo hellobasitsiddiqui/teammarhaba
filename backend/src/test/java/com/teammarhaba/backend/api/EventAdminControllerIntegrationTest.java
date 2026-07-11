@@ -126,6 +126,30 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
         return events.saveAndFlush(event);
     }
 
+    /**
+     * Seed an event that has already ENDED (TM-518): started 5h ago, ended 2h ago, but with a wide-open
+     * visibility window so "past" is decided purely by its end time, not visibility. Used for the
+     * read-only (no edit/cancel) + {@code past} flag assertions.
+     */
+    private Event seedPastEvent(String heading) {
+        Long creatorId = users.findByFirebaseUid("event-admin-seed-uid")
+                .orElseGet(() -> users.saveAndFlush(new User("event-admin-seed-uid", "seed@example.com", "Seeder")))
+                .getId();
+        Instant now = Instant.now();
+        Event event = new Event(
+                heading,
+                "Already happened.",
+                "Marhaba Cafe, 12 High St",
+                "Europe/London",
+                now.minusSeconds(5 * 3600),
+                now.minusSeconds(10L * 24 * 3600),
+                now.plusSeconds(10L * 24 * 3600),
+                creatorId,
+                now);
+        event.setEndAt(now.minusSeconds(2 * 3600));
+        return events.saveAndFlush(event);
+    }
+
     /** Register a fresh user as attending an event in the given state (for the count assertions). */
     private void attend(long eventId, String uid, AttendanceState state) {
         Long userId = users.saveAndFlush(new User(uid, uid + "@example.com", uid)).getId();
@@ -596,6 +620,58 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
         assertThat(auditActionsFor(id)).containsOnlyOnce(AuditAction.EVENT_CANCELLED);
         assertThat(lifecycleSignals(id, EventLifecycleEvent.Kind.CANCELLED)).hasSize(1);
+    }
+
+    // --- Past events are read-only (TM-518) ---
+
+    @Test
+    void patchRejectingAPastEventIsA409AndLeavesItUnchanged() throws Exception {
+        Event past = seedPastEvent("Past — no edit");
+        long id = past.getId();
+
+        mockMvc.perform(patch("/api/v1/admin/events/{id}", id)
+                        .with(admin("events-admin-past-edit"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"heading\":\"Tampered\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Conflict"))
+                .andExpect(jsonPath("$.detail").value("This event has already ended and can no longer be edited."));
+
+        // The record is untouched — no field changed, no audit row written.
+        assertThat(events.findById(id).orElseThrow().getHeading()).isEqualTo("Past — no edit");
+        assertThat(auditActionsFor(id)).doesNotContain(AuditAction.EVENT_UPDATED);
+    }
+
+    @Test
+    void cancellingAPastEventIsA409AndLeavesItPublished() throws Exception {
+        Event past = seedPastEvent("Past — no cancel");
+        long id = past.getId();
+
+        mockMvc.perform(post("/api/v1/admin/events/{id}/cancel", id).with(admin("events-admin-past-cancel")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Conflict"))
+                .andExpect(jsonPath("$.detail").value("This event has already ended and can no longer be cancelled."));
+
+        // Still PUBLISHED — the past event was never called off; no cancel audit/signal.
+        assertThat(events.findById(id).orElseThrow().getStatus()).isEqualTo(EventStatus.PUBLISHED);
+        assertThat(auditActionsFor(id)).doesNotContain(AuditAction.EVENT_CANCELLED);
+        assertThat(lifecycleSignals(id, EventLifecycleEvent.Kind.CANCELLED)).isEmpty();
+    }
+
+    @Test
+    void projectionCarriesThePastFlagTrueForEndedEventsAndFalseForFutureOnes() throws Exception {
+        Event past = seedPastEvent("Ended already");
+        Event future = seedEvent(
+                "Still to come", Instant.parse("2030-01-01T00:00:00Z"), Instant.parse("2030-02-01T00:00:00Z"));
+
+        mockMvc.perform(get("/api/v1/admin/events/{id}", past.getId()).with(admin("events-admin-pastflag")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.past").value(true));
+
+        mockMvc.perform(get("/api/v1/admin/events/{id}", future.getId()).with(admin("events-admin-pastflag")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.past").value(false));
     }
 
     // --- Admin listing: the full inventory ---
