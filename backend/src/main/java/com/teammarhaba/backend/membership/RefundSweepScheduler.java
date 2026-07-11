@@ -22,17 +22,23 @@ import org.springframework.stereotype.Component;
  * so one poisoned refund can never stall the rest of the pass; overlap between instances is safe
  * because each row is re-checked under the owner's user-row lock.
  *
- * <p><strong>Kill switch (TM-625).</strong> Gated on the SAME opt-in pair as the renewal scheduler:
- * BOTH {@code app.subscriptions.enabled} AND {@code app.membership.enabled} must be explicitly
- * {@code true} ({@code matchIfMissing = false}) for this bean to exist. It moves money (back to the
- * customer, but still a provider mutation), so it follows the money-mover rule: no context that didn't
- * explicitly opt in ever ticks it, and a feature rollback stops it together with the charging side.
+ * <p><strong>Kill switch (TM-625, regated by TM-630).</strong> Gated on {@code app.membership.enabled}
+ * ALONE (explicitly {@code true}, {@code matchIfMissing = false}). The gate must match the
+ * {@code REFUND_DUE} <em>producers</em>, and those are membership-gated: the EVENT checkout / cancel
+ * refund paths ({@code CheckoutService.tryRefund}) are live whenever membership is on, with or without
+ * subscriptions. The original gate additionally required {@code app.subscriptions.enabled} (copied from
+ * the renewal scheduler, which is genuinely subscription-specific — its BOTH-flags gate is correct and
+ * unchanged), so the launch config MEMBERSHIP_ENABLED=true / SUBSCRIPTIONS_ENABLED=false had live event
+ * refunds and NO sweeper: one failed inline refund stranded captured customer money in
+ * {@code REFUND_DUE} forever — the exact TM-625 dead-end, reopened by configuration. Sweeping BOTH
+ * ledgers under the membership-only gate is safe: subscription refunds only exist when subscriptions
+ * are on, so the {@code subscription_charges} ledger is simply empty otherwise. It still moves money
+ * (back to the customer, but still a provider mutation), so it keeps the money-mover rule: no context
+ * that didn't explicitly opt in to membership ever ticks it, and a membership rollback stops it
+ * together with every refund producer.
  */
 @Component
-@ConditionalOnProperty(
-        name = {"app.subscriptions.enabled", "app.membership.enabled"},
-        havingValue = "true",
-        matchIfMissing = false)
+@ConditionalOnProperty(name = "app.membership.enabled", havingValue = "true", matchIfMissing = false)
 public class RefundSweepScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(RefundSweepScheduler.class);

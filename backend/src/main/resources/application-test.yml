@@ -33,6 +33,11 @@ app:
   # subscription state a test sets up itself.
   subscriptions:
     enabled: false
+    # The refund sweeper is membership-gated (TM-630), so with membership ON below its bean EXISTS in
+    # every integration-test context — exactly what RefundSweepMembershipOnlyIntegrationTest proves.
+    # Push its first @Scheduled tick a day out so no background sweep ever fires mid-suite (the same
+    # determinism rule as the disabled schedulers above); tests drive tick() directly instead.
+    initial-delay-ms: 86400000
   # The SERVER-SIDE membership flag (TM-623) is ON under test so the integration suite can exercise the
   # money paths end to end (subscription checkout/cancel, PAY checkout) with the provider seam mocked.
   # The flag-OFF behaviour (money endpoints 404/403, scheduler bean absent) is proven by
