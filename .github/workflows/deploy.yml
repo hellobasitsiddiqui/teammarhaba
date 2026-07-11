@@ -416,6 +416,7 @@ jobs:
           MAIL_ENV: ${{ steps.mail.outputs.env }}
           REVOLUT_SECRETS: ${{ steps.revolut.outputs.secrets }}
           REVOLUT_ENV: ${{ steps.revolut.outputs.env }}
+          E2E_TEST_LOGIN_ADDRESS: ${{ vars.E2E_TEST_LOGIN_ADDRESS }}
         run: |
           set -euo pipefail
           # Comma-join DB_PASSWORD with the optional MAIL_PASSWORD + Revolut secrets (empty -> no stray comma).
@@ -430,7 +431,17 @@ jobs:
           #   SUBSCRIPTIONS_ENABLED  the off-session renewal/dunning scheduler's own switch (also
           #                          requires MEMBERSHIP_ENABLED=true — both must be true for the bean
           #                          to exist). Explicit false today: nothing charges saved cards.
-          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }},MEMBERSHIP_ENABLED=true,SUBSCRIPTIONS_ENABLED=false${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}"
+          # TM-312 e2e test-login: wire the inbox-free fixed-code email hook ONLY for the allow-listed
+          # test address, and ONLY when the repo VARIABLE E2E_TEST_LOGIN_ADDRESS is set (empty -> not
+          # wired, prod unaffected). Kept in a repo variable, NOT source, so the address isn't in the
+          # public repo. Real addresses always get a random code + real send; this fixed-code path is
+          # scoped to that one powerless test account (sandbox payments only).
+          E2E_ENV=""
+          if [ -n "${E2E_TEST_LOGIN_ADDRESS}" ]; then
+            E2E_ENV="EMAIL_CODE_TEST_ALLOWED_ADDRESSES=${E2E_TEST_LOGIN_ADDRESS}"
+            echo "- Test-login (e2e): ON for the allow-listed test address (TM-312)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }},MEMBERSHIP_ENABLED=true,SUBSCRIPTIONS_ENABLED=false${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}${E2E_ENV:+,${E2E_ENV}}"
 
           # --no-traffic is only meaningful when a previous revision holds traffic; on the
           # first-ever deploy of the service (fresh replay) the first revision must serve.
