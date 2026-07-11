@@ -29,6 +29,9 @@ import {
   checkoutPayload,
   createRevolutSdkLoader,
   formatPrice,
+  isValidCardholderName,
+  normalizeCardholderName,
+  CARDHOLDER_NAME_HINT,
   CHECKOUT_MODE,
   PRICE_KIND,
   TIER,
@@ -158,6 +161,73 @@ export function loadRevolutSdk() {
   return revolutSdkLoader();
 }
 
+/**
+ * Read the Paper theme values for the Revolut card field's `styles` option (TM-639). The card number /
+ * expiry / CVC inputs render INSIDE Revolut's own iframe, so our stylesheet can never reach them — they
+ * can only be themed through this object. We read the RESOLVED theme custom properties at runtime (so
+ * dark mode + the per-user accent are honoured) with hard-coded Paper-ink fallbacks, and pin a 16px size
+ * (comfortable, and it stops iOS zooming the page on focus). The hand-drawn Paper body font isn't loaded
+ * inside the cross-origin iframe, so we pass a rounded system-font stack rather than a face that would
+ * silently fall back to Times. Exported so the Subscribe checkout (membership-subscribe.js) themes its
+ * card field identically.
+ * @returns {object} a RevolutCheckout.js card-field `styles` object.
+ */
+export function revolutCardFieldStyles() {
+  const read = (name, fallback) => {
+    try {
+      const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return value || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    default: {
+      color: read("--fg", "#2b2b2b"),
+      "font-family": '"Patrick Hand", "Comic Sans MS", ui-rounded, system-ui, sans-serif',
+      "font-size": "16px",
+      "::placeholder": { color: read("--muted", "#6b6b6b") },
+    },
+    invalid: { color: read("--danger", "#b00020") },
+  };
+}
+
+/**
+ * Build the "Name on card" field both payment views render (TM-639). Revolut rejects a one-word
+ * cardholder name AND the card field renders no name input of its own, so both the per-event Pay flow and
+ * the Subscribe checkout drop this required text input ABOVE the card iframe, pre-filled with the caller's
+ * profile display name (a best-effort convenience — the field is editable and the profile read never
+ * blocks the charge). Returns the wrapper plus direct handles to the input and the inline (aria-live)
+ * error node, so the caller can read the value, focus it, and set the hint without re-querying the DOM.
+ * XSS-safe: built with ui.js `el()` (textContent only). Themed by the shared `.tm-cardholder-*` rules in
+ * membership-checkout.css (the `.tm-input` base + hand-drawn wobble come from styles.css).
+ * @param {string} [displayName] the value to pre-fill (the caller's profile display name).
+ * @returns {{field: HTMLElement, input: HTMLInputElement, error: HTMLElement}}
+ */
+export function buildCardholderNameField(displayName = "") {
+  const input = el("input", {
+    type: "text",
+    class: "tm-input tm-cardholder-input",
+    name: "cardholder-name",
+    autocomplete: "cc-name",
+    placeholder: "Name on card",
+    required: true,
+  });
+  // Pre-fill the DOM value property (not a value attribute) so an editable, well-formed field starts
+  // populated; a single-word display name (e.g. "Basit") is left as-is and simply fails validation on
+  // submit, prompting the user to add a surname — never sent to Revolut.
+  if (typeof displayName === "string" && displayName.trim()) input.value = displayName;
+  const error = el("p", { class: "tm-cardholder-error", "aria-live": "polite", text: "" });
+  const field = el("div", { class: "tm-cardholder-field" }, [
+    el("label", { class: "tm-cardholder-label" }, [
+      el("span", { class: "tm-cardholder-label-text", text: "Name on card" }),
+      input,
+    ]),
+    error,
+  ]);
+  return { field, input, error };
+}
+
 /** Set the Pay mount's aria-live status line (progress / error copy). No-op if the mount is gone. */
 function setPayStatus(mount, text) {
   const status = mount && mount.querySelector(".tm-checkout-pay-status");
@@ -231,6 +301,22 @@ async function mountRevolutCard(mount, token, state) {
 
   const host = mount.querySelector(".tm-checkout-pay-widget");
   if (host) clear(host);
+
+  // The "Name on card" field (TM-639): Revolut rejects the charge unless the cardholder name is at least
+  // two words, and the card field renders no name input of its own — so we render our own, pre-filled with
+  // the caller's profile display name (best-effort; editable; its read never blocks the charge) and pass
+  // the validated value to cardField.submit({ name }) below.
+  let displayName = "";
+  try {
+    const me = await api.getMe();
+    if (me && typeof me.displayName === "string") displayName = me.displayName;
+  } catch {
+    // No profile read — the field just starts empty and the user types their name.
+  }
+  const { field: nameField, input: nameInput, error: nameError } = buildCardholderNameField(displayName);
+  // Render the name field ABOVE the card iframe so the box reads top-to-bottom: name → card → Pay.
+  if (host) mount.insertBefore(nameField, host);
+
   const priceText =
     Number.isFinite(state?.amountPence) && state.amountPence > 0 ? formatPrice(state.amountPence) : null;
   const payBtn = el("button", {
@@ -239,15 +325,27 @@ async function mountRevolutCard(mount, token, state) {
     text: priceText ? `Pay ${priceText}` : "Pay",
   });
 
+  // The card field, themed to the Paper look via `styles` (TM-639): the number / expiry / CVC inputs live
+  // in Revolut's iframe, so they can only be styled through this object, never our CSS.
   const cardField = instance.createCardField({
     target: host,
+    styles: revolutCardFieldStyles(),
     onSuccess: () => reflectPaid(mount, "Payment received — you're confirmed for this event."),
     onError: (message) => setPayStatus(mount, `Payment failed: ${message?.message ?? message ?? "please try again"}`),
   });
 
   payBtn.addEventListener("click", () => {
+    // Cardholder-name gate (TM-639): never submit a name Revolut will reject — require two words and show
+    // the inline hint instead of charging. The card field submits only once a valid two-word name is set.
+    const name = nameInput.value;
+    if (!isValidCardholderName(name)) {
+      nameError.textContent = CARDHOLDER_NAME_HINT;
+      nameInput.focus();
+      return;
+    }
+    nameError.textContent = "";
     setPayStatus(mount, "Processing payment…");
-    cardField.submit();
+    cardField.submit({ name: normalizeCardholderName(name) });
   });
   if (host) host.append(payBtn);
   setPayStatus(mount, "Enter your card details to pay.");

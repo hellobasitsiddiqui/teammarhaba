@@ -16,6 +16,9 @@ import {
   checkoutPayload,
   formatPrice,
   normalizeTier,
+  isValidCardholderName,
+  normalizeCardholderName,
+  CARDHOLDER_NAME_HINT,
   TIER,
   PRICE_KIND,
   CHECKOUT_MODE,
@@ -51,6 +54,44 @@ test("normalizeTier accepts the known tiers (any case/whitespace) and defaults t
   assert.equal(normalizeTier(undefined), TIER.PAY_PER_EVENT);
   assert.equal(normalizeTier(null), TIER.PAY_PER_EVENT);
   assert.equal(normalizeTier(42), TIER.PAY_PER_EVENT);
+});
+
+// --- cardholder name validation (TM-639) -------------------------------------------------------
+// Revolut rejects the charge with "Cardholder name must be at least two words" when the name on the card
+// isn't a first + last name. The bug: the pay button submitted the card field with NO name at all, so the
+// charge always failed on the live sandbox. These pin the pure ≥2-word gate the views run BEFORE submit
+// so an invalid name is never sent to Revolut.
+
+test("isValidCardholderName requires at least two words (a single word is rejected — TM-639)", () => {
+  assert.equal(isValidCardholderName("Basit Siddiqui"), true, "two words: a first and last name");
+  assert.equal(isValidCardholderName("Mary Jane Watson"), true, "three words is fine");
+  assert.equal(isValidCardholderName("Basit"), false, "a single word is exactly what Revolut rejects");
+});
+
+test("isValidCardholderName handles surrounding + internal whitespace (trim, split on any run)", () => {
+  assert.equal(isValidCardholderName("   Basit   Siddiqui   "), true, "surrounding whitespace ignored");
+  assert.equal(isValidCardholderName("Basit\tSiddiqui"), true, "a tab still splits two words");
+  assert.equal(isValidCardholderName("   Basit   "), false, "a padded single word is still one word");
+});
+
+test("isValidCardholderName rejects empty / blank / non-string input (TM-639)", () => {
+  assert.equal(isValidCardholderName(""), false);
+  assert.equal(isValidCardholderName("   "), false, "whitespace-only is no words, not one");
+  assert.equal(isValidCardholderName(undefined), false);
+  assert.equal(isValidCardholderName(null), false);
+  assert.equal(isValidCardholderName(42), false);
+});
+
+test("normalizeCardholderName trims and squeezes internal whitespace to a single space (TM-639)", () => {
+  assert.equal(normalizeCardholderName("  Basit   Siddiqui "), "Basit Siddiqui");
+  assert.equal(normalizeCardholderName("Mary\tJane  Watson"), "Mary Jane Watson");
+  assert.equal(normalizeCardholderName("Basit"), "Basit", "one word normalises to itself (validation is separate)");
+  assert.equal(normalizeCardholderName(undefined), "", "a non-string collapses to empty");
+});
+
+test("CARDHOLDER_NAME_HINT is the shared first-and-last inline hint (TM-639)", () => {
+  assert.equal(typeof CARDHOLDER_NAME_HINT, "string");
+  assert.match(CARDHOLDER_NAME_HINT, /first and last/i);
 });
 
 // --- AC 1: the price states --------------------------------------------------------------------

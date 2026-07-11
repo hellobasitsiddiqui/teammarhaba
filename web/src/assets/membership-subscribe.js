@@ -25,8 +25,13 @@
 
 import * as api from "./api.js";
 import { el, clear } from "./ui.js";
-import { loadRevolutSdk } from "./membership-checkout.js";
-import { formatPrice } from "./membership-checkout-core.js";
+import { loadRevolutSdk, revolutCardFieldStyles, buildCardholderNameField } from "./membership-checkout.js";
+import {
+  formatPrice,
+  isValidCardholderName,
+  normalizeCardholderName,
+  CARDHOLDER_NAME_HINT,
+} from "./membership-checkout-core.js";
 import {
   describeSubscription,
   pollSubscriptionActivation,
@@ -157,6 +162,24 @@ async function startSubscribePayment(section, tier, generation) {
 
   const host = section.querySelector(".tm-subscribe-widget");
   if (host) clear(host);
+
+  // The "Name on card" field (TM-639): Revolut rejects the charge unless the cardholder name is at least
+  // two words, and the card field renders no name input of its own — so we render our own, pre-filled with
+  // the caller's profile display name (best-effort; editable; its read never blocks the charge) and pass
+  // the validated value to cardField.submit({ name }) below.
+  let displayName = "";
+  try {
+    const me = await api.getMe();
+    if (me && typeof me.displayName === "string") displayName = me.displayName;
+  } catch {
+    // No profile read — the field just starts empty and the user types their name.
+  }
+  const { field: nameField, input: nameInput, error: nameError } = buildCardholderNameField(displayName);
+  const pay = section.querySelector(".tm-subscribe-pay");
+  // Render the name field ABOVE the card-number widget host so the box reads top-to-bottom: name → card
+  // → Subscribe button.
+  if (pay && host) pay.insertBefore(nameField, host);
+
   const amount = Number.isFinite(checkout.amountPence) ? checkout.amountPence : subscriptionPricePence(tier);
   const payBtn = el("button", {
     type: "button",
@@ -164,12 +187,15 @@ async function startSubscribePayment(section, tier, generation) {
     text: `Subscribe · ${formatPrice(amount)}/month`,
   });
 
-  // The card field, with the card saved for MERCHANT-initiated use — the documented widget flag for
-  // subscription mandates (an API-shape assumption flagged for the live smoke test): the SCA/3DS
-  // challenge runs in the widget on this first charge, and every renewal then charges off-session.
+  // The card field, themed to the Paper look via `styles` (TM-639: the number / expiry / CVC inputs live
+  // in Revolut's iframe, so they can only be styled through this object, never our CSS). The card is saved
+  // for MERCHANT-initiated renewals: per the RevolutCheckout.js contract that flag — like the cardholder
+  // `name` — is SUBMIT-time metadata, so it is passed to cardField.submit() below. It was moved off
+  // createCardField in TM-639, where the contract silently ignored it (so the mandate may never actually
+  // have been saved). The SCA/3DS challenge still runs on this first charge; renewals then charge off-session.
   const cardField = instance.createCardField({
     target: host,
-    savePaymentMethodFor: "merchant",
+    styles: revolutCardFieldStyles(),
     onSuccess: () => {
       setStatus(section, "Payment received — activating your subscription…");
       pollActivation(section, tier, generation);
@@ -184,9 +210,18 @@ async function startSubscribePayment(section, tier, generation) {
     // In-flight guard (TM-629): a double-click used to submit the card field twice while the first
     // charge was still processing. Re-enabled in onError above so a declined card can be retried.
     if (payBtn.disabled) return;
+    // Cardholder-name gate (TM-639): never send a name Revolut will reject — require two words and show
+    // the inline hint instead of submitting. The button stays ENABLED so the user can fix it and retry.
+    const name = nameInput.value;
+    if (!isValidCardholderName(name)) {
+      nameError.textContent = CARDHOLDER_NAME_HINT;
+      nameInput.focus();
+      return;
+    }
+    nameError.textContent = "";
     payBtn.disabled = true;
     setStatus(section, "Processing payment…");
-    cardField.submit();
+    cardField.submit({ name: normalizeCardholderName(name), savePaymentMethodFor: "merchant" });
   });
 
   const actions = section.querySelector(".tm-subscribe-actions");
@@ -233,7 +268,7 @@ function renderSubscribe(section, tier, generation) {
     onClick: () => startSubscribePayment(section, tier, generation),
   });
   section.appendChild(
-    el("div", { class: "tm-subscribe-pay", dataset: { provider: "revolut" } }, [
+    el("div", { class: "tm-subscribe-pay tm-wobble", dataset: { provider: "revolut" } }, [
       el("div", { class: "tm-subscribe-widget" }),
       el("div", { class: "tm-subscribe-actions" }, [start]),
       el("p", { class: "tm-subscribe-status", "aria-live": "polite", text: "" }),

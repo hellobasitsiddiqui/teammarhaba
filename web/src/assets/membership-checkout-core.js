@@ -220,6 +220,52 @@ export function checkoutPayload(event, state) {
   return { eventId, action: "RSVP", chargePence: 0 };
 }
 
+// --- Cardholder name (TM-639) ----------------------------------------------------------------------
+
+/**
+ * The inline hint shown when the "Name on card" field fails validation (TM-639). Kept here so BOTH
+ * payment views — the per-event checkout (membership-checkout.js) and the Subscribe checkout
+ * (membership-subscribe.js) — show the exact same copy, and the tests assert against one source of truth.
+ */
+export const CARDHOLDER_NAME_HINT = "Enter the full name on the card (first and last).";
+
+/**
+ * Split a cardholder name into its non-empty, whitespace-separated words. The shared primitive behind
+ * {@link isValidCardholderName} and {@link normalizeCardholderName}: trims the ends, splits on ANY run
+ * of whitespace (spaces, tabs), and drops empty parts so runs of whitespace never count as words.
+ * @param {unknown} name
+ * @returns {string[]}
+ */
+function cardholderNameWords(name) {
+  if (typeof name !== "string") return [];
+  return name.trim().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Is a cardholder name acceptable to Revolut? The Revolut card field rejects the charge with
+ * "Cardholder name must be at least two words" unless the name on the card is at least a first AND a
+ * last name (TM-639). We enforce the SAME rule client-side so an invalid name is never sent to Revolut:
+ * the trimmed value must contain at least TWO whitespace-separated words. A single word, a blank string,
+ * or a non-string all fail.
+ * @param {unknown} name the raw value of the "Name on card" input.
+ * @returns {boolean} true iff the name has two or more words.
+ */
+export function isValidCardholderName(name) {
+  return cardholderNameWords(name).length >= 2;
+}
+
+/**
+ * Collapse a cardholder name to one tidy line before it is SENT to Revolut — trim the ends and squeeze
+ * every internal run of whitespace to a single space ("  John   Smith " → "John Smith"). Independent of
+ * {@link isValidCardholderName}: a one-word input normalises to itself (the view validates first, so a
+ * value this returns has already been checked).
+ * @param {unknown} name
+ * @returns {string} the normalised name, or "" for a non-string / blank input.
+ */
+export function normalizeCardholderName(name) {
+  return cardholderNameWords(name).join(" ");
+}
+
 // --- Revolut SDK loader (TM-629) -------------------------------------------------------------------
 
 /**

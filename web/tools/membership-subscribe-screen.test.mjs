@@ -85,16 +85,61 @@ test("Continue-to-payment disables itself while the checkout is in flight and re
   );
 });
 
-test("the Pay button guards double-submit and re-enables on a declined card (TM-629)", () => {
+test("the Pay button guards double-submit, validates the name, then submits with a { name } (TM-629/TM-639)", () => {
+  // Still guards a double-submit while a charge is already in flight…
+  assert.match(SRC, /if\s*\(payBtn\.disabled\)\s*return;/, "the Pay handler bails while a charge is already in flight");
+  // …blocks an invalid (one-word) cardholder name and returns WITHOUT disabling/charging (so the user can
+  // fix it and retry — the button stays enabled)…
   assert.match(
     SRC,
-    /if\s*\(payBtn\.disabled\)\s*return;\s*\n\s*payBtn\.disabled\s*=\s*true;[\s\S]{0,120}cardField\.submit\(\)/,
-    "the Pay click handler must disable the button before submitting the card field",
+    /if\s*\(!isValidCardholderName\([\s\S]{0,40}\)\)\s*\{[\s\S]{0,220}return;/,
+    "an invalid cardholder name must block the submit and return without charging",
+  );
+  // …then disables the button and submits the card field WITH the validated name (TM-639: no name ⇒
+  // Revolut rejects "Cardholder name must be at least two words").
+  assert.match(
+    SRC,
+    /payBtn\.disabled\s*=\s*true;[\s\S]{0,160}cardField\.submit\(\{\s*name:/,
+    "the Pay handler disables the button and submits the card field with a { name } payload",
   );
   assert.match(
     SRC,
     /onError:\s*\(message\)\s*=>\s*\{[\s\S]{0,240}payBtn\.disabled\s*=\s*false/,
     "the widget's onError must re-enable Pay so a declined card can be retried",
+  );
+});
+
+// --- cardholder name field + themed card field (TM-639) --------------------------------------------
+
+test("the shell renders a required 'Name on card' field pre-filled from the profile (TM-639)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bisValidCardholderName\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the pure cardholder-name validator from the core (where it is unit-tested)",
+  );
+  assert.match(SRC, /buildCardholderNameField\s*\(/, "builds the shared Name-on-card field");
+  assert.match(SRC, /api\.getMe\(\)/, "pre-fills the name from the caller's profile (GET /me)");
+  assert.match(SRC, /CARDHOLDER_NAME_HINT/, "shows the shared inline hint when the name is invalid");
+});
+
+test("the card field is themed for the Revolut iframe, and merchant-save moved to submit() (TM-639)", () => {
+  // The number / expiry / CVC inputs live in Revolut's iframe, so they're themed via the styles object.
+  assert.match(
+    SRC,
+    /createCardField\(\{[\s\S]{0,200}styles:\s*revolutCardFieldStyles\(\)/,
+    "createCardField must get a styles object (its inputs are unreachable by our CSS)",
+  );
+  // savePaymentMethodFor is SUBMIT-time metadata per the RevolutCheckout.js contract — it moved onto
+  // submit() (with the name), off createCardField where it was silently ignored.
+  assert.match(
+    SRC,
+    /cardField\.submit\(\{[\s\S]{0,90}savePaymentMethodFor:\s*"merchant"/,
+    "the merchant-save flag is passed to submit() alongside the name",
+  );
+  assert.doesNotMatch(
+    SRC,
+    /createCardField\(\{[\s\S]{0,160}savePaymentMethodFor/,
+    "savePaymentMethodFor must no longer sit on createCardField (the contract ignores it there)",
   );
 });
 

@@ -55,8 +55,19 @@
   color: var(--muted);
 }
 
-/* The payment area: the Revolut card-field host, the action button and the live status line. */
+/* The payment area (TM-639): a proper Paper card box — the "Name on card" field (styled by the shared
+   .tm-cardholder-* rules in membership-checkout.css), the Revolut card-field host, the action button and
+   the live status line all sit inside one tidy, wobble-edged card, matching .tm-subscribe-summary above.
+   Before TM-639 this had no box, so Revolut's raw iframe inputs rendered unstyled across the width. */
 .tm-subscribe-pay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface-card);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
   margin-bottom: var(--space-3);
 }
 
