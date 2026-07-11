@@ -32,6 +32,10 @@ import {
   isValidCardholderName,
   normalizeCardholderName,
   CARDHOLDER_NAME_HINT,
+  createCardSubmitController,
+  summarizeCardValidation,
+  PAYMENT_STUCK_HINT,
+  PAYMENT_SUBMIT_STATE,
   CHECKOUT_MODE,
   PRICE_KIND,
   TIER,
@@ -325,16 +329,70 @@ async function mountRevolutCard(mount, token, state) {
     text: priceText ? `Pay ${priceText}` : "Pay",
   });
 
+  // Tracks the last card-field validity the widget reported (null = it never told us — treat as unknown
+  // and let the submit proceed; the timeout backstop covers a genuinely stuck attempt). Set by onValidation.
+  let cardValid = null;
+
+  // The stuck-payment backstop (TM-642): a card the widget rejects/declines client-side sometimes calls
+  // NEITHER onSuccess NOR onError, so before this the Pay button sat disabled on "Processing payment…"
+  // forever. The node-tested controller owns the submit lifecycle (IDLE→PENDING→success|error|timeout)
+  // and arms a real setTimeout backstop; onChange drives the DOM per state, and it swallows a late
+  // onSuccess/onError after the attempt already settled (the double-fire guard).
+  const submitCtl = createCardSubmitController({
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (h) => clearTimeout(h),
+    onChange: (state, detail) => {
+      switch (state) {
+        case PAYMENT_SUBMIT_STATE.PENDING:
+          payBtn.disabled = true;
+          setPayStatus(mount, "Processing payment…");
+          break;
+        case PAYMENT_SUBMIT_STATE.SUCCESS:
+          reflectPaid(mount, "Payment received — you're confirmed for this event.");
+          break;
+        case PAYMENT_SUBMIT_STATE.ERROR:
+          setPayStatus(mount, `Payment failed: ${detail?.message ?? detail ?? "please try again"}`);
+          payBtn.disabled = false; // let the user retry the charge after a decline (TM-642)
+          break;
+        case PAYMENT_SUBMIT_STATE.TIMEOUT:
+          // The backstop fired: no callback within the window. Clear "Processing payment…", show the
+          // shared retryable hint, and re-enable so the button never stays stuck (TM-642).
+          setPayStatus(mount, PAYMENT_STUCK_HINT);
+          payBtn.disabled = false;
+          break;
+        default:
+          break;
+      }
+    },
+  });
+
   // The card field, themed to the Paper look via `styles` (TM-639): the number / expiry / CVC inputs live
   // in Revolut's iframe, so they can only be styled through this object, never our CSS.
   const cardField = instance.createCardField({
     target: host,
     styles: revolutCardFieldStyles(),
-    onSuccess: () => reflectPaid(mount, "Payment received — you're confirmed for this event."),
-    onError: (message) => setPayStatus(mount, `Payment failed: ${message?.message ?? message ?? "please try again"}`),
+    // Feed the widget callbacks into the controller — it decides whether each is the FIRST settle for
+    // the attempt (applies the effect) or a late no-op after the timeout already fired (TM-642).
+    onSuccess: () => submitCtl.success(),
+    onError: (message) => submitCtl.error(message),
+    // Inline validation feedback if the SDK offers it (TM-642): surface an obviously-invalid card
+    // (number/expiry/CVC) BEFORE submit so the Pay button ideally never enters the stuck state. Degrades
+    // gracefully — an unknown payload shape is treated as "no verdict", leaving the timeout as backstop.
+    onValidation: (payload) => {
+      const { valid, message } = summarizeCardValidation(payload);
+      cardValid = valid;
+      // Don't stomp the live "Processing payment…" line while a charge is in flight; otherwise restore the
+      // entry prompt when the card reads valid, or surface the inline hint (always present when invalid).
+      if (submitCtl.getState() !== PAYMENT_SUBMIT_STATE.PENDING) {
+        setPayStatus(mount, valid ? "Enter your card details to pay." : message);
+      }
+    },
   });
 
   payBtn.addEventListener("click", () => {
+    // In-flight guard (TM-642): ignore a double-click while a charge is already processing. The
+    // controller re-enables the button on error/timeout so a genuine retry still works.
+    if (payBtn.disabled) return;
     // Cardholder-name gate (TM-639): never submit a name Revolut will reject — require two words and show
     // the inline hint instead of charging. The card field submits only once a valid two-word name is set.
     const name = nameInput.value;
@@ -343,8 +401,17 @@ async function mountRevolutCard(mount, token, state) {
       nameInput.focus();
       return;
     }
+    // Obviously-invalid card gate (TM-642): if the widget has explicitly told us the card is invalid,
+    // surface it inline instead of submitting into the stuck state. `null`/valid → proceed.
+    if (cardValid === false) {
+      const { message } = summarizeCardValidation({ valid: false });
+      setPayStatus(mount, message);
+      return;
+    }
     nameError.textContent = "";
-    setPayStatus(mount, "Processing payment…");
+    // begin() moves to PENDING (disables the button + sets "Processing payment…" via onChange) and arms
+    // the timeout backstop; only then do we submit. begin() returns false only if already succeeded.
+    if (!submitCtl.begin()) return;
     cardField.submit({ name: normalizeCardholderName(name) });
   });
   if (host) host.append(payBtn);

@@ -266,6 +266,267 @@ export function normalizeCardholderName(name) {
   return cardholderNameWords(name).join(" ");
 }
 
+// --- Card submit lifecycle + stuck backstop (TM-642) -----------------------------------------------
+//
+// THE BUG: on the checkout, a card that Revolut rejects or declines CLIENT-side sometimes makes
+// `cardField.submit()` call NEITHER `onSuccess` NOR `onError` — and there is no timeout. The Pay /
+// Subscribe button had been disabled and the status set to "Processing payment…" the instant we
+// submitted, so with no callback it stays disabled saying "Processing payment…" forever: no feedback,
+// no retry (found in the payment e2e — a non-Revolut card number left it permanently stuck).
+//
+// THE FIX (this pure core + the two view wirings): model one card submit as a tiny state machine —
+//   IDLE → (submit) → PENDING → (first of success | error | timeout) → a terminal state —
+// and arm a client-side TIMEOUT backstop when we enter PENDING. If neither callback fires within the
+// window the timeout settles the attempt to a RETRYABLE state, so the view can clear "Processing
+// payment…", re-enable the button and show a "try again" hint. Everything that decides transitions +
+// which state re-enables the button lives HERE (DOM-free, node-tested); the views only own the DOM
+// effects + the real timer. The machine is also the double-fire GUARD the ticket asks for: once an
+// attempt has settled, a LATE callback from that same attempt is a no-op (see the precedence note on
+// nextPaymentSubmitState), so a success that arrives after the timeout can't clobber the shown error.
+
+/**
+ * The retryable copy shown when a card submit gets STUCK — the client-side timeout elapsed with no
+ * onSuccess/onError from the widget (TM-642). Shared by BOTH payment views (per-event checkout +
+ * Subscribe) so the wording is identical and the tests assert one source of truth. Deliberately blames
+ * the card details (the overwhelmingly likely cause of a rejected/declined submit) and invites a retry.
+ */
+export const PAYMENT_STUCK_HINT = "Payment didn't go through — check your card details and try again.";
+
+/**
+ * How long the view waits for a submit callback before declaring the attempt stuck (TM-642). 30s is
+ * comfortably longer than a real Revolut round-trip (incl. the 3DS/SCA challenge) yet short enough that
+ * a user is not left staring at "Processing payment…" indefinitely. The views inject the real timer;
+ * this is the default window.
+ */
+export const PAYMENT_SUBMIT_TIMEOUT_MS = 30000;
+
+/**
+ * The states one card submit moves through (TM-642):
+ *   • IDLE     — nothing submitted yet;
+ *   • PENDING  — submit() called; awaiting onSuccess / onError / the timeout backstop (button disabled);
+ *   • SUCCESS  — onSuccess fired first — terminal and LOCKED (a payment is never "un-succeeded");
+ *   • ERROR    — onError fired first — terminal, RETRYABLE (re-enable the button so the user can retry);
+ *   • TIMEOUT  — neither callback fired within the window — terminal, RETRYABLE (the stuck-state fix).
+ * ERROR and TIMEOUT are the two retryable terminals; SUCCESS is the one non-retryable terminal.
+ */
+export const PAYMENT_SUBMIT_STATE = Object.freeze({
+  IDLE: "IDLE",
+  PENDING: "PENDING",
+  SUCCESS: "SUCCESS",
+  ERROR: "ERROR",
+  TIMEOUT: "TIMEOUT",
+});
+
+/** The lifecycle events that drive {@link nextPaymentSubmitState}. */
+export const PAYMENT_SUBMIT_EVENT = Object.freeze({
+  SUBMIT: "SUBMIT", // the user pressed Pay/Subscribe and we called cardField.submit()
+  SUCCESS: "SUCCESS", // the widget's onSuccess fired
+  ERROR: "ERROR", // the widget's onError fired
+  TIMEOUT: "TIMEOUT", // our client-side backstop elapsed with no callback
+});
+
+/** The terminal states — an attempt in one of these has settled. */
+const SETTLED_STATES = new Set([
+  PAYMENT_SUBMIT_STATE.SUCCESS,
+  PAYMENT_SUBMIT_STATE.ERROR,
+  PAYMENT_SUBMIT_STATE.TIMEOUT,
+]);
+
+/** The retryable terminals — settled, but the button should re-enable so the user can try again. */
+const RETRYABLE_STATES = new Set([PAYMENT_SUBMIT_STATE.ERROR, PAYMENT_SUBMIT_STATE.TIMEOUT]);
+
+/** Has this submit reached a terminal state (success / error / timeout)? */
+export function isPaymentSettled(state) {
+  return SETTLED_STATES.has(state);
+}
+
+/** Is this a settled state the user can retry from (error / timeout — NOT success)? */
+export function isPaymentRetryable(state) {
+  return RETRYABLE_STATES.has(state);
+}
+
+/** Is a submit currently in flight (button should stay disabled)? */
+export function isPaymentPending(state) {
+  return state === PAYMENT_SUBMIT_STATE.PENDING;
+}
+
+/**
+ * The pure transition function for one card submit (TM-642) — `(current, event) → next`. It is the
+ * single place the "who wins" precedence is decided, so it can be exhaustively unit-tested without a
+ * DOM or a timer:
+ *
+ *   • from IDLE:        SUBMIT → PENDING; a stray callback before any submit is ignored (stays IDLE).
+ *   • from PENDING:     the FIRST of SUCCESS / ERROR / TIMEOUT wins and becomes the terminal state;
+ *                       a redundant SUBMIT stays PENDING (the button already guards double-clicks).
+ *   • from SUCCESS:     LOCKED — a payment is never un-succeeded, so a late ERROR/TIMEOUT is ignored,
+ *                       and SUBMIT does NOT restart (there is nothing left to pay).
+ *   • from ERROR/TIMEOUT (the retryable terminals): a fresh SUBMIT (the user pressing the re-enabled
+ *                       button) starts a NEW attempt → PENDING; but a LATE SUCCESS/ERROR/TIMEOUT from
+ *                       the ORIGINAL, already-settled attempt is IGNORED.
+ *
+ * THE CHOSEN PRECEDENCE (TM-642): the FIRST terminal event of an attempt wins; later callbacks from
+ * that same attempt are no-ops. In particular a SUCCESS that arrives AFTER a TIMEOUT does NOT override
+ * the shown "try again" error — we have already told the user it did not go through and re-enabled the
+ * button (they may even have retried), so silently flipping to success would be more confusing than the
+ * honest, server-authoritative outcome (the payment webhook is the real source of truth; the next
+ * screen visit reflects any charge that actually landed). Only the user pressing Pay again (a SUBMIT)
+ * moves a retryable terminal onward.
+ *
+ * @param {string} current a PAYMENT_SUBMIT_STATE value (an unknown value is treated as IDLE).
+ * @param {string} event a PAYMENT_SUBMIT_EVENT value.
+ * @returns {string} the next PAYMENT_SUBMIT_STATE.
+ */
+export function nextPaymentSubmitState(current, event) {
+  const state =
+    current === PAYMENT_SUBMIT_STATE.PENDING || SETTLED_STATES.has(current) ? current : PAYMENT_SUBMIT_STATE.IDLE;
+
+  switch (event) {
+    case PAYMENT_SUBMIT_EVENT.SUBMIT:
+      // A locked SUCCESS never re-submits; every other state (IDLE, PENDING, or a retryable terminal)
+      // (re)enters PENDING — the retry path for ERROR/TIMEOUT.
+      return state === PAYMENT_SUBMIT_STATE.SUCCESS ? state : PAYMENT_SUBMIT_STATE.PENDING;
+    case PAYMENT_SUBMIT_EVENT.SUCCESS:
+      // Only an in-flight (PENDING) attempt can succeed. A success after we already settled is ignored.
+      return state === PAYMENT_SUBMIT_STATE.PENDING ? PAYMENT_SUBMIT_STATE.SUCCESS : state;
+    case PAYMENT_SUBMIT_EVENT.ERROR:
+      return state === PAYMENT_SUBMIT_STATE.PENDING ? PAYMENT_SUBMIT_STATE.ERROR : state;
+    case PAYMENT_SUBMIT_EVENT.TIMEOUT:
+      return state === PAYMENT_SUBMIT_STATE.PENDING ? PAYMENT_SUBMIT_STATE.TIMEOUT : state;
+    default:
+      return state;
+  }
+}
+
+/**
+ * Build the stateful controller both payment views drive one card submit through (TM-642). It owns the
+ * {@link nextPaymentSubmitState} machine PLUS the client-side timeout backstop, but stays DOM-free and
+ * node-testable by taking its timer + its state-change sink as injected dependencies — the same
+ * dependency-injection seam createRevolutSdkLoader uses. The view constructs one with the real
+ * setTimeout/clearTimeout + an `onChange` that applies the DOM effects; the unit tests construct one
+ * with a fake timer + a recording sink.
+ *
+ * `onChange(state, detail)` fires exactly once per REAL transition (never for an ignored late callback),
+ * so the view can react per state: PENDING → "Processing payment…" + disable; SUCCESS → the paid/activate
+ * effect; ERROR → show the decline reason + re-enable; TIMEOUT → show PAYMENT_STUCK_HINT + re-enable. The
+ * `detail` is passed straight through (e.g. the onError message).
+ *
+ * @param {{setTimer?: (fn: Function, ms: number) => *, clearTimer?: (handle: *) => void,
+ *   timeoutMs?: number, onChange?: (state: string, detail?: unknown) => void}} [deps]
+ * @returns {{getState: () => string, begin: () => boolean, success: (d?: unknown) => (string|null),
+ *   error: (d?: unknown) => (string|null), timeout: (d?: unknown) => (string|null)}}
+ */
+export function createCardSubmitController({ setTimer, clearTimer, timeoutMs = PAYMENT_SUBMIT_TIMEOUT_MS, onChange } = {}) {
+  let state = PAYMENT_SUBMIT_STATE.IDLE;
+  let handle = null;
+  const emit = typeof onChange === "function" ? onChange : () => {};
+
+  // Cancel the backstop timer if one is armed. Safe to call when there is none.
+  const cancelTimer = () => {
+    if (handle != null && typeof clearTimer === "function") clearTimer(handle);
+    handle = null;
+  };
+
+  // Apply one lifecycle event. Returns the NEW state when the event actually moved the machine (the
+  // caller/emit then reacts), or null when it was a no-op — a stray/late callback after the attempt
+  // already settled, which must be swallowed so a late onSuccess/onError can't double-fire (TM-642).
+  function apply(event, detail) {
+    const next = nextPaymentSubmitState(state, event);
+    if (next === state) return null; // ignored: nothing changed (the double-fire guard)
+    state = next;
+    if (next !== PAYMENT_SUBMIT_STATE.PENDING) cancelTimer(); // settled → the backstop is no longer needed
+    emit(next, detail);
+    return next;
+  }
+
+  return {
+    /** The current PAYMENT_SUBMIT_STATE. */
+    getState: () => state,
+    /**
+     * Start (or retry) a submit: move to PENDING and arm the timeout backstop. Returns false ONLY when
+     * the attempt already succeeded (locked) so the caller must not submit again; true otherwise.
+     */
+    begin() {
+      apply(PAYMENT_SUBMIT_EVENT.SUBMIT);
+      if (state !== PAYMENT_SUBMIT_STATE.PENDING) return false; // locked at SUCCESS — nothing to submit
+      cancelTimer();
+      if (typeof setTimer === "function") {
+        handle = setTimer(() => apply(PAYMENT_SUBMIT_EVENT.TIMEOUT), timeoutMs);
+      }
+      return true;
+    },
+    /** Feed the widget's onSuccess. No-op (returns null) if the attempt already settled. */
+    success(detail) {
+      return apply(PAYMENT_SUBMIT_EVENT.SUCCESS, detail);
+    },
+    /** Feed the widget's onError. No-op (returns null) if the attempt already settled. */
+    error(detail) {
+      return apply(PAYMENT_SUBMIT_EVENT.ERROR, detail);
+    },
+    /** Fire the backstop manually (the injected timer normally does this). No-op once settled. */
+    timeout(detail) {
+      return apply(PAYMENT_SUBMIT_EVENT.TIMEOUT, detail);
+    },
+  };
+}
+
+// --- Card-field inline validation feedback (TM-642) ------------------------------------------------
+
+/** The generic inline hint when the card field reports an unspecified validation problem (TM-642). */
+export const CARD_VALIDATION_HINT = "Check your card number, expiry and CVC.";
+
+/** Best-effort: pull a human message out of the first entry of a Revolut validation-error array. */
+function firstCardValidationMessage(errors) {
+  const first = Array.isArray(errors) ? errors[0] : undefined;
+  if (typeof first === "string" && first.trim()) return first.trim();
+  if (first && typeof first === "object") {
+    for (const key of ["message", "text", "type"]) {
+      if (typeof first[key] === "string" && first[key].trim()) return first[key].trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Defensively interpret whatever Revolut's `createCardField` `onValidation` hands us into a simple
+ * `{ valid, message }` verdict (TM-642). The callback name/shape is NOT guaranteed across embed.js
+ * versions, so this reads the common shapes and — crucially — treats anything it can't understand as
+ * VALID (no verdict), so an unknown payload never wrongly blocks the user: the timeout backstop remains
+ * the guaranteed safety net. `valid` is FALSE only when we can clearly see an error; `message` is a
+ * short inline hint when invalid, else null.
+ *
+ * Shapes handled: an array of errors (empty = valid); `{ errors: [...] }`; `{ valid: boolean, message? }`;
+ * `{ message: string }`; a bare boolean validity. Everything else → valid, no message.
+ * @param {unknown} payload the argument onValidation was called with.
+ * @returns {{valid: boolean, message: (string|null)}}
+ */
+export function summarizeCardValidation(payload) {
+  if (Array.isArray(payload)) {
+    return payload.length === 0
+      ? { valid: true, message: null }
+      : { valid: false, message: firstCardValidationMessage(payload) || CARD_VALIDATION_HINT };
+  }
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.errors)) {
+      return payload.errors.length === 0
+        ? { valid: true, message: null }
+        : { valid: false, message: firstCardValidationMessage(payload.errors) || CARD_VALIDATION_HINT };
+    }
+    if (typeof payload.valid === "boolean") {
+      if (payload.valid) return { valid: true, message: null };
+      const own = typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : null;
+      return { valid: false, message: own || CARD_VALIDATION_HINT };
+    }
+    if (typeof payload.message === "string" && payload.message.trim()) {
+      return { valid: false, message: payload.message.trim() };
+    }
+  }
+  if (typeof payload === "boolean") {
+    return { valid: payload, message: payload ? null : CARD_VALIDATION_HINT };
+  }
+  // Unknown / absent → no verdict; never block (the timeout is the guaranteed backstop).
+  return { valid: true, message: null };
+}
+
 // --- Revolut SDK loader (TM-629) -------------------------------------------------------------------
 
 /**
