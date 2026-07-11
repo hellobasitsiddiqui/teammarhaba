@@ -8,8 +8,10 @@ import com.teammarhaba.backend.event.CancellationPolicy;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventAdminService;
 import com.teammarhaba.backend.event.EventAdminService.EventCounts;
+import com.teammarhaba.backend.event.EventPhasePolicy;
 import com.teammarhaba.backend.event.LocationRevealPolicy;
 import jakarta.validation.Valid;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -70,16 +72,19 @@ public class EventAdminController {
     private final LocationRevealPolicy reveal;
     private final BookingCutoffPolicy cutoff;
     private final CancellationPolicy cancellation;
+    private final EventPhasePolicy phase;
 
     public EventAdminController(
             EventAdminService adminService,
             LocationRevealPolicy reveal,
             BookingCutoffPolicy cutoff,
-            CancellationPolicy cancellation) {
+            CancellationPolicy cancellation,
+            EventPhasePolicy phase) {
         this.adminService = adminService;
         this.reveal = reveal;
         this.cutoff = cutoff;
         this.cancellation = cancellation;
+        this.phase = phase;
     }
 
     @GetMapping
@@ -93,9 +98,13 @@ public class EventAdminController {
         // public side's EventQueryService; the controller only maps entity -> DTO.
         List<Long> ids = events.getContent().stream().map(Event::getId).toList();
         Map<Long, EventCounts> counts = adminService.attendanceCounts(ids);
+        // "now" is fixed once for the whole page so every row's `past` flag (TM-518) is decided against
+        // the same instant.
+        Instant now = Instant.now();
         return PageResponse.from(events, event -> {
             EventCounts c = counts.getOrDefault(event.getId(), EventCounts.ZERO);
-            return EventResponse.from(event, reveal, cutoff, cancellation, c.going(), c.waitlist());
+            return EventResponse.from(
+                    event, reveal, cutoff, cancellation, phase.isFinished(event, now), c.going(), c.waitlist());
         });
     }
 
@@ -103,14 +112,16 @@ public class EventAdminController {
     public EventResponse get(@PathVariable long id) {
         Event event = adminService.get(id);
         EventCounts counts = adminService.attendanceCounts(id);
-        return EventResponse.from(event, reveal, cutoff, cancellation, counts.going(), counts.waitlist());
+        return EventResponse.from(
+                event, reveal, cutoff, cancellation, phase.isFinished(event, Instant.now()), counts.going(), counts.waitlist());
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public EventResponse create(
             @RequestBody @Valid CreateEventRequest request, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.create(caller, request.toDraft()), reveal, cutoff, cancellation);
+        Event created = adminService.create(caller, request.toDraft());
+        return EventResponse.from(created, reveal, cutoff, cancellation, phase.isFinished(created, Instant.now()));
     }
 
     @PatchMapping("/{id}")
@@ -118,7 +129,8 @@ public class EventAdminController {
             @PathVariable long id,
             @RequestBody @Valid UpdateEventRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.update(caller, id, request.toPatch()), reveal, cutoff, cancellation);
+        Event updated = adminService.update(caller, id, request.toPatch());
+        return EventResponse.from(updated, reveal, cutoff, cancellation, phase.isFinished(updated, Instant.now()));
     }
 
     /**
@@ -128,6 +140,7 @@ public class EventAdminController {
      */
     @PostMapping("/{id}/cancel")
     public EventResponse cancel(@PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.cancel(caller, id), reveal, cutoff, cancellation);
+        Event cancelled = adminService.cancel(caller, id);
+        return EventResponse.from(cancelled, reveal, cutoff, cancellation, phase.isFinished(cancelled, Instant.now()));
     }
 }

@@ -51,6 +51,36 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             Pageable pageable);
 
     /**
+     * The "Past events" section of the public listing (TM-518, superseding TM-412's hide-once-finished):
+     * events whose visibility window still contains {@code now} but which have already <em>finished</em>
+     * — the exact complement of {@link #findVisibleAt}'s not-finished clause, so an event is in one set
+     * or the other but never both nor neither. An event with an {@code endAt} is finished once
+     * {@code endAt < now}; an open-ended one ({@code endAt is null}) once its start has fallen below
+     * {@code openEndedStartFloor} ({@code = now − defaultDuration}), keeping this a plain column
+     * comparison (mirrors {@link EventPhasePolicy#openEndedStartFloor}). Ordered most-recently-ended
+     * first ({@code coalesce(endAt, startAt) desc}, id-tiebroken) so the newest past event sits at the
+     * top of the section, and paged by the caller to a bounded addendum. Cancelled events (status not
+     * {@code PUBLISHED}) and soft-deleted events (the {@code @SQLRestriction}) never appear.
+     */
+    @Query(
+            """
+            select e from Event e
+            where e.status = :status
+              and e.visibilityStart <= :now
+              and e.visibilityEnd >= :now
+              and (
+                (e.endAt is not null and e.endAt < :now)
+                or (e.endAt is null and e.startAt < :openEndedStartFloor)
+              )
+            order by coalesce(e.endAt, e.startAt) desc, e.id desc
+            """)
+    List<Event> findRecentlyFinished(
+            @Param("now") Instant now,
+            @Param("openEndedStartFloor") Instant openEndedStartFloor,
+            @Param("status") EventStatus status,
+            Pageable pageable);
+
+    /**
      * The reminder scanner's candidate window (TM-394): events of {@code status} starting inside
      * {@code (from, to]} — strictly after {@code from} (an event starting this very instant has
      * started; nothing left to remind) and no further out than {@code to} (the scan horizon, i.e.

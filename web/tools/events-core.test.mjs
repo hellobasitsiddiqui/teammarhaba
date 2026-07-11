@@ -167,18 +167,20 @@ test("isFinished: status or a past end; open-ended is never client-side finished
   assert.equal(isFinished({ startAt: "2000-01-01T00:00:00Z", endAt: null }, NOON_UTC), false);
 });
 
-test("listingBuckets: splits happening-now vs upcoming, preserves order, drops finished, tolerates junk", () => {
+test("listingBuckets: splits happening-now vs upcoming vs past (TM-518), preserves order, tolerates junk", () => {
   const cards = [
     { id: 1, startAt: "2026-07-05T11:00:00Z", endAt: "2026-07-05T13:00:00Z" }, // live
     { id: 2, startAt: "2026-07-05T18:00:00Z" }, // upcoming
     { id: 3, startAt: "2026-07-06T09:00:00Z" }, // upcoming (later)
-    { id: 4, status: "FINISHED" }, // dropped
+    { id: 4, status: "FINISHED" }, // past (tagged)
+    { id: 5, startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }, // past (ended before noon)
   ];
-  const { happeningNow, upcoming } = listingBuckets(cards, NOON_UTC);
+  const { happeningNow, upcoming, past } = listingBuckets(cards, NOON_UTC);
   assert.deepEqual(happeningNow.map((c) => c.id), [1]);
-  assert.deepEqual(upcoming.map((c) => c.id), [2, 3], "order preserved (soonest-first)");
+  assert.deepEqual(upcoming.map((c) => c.id), [2, 3], "active order preserved (soonest-first)");
+  assert.deepEqual(past.map((c) => c.id), [4, 5], "finished events land in past (API order preserved), not dropped");
   const empty = listingBuckets(null, NOON_UTC);
-  assert.deepEqual(empty, { happeningNow: [], upcoming: [] });
+  assert.deepEqual(empty, { happeningNow: [], upcoming: [], past: [] });
 });
 
 // ------------------------------------------------------------------ location reveal (TM-408)
@@ -385,6 +387,22 @@ test("control: NONE + open + eligible → enabled RSVP with confirm + reminder n
   assert.equal(m.chip, null);
 });
 
+test("control: a finished event is read-only — no action, keeps the ✓ Going chip as history, says it ended (TM-518)", () => {
+  // A past GOING attendee: chip stays (history), but there is NO cancel/leave/RSVP action to take.
+  const finishedGoing = { ...OPEN_DETAIL, status: "FINISHED", myState: "GOING", goingCount: 4 };
+  const m = rsvpControlModel({ detail: finishedGoing, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(m.primary, null, "no actionable primary on a finished event");
+  assert.equal(m.secondary, null);
+  assert.deepEqual(m.chip, { state: "GOING", label: "✓ Going", cls: "tm-event-chip-going" }, "history chip kept");
+  assert.equal(m.remindNote, "This event has ended.");
+
+  // Also read-only for a NONE viewer (an event that ended by its endAt, no status tag needed).
+  const endedByTime = { ...OPEN_DETAIL, startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" };
+  const none = rsvpControlModel({ detail: endedByTime, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(none.primary, null);
+  assert.equal(none.remindNote, "This event has ended.");
+});
+
 test("control: NONE + full → enabled 'Join the waiting list' (no confirm)", () => {
   const full = { ...OPEN_DETAIL, capacity: 3, goingCount: 3 };
   const m = rsvpControlModel({ detail: full, me: { age: 27 }, nowMs: NOON_UTC });
@@ -500,6 +518,16 @@ test("listCtaState: mirrors the wireframe button states", () => {
   assert.deepEqual(listCtaState({}), { label: "RSVP", variant: "primary" }); // default: joinable
 });
 
+test("listCtaState: a past event is read-only 'Ended' — wins even over a stale GOING/WAITLISTED (TM-518)", () => {
+  assert.deepEqual(listCtaState({ status: "FINISHED" }, NOON_UTC), { label: "Ended", variant: "ended" });
+  assert.deepEqual(
+    listCtaState({ startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }, NOON_UTC),
+    { label: "Ended", variant: "ended" },
+  );
+  // A finished event the caller was GOING to still reads as Ended (no RSVP/Going affordance).
+  assert.deepEqual(listCtaState({ status: "FINISHED", myState: "GOING" }, NOON_UTC), { label: "Ended", variant: "ended" });
+});
+
 test("attendanceSummary: leads with the going badge; '· spots' only for finite capacity", () => {
   assert.deepEqual(attendanceSummary({ goingCount: 8, capacity: 12 }), { going: "8 going", spots: "12 spots" });
   assert.deepEqual(attendanceSummary({ goingCount: 3, capacity: null }), { going: "3 going", spots: "" });
@@ -533,37 +561,46 @@ test("filterCards: filters by status/live; 'all'/unknown returns the list unchan
   assert.deepEqual(filterCards(cards, "bogus", NOON_UTC).map((c) => c.id), [1, 2, 3, 4]);
 });
 
-test("browseListModel: the all-finished (unfiltered) listing is the empty state, not a filter dead-end (TM-535)", () => {
-  // The regression case: the API handed us cards, but every one has finished so they all bucket out.
-  // Unfiltered (state.filter === "all") this must be the friendly empty state — NOT "No events match
-  // this filter" (which, with only the All chip on offer, would leave no chip row and no escape).
+test("browseListModel: an all-finished listing is now a LIST with a Past events section (TM-518), truly-empty stays empty", () => {
+  // TM-518 supersedes TM-535's all-finished→empty: the API now SURFACES finished events, so a listing
+  // of only past events is a real "list" whose content IS the Past events section — not an empty state.
   const allFinished = [
     { id: 1, status: "FINISHED" },
     { id: 2, startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }, // ended before NOON_UTC
   ];
   const finishedModel = browseListModel(allFinished, "all", NOON_UTC);
-  assert.equal(finishedModel.kind, "empty");
+  assert.equal(finishedModel.kind, "list");
   assert.deepEqual(finishedModel.happeningNow, []);
   assert.deepEqual(finishedModel.upcoming, []);
+  assert.deepEqual(finishedModel.past.map((c) => c.id), [1, 2], "both finished cards land in the Past section");
 
-  // Truly zero cards → also the empty state, whatever the (stale) filter key.
+  // Truly zero cards → still the empty state, whatever the (stale) filter key.
   assert.equal(browseListModel([], "all", NOON_UTC).kind, "empty");
   assert.equal(browseListModel(null, "going", NOON_UTC).kind, "empty");
 
-  // A real, non-"all" filter that matches nothing IS the filter-empty note (the chip row still escapes
-  // to All): here the only GOING card has already ended, so it buckets out under the "going" filter.
+  // A finished GOING card under the "going" filter still HAS content — it's the caller's past going
+  // event, so it lands in the Past section ("list"), not a dead-end (TM-518 refines TM-535).
   const goingButEnded = [{ id: 1, myState: "GOING", startAt: "2026-07-05T08:00:00Z", endAt: "2026-07-05T10:00:00Z" }];
-  assert.equal(browseListModel(goingButEnded, "going", NOON_UTC).kind, "filter-empty");
+  const goingEndedModel = browseListModel(goingButEnded, "going", NOON_UTC);
+  assert.equal(goingEndedModel.kind, "list");
+  assert.deepEqual(goingEndedModel.past.map((c) => c.id), [1]);
 
-  // A listing with something to show is the list state, with the happening-now / upcoming split intact.
-  const live = [
+  // A real filter that matches NOTHING in any bucket is still the filter-empty note (the chip row
+  // escapes to All): filtering "live" when the only card is a future upcoming one.
+  const noLive = [{ id: 1, myState: "NONE", startAt: "2026-07-05T18:00:00Z" }];
+  assert.equal(browseListModel(noLive, "live", NOON_UTC).kind, "filter-empty");
+
+  // A mixed listing is the list state, with the happening-now / upcoming / past split all intact.
+  const mixed = [
     { id: 1, startAt: "2026-07-05T11:00:00Z", endAt: "2026-07-05T13:00:00Z" }, // live at NOON_UTC
     { id: 2, startAt: "2026-07-05T18:00:00Z" }, // upcoming
+    { id: 3, status: "FINISHED" }, // past
   ];
-  const listModel = browseListModel(live, "all", NOON_UTC);
+  const listModel = browseListModel(mixed, "all", NOON_UTC);
   assert.equal(listModel.kind, "list");
   assert.deepEqual(listModel.happeningNow.map((c) => c.id), [1]);
   assert.deepEqual(listModel.upcoming.map((c) => c.id), [2]);
+  assert.deepEqual(listModel.past.map((c) => c.id), [3]);
 });
 
 // ------------------------------------------------------------------ paid per-event checkout (TM-624)

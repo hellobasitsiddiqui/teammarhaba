@@ -6,6 +6,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
+import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
@@ -42,6 +43,13 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li><b>Cancel ≠ delete</b> — cancelling flips the status to {@code CANCELLED} and keeps the
  *       row (attendees keep their history); it is idempotent, and a repeat cancel neither
  *       re-audits nor re-notifies.</li>
+ *   <li><b>Past events are frozen</b> (TM-518) — once an event has ended
+ *       ({@link EventPhasePolicy#isFinished}) there is nothing left to cancel and no one to notify,
+ *       so both {@link #update edit} and {@link #cancel} reject it with a {@code 409}
+ *       ({@link ConflictException}) and its record stays exactly as it was. Keyed on the event's
+ *       <em>current</em> times, so a patch that would move the start into the future can't unfreeze a
+ *       past event. This mirrors the RSVP side's {@code EVENT_STARTED} conflict, one threshold later
+ *       (ended, not merely started).</li>
  * </ul>
  */
 @Service
@@ -50,12 +58,19 @@ public class EventAdminService {
     /** Audit {@code target_type} for event rows (mirrors {@code UserService.TARGET_USER}). */
     static final String TARGET_EVENT = "Event";
 
+    /** 409 copy when an admin tries to edit an event that has already ended (TM-518). */
+    static final String EVENT_ENDED_EDIT = "This event has already ended and can no longer be edited.";
+
+    /** 409 copy when an admin tries to cancel an event that has already ended (TM-518). */
+    static final String EVENT_ENDED_CANCEL = "This event has already ended and can no longer be cancelled.";
+
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
     private final UserService users;
     private final AuditService audit;
     private final ApplicationEventPublisher lifecycle;
     private final EntityManager entityManager;
+    private final EventPhasePolicy phase;
 
     public EventAdminService(
             EventRepository events,
@@ -63,13 +78,15 @@ public class EventAdminService {
             UserService users,
             AuditService audit,
             ApplicationEventPublisher lifecycle,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            EventPhasePolicy phase) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
         this.audit = audit;
         this.lifecycle = lifecycle;
         this.entityManager = entityManager;
+        this.phase = phase;
     }
 
     /**
@@ -210,6 +227,11 @@ public class EventAdminService {
     @Transactional
     public Event update(VerifiedUser caller, long id, EventPatch patch) {
         Event event = events.findById(id).orElseThrow(EventAdminService::notFound);
+        // Past events are read-only (TM-518): reject before applying the patch, keyed on the event's
+        // current times, so a finished event's record is never touched.
+        if (phase.isFinished(event, Instant.now())) {
+            throw new ConflictException(EVENT_ENDED_EDIT);
+        }
 
         List<String> changed = new ArrayList<>();
         applyIfChanged(patch.heading(), event.getHeading(), event::setHeading, "heading", changed);
@@ -290,6 +312,11 @@ public class EventAdminService {
     @Transactional
     public Event cancel(VerifiedUser caller, long id) {
         Event event = events.findById(id).orElseThrow(EventAdminService::notFound);
+        // Past events can't be cancelled (TM-518): the event already happened, so there is nothing to
+        // call off — reject even an already-cancelled past event rather than silently no-op it.
+        if (phase.isFinished(event, Instant.now())) {
+            throw new ConflictException(EVENT_ENDED_CANCEL);
+        }
         if (!event.isPublished()) {
             return event; // already cancelled — idempotent no-op
         }

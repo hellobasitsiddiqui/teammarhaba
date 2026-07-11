@@ -116,6 +116,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.CancellationPolicy cancellationPolicy;
 
+    // EventAdminController (TM-518) also needs an EventPhasePolicy for the `past` flag — supply it so
+    // the slice loads.
+    @MockitoBean
+    private com.teammarhaba.backend.event.EventPhasePolicy eventPhasePolicy;
+
     // NotificationController (TM-454) needs a NotificationFeedService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.notify.NotificationFeedService notificationFeedService;

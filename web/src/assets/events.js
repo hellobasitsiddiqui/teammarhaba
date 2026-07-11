@@ -174,7 +174,7 @@ function paintList(view) {
   clear(view).append(headerBar("Events"));
 
   // The core decides which of the three list states this is (see events-core `browseListModel`).
-  const { kind, happeningNow, upcoming } = core.browseListModel(state.cards, state.filter, now);
+  const { kind, happeningNow, upcoming, past } = core.browseListModel(state.cards, state.filter, now);
 
   // Nothing to show for the UNFILTERED listing — no cards at all, or everything bucketed out (e.g. every
   // event has finished; `listingBuckets` drops finished events defensively). There are no chips to offer,
@@ -207,6 +207,16 @@ function paintList(view) {
   if (upcoming.length) {
     if (happeningNow.length) list.append(el("h3", { class: "tm-event-section", text: "Upcoming" }));
     for (const c of upcoming) list.append(eventCard(c, { live: false }));
+  }
+  // The "Past events" section (TM-518): finished events, de-emphasised and read-only, always at the
+  // BOTTOM under their own divider heading (only when there's an active section above it does the
+  // divider separate two groups; on an all-past listing it's still the section header). Superseding
+  // TM-412, which hid finished events entirely.
+  if (past.length) {
+    list.append(
+      el("h3", { class: "tm-event-section tm-event-section-past", "data-testid": "events-past", text: "Past events" }),
+    );
+    for (const c of past) list.append(eventCard(c, { live: false, past: true }));
   }
   view.append(list);
 }
@@ -249,18 +259,19 @@ function filterChips(view, filters) {
  * whole card is a LINK to the detail (where the real RSVP command runs), so the CTA is a non-interactive
  * label — tapping anywhere on the card, including it, opens the detail.
  */
-function eventCard(card, { live }) {
+function eventCard(card, { live, past = false }) {
   const when = core.formatWhen(card.startAt, { tz: VIEWER_TZ, locale: LOCALE });
   // The card's location may be withheld pre-reveal (TM-408) — degrade to a neutral line.
   const where = (card.locationText || card.city || "Location shared before the event").trim();
   const meta = [when || "Date to be confirmed", where].filter(Boolean).join(" · ");
   const pill = core.listCountPill(card);
+  // A past card shows the read-only "Ended" state (TM-518); the tap still opens the read-only detail.
   const cta = core.listCtaState(card);
 
   return el(
     "a",
     {
-      class: `tm-event-card${live ? " tm-event-card-live" : ""}`,
+      class: `tm-event-card${live ? " tm-event-card-live" : ""}${past ? " tm-event-card-past" : ""}`,
       href: `#/events/${encodeURIComponent(card.id)}`,
       "data-testid": "event-card",
       dataset: { eventId: String(card.id) },

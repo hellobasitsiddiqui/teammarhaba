@@ -5,6 +5,7 @@ import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,6 +40,13 @@ public class EventQueryService {
     /** How many attendee avatars the detail view carries — the first N {@code GOING}, join order. */
     public static final int ATTENDEE_AVATAR_LIMIT = 5;
 
+    /**
+     * How many recently-finished events the listing's "Past events" section carries (TM-518). A bounded
+     * addendum appended after the active page — enough to show a meaningful history without unbounded
+     * growth as events accumulate; older past events age out of their visibility window anyway.
+     */
+    static final int PAST_LISTING_LIMIT = 50;
+
     /** Avatar strip order: join order (DB-authoritative {@code createdAt}, id as same-instant tiebreak). */
     private static final Sort JOIN_ORDER = Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id"));
 
@@ -68,19 +76,34 @@ public class EventQueryService {
     }
 
     /**
-     * The visible-now listing: {@code PUBLISHED} events whose visibility window contains now and
-     * which have not finished (TM-412 — a live/upcoming event survives, a finished one drops out),
-     * in the caller-supplied page order (the API fixes soonest-first, which sorts live events ahead
-     * of upcoming ones). Each card carries its temporal {@link EventPhase} and a {@code happeningNow}
-     * flag for the live badge. Going counts come from one grouped tally and the caller's states from
-     * one batched lookup — no N+1 regardless of page size.
+     * The visible-now listing plus its "Past events" section (TM-518, superseding TM-412's
+     * hide-once-finished). The paged part is the ACTIVE listing exactly as before — {@code PUBLISHED}
+     * events whose visibility window contains now and which have <em>not</em> finished, in the
+     * caller-supplied page order (the API fixes soonest-first, which sorts live events ahead of upcoming
+     * ones). On the <b>first page</b> a bounded set of recently-finished events (still inside their
+     * visibility window, most-recently-ended first) is <em>appended</em> after the active rows — the
+     * client groups them into a de-emphasised, read-only "Past events" section by their
+     * {@link EventPhase#FINISHED} tag. Past events are a fixed-size addendum, not part of the paging, so
+     * they ride only page 0 and never inflate {@code totalElements}; the client browse list reads
+     * {@code items} directly. Going counts and the caller's states are tallied once over the union of
+     * active + past ids — no N+1 regardless of page size.
      */
     @Transactional(readOnly = true)
     public PageResponse<EventCard> visibleNow(String callerUid, Pageable pageable) {
         Instant now = Instant.now();
-        Page<Event> page =
-                events.findVisibleAt(now, phase.openEndedStartFloor(now), EventStatus.PUBLISHED, pageable);
-        List<Long> eventIds = page.getContent().stream().map(Event::getId).toList();
+        Instant floor = phase.openEndedStartFloor(now);
+        Page<Event> active = events.findVisibleAt(now, floor, EventStatus.PUBLISHED, pageable);
+        // The "Past events" section (TM-518): a bounded, most-recently-ended-first addendum, only on the
+        // first page (it is not paged content). Empty on later pages so it never repeats down the list.
+        List<Event> past = pageable.getPageNumber() == 0
+                ? events.findRecentlyFinished(
+                        now, floor, EventStatus.PUBLISHED, PageRequest.of(0, PAST_LISTING_LIMIT))
+                : List.of();
+
+        // Active rows first, then the past section — the order the client renders top-to-bottom.
+        List<Event> all = new ArrayList<>(active.getContent());
+        all.addAll(past);
+        List<Long> eventIds = all.stream().map(Event::getId).toList();
 
         Map<Long, Long> goingCounts = eventIds.isEmpty()
                 ? Map.of()
@@ -95,30 +118,39 @@ public class EventQueryService {
                         .collect(Collectors.toMap(EventAttendance::getEventId, EventAttendance::getState)))
                 .orElse(Map.of());
 
-        return PageResponse.from(page, event -> {
-            // Location-reveal guard (TM-408): withhold the exact venue until the reveal boundary;
-            // the coarse city hint + reveal timestamp are always safe to expose.
-            boolean revealed = reveal.isRevealed(event, now);
-            EventPhase phaseNow = phase.phaseAt(event, now);
-            return new EventCard(
-                    event.getId(),
-                    event.getHeading(),
-                    revealed ? event.getLocationText() : null,
-                    event.getCity(),
-                    event.getTimezone(),
-                    event.getStartAt(),
-                    event.getEndAt(),
-                    event.getCapacity(),
-                    event.getImagePath(),
-                    event.getPricePence(),
-                    event.isPremium(),
-                    goingCounts.getOrDefault(event.getId(), 0L),
-                    MyState.of(myStates.get(event.getId())),
-                    revealed,
-                    reveal.revealsAt(event),
-                    phaseNow,
-                    phaseNow == EventPhase.HAPPENING_NOW);
-        });
+        List<EventCard> cards =
+                all.stream().map(event -> toCard(event, now, goingCounts, myStates)).toList();
+        // Paging metadata stays that of the ACTIVE query — the past section is an addendum, not paged —
+        // so `totalElements`/`totalPages` describe the active listing the caller is walking.
+        return new PageResponse<>(
+                cards, active.getNumber(), active.getSize(), active.getTotalElements(), active.getTotalPages());
+    }
+
+    /** Project one event to its listing card at {@code now}, reading counts + my-state from the batches. */
+    private EventCard toCard(
+            Event event, Instant now, Map<Long, Long> goingCounts, Map<Long, AttendanceState> myStates) {
+        // Location-reveal guard (TM-408): withhold the exact venue until the reveal boundary;
+        // the coarse city hint + reveal timestamp are always safe to expose.
+        boolean revealed = reveal.isRevealed(event, now);
+        EventPhase phaseNow = phase.phaseAt(event, now);
+        return new EventCard(
+                event.getId(),
+                event.getHeading(),
+                revealed ? event.getLocationText() : null,
+                event.getCity(),
+                event.getTimezone(),
+                event.getStartAt(),
+                event.getEndAt(),
+                event.getCapacity(),
+                event.getImagePath(),
+                event.getPricePence(),
+                event.isPremium(),
+                goingCounts.getOrDefault(event.getId(), 0L),
+                MyState.of(myStates.get(event.getId())),
+                revealed,
+                reveal.revealsAt(event),
+                phaseNow,
+                phaseNow == EventPhase.HAPPENING_NOW);
     }
 
     /**
@@ -133,10 +165,13 @@ public class EventQueryService {
     @Transactional(readOnly = true)
     public EventDetail detail(String callerUid, Long eventId) {
         Instant now = Instant.now();
-        // A finished event is hidden just like a cancelled / out-of-window one (TM-412): its detail
-        // 404s indistinguishably from a missing id, consistent with it dropping out of the listing.
+        // A finished event stays READABLE (TM-518, superseding TM-412's 404-once-finished): its detail
+        // is served read-only so a "Past events" card can open, carrying an {@link EventPhase#FINISHED}
+        // tag; the booking-cutoff gate already closes RSVP/claim so nothing here is actionable. Only
+        // cancelled / out-of-window / soft-deleted events still 404 (via {@code isVisibleAt}),
+        // indistinguishably from a missing id.
         Event event = events.findById(eventId)
-                .filter(e -> e.isVisibleAt(now) && !phase.isFinished(e, now))
+                .filter(e -> e.isVisibleAt(now))
                 .orElseThrow(() -> new ResourceNotFoundException(EventRsvpService.EVENT_NOT_FOUND));
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);

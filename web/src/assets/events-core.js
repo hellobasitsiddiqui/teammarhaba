@@ -254,9 +254,11 @@ export function isHappeningNow(item, nowMs = Date.now()) {
 }
 
 /**
- * Has this event finished? The API already excludes finished events from the listing, so this is a
- * pure client-side backstop (never trust it to be exhaustive). Open-ended events are never
- * client-side "finished".
+ * Has this event finished? Since TM-518 the API SURFACES finished events (tagged `FINISHED`) as the
+ * read-only "Past events" section rather than excluding them, so this is the authoritative bucketing
+ * predicate — it prefers the API's own `status` tag and falls back to a past `endAt`. Open-ended
+ * events (no `endAt`) are never client-side "finished" (only the server, which knows the assumed
+ * duration, can call them past — it does so via the `FINISHED` status tag).
  */
 export function isFinished(item, nowMs = Date.now()) {
   const status = statusOf(item);
@@ -267,16 +269,20 @@ export function isFinished(item, nowMs = Date.now()) {
 }
 
 /**
- * Split the visible listing into the two surfaced states, preserving the API's soonest-first order
- * within each: `happeningNow` (surfaced section) and `upcoming`. Finished events are dropped
- * defensively (the API already excludes them), so there is no third bucket — finished → gone.
+ * Split the listing into its three surfaced states, preserving the API's order within each:
+ * `happeningNow` (surfaced section, soonest-first) and `upcoming` (soonest-first) for active events,
+ * and `past` for finished ones (TM-518 — the API appends these most-recently-ended-first as the
+ * "Past events" section). Finished events used to be dropped (TM-412); now they land in `past` so the
+ * client can render them de-emphasised and read-only at the bottom.
  */
 export function listingBuckets(cards, nowMs = Date.now()) {
   const list = Array.isArray(cards) ? cards : [];
-  const visible = list.filter((c) => !isFinished(c, nowMs));
+  const past = list.filter((c) => isFinished(c, nowMs));
+  const active = list.filter((c) => !isFinished(c, nowMs));
   return {
-    happeningNow: visible.filter((c) => isHappeningNow(c, nowMs)),
-    upcoming: visible.filter((c) => !isHappeningNow(c, nowMs)),
+    happeningNow: active.filter((c) => isHappeningNow(c, nowMs)),
+    upcoming: active.filter((c) => !isHappeningNow(c, nowMs)),
+    past,
   };
 }
 
@@ -512,6 +518,15 @@ export function rsvpControlModel({ detail, me, cards = [], nowMs = Date.now(), c
   const band = ageBandLabel(detail);
   const model = { chip, primary: null, secondary: null, ageBandLabel: band, remindNote: null, full: !wouldLandGoing(detail) };
 
+  // A finished event is READ-ONLY (TM-518): no RSVP / waitlist / claim / leave — the record is closed.
+  // Keep the my-state chip (a past attendee still sees "✓ Going" as history) but offer no action, and
+  // say plainly that it has ended. The backend rejects any command on an ended event anyway, so this
+  // only spares the user a doomed tap. Takes precedence over every state below.
+  if (isFinished(detail, nowMs)) {
+    model.remindNote = "This event has ended.";
+    return model;
+  }
+
   const claimable = detail?.spotAvailableToClaim === true && detail?.myState === "WAITLISTED";
 
   // 1) A live claim offer wins the primary slot — it's the whole point of the offer cascade and the
@@ -655,11 +670,14 @@ export function listCountPill(item) {
  * The right-hand action affordance on a browse card. The list is a BROWSE surface — the real
  * RSVP/waitlist/claim commands (with their confirm dialogs + the tested `rsvpControlModel`) live on the
  * DETAIL — so this is a state LABEL styled like the wireframe's button; tapping the card opens the
- * detail to act. Mirrors the wireframe states: `Going ✓` (done) · `Waitlisted` (done) · `Waitlist`
- * (ghost, when full) · `RSVP` (primary).
- * @returns {{label: string, variant: "primary"|"done"|"ghost"}}
+ * detail to act. Mirrors the wireframe states: `Ended` (past, read-only) · `Going ✓` (done) ·
+ * `Waitlisted` (done) · `Waitlist` (ghost, when full) · `RSVP` (primary). A finished event is
+ * read-only (TM-518), so it takes precedence and never offers an RSVP/waitlist affordance — even if
+ * the caller's stale `myState` still says GOING/WAITLISTED, the card just shows it has ended.
+ * @returns {{label: string, variant: "primary"|"done"|"ghost"|"ended"}}
  */
-export function listCtaState(item) {
+export function listCtaState(item, nowMs = Date.now()) {
+  if (isFinished(item, nowMs)) return { label: "Ended", variant: "ended" };
   if (item?.myState === "GOING") return { label: "Going ✓", variant: "done" };
   if (item?.myState === "WAITLISTED") return { label: "Waitlisted", variant: "done" };
   if (isFull(item)) return { label: "Waitlist", variant: "ghost" };
@@ -714,32 +732,38 @@ export function filterCards(cards, key, nowMs = Date.now()) {
  * has to tell apart THREE "how do I render this list?" outcomes, and getting them apart is exactly the
  * decision that regressed in TM-513 — so it lives here in the unit-tested core, not the view:
  *
- *   • kind "empty"        — nothing to show for the UNFILTERED listing: either no cards at all, or every
- *                           card bucketed out (e.g. all finished — `listingBuckets` drops finished events
- *                           defensively even though the API already excludes them). A genuine "no events"
- *                           state, so the view renders the friendly events-empty block. With only the
- *                           `All` chip on offer there are no chips to show, so a filter note here would be
- *                           a dead end with no escape — the TM-535 bug.
+ *   • kind "empty"        — nothing to show for the UNFILTERED listing: no cards at all, or every card
+ *                           bucketed out with nothing even in `past`. A genuine "no events" state, so the
+ *                           view renders the friendly events-empty block. With only the `All` chip on
+ *                           offer there are no chips to show, so a filter note here would be a dead end
+ *                           with no escape — the TM-535 bug.
  *   • kind "filter-empty" — a real, non-"all" filter matched nothing (edge: the only GOING event has since
  *                           ended). The chip row still offers a way back to All, so the view renders the
  *                           muted "No events match this filter" note inside the list container.
- *   • kind "list"         — there are cards to render; `happeningNow` / `upcoming` carry the split.
+ *   • kind "list"         — there are cards to render; `happeningNow` / `upcoming` / `past` carry the
+ *                           split. A listing that is ONLY past events (all finished) is still a "list"
+ *                           now (TM-518, superseding TM-535's all-finished→empty) — the "Past events"
+ *                           section IS the content, not a dead end.
  *
- * @returns {{ kind: "empty"|"filter-empty"|"list", happeningNow: object[], upcoming: object[] }}
+ * @returns {{ kind: "empty"|"filter-empty"|"list", happeningNow: object[], upcoming: object[], past: object[] }}
  */
 export function browseListModel(cards, filter = "all", nowMs = Date.now()) {
   const list = Array.isArray(cards) ? cards : [];
   // Truly zero cards is always the empty state, whatever the (stale) filter key — matches the original
   // `!state.cards.length` guard.
-  if (!list.length) return { kind: "empty", happeningNow: [], upcoming: [] };
+  if (!list.length) return { kind: "empty", happeningNow: [], upcoming: [], past: [] };
 
-  const { happeningNow, upcoming } = listingBuckets(filterCards(list, filter, nowMs), nowMs);
-  if (happeningNow.length || upcoming.length) return { kind: "list", happeningNow, upcoming };
+  const { happeningNow, upcoming, past } = listingBuckets(filterCards(list, filter, nowMs), nowMs);
+  // Anything in any bucket — active OR past — is a real list to render (TM-518): a listing of only past
+  // events is the "Past events" section, not an empty/dead-end state.
+  if (happeningNow.length || upcoming.length || past.length) {
+    return { kind: "list", happeningNow, upcoming, past };
+  }
 
-  // Nothing survived bucketing. Under the unfiltered "all" view that's a genuine empty state (e.g. every
-  // event finished); only an actual status filter that matched nothing is the filter-empty note.
+  // Nothing survived bucketing at all. Under the unfiltered "all" view that's a genuine empty state; only
+  // an actual status filter that matched nothing is the filter-empty note.
   const filtered = filter != null && filter !== "all";
-  return { kind: filtered ? "filter-empty" : "empty", happeningNow, upcoming };
+  return { kind: filtered ? "filter-empty" : "empty", happeningNow, upcoming, past };
 }
 
 // ------------------------------------------------------------------ event chat entry (TM-450)
