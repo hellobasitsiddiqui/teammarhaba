@@ -52,6 +52,7 @@ public class EventAdminService {
 
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
+    private final VenueRepository venues;
     private final UserService users;
     private final AuditService audit;
     private final ApplicationEventPublisher lifecycle;
@@ -60,12 +61,14 @@ public class EventAdminService {
     public EventAdminService(
             EventRepository events,
             EventAttendanceRepository attendance,
+            VenueRepository venues,
             UserService users,
             AuditService audit,
             ApplicationEventPublisher lifecycle,
             EntityManager entityManager) {
         this.events = events;
         this.attendance = attendance;
+        this.venues = venues;
         this.users = users;
         this.audit = audit;
         this.lifecycle = lifecycle;
@@ -160,6 +163,13 @@ public class EventAdminService {
         event.setMapUrl(draft.mapUrl());
         event.setOnlineUrl(draft.onlineUrl());
         event.setCity(draft.city());
+        // Venue reference (TM-519): when the admin picked a saved venue, verify it exists and is
+        // active (a deactivated/unknown venue is a 400) before pointing the event at it. `null` =
+        // a one-off free-text location — locationText remains the display line.
+        if (draft.venueId() != null) {
+            requireActiveVenue(draft.venueId());
+            event.setVenueId(draft.venueId());
+        }
         event.setEndAt(draft.endAt());
         event.setCapacity(draft.capacity());
         event.setImagePath(draft.imagePath());
@@ -219,6 +229,14 @@ public class EventAdminService {
         applyIfChanged(patch.mapUrl(), event.getMapUrl(), event::setMapUrl, "mapUrl", changed);
         applyIfChanged(patch.onlineUrl(), event.getOnlineUrl(), event::setOnlineUrl, "onlineUrl", changed);
         applyIfChanged(patch.city(), event.getCity(), event::setCity, "city", changed);
+        // Venue reference (TM-519): validate ONLY a genuine re-point to a DIFFERENT venue (exists +
+        // active) — so pointing an event at a deactivated/unknown venue is a 400, but re-saving an
+        // event that already references a since-deactivated venue (unchanged) stays valid. Omitted =
+        // unchanged.
+        if (patch.venueId() != null && !patch.venueId().equals(event.getVenueId())) {
+            requireActiveVenue(patch.venueId());
+        }
+        applyIfChanged(patch.venueId(), event.getVenueId(), event::setVenueId, "venueId", changed);
         applyIfChanged(patch.timezone(), event.getTimezone(), event::setTimezone, "timezone", changed);
         applyIfChanged(patch.startAt(), event.getStartAt(), event::setStartAt, "startAt", changed);
         applyIfChanged(patch.endAt(), event.getEndAt(), event::setEndAt, "endAt", changed);
@@ -340,6 +358,20 @@ public class EventAdminService {
         Integer max = event.getAgeMax();
         if (min != null && max != null && min > max) {
             throw new BadRequestException("ageMin must be less than or equal to ageMax.");
+        }
+    }
+
+    /**
+     * The referenced venue must exist and be active (TM-519). A missing or deactivated venue is a
+     * {@code 400} on the <em>event</em> request (bad input) — not a 404, since the event id itself is
+     * fine; it's the picked venue that's the problem. The nullable FK + {@code ON DELETE SET NULL}
+     * back this at the DB layer, but validating here gives a clean RFC-7807 message instead of a
+     * constraint-violation 500.
+     */
+    private void requireActiveVenue(long venueId) {
+        Venue venue = venues.findById(venueId).orElseThrow(() -> new BadRequestException("Unknown or inactive venue."));
+        if (!venue.isActive()) {
+            throw new BadRequestException("Unknown or inactive venue.");
         }
     }
 

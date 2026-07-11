@@ -60,5 +60,20 @@ service firebase.storage {
       // `request.resource` on delete, so only the role check applies.
       allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
     }
+
+    match /venue-images/{venueId} {
+      // Venue photos (TM-519) ride the same pattern as event images: publicly readable (an event
+      // detail may render its venue's photo for signed-out visitors, and the download URL carries an
+      // unguessable token), admin-only write, image content-type under 5 MB.
+      allow read: if true;
+
+      allow create, update: if request.auth != null
+                            && request.auth.token.role == 'ADMIN'
+                            && request.resource.size < 5 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+
+      // Admins may delete a venue photo (re-upload cleanup / venue retired).
+      allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
+    }
   }
 }

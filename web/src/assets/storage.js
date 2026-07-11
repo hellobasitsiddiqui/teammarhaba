@@ -250,3 +250,77 @@ function mapEventImageUploadError(err) {
   }
   return new Error("Could not upload the event image. Please try again.");
 }
+
+// Venue photos (TM-519) ride the SAME house Storage pattern as event images: bytes go to
+// `venue-images/{venueId}` (admin-only per storage.rules), and only the OBJECT PATH is persisted on
+// the venue row via the admin API (`PATCH /api/v1/admin/venues/{id}` photoPath). The path is stored
+// (not a rotating download URL); the admin form keeps the returned URL only for its own preview.
+
+/** Venue-photo size cap — mirrors storage.rules (`< 5 MB`), same as event images. */
+export const MAX_VENUE_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** A user-facing validation message for a venue photo the rules would reject, or "" if acceptable. */
+export function validateVenueImageFile(file) {
+  if (!file) return "Choose an image to upload.";
+  if (!file.type || !file.type.startsWith("image/")) return "That file isn't an image.";
+  if (file.size > MAX_VENUE_IMAGE_BYTES) return "Image must be 5 MB or smaller.";
+  return "";
+}
+
+/**
+ * Upload a venue photo to Firebase Storage at `venue-images/{venueId}` and return its object PATH
+ * (for the photoPath PATCH) plus the download URL (for the form's preview). Admin-only at the rules
+ * layer (`request.auth.token.role == 'ADMIN'`); this mirrors that with a fast client pre-check. A
+ * re-upload overwrites the same per-venue path, so a venue never accumulates orphan objects.
+ *
+ * @param {number|string} venueId the persisted venue id (the path segment). MUST exist — for a NEW
+ *   venue the caller creates it first, then uploads to the returned id (the id can't exist before
+ *   creation, so the create body carries no photo; the house avatar/photoPath pattern).
+ * @param {File} file the image the admin picked.
+ * @param {(fraction: number) => void} [onProgress] called with 0..1 as bytes transfer.
+ * @returns {Promise<{path: string, url: string}>} the stored object path + its download URL.
+ * @throws {Error} with a user-friendly `.message` on validation/upload failure.
+ */
+export async function uploadVenueImage(venueId, file, onProgress) {
+  const message = validateVenueImageFile(file);
+  if (message) throw new Error(message);
+  if (venueId == null || String(venueId).trim() === "") {
+    throw new Error("Save the venue before adding a photo.");
+  }
+
+  const store = getStorageOrNull();
+  if (!store) throw new Error("Venue photo uploads aren't available right now.");
+
+  const path = `venue-images/${venueId}`;
+  const objectRef = ref(store, path);
+  const task = uploadBytesResumable(objectRef, file, { contentType: file.type });
+
+  await new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snapshot) => {
+        if (typeof onProgress === "function" && snapshot.totalBytes > 0) {
+          onProgress(snapshot.bytesTransferred / snapshot.totalBytes);
+        }
+      },
+      (err) => reject(mapVenueImageUploadError(err)),
+      resolve,
+    );
+  });
+
+  const url = await getDownloadURL(objectRef);
+  return { path, url };
+}
+
+/** Map a Firebase Storage upload error to a concise, user-friendly Error (venue-photo wording). */
+function mapVenueImageUploadError(err) {
+  const code = err?.code || "";
+  if (code === "storage/unauthorized") {
+    return new Error("You're not allowed to upload that — admins only, and it must be an image under 5 MB.");
+  }
+  if (code === "storage/canceled") return new Error("Upload cancelled.");
+  if (code === "storage/retry-limit-exceeded" || code === "storage/quota-exceeded") {
+    return new Error("Upload failed — please try again.");
+  }
+  return new Error("Could not upload the venue photo. Please try again.");
+}

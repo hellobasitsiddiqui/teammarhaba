@@ -35,6 +35,8 @@ import java.time.Instant;
  * @param mapUrl                       optional map-pin link ({@code null} when none)
  * @param onlineUrl                    optional join link ({@code null} for in-person only)
  * @param city                         coarse locality; the pre-reveal public hint + per-city default key
+ * @param venueId                      id of the referenced reusable venue ({@code null} = one-off free-text
+ *     location) — TM-519. The venue's editable details are read live from the admin venues API.
  * @param timezone                     IANA timezone id the instants pair with
  * @param startAt                      start instant (UTC)
  * @param endAt                        optional end instant ({@code null} = open-ended)
@@ -72,6 +74,7 @@ public record EventResponse(
         String mapUrl,
         String onlineUrl,
         String city,
+        Long venueId,
         String timezone,
         Instant startAt,
         Instant endAt,
@@ -131,6 +134,7 @@ public record EventResponse(
                 event.getMapUrl(),
                 event.getOnlineUrl(),
                 event.getCity(),
+                event.getVenueId(),
                 event.getTimezone(),
                 event.getStartAt(),
                 event.getEndAt(),

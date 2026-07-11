@@ -78,6 +78,19 @@ public class Event {
     private String city;
 
     /**
+     * Optional reference to a reusable {@link Venue} this event is held at (TM-519), held as a plain
+     * FK id (not a JPA association) to stay decoupled from the {@code Venue} aggregate's own
+     * {@code @SQLRestriction} — the same convention as {@link #createdBy}. {@code null} = a one-off
+     * free-text location (or a legacy event): {@link #locationText} remains the authoritative display
+     * line, so referencing a venue is additive and back-compatible. When set, the venue's editable
+     * details (address, photo, capacity, …) are read live from the venue, so a venue edit propagates
+     * to every event pointing at it. The exact venue address is admin-only; the public surface still
+     * renders the reveal-gated {@code locationText} (TM-408), so a reference never leaks the address.
+     */
+    @Column(name = "venue_id")
+    private Long venueId;
+
+    /**
      * Per-event override of the location-reveal window, in whole hours before {@code startAt}
      * (TM-408). {@code null} = inherit — {@link LocationRevealPolicy} then falls back to the
      * per-city default and finally the app default (24h).
@@ -287,6 +300,15 @@ public class Event {
 
     public void setCity(String city) {
         this.city = city;
+    }
+
+    /** The referenced reusable venue's id (TM-519), or {@code null} for a one-off free-text location. */
+    public Long getVenueId() {
+        return venueId;
+    }
+
+    public void setVenueId(Long venueId) {
+        this.venueId = venueId;
     }
 
     public Integer getLocationRevealHours() {

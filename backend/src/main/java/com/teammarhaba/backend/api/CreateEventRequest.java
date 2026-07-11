@@ -53,6 +53,9 @@ import java.time.ZoneId;
  * @param pricePence      optional ticket price in pence (minor units, GBP), ≥ 0; omitted = the £5
  *     default ({@link com.teammarhaba.backend.event.Event#DEFAULT_PRICE_PENCE}). {@code 0} = free (TM-475)
  * @param premium         optional premium-gating flag; omitted = {@code false} (TM-475)
+ * @param venueId         optional id of a reusable venue this event is held at (TM-519); omitted = a
+ *     one-off free-text location. {@code locationText} stays the display line either way; the id must
+ *     reference an existing, active venue (validated in {@code EventAdminService}), else a 400
  */
 public record CreateEventRequest(
         @NotBlank @Size(max = 120) String heading,
@@ -61,6 +64,7 @@ public record CreateEventRequest(
         @Size(max = 2048) String mapUrl,
         @Size(max = 2048) String onlineUrl,
         @Size(max = 120) String city,
+        @Min(1) Long venueId,
         @NotBlank @Size(max = 64) String timezone,
         @NotNull Instant startAt,
         Instant endAt,
@@ -117,6 +121,7 @@ public record CreateEventRequest(
                 mapUrl,
                 onlineUrl,
                 city,
+                venueId,
                 timezone,
                 startAt,
                 endAt,

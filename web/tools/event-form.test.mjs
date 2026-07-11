@@ -255,6 +255,18 @@ test("buildEventPayload sends age band as camelCase ageMin/ageMax, omitted when 
   assert.equal("ageMax" in noAges, false);
 });
 
+test("buildEventPayload carries the venueId reference and omits it when unset (TM-519)", () => {
+  const withVenue = buildEventPayload(validDraft({ venueId: "7" }));
+  assert.equal(withVenue.venueId, 7); // sent as an integer id
+  const noVenue = buildEventPayload(validDraft({ venueId: "" }));
+  assert.equal("venueId" in noVenue, false); // a one-off location omits it (back-compat)
+});
+
+test("toFormModel reads venueId back for the edit prefill (TM-519)", () => {
+  assert.equal(toFormModel({ venueId: 7 }).venueId, "7");
+  assert.equal(toFormModel({}).venueId, ""); // no reference → blank
+});
+
 test("toFormModel ∘ buildEventPayload round-trips an EventResponse's instants", () => {
   const event = {
     heading: "Coffee & Walk",

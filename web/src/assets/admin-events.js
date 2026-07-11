@@ -48,6 +48,8 @@ import {
   formatEventWhen,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
+import { venueSummaryLabel } from "./admin-venues-core.js";
+import { adminVenueNewHash } from "./admin-venues-route.js";
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-inventory walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 events)
@@ -612,6 +614,74 @@ function buildImageControl(event) {
 }
 
 /**
+ * Load the ACTIVE venues for the event-create picker (TM-519). Kept small (an admin curates tens of
+ * venues) — one page of the active-only inventory. A failure returns an empty list so the picker
+ * degrades to "one-off location only" rather than blocking event creation. Uses the shared eventApi
+ * wrapper (Bearer + 401 handling); the venues API is under the same ADMIN gate as events.
+ */
+async function fetchActiveVenues() {
+  try {
+    const envelope = await eventApi("/api/v1/admin/venues?active=true&size=100&sort=name,asc");
+    return Array.isArray(envelope?.items) ? envelope.items : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The venue picker (TM-519): a <select> of saved active venues plus a "＋ New venue" shortcut, with a
+ * blank "one-off location" option that preserves the legacy free-text path (back-compat). Picking a
+ * venue prefills the (required) Location line and City from it when they're still blank — so the event
+ * always keeps a display location AND references the venue, and edits to the venue propagate. The
+ * picked venue id flows into the event payload as `venueId`.
+ *
+ * @param {?object} event the EventResponse being edited (for the prefill), or null on create.
+ * @param {(venue: ?object) => void} onSelect called with the chosen venue (or null) after a change.
+ * @returns {{node: HTMLElement, getValue: () => string}}
+ */
+function buildVenuePicker(event, onSelect) {
+  const currentId = event && event.venueId != null ? String(event.venueId) : "";
+  const blankOption = () => el("option", { value: "", text: "One-off location (no saved venue)" });
+  const select = el("select", { id: "event-venue", class: "tm-input", "aria-describedby": "event-venue-hint" }, [blankOption()]);
+  const newLink = el("a", { class: "tm-btn tm-btn-sm", id: "event-venue-new", href: adminVenueNewHash() }, "＋ New venue");
+  const hint = el("p", {
+    id: "event-venue-hint",
+    class: "tm-muted tm-field-hint",
+    text: "Pick a saved venue to reuse its address + details (edits to it propagate), or leave as a one-off location.",
+  });
+
+  let venues = [];
+  const populate = (list) => {
+    venues = list;
+    const options = [blankOption(), ...list.map((v) => el("option", { value: String(v.id), text: venueSummaryLabel(v) }))];
+    // Editing an event whose venue was since deactivated: keep it selectable so the reference survives.
+    if (currentId && !list.some((v) => String(v.id) === currentId)) {
+      options.push(el("option", { value: currentId, text: `Venue #${currentId} (deactivated)` }));
+    }
+    clear(select).append(...options);
+    select.value = currentId;
+  };
+  populate([]);
+
+  // Async-load the active venues, then re-populate (keeping any current selection).
+  fetchActiveVenues().then((list) => {
+    populate(list);
+    onSelect?.(venues.find((v) => String(v.id) === select.value) || null);
+  });
+
+  select.addEventListener("change", () => {
+    onSelect?.(venues.find((v) => String(v.id) === select.value) || null);
+  });
+
+  const node = el("div", { class: "tm-form-field", dataset: { field: "venueId" } }, [
+    el("label", { class: "tm-field-label", for: "event-venue", text: "Venue (optional)" }),
+    el("div", { class: "tm-field-fill" }, [select, newLink]),
+    hint,
+  ]);
+  return { node, getValue: () => select.value };
+}
+
+/**
  * Build the create/edit event form as a detached DOM subtree (no shell) — the SAME fields, validation,
  * Coffee & X chips, image control and read-back the modal used; only the surrounding shell changed
  * from a modal() to a full page (TM-426). `mode` is "create" (event=null) or "edit" (event = the
@@ -644,6 +714,8 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   }
 
   const image = buildImageControl(event);
+  // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
+  let venuePicker = null;
 
   const setFieldError = (key, message) => {
     const f = fields.get(key);
@@ -662,6 +734,9 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const readDraft = () => {
     const draft = {};
     for (const f of FORM_FIELDS) draft[f.key] = fields.get(f.key).input.value;
+    // The venue reference (TM-519) isn't a FORM_FIELDS input; read it off the picker (blank on create
+    // until built, "" = one-off location).
+    draft.venueId = venuePicker ? venuePicker.getValue() : "";
     return draft;
   };
 
@@ -697,6 +772,24 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     const v = model[f.key];
     if (v != null && v !== "") fields.get(f.key).input.value = v;
   }
+
+  // The venue picker (TM-519): sits under the Location line. Picking a venue prefills the required
+  // Location line + City from it when they're still blank (so the event always has a display location
+  // AND references the venue), then re-validates. Built here — after revalidate/prefill — so its
+  // onSelect can safely call them; spliced into the layout right after the location field.
+  venuePicker = buildVenuePicker(event, (chosen) => {
+    if (chosen) {
+      const loc = fields.get("locationText").input;
+      if (loc.value.trim() === "") loc.value = chosen.addressLine || chosen.name || "";
+      const cityInput = fields.get("city").input;
+      if (cityInput && cityInput.value.trim() === "" && chosen.city) cityInput.value = chosen.city;
+    }
+    revalidate("locationText");
+  });
+  const locationNode = byKey.get("locationText");
+  const locIdx = layout.indexOf(locationNode);
+  if (locIdx >= 0) layout.splice(locIdx + 1, 0, venuePicker.node);
+  else layout.push(venuePicker.node);
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.

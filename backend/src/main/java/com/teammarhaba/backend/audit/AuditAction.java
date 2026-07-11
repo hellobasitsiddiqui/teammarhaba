@@ -80,6 +80,22 @@ public enum AuditAction {
      */
     EVENT_CANCELLED,
 
+    /** An admin created a reusable venue via {@code POST /api/v1/admin/venues} (TM-519). */
+    VENUE_CREATED,
+
+    /** An admin edited a venue via {@code PATCH /api/v1/admin/venues/{id}} (TM-519). */
+    VENUE_UPDATED,
+
+    /**
+     * An admin deactivated a venue via {@code POST /api/v1/admin/venues/{id}/deactivate} (TM-519):
+     * the place is retired from the event-create picker but the row (and any referencing events)
+     * survives — deactivate is not delete. Idempotent.
+     */
+    VENUE_DEACTIVATED,
+
+    /** An admin reactivated a venue via {@code POST /api/v1/admin/venues/{id}/reactivate} (TM-519). Idempotent. */
+    VENUE_REACTIVATED,
+
     /**
      * A member posted a message to an event group thread via {@code POST
      * /api/v1/conversations/{id}/messages} (TM-447, epic Event Chat). One row per post carrying the

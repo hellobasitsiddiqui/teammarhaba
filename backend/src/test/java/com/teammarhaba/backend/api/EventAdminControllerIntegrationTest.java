@@ -22,6 +22,8 @@ import com.teammarhaba.backend.event.EventAttendanceRepository;
 import com.teammarhaba.backend.event.EventLifecycleEvent;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.event.EventStatus;
+import com.teammarhaba.backend.event.Venue;
+import com.teammarhaba.backend.event.VenueRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Instant;
@@ -94,6 +96,9 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private EventAttendanceRepository attendance;
 
+    @Autowired
+    private VenueRepository venues;
+
     private static RequestPostProcessor admin(String uid) {
         return principal(uid, "ROLE_ADMIN");
     }
@@ -130,6 +135,16 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
     private void attend(long eventId, String uid, AttendanceState state) {
         Long userId = users.saveAndFlush(new User(uid, uid + "@example.com", uid)).getId();
         attendance.saveAndFlush(new EventAttendance(eventId, userId, state));
+    }
+
+    /** Seed a reusable venue for the event-reference wiring tests (TM-519). */
+    private Venue seedVenue(String name, boolean active) {
+        Long creatorId = users.findByFirebaseUid("event-admin-seed-uid")
+                .orElseGet(() -> users.saveAndFlush(new User("event-admin-seed-uid", "seed@example.com", "Seeder")))
+                .getId();
+        Venue venue = new Venue(name, name + " address", creatorId, Instant.now());
+        venue.setActive(active);
+        return venues.saveAndFlush(venue);
     }
 
     private List<AuditAction> auditActionsFor(long eventId) {
@@ -638,6 +653,79 @@ class EventAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.id").value(seeded.getId()))
                 .andExpect(jsonPath("$.heading").value("Read me"))
                 .andExpect(jsonPath("$.visibilityStart").value("2030-01-01T00:00:00Z"));
+    }
+
+    // --- Venue reference (TM-519): the event-create picker + back-compat ---
+
+    @Test
+    void createReferencesAnActiveVenue() throws Exception {
+        Venue venue = seedVenue("Picker venue", true);
+        String body = VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"venueId\": " + venue.getId());
+
+        String response = mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-venue"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.venueId").value(venue.getId().intValue()))
+                // locationText stays the display line: a picked venue is additive, not a replacement
+                .andExpect(jsonPath("$.locationText").value("Victoria Park, main gate"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(response).<Number>read("$.id").longValue();
+        assertThat(events.findById(id).orElseThrow().getVenueId()).isEqualTo(venue.getId());
+    }
+
+    @Test
+    void createWithoutVenueKeepsBackCompatFreeTextLocation() throws Exception {
+        // No venueId: the legacy free-text-only path still works — venueId comes back null.
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-novenue"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.venueId").doesNotExist())
+                .andExpect(jsonPath("$.locationText").value("Victoria Park, main gate"));
+    }
+
+    @Test
+    void createRejectsUnknownVenue() throws Exception {
+        String body = VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"venueId\": 999999");
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-badvenue"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"))
+                .andExpect(jsonPath("$.detail").value("Unknown or inactive venue."));
+    }
+
+    @Test
+    void createRejectsDeactivatedVenue() throws Exception {
+        Venue inactive = seedVenue("Retired venue", false);
+        String body = VALID_BODY.replace("\"capacity\": 40", "\"capacity\": 40, \"venueId\": " + inactive.getId());
+        mockMvc.perform(post("/api/v1/admin/events")
+                        .with(admin("events-admin-deadvenue"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Unknown or inactive venue."));
+    }
+
+    @Test
+    void patchRepointsEventAtAVenue() throws Exception {
+        Event seeded = seedEvent("Repoint", Instant.parse("2030-01-01T00:00:00Z"), Instant.parse("2030-02-01T00:00:00Z"));
+        Venue venue = seedVenue("New home", true);
+
+        mockMvc.perform(patch("/api/v1/admin/events/{id}", seeded.getId())
+                        .with(admin("events-admin-venue-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"venueId\":" + venue.getId() + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.venueId").value(venue.getId().intValue()));
+
+        assertThat(events.findById(seeded.getId()).orElseThrow().getVenueId()).isEqualTo(venue.getId());
     }
 
     @Test

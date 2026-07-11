@@ -19,6 +19,12 @@ import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
 import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
 import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
+// Admin venues console + create/edit form (TM-519) — ADMIN-only, same gate as #/admin/events. The
+// list is #/admin/venues; the form is #/admin/venues/new (create) and #/admin/venues/{id}/edit (edit).
+// admin-venues.js mounts the list into #admin-venues-view and the form into #admin-venue-form-view;
+// the route math (the dynamic-id edit route) is the pure admin-venues-route.js (unit-tested).
+import { enterAdminVenues, enterAdminVenueForm } from "./admin-venues.js";
+import { isAdminVenueFormRoute, parseAdminVenueFormRoute } from "./admin-venues-route.js";
 // Admin message compose (TM-443): the full-page #/admin/messages/new compose form, ADMIN-only (same
 // gate as #/admin). admin-messages.js mounts it into #admin-message-form-view; the route math is the
 // pure admin-message-route.js (unit-tested on the PR gate). Kept additive to this shared router.
@@ -68,6 +74,9 @@ const ADMIN = "#/admin";
 // Admin events console (TM-395) — protected + ADMIN-only, the same gate as #/admin. Its own hash so
 // it's a distinct exact-match route; admin-events.js mounts into #admin-events-view.
 const ADMIN_EVENTS = "#/admin/events";
+// Admin venues console (TM-519) — protected + ADMIN-only, the same gate as #/admin/events. Its own
+// exact-match hash; admin-venues.js mounts into #admin-venues-view.
+const ADMIN_VENUES = "#/admin/venues";
 // Admin sent-history list (TM-444) — protected + ADMIN-only, the same gate as #/admin. Its own exact
 // hash (the bare #/admin/messages, distinct from the #/admin/messages/new compose sub-route, TM-443);
 // admin-sent-history.js mounts into #admin-message-list-view. The one route string lives in
@@ -131,7 +140,7 @@ const MEMBERSHIP = "#/membership";
 // PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
 // the membership tier route.
 const RECEIPTS = "#/receipts";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -186,6 +195,8 @@ function isProtected(route) {
     isEventsRoute(route) ||
     isChatRoute(route) ||
     isAdminEventFormRoute(route) ||
+    // Admin venue create/edit form (TM-519) — ADMIN-only, so protected too.
+    isAdminVenueFormRoute(route) ||
     // Admin message compose (TM-443) — ADMIN-only, so protected too.
     isAdminMessageComposeRoute(route) ||
     // Membership tier screen (TM-606) — protected (any signed-in user) when the flag is on.
@@ -221,6 +232,13 @@ let adminEventsActive = false;
 // repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does.
 // Reset to null when leaving the form (mirrors eventsRouteEntered).
 let adminEventFormEntered = null;
+// Admin venues console (TM-519): whether the venues list is currently mounted, so we (re)load it only
+// on entry (mirrors adminEventsActive).
+let adminVenuesActive = false;
+// Admin venue form (TM-519): the last form route we entered (#/admin/venues/new or …/{id}/edit), so a
+// repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does
+// (mirrors adminEventFormEntered).
+let adminVenueFormEntered = null;
 // Admin message compose (TM-443): whether the compose page is currently mounted, so we mount it once on
 // entry and reset on leaving (mirrors the single-route views like notifications). The route is a single
 // exact hash (#/admin/messages/new), so a boolean is enough — there's no id to switch between.
@@ -281,13 +299,15 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
   if (isChatRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
   if (isAdminEventFormRoute(hash)) return hash;
+  // Admin venue form (create/edit): return the raw hash so the {id} in an edit route survives (TM-519).
+  if (isAdminVenueFormRoute(hash)) return hash;
   // Admin message compose (TM-443): the exact #/admin/messages/new route.
   if (isAdminMessageComposeRoute(hash)) return hash;
   // Membership tier screen (TM-606): the exact #/membership route, but ONLY when the membership flag is
@@ -324,6 +344,8 @@ function render() {
   const adminView = $("admin-view");
   const adminEventsView = $("admin-events-view");
   const adminEventFormView = $("admin-event-form-view");
+  const adminVenuesView = $("admin-venues-view");
+  const adminVenueFormView = $("admin-venue-form-view");
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
   const termsView = $("terms-view");
@@ -338,6 +360,10 @@ function render() {
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   // Admin event form (TM-426) — shown for the create route and any {id} edit route.
   if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
+  // Admin venues console (TM-519) — shown for the exact #/admin/venues route.
+  if (adminVenuesView) adminVenuesView.hidden = route !== ADMIN_VENUES;
+  // Admin venue form (TM-519) — shown for the create route and any {id} edit route.
+  if (adminVenueFormView) adminVenueFormView.hidden = !isAdminVenueFormRoute(route);
   // Admin message compose (TM-443) — shown for the exact #/admin/messages/new route.
   const adminMessageFormView = $("admin-message-form-view");
   if (adminMessageFormView) adminMessageFormView.hidden = !isAdminMessageComposeRoute(route);
@@ -386,6 +412,7 @@ function render() {
   const navSignOut = $("signout-btn");
   const navAdmin = $("nav-admin");
   const navAdminEvents = $("nav-admin-events");
+  const navAdminVenues = $("nav-admin-venues");
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
@@ -417,6 +444,8 @@ function render() {
   if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
   // The admin events console link (TM-395) follows the same ADMIN-only, hidden-while-gated rule.
   if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
+  // The admin venues console link (TM-519) follows the same ADMIN-only, hidden-while-gated rule.
+  if (navAdminVenues) navAdminVenues.hidden = !(signedIn && isAdmin) || gated;
   // The admin "Messages" link (TM-443) — the entry point to the compose page — follows the same
   // ADMIN-only, hidden-while-gated rule. It targets compose directly since the sent-history list
   // (#/admin/messages) is TM-444 (a later wave) and doesn't exist yet.
@@ -530,6 +559,21 @@ function guard() {
     go(HOME);
     return;
   }
+  // Admin venues console (TM-519) is ADMIN-only too — same rule as #/admin/events; the backend is the
+  // real gate, this just avoids showing an unusable page to a non-admin.
+  if (route === ADMIN_VENUES && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminVenuesActive = false;
+    go(HOME);
+    return;
+  }
+  // The full-page venue create/edit form (TM-519) is ADMIN-only too — same rule as the venues console.
+  if (isAdminVenueFormRoute(route) && !isAdmin) {
+    toast("Admins only.", { type: "error" });
+    adminVenueFormEntered = null;
+    go(HOME);
+    return;
+  }
   // The full-page message compose form (TM-443) is ADMIN-only too — same rule as the consoles above.
   if (isAdminMessageComposeRoute(route) && !isAdmin) {
     toast("Admins only.", { type: "error" });
@@ -578,6 +622,28 @@ function guard() {
     }
   } else {
     adminEventFormEntered = null;
+  }
+  // Admin venues console (TM-519): mount on entry, (re)load its list each entry, reset on leaving so a
+  // future entry reloads. Same lifecycle as the events console above.
+  if (route === ADMIN_VENUES && isAdmin) {
+    if (!adminVenuesActive) {
+      adminVenuesActive = true;
+      enterAdminVenues();
+    }
+  } else {
+    adminVenuesActive = false;
+  }
+  // Full-page venue create/edit form (TM-519): (re)enter whenever the form route CHANGES (create vs a
+  // specific edit id), reset on leaving — and returning to #/admin/venues re-runs enterAdminVenues(),
+  // which reloads the list so a just-saved create/edit shows immediately. Mirrors the event form.
+  if (isAdminVenueFormRoute(route) && isAdmin) {
+    if (route !== adminVenueFormEntered) {
+      adminVenueFormEntered = route;
+      const target = parseAdminVenueFormRoute(route);
+      enterAdminVenueForm(target.mode, target.id);
+    }
+  } else {
+    adminVenueFormEntered = null;
   }
   // Full-page message compose (TM-443): mount once on entry into #/admin/messages/new, reset on leaving
   // so a future entry re-mounts a fresh draft. Single exact route, so a boolean guard is enough (unlike
