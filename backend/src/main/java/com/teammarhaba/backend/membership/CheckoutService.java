@@ -70,9 +70,6 @@ public class CheckoutService {
     /** The 403 copy when the server-side membership flag is off and the checkout would need a payment. */
     static final String PAYMENTS_OFF = "Paid tickets are not available.";
 
-    /** The single currency the paid path charges in — order amounts are defined in GBP pence (V36). */
-    private static final String CURRENCY = "GBP";
-
     private final EntitlementService entitlements;
     private final EventRsvpService rsvps;
     private final MembershipService memberships;
@@ -147,8 +144,8 @@ public class CheckoutService {
             // reference passed to the provider for reconciliation.
             Order order =
                     orders.save(new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.PENDING, now));
-            PaymentOrder providerOrder =
-                    payments.createOrder(entitlement.amountPence(), CURRENCY, String.valueOf(order.getId()));
+            PaymentOrder providerOrder = payments.createOrder(
+                    entitlement.amountPence(), payments.currency(), String.valueOf(order.getId()));
             order.setPaymentReference(payments.name(), providerOrder.id());
             return CheckoutResult.paymentRequired(order, providerOrder.token());
         }
@@ -300,22 +297,26 @@ public class CheckoutService {
         CancelResult cancel = rsvps.cancelRsvp(caller, eventId, false);
 
         Order order = orders.findByUserIdAndEventId(user.getId(), eventId).orElse(null);
-        if (order == null || !order.isReversible()) {
-            // No checkout order, or already cancelled/refunded — nothing to reverse (idempotent).
-            return CheckoutCancelResult.of(false, false, cancel, order);
-        }
         if (cancel.lateCancel()) {
             // Missed the window: consumed/forfeited even though the caller left the event. Order untouched.
             return CheckoutCancelResult.of(false, false, cancel, order);
         }
 
-        // Inside the window: reverse the commitment. Return the first-event credit only if THIS event is
-        // the one that consumed it (the membership points at exactly one event), then flip the order.
+        // Inside the window: return the first-event credit if THIS event is the one that consumed it (the
+        // membership points at exactly one event). Checked BEFORE the order guard (TM-629): a direct
+        // FREE-first RSVP consumes the credit with no order row at all, so an order-first early return
+        // would silently forfeit the credit on an in-window cancel of exactly that commitment.
         Membership membership = memberships.getOrEnrol(caller);
         boolean creditReturned =
                 membership.isFirstEventCreditUsed() && eventId.equals(membership.getFirstEventCreditEventId());
         if (creditReturned) {
             membership.reverseFirstEventCredit(now);
+        }
+
+        if (order == null || !order.isReversible()) {
+            // No checkout order, or already cancelled/refunded — no ORDER to reverse (idempotent), though
+            // the credit above may still have been returned.
+            return CheckoutCancelResult.of(false, creditReturned, cancel, order);
         }
 
         // Reversing a still-PENDING PAY order: void the provider order too (TM-623, best-effort). Its
@@ -360,7 +361,10 @@ public class CheckoutService {
         }
         try {
             payments.refund(
-                    order.getProviderOrderId(), order.getAmountPence(), CURRENCY, String.valueOf(order.getId()));
+                    order.getProviderOrderId(),
+                    order.getAmountPence(),
+                    payments.currency(),
+                    String.valueOf(order.getId()));
             order.markRefunded(now);
         } catch (PaymentProviderException e) {
             log.warn(

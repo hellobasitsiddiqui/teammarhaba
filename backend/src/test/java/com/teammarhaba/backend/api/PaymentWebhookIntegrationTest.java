@@ -77,6 +77,7 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
         // Seed a PAY checkout → a PENDING order carrying a known provider order id (create-order stubbed).
         Event event = premiumEvent();
         when(paymentProvider.name()).thenReturn("revolut");
+        when(paymentProvider.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
         when(paymentProvider.createOrder(anyInt(), anyString(), anyString()))
                 .thenReturn(new PaymentOrder("rev-hook-1", "tok-1"));
         mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(caller("uid-wh-pay")))

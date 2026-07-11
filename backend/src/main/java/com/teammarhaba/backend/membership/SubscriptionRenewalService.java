@@ -86,9 +86,6 @@ public class SubscriptionRenewalService {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionRenewalService.class);
 
-    /** The single currency subscriptions charge in — prices are defined in GBP pence (V38). */
-    private static final String CURRENCY = "GBP";
-
     /** Upper bound on subscriptions handled per pass (oldest-due first; the next tick takes the rest). */
     private static final int SCAN_LIMIT = 100;
 
@@ -291,7 +288,7 @@ public class SubscriptionRenewalService {
                 if (providerOrderId == null) {
                     PaymentOrder order = payments.createOrderForCustomer(
                             amountPence,
-                            CURRENCY,
+                            payments.currency(),
                             "sub-charge:" + charge.getId(),
                             subscription.getProviderCustomerId());
                     charge.setPaymentReference(

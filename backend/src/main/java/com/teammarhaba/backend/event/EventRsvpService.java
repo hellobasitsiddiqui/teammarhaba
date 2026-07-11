@@ -2,8 +2,11 @@ package com.teammarhaba.backend.event;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.MembershipProperties;
+import com.teammarhaba.backend.membership.Entitlement;
 import com.teammarhaba.backend.membership.EntitlementDecision;
+import com.teammarhaba.backend.membership.EntitlementReason;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.membership.OrderStatus;
 import com.teammarhaba.backend.membership.PaymentRequiredException;
@@ -77,10 +80,12 @@ import org.springframework.transaction.annotation.Transactional;
  * with a {@code 402 Payment Required} unless the caller already holds a settled ({@code CONFIRMED})
  * order for it — the join must go through checkout (TM-477/478) so the money settles first. Without
  * this, any authenticated caller could free-join a priced/premium event, bypassing the checkout PAY
- * gate entirely. {@code FREE}/{@code INCLUDED} entitlements join normally; the webhook-driven
- * {@link #rsvpForConfirmedOrder} path (money already settled) is never re-gated; idempotent
- * re-RSVPs/double-tap claims and leaving are untouched; and with the flag <em>off</em> no entitlement
- * is resolved at all — the verbs keep their exact legacy behaviour.
+ * gate entirely. {@code FREE}/{@code INCLUDED} entitlements join normally — and a {@code FREE} landing
+ * granted by the <em>first-event credit</em> consumes that credit on commitment (TM-629), exactly as
+ * checkout does, so the freebie cannot be re-used event after event through the direct verbs. The
+ * webhook-driven {@link #rsvpForConfirmedOrder} path (money already settled) is never re-gated;
+ * idempotent re-RSVPs/double-tap claims and leaving are untouched; and with the flag <em>off</em> no
+ * entitlement is resolved at all — the verbs keep their exact legacy behaviour.
  */
 @Service
 public class EventRsvpService {
@@ -115,6 +120,7 @@ public class EventRsvpService {
     private final MembershipProperties membershipProps;
     private final EntitlementService entitlements;
     private final OrderRepository orders;
+    private final MembershipService memberships;
 
     public EventRsvpService(
             EventRepository events,
@@ -128,7 +134,8 @@ public class EventRsvpService {
             EventChatLifecycleService chatLifecycle,
             MembershipProperties membershipProps,
             EntitlementService entitlements,
-            OrderRepository orders) {
+            OrderRepository orders,
+            MembershipService memberships) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -141,6 +148,7 @@ public class EventRsvpService {
         this.membershipProps = membershipProps;
         this.entitlements = entitlements;
         this.orders = orders;
+        this.memberships = memberships;
     }
 
     /**
@@ -201,7 +209,7 @@ public class EventRsvpService {
                     // re-RSVP branch above returns the existing state without ever resolving an
                     // entitlement, and every pre-existing guard (404/started/cutoff/age) keeps its
                     // precedence because the gate runs last, just before the attendance write.
-                    guardPaidEventJoin(directCaller, user, eventId);
+                    Entitlement entitlement = guardPaidEventJoin(directCaller, user, eventId);
                     boolean spotFree = !event.hasCapacityLimit() || going < event.getCapacity();
                     AttendanceState state =
                             (spotFree && waitlisted == 0) ? AttendanceState.GOING : AttendanceState.WAITLISTED;
@@ -209,6 +217,11 @@ public class EventRsvpService {
                         guardOneActiveEvent(user.getId(), eventId, now);
                     }
                     attendance.save(new EventAttendance(eventId, user.getId(), state));
+                    // A FREE-first direct landing is a COMMITMENT, so it spends the one first-event
+                    // credit (TM-629) — exactly as checkout does. Without this, the direct verb read
+                    // the FIRST_EVENT_FREE entitlement but never consumed it, so a pay-per-event
+                    // caller could free-join priced events repeatedly, never routing through checkout.
+                    consumeFirstEventCreditOnCommitment(directCaller, entitlement, eventId, now);
                     // Event-chat lifecycle (TM-446): a GOING landing joins (and lazily creates) the
                     // group thread; a waitlisted landing joins only if the event opts its waitlist into
                     // chat. Runs inside this locked RSVP transaction, so membership commits atomically
@@ -331,10 +344,14 @@ public class EventRsvpService {
         // like a fresh RSVP — otherwise a free waitlist landing could be promoted into a paid event
         // without ever paying. A paid-up member (their CONFIRMED order landed them WAITLISTED via the
         // payment webhook when the event was full) passes: their money already settled.
-        guardPaidEventJoin(caller, user, eventId);
+        Entitlement entitlement = guardPaidEventJoin(caller, user, eventId);
         guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
+        // A FREE-first claim spends the credit too (TM-629) — normally a no-op re-stamp, because the
+        // waitlist landing already consumed it for this same event; it only bites for a legacy
+        // waitlist row that predates consumption on the RSVP verb.
+        consumeFirstEventCreditOnCommitment(caller, entitlement, eventId, now);
         // Event-chat lifecycle (TM-446): a claim is a WAITLISTED -> GOING landing, so the claimant
         // joins the group thread here — whether or not the event opted its waitlist into chat (a
         // waitlist-in-chat member is already in; ensureMember makes this idempotent).
@@ -377,15 +394,19 @@ public class EventRsvpService {
      * <p>Runs inside the command's transaction, after every pre-existing guard, immediately before the
      * attendance write — so no existing 404/409 outcome changes precedence, and the entitlement read
      * (which may JIT-enrol a membership, exactly as checkout does) shares the surrounding locks.
+     *
+     * @return the resolved entitlement when the gate ran (so the caller can consume a
+     *         {@code FIRST_EVENT_FREE} credit on commitment, TM-629), or {@code null} when no
+     *         entitlement was resolved (settled-order path / flag off)
      */
-    private void guardPaidEventJoin(VerifiedUser directCaller, User user, Long eventId) {
+    private Entitlement guardPaidEventJoin(VerifiedUser directCaller, User user, Long eventId) {
         if (directCaller == null || !membershipProps.enabled()) {
-            return; // settled-order path, or the paid feature is off — legacy behaviour, no resolution
+            return null; // settled-order path, or the paid feature is off — legacy behaviour, no resolution
         }
-        EntitlementDecision decision =
-                entitlements.resolve(directCaller, eventId).decision();
+        Entitlement entitlement = entitlements.resolve(directCaller, eventId);
+        EntitlementDecision decision = entitlement.decision();
         if (decision == EntitlementDecision.FREE || decision == EntitlementDecision.INCLUDED) {
-            return; // nothing to pay — the direct join is legitimate
+            return entitlement; // nothing to pay — the direct join is legitimate
         }
         // PAY (or reserved UPGRADE): only a settled order proves the money side is done. PENDING /
         // CANCELLED / REFUND_DUE / REFUNDED orders do not buy a join — the money never (or no longer)
@@ -396,6 +417,28 @@ public class EventRsvpService {
         if (!settled) {
             throw new PaymentRequiredException(PAYMENT_REQUIRED);
         }
+        return entitlement;
+    }
+
+    /**
+     * Spend the caller's one first-event credit when a direct join committed on the strength of it
+     * (TM-629) — the same "consumed on commitment" rule checkout applies (TM-477), now shared by the
+     * direct RSVP/waitlist-join and claim verbs. Before this, the direct verbs only <em>read</em> the
+     * {@code FIRST_EVENT_FREE} entitlement: the credit stayed available, so it could be re-used for
+     * event after event without ever going through checkout (the TM-625a free-credit abuse).
+     *
+     * <p>No-op unless the gate actually resolved a {@code FIRST_EVENT_FREE} entitlement for a direct
+     * caller. Re-consuming for the SAME event (a claim after the waitlist landing consumed, or a
+     * checkout following a direct join) just re-stamps identical values — {@code EntitlementService}
+     * keeps that event's entitlement {@code FIRST_EVENT_FREE}, and {@code CheckoutService.cancel}
+     * returns the credit on an in-window cancel exactly as for a checkout-consumed credit.
+     */
+    private void consumeFirstEventCreditOnCommitment(
+            VerifiedUser directCaller, Entitlement entitlement, Long eventId, Instant now) {
+        if (directCaller == null || entitlement == null || entitlement.reason() != EntitlementReason.FIRST_EVENT_FREE) {
+            return;
+        }
+        memberships.getOrEnrol(directCaller).consumeFirstEventCredit(eventId, now);
     }
 
     /**

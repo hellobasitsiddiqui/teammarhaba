@@ -46,6 +46,7 @@ class RefundSweepServiceTest {
         users = mock(UserService.class);
         payments = mock(PaymentProvider.class);
         entityManager = mock(EntityManager.class); // refresh() is a no-op in these unit tests
+        when(payments.currency()).thenReturn("GBP"); // the seam-exposed refund currency (TM-629)
         service = new RefundSweepService(orders, charges, users, payments, entityManager);
     }
 

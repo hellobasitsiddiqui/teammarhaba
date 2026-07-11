@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -15,8 +16,11 @@ import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.MembershipProperties;
+import com.teammarhaba.backend.event.AttendanceState;
 import com.teammarhaba.backend.event.CancelResult;
 import com.teammarhaba.backend.event.EventRsvpService;
+import com.teammarhaba.backend.event.RsvpResult;
+import com.teammarhaba.backend.payments.PaymentOrder;
 import com.teammarhaba.backend.payments.PaymentProvider;
 import com.teammarhaba.backend.payments.PaymentProviderException;
 import com.teammarhaba.backend.user.User;
@@ -76,6 +80,7 @@ class CheckoutServiceTest {
         // The tombstone-safe settle-time read (TM-625): the default buyer is a live account.
         when(users.findAnyById(42L)).thenReturn(Optional.of(user));
         when(payments.name()).thenReturn("revolut");
+        when(payments.currency()).thenReturn("GBP"); // the seam-exposed charge currency (TM-629)
         when(orders.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -274,5 +279,87 @@ class CheckoutServiceTest {
         service(true).cancel(CALLER, 7L); // must not throw — the cancel bookkeeping stands
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_DUE); // the debt stays visible
+    }
+
+    // ------------------------------------------------------------------ configured currency (TM-629)
+
+    @Test
+    void payBranchChargesTheProviderConfiguredCurrencyNotAHardcodedGbp() {
+        // Regression for the dead config knob (review finding #22, TM-629): app.payments.revolut.currency
+        // was bound and documented but never read — every call site hardcoded "GBP". The checkout must
+        // pass the SEAM-exposed currency to create-order; on the pre-fix code this verify fails because
+        // the provider is asked for GBP no matter what it is configured to charge.
+        when(payments.currency()).thenReturn("EUR");
+        when(entitlements.resolve(any(), anyLong()))
+                .thenReturn(new Entitlement(EntitlementDecision.PAY, 500, EntitlementReason.PAY_STANDARD));
+        when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
+        when(payments.createOrder(eq(500), eq("EUR"), anyString()))
+                .thenReturn(new PaymentOrder("rev-eur-1", "tok-eur-1"));
+
+        service(true).checkout(CALLER, 7L);
+
+        verify(payments).createOrder(eq(500), eq("EUR"), anyString());
+        verify(payments, never()).createOrder(anyInt(), eq("GBP"), anyString());
+    }
+
+    // ------------------------------------------------------------------ paid-but-waitlisted settle (TM-629)
+
+    @Test
+    void settleThatLandsWaitlistedKeepsTheOrderConfirmedForALaterClaim() {
+        // Review finding #7 sub-case (TM-629): capacity filled between checkout and payment, so the
+        // settle-time RSVP lands WAITLISTED rather than GOING. The money is honoured, not stranded:
+        // the order must still move PENDING → CONFIRMED (a CONFIRMED order is exactly what lets this
+        // member pass EventRsvpService's paid-join gate and claim a freed spot without paying twice)
+        // and no refund fires while they hold that paid waitlist place. The regression guarded against
+        // is the order stuck PENDING (webhook retry loop) or an over-eager refund on the WAITLISTED
+        // landing.
+        Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-wl");
+        when(orders.findByProviderOrderId("rev-ord-wl")).thenReturn(Optional.of(order));
+        when(rsvps.rsvpForConfirmedOrder(user, 7L)).thenReturn(new RsvpResult(AttendanceState.WAITLISTED, 5, 1));
+
+        boolean matched = service(true).confirmPayment("rev-ord-wl");
+
+        assertThat(matched).isTrue();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(payments, never()).refund(any(), anyInt(), any(), any());
+    }
+
+    // ------------------------------------------------------------------ credit return with no order (TM-629)
+
+    @Test
+    void inWindowCancelReturnsTheCreditEvenWhenNoOrderExists() {
+        // TM-629: a direct FREE-first RSVP consumes the first-event credit WITHOUT writing an order row
+        // (consumption moved into EventRsvpService, matching checkout's consume-on-commitment rule).
+        // The old cancel() returned early when it found no order, silently forfeiting the credit on an
+        // in-window cancel of exactly that commitment. The credit check must run before the order guard.
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.free(false, 0));
+        when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
+        Membership membership = new Membership(42L, Instant.now());
+        membership.consumeFirstEventCredit(7L, Instant.now()); // spent by the direct RSVP on THIS event
+        when(memberships.getOrEnrol(any())).thenReturn(membership);
+
+        CheckoutCancelResult result = service(true).cancel(CALLER, 7L);
+
+        assertThat(result.creditReturned()).isTrue();
+        assertThat(result.reversed()).isFalse(); // there was no ORDER to reverse — only the credit
+        assertThat(membership.isFirstEventCreditUsed()).isFalse();
+        assertThat(membership.getFirstEventCreditEventId()).isNull();
+    }
+
+    @Test
+    void lateCancelWithNoOrderStillForfeitsTheCredit() {
+        // The forfeiture rule is unchanged (TM-629): missing the window forfeits the credit whether the
+        // commitment came from checkout or from a direct FREE-first RSVP — no order means no exception.
+        when(rsvps.cancelRsvp(any(), eq(7L), eq(false))).thenReturn(CancelResult.committedLate(1));
+        when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
+        Membership membership = new Membership(42L, Instant.now());
+        membership.consumeFirstEventCredit(7L, Instant.now());
+        when(memberships.getOrEnrol(any())).thenReturn(membership);
+
+        CheckoutCancelResult result = service(true).cancel(CALLER, 7L);
+
+        assertThat(result.creditReturned()).isFalse();
+        assertThat(membership.isFirstEventCreditUsed()).isTrue(); // forfeited — the late cancel rule holds
     }
 }

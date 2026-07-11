@@ -2,6 +2,7 @@ package com.teammarhaba.backend.membership;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.event.Event;
@@ -87,6 +88,8 @@ class RefundSweepMembershipOnlyIntegrationTest extends AbstractIntegrationTest {
         order.setPaymentReference("revolut", "rev-ord-tm630");
         order.markRefundDue(Instant.now());
         Long orderId = orders.save(order).getId();
+
+        when(paymentProvider.currency()).thenReturn("GBP"); // seam-exposed charge currency (TM-629)
 
         // One sweeper heartbeat in the membership-only context.
         sweeper.tick();

@@ -131,12 +131,25 @@ public class Subscription {
      * — the row resets to a clean ACTIVE state and a new anniversary; any previous dunning state is
      * cleared. The saved-method ref is cleared too: the new checkout saves a (possibly different) card,
      * which the activation confirm re-resolves from the provider.
+     *
+     * <p><strong>Residual paid time is credited, never forfeited (TM-629).</strong> A CANCELED
+     * subscription may re-subscribe immediately, but its old paid window can still have days left —
+     * previously the reset simply swallowed them, so "cancel day 1, re-subscribe day 2" paid twice for
+     * the overlap. The unexpired remainder is carried over: the fresh period ends one month from
+     * {@code now} <em>plus</em> whatever was still paid for. (A lapsed/PAST_DUE row's period end is
+     * already in the past, so nothing is added there.)
      */
     public void activate(MembershipTier tier, String provider, String providerCustomerId, Instant now) {
+        java.time.Duration residual = java.time.Duration.ZERO;
+        if (this.status == SubscriptionStatus.CANCELED
+                && this.currentPeriodEnd != null
+                && this.currentPeriodEnd.isAfter(now)) {
+            residual = java.time.Duration.between(now, this.currentPeriodEnd);
+        }
         this.tier = tier;
         this.status = SubscriptionStatus.ACTIVE;
         this.currentPeriodStart = now;
-        this.currentPeriodEnd = plusOneMonth(now);
+        this.currentPeriodEnd = plusOneMonth(now).plus(residual);
         this.provider = provider;
         this.providerCustomerId = providerCustomerId;
         this.savedPaymentMethodRef = null;
