@@ -160,6 +160,40 @@ public class Order {
         return true;
     }
 
+    /**
+     * Mark a PAY order {@code FAILED} on a verified decline/fail webhook (TM-634): {@code PENDING → FAILED}.
+     * Only a still-{@code PENDING} order transitions — a repeat delivery, or a decline arriving for an
+     * already {@code CONFIRMED}/{@code CANCELLED}/{@code EXPIRED} order, is a no-op. A declined payment
+     * captured no money, so this order never owes a refund and the held-back RSVP is never performed.
+     * Returns {@code true} iff this call actually failed the order.
+     */
+    public boolean failPending(Instant when) {
+        if (status != OrderStatus.PENDING) {
+            return false;
+        }
+        this.status = OrderStatus.FAILED;
+        this.updatedAt = when;
+        return true;
+    }
+
+    /**
+     * Expire an abandoned unpaid PAY order the TTL sweep found still {@code PENDING} past the abandon
+     * window (TM-634): {@code PENDING → EXPIRED}. Only a still-{@code PENDING} order transitions, so a
+     * settle/decline/cancel that landed while the sweep waited for the lock leaves it untouched. No money
+     * captured on a {@code PENDING} order, so nothing is owed back here — but the sweep voids the provider
+     * order best-effort and a late settle of a payment that captured just before expiry is caught by
+     * {@link #confirmPaid}'s settle-after-terminal race handling (flagged {@code REFUND_DUE} + refunded).
+     * Returns {@code true} iff this call actually expired the order.
+     */
+    public boolean expirePending(Instant when) {
+        if (status != OrderStatus.PENDING) {
+            return false;
+        }
+        this.status = OrderStatus.EXPIRED;
+        this.updatedAt = when;
+        return true;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

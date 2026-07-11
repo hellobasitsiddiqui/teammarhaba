@@ -261,6 +261,54 @@ class SubscriptionServiceTest {
         verify(subscriptions, never()).save(any());
     }
 
+    // ------------------------------------------------------------------ decline/fail webhook (TM-634)
+
+    @Test
+    void failChargeMarksAPendingInitialChargeFailedWithoutActivating() {
+        // TM-634: a declined INITIAL widget payment (ORDER_PAYMENT_DECLINED/FAILED) marks the PENDING charge
+        // terminal FAILED and — crucially — must NOT activate the subscription (no save, no tier grant, no
+        // "subscription started" notification).
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-df", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-df")).thenReturn(Optional.of(charge));
+
+        boolean matched = service.failCharge("rev-ord-df");
+
+        assertThat(matched).isTrue();
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.FAILED);
+        verify(users).lockForUpdate(42L); // serialised with confirms/renewals on this buyer
+        verify(subscriptions, never()).save(any());
+        verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
+        verify(notifier, never()).subscriptionStarted(anyLong(), any(), anyString());
+    }
+
+    @Test
+    void failChargeLeavesAnAlreadyPaidChargeUntouched() {
+        // A decline arriving after a settle must never overwrite a PAID (settled) charge.
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-paid", "cust-1", chargeTime);
+        charge.markPaid(chargeTime, Subscription.plusOneMonth(chargeTime), chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-paid")).thenReturn(Optional.of(charge));
+
+        boolean matched = service.failCharge("rev-ord-paid");
+
+        assertThat(matched).isTrue();
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.PAID); // untouched
+    }
+
+    @Test
+    void failChargeIgnoresUnknownProviderOrder() {
+        // Not a subscription charge — the bridge already tried the event-order ledger.
+        when(charges.findByProviderOrderId("not-ours")).thenReturn(Optional.empty());
+
+        assertThat(service.failCharge("not-ours")).isFalse();
+        verify(users, never()).lockForUpdate(anyLong());
+    }
+
     @Test
     void confirmChargeResubscribeResetsExistingRow() {
         // The account cancelled earlier and subscribed again: the SAME row resets rather than duplicating.

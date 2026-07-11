@@ -295,6 +295,21 @@ app:
       api-version: ${REVOLUT_API_VERSION:2024-09-01}
       webhook-signing-secret: ${REVOLUT_WEBHOOK_SIGNING_SECRET:}
       currency: ${REVOLUT_CURRENCY:GBP}
+    # Abandoned-PENDING-order TTL sweep (TM-634): PendingOrderSweepScheduler → PendingOrderSweepService
+    # expires any PAY order still PENDING past `pending-ttl` — a checkout whose settle/decline webhook never
+    # arrived — voiding its provider order best-effort and moving it to EXPIRED, so it stops sitting PENDING
+    # forever. Gated on app.membership.enabled ALONE (the PAY checkout that PRODUCES PENDING orders is
+    # membership-gated), so with membership OFF the bean is never created — the same money-mover opt-in as
+    # the refund sweeper. Knobs are tunables, not secrets.
+    #   pending-ttl                     how old a PENDING order must be before the sweep expires it. Default
+    #                                   30m — comfortably longer than a real widget payment, so a genuinely
+    #                                   in-flight payment is never expired. A non-positive value falls back.
+    #   pending-sweep-interval-ms       gap between sweep passes (fixed delay). Default 5 min — stale orders
+    #                                   are not latency-sensitive; the TTL is the real timer.
+    #   pending-sweep-initial-delay-ms  startup grace before the first sweep pass.
+    pending-ttl: ${PAYMENTS_PENDING_TTL:30m}
+    pending-sweep-interval-ms: ${PAYMENTS_PENDING_SWEEP_INTERVAL_MS:300000}
+    pending-sweep-initial-delay-ms: ${PAYMENTS_PENDING_SWEEP_INITIAL_DELAY_MS:30000}
   auth:
     email-code:
       length: ${EMAIL_CODE_LENGTH:6}            # digits in the one-time code (matches the SMS UX)

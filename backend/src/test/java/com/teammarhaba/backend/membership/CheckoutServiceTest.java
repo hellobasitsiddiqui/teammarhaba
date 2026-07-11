@@ -282,6 +282,71 @@ class CheckoutServiceTest {
         assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_DUE); // the debt stays visible
     }
 
+    // ------------------------------------------------------------------ decline/fail webhook (TM-634)
+
+    @Test
+    void failPaymentMarksAPendingOrderFailedWithoutActivatingOrRefunding() {
+        // A declined/failed INITIAL widget payment (ORDER_PAYMENT_DECLINED/FAILED): the PENDING order goes
+        // terminal FAILED, the held-back RSVP is NEVER performed, and no money is refunded (nothing was
+        // captured on a decline). Pre-fix the webhook path mapped only the settle events, so the order sat
+        // PENDING forever — the exact TM-634 defect.
+        Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-df1");
+        when(orders.findByProviderOrderId("rev-ord-df1")).thenReturn(Optional.of(order));
+
+        boolean matched = service(true).failPayment("rev-ord-df1");
+
+        assertThat(matched).isTrue();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.FAILED);
+        verifyNoInteractions(rsvps); // the caller is never confirmed to the event — no membership activated
+        verify(payments, never()).refund(any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void failPaymentIsANoOpForAnAlreadyConfirmedOrder() {
+        // A decline arriving after a settle (out-of-order delivery) must NEVER undo a confirmed, paid
+        // commitment — only a still-PENDING order transitions.
+        Order order = new Order(42L, 7L, 500, OrderStatus.CONFIRMED, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-df2");
+        when(orders.findByProviderOrderId("rev-ord-df2")).thenReturn(Optional.of(order));
+
+        boolean matched = service(true).failPayment("rev-ord-df2");
+
+        assertThat(matched).isTrue();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED); // untouched
+        verifyNoInteractions(rsvps);
+    }
+
+    @Test
+    void failPaymentForAnUnknownOrderReturnsFalseSoTheBridgeTriesTheSubscriptionLedger() {
+        // Not an event order — the bridge then dispatches the decline to the subscription-charge ledger.
+        when(orders.findByProviderOrderId("no-such")).thenReturn(Optional.empty());
+
+        assertThat(service(true).failPayment("no-such")).isFalse();
+        verifyNoInteractions(rsvps);
+    }
+
+    @Test
+    void settleForAnExpiredOrderIsFlaggedRefundDueNotSilentlyKept() {
+        // The settle-vs-void race the TTL sweep introduces (TM-634), mirroring the cancel-vs-void race
+        // (TM-625): the sweep expired an abandoned PENDING order and best-effort voided its provider order,
+        // but the widget payment was completing concurrently so the void was refused and the money captured.
+        // A late settle for the now-EXPIRED order must be recognised as captured money for a dead
+        // commitment: REFUND_DUE + provider refund, never a silent keep-the-money.
+        Order order = new Order(42L, 7L, 500, OrderStatus.PENDING, Instant.now());
+        order.setPaymentReference("revolut", "rev-ord-exp");
+        order.expirePending(Instant.now()); // the sweep already ran: PENDING -> EXPIRED
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.EXPIRED);
+        when(orders.findByProviderOrderId("rev-ord-exp")).thenReturn(Optional.of(order));
+
+        boolean matched = service(true).confirmPayment("rev-ord-exp");
+
+        assertThat(matched).isTrue();
+        verify(payments).refund("rev-ord-exp", 500, "GBP", String.valueOf(order.getId()));
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUNDED);
+        verifyNoInteractions(rsvps); // the expired commitment is never resurrected
+    }
+
     // ------------------------------------------------------------------ configured currency (TM-629)
 
     @Test

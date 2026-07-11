@@ -35,8 +35,10 @@ import org.springframework.stereotype.Component;
  * {@code "v1." + timestamp + "." + rawBody}, keyed by the webhook <em>signing secret</em> (distinct from
  * the API key), and sends it as {@code Revolut-Signature: v1=<hex>} alongside a
  * {@code Revolut-Request-Timestamp}. We recompute and compare in constant time; only
- * {@code ORDER_COMPLETED}/{@code ORDER_AUTHORISED} count as "settled". Anything that fails to verify or
- * parse yields {@link Optional#empty()} — the permit-listed endpoint then treats it as reject/ignore.
+ * {@code ORDER_COMPLETED}/{@code ORDER_AUTHORISED} count as "settled", while
+ * {@code ORDER_PAYMENT_DECLINED}/{@code ORDER_PAYMENT_FAILED} reduce to a terminal "failed" outcome
+ * (TM-634) and every other event to "other". Anything that fails to verify or parse yields
+ * {@link Optional#empty()} — the permit-listed endpoint then treats it as reject/ignore.
  *
  * <p><b>Subscriptions (TM-620)</b> — three more Merchant API calls power recurring billing:
  * {@code POST /api/customers} (the Customer a saved card attaches to), {@code POST /api/orders} with a
@@ -64,9 +66,21 @@ public class RevolutPaymentProvider implements PaymentProvider {
     /**
      * Revolut order events that mean the money has settled and the RSVP may be confirmed. {@code COMPLETED}
      * is the terminal "paid" event for an auto-capture order; {@code AUTHORISED} covers an auth-then-capture
-     * setup. Any other lifecycle event (declined/cancelled/failed/…) is not a confirm trigger.
+     * setup. Any other lifecycle event that is not in {@link #FAILED_EVENTS} is not a confirm trigger.
      */
     private static final Set<String> SETTLED_EVENTS = Set.of("ORDER_COMPLETED", "ORDER_AUTHORISED");
+
+    /**
+     * Revolut order events that mean the INITIAL widget payment was declined/failed (TM-634). These drive
+     * the local order to a terminal {@code FAILED} state (never a settle) so it stops sitting {@code PENDING}
+     * forever — the money never captured, so nothing is owed back. Renewals are unaffected: an off-session
+     * renewal decline is handled synchronously by {@code payWithSavedMethod}, not through this webhook.
+     *
+     * <p>Note (ops follow-up, not code): actually RECEIVING these deliveries requires the Revolut webhook
+     * subscription to include {@code ORDER_PAYMENT_DECLINED}/{@code ORDER_PAYMENT_FAILED} in its event list
+     * — re-register/patch the webhook on the dashboard so the events reach this endpoint.
+     */
+    private static final Set<String> FAILED_EVENTS = Set.of("ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED");
 
     /**
      * Replay window (TM-623): how far a webhook's {@code Revolut-Request-Timestamp} may deviate from
@@ -386,7 +400,17 @@ public class RevolutPaymentProvider implements PaymentProvider {
             if (orderId == null || orderId.isBlank()) {
                 return Optional.empty();
             }
-            return Optional.of(new PaymentWebhookEvent(orderId, SETTLED_EVENTS.contains(event)));
+            // Reduce the provider's event zoo to the three outcomes the confirm/fail path acts on (TM-634):
+            // a settle, a decline/fail (terminal, non-settling), or any other lifecycle event we only ack.
+            PaymentWebhookEvent.Outcome outcome;
+            if (SETTLED_EVENTS.contains(event)) {
+                outcome = PaymentWebhookEvent.Outcome.SETTLED;
+            } else if (FAILED_EVENTS.contains(event)) {
+                outcome = PaymentWebhookEvent.Outcome.FAILED;
+            } else {
+                outcome = PaymentWebhookEvent.Outcome.OTHER;
+            }
+            return Optional.of(new PaymentWebhookEvent(orderId, outcome));
         } catch (Exception e) {
             log.warn("Rejecting Revolut webhook: body did not parse");
             return Optional.empty();

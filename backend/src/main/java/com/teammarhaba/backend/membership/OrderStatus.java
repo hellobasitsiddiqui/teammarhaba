@@ -39,5 +39,22 @@ public enum OrderStatus {
      * The owed money was returned (TM-623): the provider refund call succeeded and the commitment is
      * fully unwound. Terminal — nothing further is owed in either direction.
      */
-    REFUNDED
+    REFUNDED,
+
+    /**
+     * A PAY order whose INITIAL widget payment was declined/failed (TM-634): the provider sent
+     * {@code ORDER_PAYMENT_DECLINED}/{@code ORDER_PAYMENT_FAILED}, so the charge never captured. Terminal
+     * and non-settling — the RSVP is never performed and no money is owed back. Before TM-634 such an order
+     * simply sat {@link #PENDING} forever, because the webhook path only handled the settle events.
+     */
+    FAILED,
+
+    /**
+     * A PAY order the TTL sweep expired because it sat {@link #PENDING} past the abandon window (TM-634):
+     * the customer opened checkout but never completed (or declined) the widget payment. Terminal — treated
+     * like an automatic in-window cancel of an unpaid order (the provider order is voided best-effort), so a
+     * payment that captured just before the sweep and whose settle webhook arrives late is still recognised
+     * as captured money for a dead commitment and refunded (see {@link Order#confirmPaid}).
+     */
+    EXPIRED
 }

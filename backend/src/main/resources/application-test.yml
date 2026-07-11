@@ -44,6 +44,12 @@ app:
   # MembershipDisabledIntegrationTest, which overrides this back to false — exactly what prod inherits.
   membership:
     enabled: true
+  # The abandoned-PENDING-order TTL sweep (TM-634) is membership-gated, so with membership ON above its
+  # bean EXISTS in every integration-test context. Push its first @Scheduled tick a day out so no
+  # background sweep ever fires mid-suite (the same determinism rule as the other schedulers); tests drive
+  # PendingOrderSweepService directly with a controlled `now`.
+  payments:
+    pending-sweep-initial-delay-ms: 86400000
   # Pin the open-ended default duration (TM-412) so listing-state integration tests are deterministic
   # regardless of any future change to the shipped prod default.
   event-listing:

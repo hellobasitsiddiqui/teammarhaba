@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.membership;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
@@ -40,4 +41,16 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * by the {@code V39} partial index so the sweep never table-scans the orders ledger.
      */
     List<Order> findByStatusOrderByIdAsc(OrderStatus status, Pageable pageable);
+
+    /**
+     * The PENDING-order TTL sweep's scan (TM-634): every order still in {@code status} (in practice
+     * {@code PENDING}) whose DB-authoritative {@code created_at} is strictly before {@code createdBefore}
+     * (the TTL cut-off), oldest first, bounded by the caller's page. This turns an abandoned/declined
+     * checkout — one whose settle/decline webhook never arrived — from a row stuck {@code PENDING} forever
+     * into something the sweep can expire (and best-effort void at the provider). The {@code UNIQUE
+     * (user_id, event_id)} + {@code amount_pence} predicates keep PENDING rows few, so this stays a cheap
+     * scan without a dedicated index.
+     */
+    List<Order> findByStatusAndCreatedAtBeforeOrderByIdAsc(
+            OrderStatus status, Instant createdBefore, Pageable pageable);
 }

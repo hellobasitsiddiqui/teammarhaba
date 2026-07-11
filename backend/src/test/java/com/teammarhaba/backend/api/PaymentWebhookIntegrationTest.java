@@ -90,7 +90,7 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
 
         // A VERIFIED, settled webhook for that order → confirm the order + perform the RSVP.
         when(paymentProvider.parseWebhookEvent(any(), any(), any()))
-                .thenReturn(Optional.of(new PaymentWebhookEvent("rev-hook-1", true)));
+                .thenReturn(Optional.of(new PaymentWebhookEvent("rev-hook-1", PaymentWebhookEvent.Outcome.SETTLED)));
         mockMvc.perform(webhook()).andExpect(status().isOk());
 
         assertThat(orders.findByProviderOrderId("rev-hook-1").orElseThrow().getStatus())
@@ -120,8 +120,44 @@ class PaymentWebhookIntegrationTest extends AbstractIntegrationTest {
         // A verified event for an order we never created (e.g. another environment) — acknowledged (2xx),
         // acted on for nothing. Proves the endpoint is reachable UNAUTHENTICATED (no caller() principal).
         when(paymentProvider.parseWebhookEvent(any(), any(), any()))
-                .thenReturn(Optional.of(new PaymentWebhookEvent("no-such-order-" + UUID.randomUUID(), true)));
+                .thenReturn(Optional.of(
+                        new PaymentWebhookEvent("no-such-order-" + UUID.randomUUID(), PaymentWebhookEvent.Outcome.SETTLED)));
         mockMvc.perform(webhook()).andExpect(status().isOk());
+    }
+
+    // ------------------------------------------------------------------ decline/fail → order FAILED, no RSVP
+
+    @Test
+    void declinedWebhookMarksOrderFailedAndPerformsNoRsvp() throws Exception {
+        // TM-634: a declined/failed INITIAL widget payment (ORDER_PAYMENT_DECLINED/FAILED) reduces to the
+        // FAILED outcome; the webhook path must move the local PENDING order to terminal FAILED and NEVER
+        // activate the RSVP/membership. Pre-fix this event was unmapped and the order sat PENDING forever.
+        Event event = premiumEvent();
+        when(paymentProvider.name()).thenReturn("revolut");
+        when(paymentProvider.currency()).thenReturn("GBP");
+        when(paymentProvider.createOrder(anyInt(), anyString(), anyString()))
+                .thenReturn(new PaymentOrder("rev-hook-fail", "tok-f"));
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(caller("uid-wh-decline")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("PENDING"));
+
+        Long userId = users.findByFirebaseUid("uid-wh-decline").orElseThrow().getId();
+        assertThat(attendanceCount(event.getId(), userId)).isZero();
+
+        // A VERIFIED decline webhook for that order → order goes terminal FAILED, still no attendance.
+        when(paymentProvider.parseWebhookEvent(any(), any(), any()))
+                .thenReturn(Optional.of(new PaymentWebhookEvent("rev-hook-fail", PaymentWebhookEvent.Outcome.FAILED)));
+        mockMvc.perform(webhook()).andExpect(status().isOk());
+
+        assertThat(orders.findByProviderOrderId("rev-hook-fail").orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.FAILED);
+        assertThat(attendanceCount(event.getId(), userId)).isZero(); // membership/RSVP never activated
+
+        // Idempotent: a repeat decline delivery leaves it FAILED and still performs no RSVP.
+        mockMvc.perform(webhook()).andExpect(status().isOk());
+        assertThat(orders.findByProviderOrderId("rev-hook-fail").orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.FAILED);
+        assertThat(attendanceCount(event.getId(), userId)).isZero();
     }
 
     // ------------------------------------------------------------------ fixtures
