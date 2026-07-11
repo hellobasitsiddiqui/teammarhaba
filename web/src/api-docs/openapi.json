@@ -1106,6 +1106,23 @@
         },
         "type" : "object"
       },
+      "LinkPreviewResponse" : {
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "imageUrl" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "MarkReadResponse" : {
         "properties" : {
           "conversationId" : {
@@ -3405,6 +3422,32 @@
           }
         },
         "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/link-preview" : {
+      "get" : {
+        "operationId" : "preview",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "url",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LinkPreviewResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "link-preview-controller" ]
       }
     },
     "/api/v1/me" : {

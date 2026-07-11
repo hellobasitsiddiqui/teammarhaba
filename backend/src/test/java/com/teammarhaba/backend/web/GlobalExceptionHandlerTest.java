@@ -183,6 +183,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.membership.SubscriptionService subscriptionService;
 
+    // LinkPreviewController (TM-470) needs a LinkPreviewService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.linkpreview.LinkPreviewService linkPreviewService;
+
     @Test
     void validationErrorReturns400ProblemDetail() throws Exception {
         mockMvc.perform(post("/test/echo")

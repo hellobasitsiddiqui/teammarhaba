@@ -1340,6 +1340,32 @@ export async function claimEventSpot(id) {
   return response.json();
 }
 
+/**
+ * GET /api/v1/link-preview?url=… — the OpenGraph card for a URL that appeared in a chat message
+ * (TM-470). The fetch of the target page happens SERVER-SIDE, behind an SSRF guard, so the browser
+ * never makes the outbound request; this just asks our backend for the resolved card.
+ *
+ * <p>Best-effort by contract: link previews are an enhancement, so a failure (a 400 for a
+ * disallowed/internal URL, a network blip, a non-2xx) resolves to {@code null} rather than throwing —
+ * the chat render hook then simply leaves the raw link as plain text (the AC's "fall back to a plain
+ * link"). A 401 will already have been handled by {@link apiFetch}. Returns the raw
+ * {@code { url, title, description, imageUrl }} response for {@code normalisePreview} to clean.
+ *
+ * @param {string} url the URL to preview.
+ * @returns {Promise<?{url: string, title: ?string, description: ?string, imageUrl: ?string}>}
+ */
+export async function getLinkPreview(url) {
+  try {
+    const response = await apiFetch(`/api/v1/link-preview?url=${encodeURIComponent(url)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 // Bridge for the framework-free page (classic scripts can't `import`).
 //
 // COMPLETENESS CONTRACT (TM-629): every exported helper in this module MUST be listed here. Modules
@@ -1402,6 +1428,7 @@ if (typeof window !== "undefined") {
     rsvpToEvent,
     cancelEventRsvp,
     claimEventSpot,
+    getLinkPreview,
     redirectToLogin,
     LOGIN_PATH,
     ApiError,
