@@ -39,6 +39,7 @@ import { lineIcon } from "./icons.js";
 import {
   listMyConversations,
   getConversationMessages,
+  getConversationMembers,
   markConversationRead,
   postConversationMessage,
   editConversationMessage,
@@ -57,6 +58,10 @@ import * as core from "./chat-core.js";
 // TM-470 link previews: pure URL-detection + response-normalisation core (see the delimited
 // `=== TM-470 link preview ===` hook further down, which mounts the card and calls the endpoint).
 import * as linkPreview from "./chat-linkpreview-core.js";
+// @mentions (TM-469): the pure parse/segment/autocomplete core. The composer autocomplete + the
+// in-message highlight below are the DOM half; all the mention LOGIC (who's mentioned, how to rank
+// candidates, how to splice a pick back in) lives in this framework-free module.
+import * as mentions from "./chat-mentions-core.js";
 // TM-585: drive the Chat-tab unread badge's drop from the mark-read path itself. Opening a thread marks
 // it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
 // so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
@@ -102,7 +107,12 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   // SSE events (each { userId, name, expiresAt }, expired by the ticker); `typingEl` is the persistent
   // indicator line under the body; `typingTimer` is the 1s expiry ticker; `lastTypingSentAt` debounces
   // our OWN outgoing signal (epoch-ms of the last one we sent, 0 = none this composing burst).
-  typists: [], typingEl: null, typingTimer: null, lastTypingSentAt: 0 };
+  typists: [], typingEl: null, typingTimer: null, lastTypingSentAt: 0,
+  // @mentions (TM-469): `members` is the thread's mentionable roster ([{ userId, displayName, role }]
+  // from GET /conversations/{id}/members), loaded best-effort once per thread open. It feeds BOTH the
+  // composer's @mention autocomplete and the in-message highlight (a mention only chips up if its member
+  // is in this list). `mentionBox` is the live autocomplete dropdown element (null when closed).
+  members: [], mentionBox: null };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
@@ -442,6 +452,8 @@ async function renderThread(view, id) {
   thread.savingEdit = false;
   thread.typists = []; // no typists carried across a thread open (TM-465)
   thread.lastTypingSentAt = 0; // fresh debounce window for our own outgoing typing signal
+  thread.members = []; // @mention roster (TM-469) — loaded best-effort just below
+  thread.mentionBox = null; // no autocomplete open on a fresh thread
 
   const body = el("div", { class: "tm-chat-body", "data-testid": "chat-thread" });
   thread.bodyEl = body;
@@ -459,6 +471,28 @@ async function renderThread(view, id) {
   startTypingExpiry(); // TM-465: expire stale typists on a 1s ticker while the thread is open
   markThreadRead(id);
   openLiveThread(id, mine); // TM-464: live SSE append on top of the poll (best-effort)
+  loadMentionRoster(id, mine); // TM-469: fetch the mentionable member list for autocomplete + highlight
+}
+
+/**
+ * Load the thread's mentionable roster (TM-469) in the background and, once it arrives, repaint the body
+ * so already-rendered messages pick up their mention highlights (a message referencing a member can only
+ * chip up once we know that member). Best-effort and race-guarded by the render token: a stale response
+ * from a thread we've since navigated away from is dropped, and any failure (e.g. a 403 the gate should
+ * never produce for a member) just leaves `members` empty — the composer autocomplete then offers only
+ * @everyone/@here and mentions render as plain text, so the thread never breaks on this.
+ */
+async function loadMentionRoster(id, mine) {
+  let roster;
+  try {
+    roster = await getConversationMembers(id);
+  } catch (err) {
+    console.warn("[chat] mention roster load failed:", err?.message ?? err);
+    return;
+  }
+  if (mine !== renderToken || thread.id !== String(id)) return; // navigated away — drop the stale roster
+  thread.members = Array.isArray(roster) ? roster : [];
+  repaintBody(); // re-render so loaded messages gain their mention highlights now the roster is known
 }
 
 /**
@@ -650,22 +684,167 @@ function buildComposer(id, meta) {
   // Reply / quote (TM-466): a quoted-preview bar shown above the input while replying; hidden otherwise.
   // Kept as a persistent node (like the input) so it survives message-list repaints.
   const replyPreview = el("div", { class: "tm-chat-reply-bar", hidden: true, "data-testid": "chat-reply-bar" });
-  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [replyPreview, input, sendBtn]);
+  // @mentions (TM-469): the autocomplete dropdown, absolutely positioned above the input (see the CSS
+  // block). Kept in the form so it survives message-list repaints; empty + hidden until an '@token' opens
+  // it. `role=listbox` + child `role=option` buttons make it keyboard- and screen-reader-navigable.
+  const mentionBox = el("div", {
+    class: "tm-chat-mention-box", hidden: true, role: "listbox",
+    "aria-label": "Mention a member", "data-testid": "chat-mention-box",
+  });
+  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [mentionBox, replyPreview, input, sendBtn]);
   thread.composerInput = input;
   thread.replyPreviewEl = replyPreview;
+  thread.mentionBox = mentionBox;
   paintReplyPreview(); // reflect any pre-existing reply target (normally none on a fresh composer)
 
   const syncEnabled = () => { sendBtn.disabled = !core.validateDraft(input.value).canSend; };
+  // TM-469: drive the @mention autocomplete from the same input. `mentionAutocomplete` owns the dropdown
+  // state (candidates / active row / the '@token' span being edited) and returns the handlers the input
+  // needs; keeping it a small controller keeps buildComposer readable.
+  const ac = mentionAutocomplete(id, input, mentionBox, syncEnabled);
   input.addEventListener("input", () => {
     syncEnabled();
     handleTypingInput(id, input.value); // TM-465: debounced typing signal while composing
+    ac.refresh(); // TM-469: (re)open/close + rank the mention dropdown for the token under the caret
   });
+  // TM-469: keyboard nav of the open dropdown — Arrow/Enter/Escape. When the dropdown is open, Enter
+  // picks the active candidate (and must NOT submit the form); when it's closed the keydown is inert and
+  // Enter submits as before.
+  input.addEventListener("keydown", ac.onKeydown);
+  // Close the dropdown when focus leaves the composer (a short delay lets a candidate mousedown land first).
+  input.addEventListener("blur", () => window.setTimeout(ac.close, 150));
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    ac.close(); // never submit with the dropdown still showing
     send(id, form, input, sendBtn);
   });
   return form;
 }
+
+/* === TM-469 mentions === */
+
+/**
+ * The composer's @mention autocomplete controller. Wires the pure core (detect the '@token' under the
+ * caret → rank candidates → splice a pick back in) to the DOM dropdown `box` over the compose `input`.
+ * Returns the three handlers buildComposer attaches: {@code refresh} (on input), {@code onKeydown}
+ * (Arrow/Enter/Escape nav) and {@code close} (blur/submit). State (the ranked candidates, the active
+ * row, and the token range being replaced) is closure-scoped, so each composer owns its own dropdown.
+ */
+function mentionAutocomplete(id, input, box, syncEnabled) {
+  let candidates = [];
+  let active = -1;
+  let range = null; // the { start, end } of the "@query" span the pick replaces
+
+  function close() {
+    candidates = [];
+    active = -1;
+    range = null;
+    box.hidden = true;
+    clear(box);
+  }
+
+  function paint() {
+    clear(box);
+    if (candidates.length === 0) {
+      box.hidden = true;
+      return;
+    }
+    candidates.forEach((c, i) => {
+      const label = c.kind === "user" ? c.name : "@" + c.name;
+      const hint = c.kind === "everyone" ? "Everyone in this chat" : c.kind === "here" ? "People online now" : null;
+      box.append(el(
+        "button",
+        {
+          class: i === active ? "tm-chat-mention-item is-active" : "tm-chat-mention-item",
+          type: "button", role: "option", "aria-selected": i === active, "data-testid": "chat-mention-item",
+          // mousedown (not click) so the pick fires BEFORE the input's blur closes the dropdown.
+          onMousedown: (e) => { e.preventDefault(); choose(i); },
+        },
+        [
+          el("span", { class: "tm-chat-mention-item-label", text: label }),
+          hint ? el("span", { class: "tm-chat-mention-item-hint", text: hint }) : null,
+        ],
+      ));
+    });
+    box.hidden = false;
+  }
+
+  function choose(i) {
+    const candidate = candidates[i];
+    if (!candidate || !range) return;
+    const spliced = mentions.applyMention(input.value, range, candidate);
+    input.value = spliced.text;
+    // Restore the caret just after the inserted "@name " so the user keeps typing inline.
+    if (typeof input.setSelectionRange === "function") input.setSelectionRange(spliced.caret, spliced.caret);
+    input.focus();
+    close();
+    syncEnabled();
+    handleTypingInput(id, input.value); // keep the typing signal honest after the programmatic edit
+  }
+
+  function refresh() {
+    const caret = typeof input.selectionStart === "number" ? input.selectionStart : input.value.length;
+    const token = mentions.detectMentionQuery(input.value, caret);
+    if (!token) {
+      close();
+      return;
+    }
+    // Offer @here alongside @everyone: the backend resolves it against live presence (TM-464) at post time.
+    candidates = mentions.mentionCandidates(thread.members, token.query, { online: true });
+    range = token;
+    active = candidates.length ? 0 : -1;
+    paint();
+  }
+
+  function onKeydown(e) {
+    if (box.hidden || candidates.length === 0) return; // dropdown closed — let Enter submit as normal
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      active = (active + 1) % candidates.length;
+      paint();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active - 1 + candidates.length) % candidates.length;
+      paint();
+    } else if (e.key === "Enter") {
+      e.preventDefault(); // pick the candidate instead of submitting the message
+      choose(active);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  }
+
+  return { refresh, onKeydown, close };
+}
+
+/**
+ * Build a message bubble that highlights any @mentions in `body` (TM-469). Splits the text into
+ * text + mention segments ({@link mentions.mentionSegments}) against the loaded thread roster and renders
+ * each mention as a highlighted chip; falls back to the plain text bubble when there are no mentions (or
+ * the roster hasn't loaded yet). All nodes are text-only (el() → textContent), so it stays XSS-safe.
+ */
+function mentionBubble(body) {
+  const segments = mentions.mentionSegments(body, thread.members);
+  // Fast path: nothing to highlight → the exact original bubble (a single flat text node).
+  if (segments.length === 1 && segments[0].type === "text") {
+    return el("div", { class: "tm-chat-bub", text: body });
+  }
+  const nodes = segments.map((seg) => {
+    if (seg.type === "text") return seg.text; // el() turns a string child into a text node
+    const cls = seg.kind === "user" ? "tm-chat-mention tm-chat-mention--user" : "tm-chat-mention tm-chat-mention--group";
+    return el("span", {
+      class: cls,
+      "data-testid": "chat-mention",
+      "data-mention-kind": seg.kind,
+      "data-user-id": seg.userId != null ? String(seg.userId) : null,
+      text: seg.label,
+    });
+  });
+  return el("div", { class: "tm-chat-bub" }, nodes);
+}
+
+/* === end TM-469 mentions === */
 
 /**
  * Begin replying to a thread message (TM-466): set the composer's reply target, show the quoted-preview
@@ -917,7 +1096,15 @@ function messageRow(m, mine = false) {
     return row;
   }
 
-  row.append(el("div", { class: "tm-chat-bub", text: m.body }));
+  /* === TM-469 mentions === */
+  // The message bubble. Instead of one flat text node, split the body into text + mention segments so
+  // any @mention (an individual on this thread's roster, or @everyone/@here) renders as a highlighted
+  // chip. `mentionBubble` falls back to the plain text node when the body has no mentions (or the roster
+  // hasn't loaded yet), so this is a pure, additive enhancement of the existing `text: m.body` bubble —
+  // the renderer is otherwise untouched. All nodes are built via el() (textContent only), so a body that
+  // merely LOOKS like markup can never inject it.
+  row.append(mentionBubble(m.body));
+  /* === end TM-469 mentions === */
   // Stamp line: the time label plus — new in TM-467 — an "edited" tag when the author has edited it.
   if (m.pending) {
     row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));

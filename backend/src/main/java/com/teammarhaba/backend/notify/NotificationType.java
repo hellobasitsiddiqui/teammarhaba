@@ -21,6 +21,10 @@ package com.teammarhaba.backend.notify;
  *       the user should check their card (TM-620).
  *   <li>{@code SUBSCRIPTION_ENDED} — the subscription ended (cancel reached the period end, or dunning
  *       exhausted) and the account was downgraded to pay-per-event (TM-620).
+ *   <li>{@code CHAT_MENTION} — someone @mentioned the user in an event group chat (TM-469), directly
+ *       (an individual mention) or via {@code @everyone} / {@code @here}. This is the one chat type
+ *       that earns a durable inbox row: an ordinary new message only ever pushes (TM-437), but being
+ *       named deserves a bell/panel row that survives the push, exactly like the other system types.
  * </ul>
  */
 public enum NotificationType {
@@ -33,5 +37,6 @@ public enum NotificationType {
     SUBSCRIPTION_STARTED,
     SUBSCRIPTION_RENEWED,
     SUBSCRIPTION_PAYMENT_FAILED,
-    SUBSCRIPTION_ENDED
+    SUBSCRIPTION_ENDED,
+    CHAT_MENTION
 }

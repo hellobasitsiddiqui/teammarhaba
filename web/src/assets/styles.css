@@ -4184,7 +4184,56 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
     align-items: center;
     margin-top: var(--space-3);
     padding-top: var(--space-2);
+    position: relative; /* anchor for the TM-469 @mention autocomplete dropdown */
 }
+
+/* === TM-469 @mentions: composer autocomplete dropdown + in-message highlight chips === */
+/* The autocomplete list floats above the input, anchored to the position:relative composer. */
+.tm-chat-mention-box {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + var(--space-1));
+    z-index: 20;
+    max-height: 40vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-3);
+    box-shadow: var(--shadow-2, 0 6px 24px rgba(0, 0, 0, 0.18));
+}
+.tm-chat-mention-box[hidden] { display: none; }
+.tm-chat-mention-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-2) var(--space-4);
+    font: inherit;
+    font-size: var(--fs-3);
+    text-align: left;
+    color: var(--fg);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+.tm-chat-mention-item.is-active,
+.tm-chat-mention-item:hover { background: var(--surface-sunken, rgba(0, 0, 0, 0.06)); }
+.tm-chat-mention-item-label { font-weight: 600; }
+.tm-chat-mention-item-hint { font-size: var(--fs-2); color: var(--muted); }
+/* A mention chip inside a rendered message — a subtle, theme-driven highlight (no new colour tokens). */
+.tm-chat-mention {
+    font-weight: 600;
+    color: var(--accent, var(--fg));
+    background: var(--accent-wash, rgba(0, 0, 0, 0.06));
+    border-radius: var(--radius-1, 4px);
+    padding: 0 2px;
+}
+.tm-chat-mention--group { font-style: italic; }
+/* === end TM-469 @mentions === */
 .tm-chat-input {
     flex: 1;
     min-width: 0;

@@ -698,6 +698,26 @@ export async function getConversationMessages(id, { page, size } = {}) {
 }
 
 /**
+ * GET /api/v1/conversations/{id}/members — the thread's mentionable roster (TM-469): its active members
+ * EXCEPT the caller, each a ConversationMemberResponse (`{ userId, displayName, role }`). Members-only
+ * (a 403 for a non-member, already surfaced by {@link apiFetch}). Read by the chat thread view to feed
+ * the composer's @mention autocomplete and to highlight mentions in rendered messages. Best-effort at
+ * the call site — a failure just means the autocomplete/highlight degrade, never that the thread breaks.
+ * @param {number|string} id the conversation id.
+ * @returns {Promise<{userId:number, displayName:string, role:string}[]>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getConversationMembers(id) {
+  const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/members`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/conversations/${id}/members failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/conversations/{id}/read — opening a thread marks it read (clears its unread count).
  * Idempotent; returns a MarkReadResponse (`{ conversationId, lastReadAt, unreadCount }`). The thread
  * view (TM-438) fires this on open, fire-and-forget. A 401 will already have refreshed/redirected via
@@ -1415,6 +1435,7 @@ if (typeof window !== "undefined") {
     listMyConversations,
     getConversationsUnreadTotal,
     getConversationMessages,
+    getConversationMembers,
     markConversationRead,
     postConversationMessage,
     editConversationMessage,

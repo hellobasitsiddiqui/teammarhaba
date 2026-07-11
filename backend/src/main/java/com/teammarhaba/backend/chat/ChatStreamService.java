@@ -2,7 +2,9 @@ package com.teammarhaba.backend.chat;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import org.slf4j.Logger;
@@ -278,6 +280,38 @@ public class ChatStreamService {
     public int connectionCount(long conversationId) {
         Collection<SseEmitter> streams = streamsByConversation.get(conversationId);
         return streams == null ? 0 : streams.size();
+    }
+
+    /**
+     * The Firebase uids of the members currently holding an open stream for {@code conversationId} on
+     * this instance — the raw material for an {@code @here} mention (TM-469). Each open stream was
+     * registered with its owner's uid at {@link #open(long, String)}; this returns the distinct set of
+     * those uids (a member with two tabs open appears once), so {@link MentionNotifier} can map them to
+     * user ids and treat them as "online here".
+     *
+     * <p><b>Same single-instance caveat as {@link #broadcast}.</b> This registry lives in one JVM's
+     * heap, so on Cloud Run it only sees the streams terminated on <em>this</em> instance — {@code @here}
+     * is therefore a best-effort "online right now, as this instance can see it", exactly like the live
+     * broadcast. That is acceptable: {@code @here} is a convenience fan-out, and any member it misses
+     * still receives the ordinary new-message push (TM-437) like everyone else. Durable cross-instance
+     * presence is the deferred TM-505 realtime-backbone work; until then this is the honest slice.
+     *
+     * @param conversationId the thread whose connected members to report
+     * @return the distinct owner uids currently connected here; empty when nobody is (the common case)
+     */
+    public Set<String> onlineOwnerUids(long conversationId) {
+        Collection<SseEmitter> streams = streamsByConversation.get(conversationId);
+        if (streams == null || streams.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> uids = new HashSet<>();
+        for (SseEmitter emitter : streams) {
+            String owner = streamOwner.get(emitter);
+            if (owner != null) {
+                uids.add(owner);
+            }
+        }
+        return uids;
     }
 
     /**

@@ -519,6 +519,21 @@
         },
         "type" : "object"
       },
+      "ConversationMemberResponse" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "ConversationMembershipResponse" : {
         "properties" : {
           "conversationId" : {
@@ -1395,7 +1410,7 @@
             "type" : "string"
           },
           "type" : {
-            "enum" : [ "ADMIN_MESSAGE", "EVENT_UPDATED", "EVENT_CANCELLED", "WAITLIST_OFFER", "RSVP_CONFIRMED", "EVENT_REMINDER", "SUBSCRIPTION_STARTED", "SUBSCRIPTION_RENEWED", "SUBSCRIPTION_PAYMENT_FAILED", "SUBSCRIPTION_ENDED" ],
+            "enum" : [ "ADMIN_MESSAGE", "EVENT_UPDATED", "EVENT_CANCELLED", "WAITLIST_OFFER", "RSVP_CONFIRMED", "EVENT_REMINDER", "SUBSCRIPTION_STARTED", "SUBSCRIPTION_RENEWED", "SUBSCRIPTION_PAYMENT_FAILED", "SUBSCRIPTION_ENDED", "CHAT_MENTION" ],
             "type" : "string"
           }
         },
@@ -2913,6 +2928,36 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ConversationMembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/members" : {
+      "get" : {
+        "operationId" : "members",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/ConversationMemberResponse"
+                  },
+                  "type" : "array"
                 }
               }
             },

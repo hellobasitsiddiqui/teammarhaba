@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.chat;
 
+import com.teammarhaba.backend.api.ConversationMemberResponse;
 import com.teammarhaba.backend.api.ConversationMessageResponse;
 import com.teammarhaba.backend.api.ConversationSummaryResponse;
 import com.teammarhaba.backend.api.EmojiReactionCount;
@@ -10,6 +11,8 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.user.UserService;
 import java.time.Instant;
 import java.util.Comparator;
@@ -56,6 +59,13 @@ public class ConversationReadService {
     private final EventRepository events;
     private final UserService users;
     private final MessageReactionService reactionSummaries;
+    /**
+     * The user aggregate, for resolving member ids → display names in the {@link #roster} (TM-469) — the
+     * id→name resolver the chat surface previously lacked. Distinct from {@link #users} (the
+     * {@link UserService} that provisions the <em>caller</em> from the token); this reads OTHER members'
+     * profiles, and through the repository so tombstoned accounts are hidden.
+     */
+    private final UserRepository userAccounts;
 
     public ConversationReadService(
             ConversationRepository conversations,
@@ -63,13 +73,15 @@ public class ConversationReadService {
             MessageRepository messages,
             EventRepository events,
             UserService users,
-            MessageReactionService reactionSummaries) {
+            MessageReactionService reactionSummaries,
+            UserRepository userAccounts) {
         this.conversations = conversations;
         this.members = members;
         this.messages = messages;
         this.events = events;
         this.users = users;
         this.reactionSummaries = reactionSummaries;
+        this.userAccounts = userAccounts;
     }
 
     /**
@@ -384,6 +396,48 @@ public class ConversationReadService {
     public void assertMember(VerifiedUser caller, Long conversationId) {
         Long userId = users.provision(caller).getId();
         requireMember(conversationId, userId);
+    }
+
+    /**
+     * The thread's mentionable roster (TM-469) — its <em>active</em> ({@link MuteState#NONE}) members
+     * <b>except the caller</b>, each as {@code (userId, displayName, role)} — the candidate list the
+     * chat composer's @mention autocomplete draws from. Member-gated exactly like {@link #messages}: the
+     * caller must be an active/read-only member of the thread ({@code 403} otherwise, so the roster
+     * can't be used to probe threads the caller isn't in).
+     *
+     * <p>Names are resolved <b>through the {@link UserRepository} aggregate</b> (one batch read), so a
+     * tombstoned account whose membership row survives contributes no roster entry — the same account
+     * rail every other people-resolving path uses. The caller is dropped server-side (you don't @mention
+     * yourself, and the client needn't know its own numeric id to filter). Read-only listing sorted by
+     * display name for a stable, human autocomplete order.
+     *
+     * @throws AccessDeniedException {@code 403} if the caller is not a member of the thread
+     */
+    @Transactional(readOnly = true)
+    public List<ConversationMemberResponse> roster(VerifiedUser caller, Long conversationId) {
+        Long callerId = users.provision(caller).getId();
+        requireMember(conversationId, callerId); // gate: members-only, else 403
+
+        List<ConversationMember> active = members.findByConversationIdAndMute(conversationId, MuteState.NONE);
+        Map<Long, User> byId = userAccounts
+                .findAllById(active.stream().map(ConversationMember::getUserId).toList()).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+
+        return active.stream()
+                .filter(member -> !member.getUserId().equals(callerId)) // you don't @mention yourself
+                .map(member -> {
+                    User user = byId.get(member.getUserId());
+                    if (user == null) {
+                        return null; // tombstoned account — no mentionable name, omit
+                    }
+                    return new ConversationMemberResponse(
+                            user.getId(), user.getDisplayName(), member.getRole().name());
+                })
+                .filter(row -> row != null)
+                .sorted(Comparator.comparing(
+                        ConversationMemberResponse::displayName,
+                        Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
+                .toList();
     }
 
     /**
