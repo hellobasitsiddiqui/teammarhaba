@@ -186,3 +186,73 @@ export function tierFromSubscribeRoute(hash) {
   const tier = hash.slice(SUBSCRIBE_ROUTE_PREFIX.length + 1).toUpperCase();
   return PAID_TIERS.includes(tier) ? tier : null;
 }
+
+// --- Post-payment activation (TM-629) ---------------------------------------------------------------
+
+/**
+ * Has the webhook-driven activation actually landed for `tier`? The subscribe screen polls
+ * GET /me/subscription after a successful first charge, and this is the predicate one poll tick
+ * evaluates.
+ *
+ * The TM-629 regression this encodes: the old check was `subscribed && tier === tier`, which a
+ * re-subscriber's STALE row satisfies immediately — a CANCELED subscription for the SAME tier still
+ * reports `subscribed: true` (paid time may remain), so the very first poll declared "You're
+ * subscribed!" before the webhook had activated anything; if the activation webhook then never landed
+ * (e.g. a misconfigured signing secret ⇒ 401s), the user saw success for a charge that activated
+ * nothing. An actually-activated subscription is one whose renewals run: ACTIVE (or dunning PAST_DUE)
+ * — exactly `describeSubscription().canCancel` — never CANCELED.
+ *
+ * @param {unknown} resp a raw GET /me/subscription response.
+ * @param {unknown} tier the paid tier the user just paid for.
+ * @returns {boolean}
+ */
+export function subscriptionActivatedFor(resp, tier) {
+  const view = describeSubscription(resp);
+  return view.subscribed && view.tier === tier && view.canCancel;
+}
+
+/** How the activation poll behaves by default: the webhook usually lands within a few seconds. */
+export const ACTIVATION_POLL_ATTEMPTS = 10;
+export const ACTIVATION_POLL_INTERVAL_MS = 1500;
+
+/**
+ * Drive the post-payment activation poll (TM-620 screen, loop extracted here in TM-629 so it is
+ * node-testable): call `fetchSubscription()` up to `attempts` times, `sleep()`ing between ticks, until
+ * {@link subscriptionActivatedFor} reports the webhook-driven activation for `tier`.
+ *
+ * Outcomes:
+ *   • "active"  — the activation landed (a genuinely ACTIVE/PAST_DUE subscription on the right tier;
+ *                 a stale CANCELED same-tier row NEVER satisfies it — the TM-629 regression above);
+ *   • "pending" — attempts ran out; the payment already succeeded, so the caller shows honest
+ *                 "activating…" copy rather than an error;
+ *   • "stale"   — `isStale()` reported the mount is gone (the user navigated away / the screen
+ *                 re-mounted for another tier). The TM-629 regression this encodes: the old loop
+ *                 polled on regardless and then painted "You're subscribed!" into whatever the section
+ *                 held by then — the caller must render NOTHING on "stale". Checked before every fetch
+ *                 and again after every sleep, so a stale mount also stops generating network reads.
+ *
+ * A rejected `fetchSubscription()` is a transient read failure mid-poll: tolerated, retried next tick.
+ *
+ * @param {{fetchSubscription: () => Promise<unknown>, tier: unknown, attempts?: number,
+ *   sleep?: () => Promise<void>, isStale?: () => boolean}} opts
+ * @returns {Promise<"active"|"pending"|"stale">}
+ */
+export async function pollSubscriptionActivation({ fetchSubscription, tier, attempts, sleep, isStale } = {}) {
+  const maxAttempts = Number.isInteger(attempts) && attempts > 0 ? attempts : ACTIVATION_POLL_ATTEMPTS;
+  const stale = typeof isStale === "function" ? isStale : () => false;
+  const rest = typeof sleep === "function" ? sleep : () => Promise.resolve();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (stale()) return "stale";
+    try {
+      if (subscriptionActivatedFor(await fetchSubscription(), tier)) {
+        // The activation landed — but if the mount died while the read was in flight, the caller
+        // must still not paint into the re-rendered/hidden section.
+        return stale() ? "stale" : "active";
+      }
+    } catch {
+      // A transient read failure mid-poll is fine — try again on the next tick.
+    }
+    await rest();
+  }
+  return stale() ? "stale" : "pending";
+}

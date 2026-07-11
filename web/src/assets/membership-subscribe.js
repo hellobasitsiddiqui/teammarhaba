@@ -29,17 +29,23 @@ import { loadRevolutSdk } from "./membership-checkout.js";
 import { formatPrice } from "./membership-checkout-core.js";
 import {
   describeSubscription,
+  pollSubscriptionActivation,
   subscriptionPricePence,
   tierFromSubscribeRoute,
+  ACTIVATION_POLL_ATTEMPTS,
+  ACTIVATION_POLL_INTERVAL_MS,
 } from "./membership-subscribe-core.js";
 import { tierMeta, MEMBERSHIP_ROUTE } from "./membership-tier.js";
 
 /** The screen container id (the `<section>` this module owns in index.html). */
 const SCREEN_ID = "membership-subscribe-screen";
 
-/** How the post-payment activation poll behaves: the webhook usually lands within a few seconds. */
-const ACTIVATION_POLL_ATTEMPTS = 10;
-const ACTIVATION_POLL_INTERVAL_MS = 1500;
+// Mount generation (TM-629): bumped on every enterMembershipSubscribe() so async work started for an
+// EARLIER mount (the activation poll, the widget mount) can tell it has gone stale. The router only
+// hides this section on navigation — it never cancels our async work — so before this existed a poll
+// started on one visit would later paint "You're subscribed!" into a re-rendered / hidden screen
+// (e.g. after hopping to the OTHER tier's subscribe route, which re-mounts and clears the section).
+let mountGeneration = 0;
 
 /** True iff the membership feature flag is ON (config.flags.membership, shipped OFF). */
 function membershipEnabled() {
@@ -77,19 +83,27 @@ function reflectDone(section, text) {
  * Poll GET /me/subscription until the webhook-driven activation shows up (or attempts run out). The
  * payment ALREADY succeeded when this runs — the poll is purely cosmetic confirmation; running out of
  * attempts shows honest "activating" copy rather than an error.
+ *
+ * The loop itself is the node-tested pollSubscriptionActivation (TM-629). Two regressions it fixes:
+ *   • success now requires a genuinely ACTIVATED subscription (subscriptionActivatedFor — canCancel,
+ *     i.e. ACTIVE/PAST_DUE): a re-subscriber's stale CANCELED same-tier row used to satisfy the old
+ *     `subscribed && tier` check on the FIRST tick, declaring success before the webhook activated
+ *     anything (and even if it never did);
+ *   • the poll is tied to its mount generation: navigating away / re-mounting the screen makes it
+ *     "stale" and it renders nothing, instead of painting success copy into the re-rendered section.
  */
-async function pollActivation(section, tier) {
-  for (let attempt = 0; attempt < ACTIVATION_POLL_ATTEMPTS; attempt++) {
-    try {
-      const view = describeSubscription(await api.getSubscription());
-      if (view.subscribed && view.tier === tier) {
-        reflectDone(section, `You're subscribed! Your ${tierMeta(tier).label} membership is active.`);
-        return;
-      }
-    } catch {
-      // A transient read failure mid-poll is fine — try again on the next tick.
-    }
-    await new Promise((resolve) => setTimeout(resolve, ACTIVATION_POLL_INTERVAL_MS));
+async function pollActivation(section, tier, generation) {
+  const outcome = await pollSubscriptionActivation({
+    fetchSubscription: () => api.getSubscription(),
+    tier,
+    attempts: ACTIVATION_POLL_ATTEMPTS,
+    sleep: () => new Promise((resolve) => setTimeout(resolve, ACTIVATION_POLL_INTERVAL_MS)),
+    isStale: () => generation !== mountGeneration,
+  });
+  if (outcome === "stale") return; // the mount is gone — never touch the section
+  if (outcome === "active") {
+    reflectDone(section, `You're subscribed! Your ${tierMeta(tier).label} membership is active.`);
+    return;
   }
   reflectDone(
     section,
@@ -103,19 +117,31 @@ async function pollActivation(section, tier) {
  * use, the one flag that makes the off-session renewals possible. Every failure renders an inline,
  * non-throwing status message — a payment hiccup must never white-screen the screen.
  */
-async function startSubscribePayment(section, tier) {
+async function startSubscribePayment(section, tier, generation) {
+  // In-flight guard (TM-629): the Continue-to-payment button used to stay clickable while the checkout
+  // POST + SDK load ran, so an impatient double-click created TWO server-side checkouts and mounted the
+  // widget twice. Disabled for the duration; re-enabled on every failure path so "try again" works.
+  const startBtn = section.querySelector(".tm-subscribe-start");
+  if (startBtn) {
+    if (startBtn.disabled) return; // a checkout is already in flight
+    startBtn.disabled = true;
+  }
+  const failStart = (text) => {
+    setStatus(section, text);
+    if (startBtn) startBtn.disabled = false;
+  };
   setStatus(section, "Starting secure card payment…");
 
   let checkout;
   try {
     checkout = await api.subscriptionCheckout(tier);
   } catch (err) {
-    setStatus(section, `Could not start the checkout: ${err?.message ?? err}`);
+    failStart(`Could not start the checkout: ${err?.message ?? err}`);
     return;
   }
   const token = checkout && checkout.paymentToken;
   if (!token) {
-    setStatus(section, "Checkout could not be initialised. Please try again.");
+    failStart("Checkout could not be initialised. Please try again.");
     return;
   }
 
@@ -125,7 +151,7 @@ async function startSubscribePayment(section, tier) {
     RevolutCheckout = await loadRevolutSdk();
     instance = await RevolutCheckout(token, paymentsConfig().revolutMode || "sandbox");
   } catch (err) {
-    setStatus(section, `Payment is unavailable right now: ${err?.message ?? err}`);
+    failStart(`Payment is unavailable right now: ${err?.message ?? err}`);
     return;
   }
 
@@ -146,13 +172,19 @@ async function startSubscribePayment(section, tier) {
     savePaymentMethodFor: "merchant",
     onSuccess: () => {
       setStatus(section, "Payment received — activating your subscription…");
-      pollActivation(section, tier);
+      pollActivation(section, tier, generation);
     },
-    onError: (message) =>
-      setStatus(section, `Payment failed: ${message?.message ?? message ?? "please try again"}`),
+    onError: (message) => {
+      setStatus(section, `Payment failed: ${message?.message ?? message ?? "please try again"}`);
+      payBtn.disabled = false; // let the user retry the charge after a decline (TM-629)
+    },
   });
 
   payBtn.addEventListener("click", () => {
+    // In-flight guard (TM-629): a double-click used to submit the card field twice while the first
+    // charge was still processing. Re-enabled in onError above so a declined card can be retried.
+    if (payBtn.disabled) return;
+    payBtn.disabled = true;
     setStatus(section, "Processing payment…");
     cardField.submit();
   });
@@ -169,7 +201,7 @@ async function startSubscribePayment(section, tier) {
  * price + includes), the card widget host, and the Start button that opens the payment. Pure paint —
  * network only runs when the user acts.
  */
-function renderSubscribe(section, tier) {
+function renderSubscribe(section, tier, generation) {
   clear(section);
   const meta = tierMeta(tier);
   const pence = subscriptionPricePence(tier);
@@ -198,7 +230,7 @@ function renderSubscribe(section, tier) {
     type: "button",
     class: "tm-btn tm-btn-primary tm-subscribe-start",
     text: "Continue to payment",
-    onClick: () => startSubscribePayment(section, tier),
+    onClick: () => startSubscribePayment(section, tier, generation),
   });
   section.appendChild(
     el("div", { class: "tm-subscribe-pay", dataset: { provider: "revolut" } }, [
@@ -222,11 +254,31 @@ export async function enterMembershipSubscribe() {
   if (typeof document === "undefined" || !membershipEnabled()) return;
   const section = document.getElementById(SCREEN_ID);
   if (!section) return;
+  // A fresh mount: anything still running for an earlier visit (the activation poll) is now stale.
+  const generation = ++mountGeneration;
   const tier = tierFromSubscribeRoute(window.location.hash);
-  if (!tier) return; // not a subscribe route (router.js should never send us here otherwise)
+  if (!tier) {
+    // router.js accepts ANY suffix under #/membership/subscribe/ (tier validity is this screen's job),
+    // so a mistyped/garbage tier (#/membership/subscribe/GOLD) lands here. This used to `return`
+    // silently, leaving the VISIBLE section empty — a blank screen with no copy and no way back
+    // (TM-629). Render an honest "choose a plan" fallback with the way back instead.
+    clear(section);
+    section.appendChild(el("h2", { class: "tm-subscribe-title", text: "Choose a plan" }));
+    section.appendChild(
+      el("p", {
+        class: "tm-subscribe-unknown-tier",
+        text: "That subscription link isn't one of our plans — pick one from the membership screen.",
+      }),
+    );
+    section.appendChild(
+      el("a", { class: "tm-btn tm-btn-primary", href: MEMBERSHIP_ROUTE, text: "See membership plans" }),
+    );
+    return;
+  }
 
   try {
     const view = describeSubscription(await api.getSubscription());
+    if (generation !== mountGeneration) return; // re-mounted while the read was in flight (TM-629)
     if (view.subscribed && view.canCancel) {
       // ACTIVE or PAST_DUE — there's a live subscription; manage it rather than double-subscribing.
       clear(section);
@@ -245,5 +297,5 @@ export async function enterMembershipSubscribe() {
   } catch {
     // Can't read the subscription — render the checkout; the backend gate is authoritative.
   }
-  renderSubscribe(section, tier);
+  renderSubscribe(section, tier, generation);
 }

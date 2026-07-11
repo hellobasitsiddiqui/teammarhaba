@@ -219,3 +219,73 @@ export function checkoutPayload(event, state) {
   // CONFIRM (Free / Included): a no-charge RSVP.
   return { eventId, action: "RSVP", chargePence: 0 };
 }
+
+// --- Revolut SDK loader (TM-629) -------------------------------------------------------------------
+
+/**
+ * Build the memoised Revolut checkout SDK loader both payment screens share (the per-event checkout in
+ * membership-checkout.js and the TM-620 subscribe screen). The DOM view constructs ONE loader with the
+ * real `window`/`document`/config reads injected; the unit tests construct it with fakes — the same
+ * dependency-injection seam the other cores use, because the DOM view itself statically imports api.js
+ * (→ the Firebase CDN) and can never be loaded under `node --test`.
+ *
+ * Memoisation contract (the TM-629 regression this encodes):
+ *   • a load already IN FLIGHT is shared — concurrent pay attempts inject exactly one <script>;
+ *   • the resolved global short-circuits — once the SDK is present no further script is injected;
+ *   • a REJECTION is NEVER memoised. The original implementation only cleared the memo in
+ *     `script.onerror`, so the two other failure paths — a missing/unconfigured script URL, and a
+ *     script that loads without exposing `RevolutCheckout` — left the REJECTED promise cached: every
+ *     later payment attempt (both screens share this loader) instantly re-rejected with the stale
+ *     error until a full page reload. "Try again" could never succeed. Every failure path now leaves
+ *     the loader ready to retry.
+ *
+ * @param {{getGlobal?: () => (object|undefined), getDocument?: () => (object|undefined),
+ *   getScriptUrl?: () => (string|undefined)}} deps injected reads: the global that carries
+ *   `RevolutCheckout`, the document to inject the <script> into, and the configured SDK URL.
+ * @returns {() => Promise<Function>} the shared load() function.
+ */
+export function createRevolutSdkLoader({ getGlobal, getDocument, getScriptUrl } = {}) {
+  // The one in-flight load promise, shared across callers. Null whenever there is nothing pending —
+  // including after ANY failure, so the next attempt retries instead of replaying a stale rejection.
+  let pending = null;
+
+  return function load() {
+    const globalObj = typeof getGlobal === "function" ? getGlobal() : undefined;
+    // Already available (a previous load resolved, or the page embedded it) — no script needed.
+    if (globalObj && typeof globalObj.RevolutCheckout === "function") {
+      return Promise.resolve(globalObj.RevolutCheckout);
+    }
+    // A load is already in flight — share it rather than injecting a second <script>.
+    if (pending) return pending;
+
+    // Resolve the injection prerequisites BEFORE creating (and memoising) the promise: rejecting
+    // synchronously without ever touching `pending` is what keeps a config-shaped failure retryable
+    // (the config may be populated by the time the user tries again).
+    const src = typeof getScriptUrl === "function" ? getScriptUrl() : undefined;
+    const doc = typeof getDocument === "function" ? getDocument() : undefined;
+    if (!src || !doc) {
+      return Promise.reject(new Error("Revolut checkout SDK is not configured."));
+    }
+
+    pending = new Promise((resolve, reject) => {
+      const script = doc.createElement("script");
+      script.src = src;
+      script.async = true;
+      script.onload = () => {
+        const now = typeof getGlobal === "function" ? getGlobal() : undefined;
+        if (now && typeof now.RevolutCheckout === "function") {
+          resolve(now.RevolutCheckout);
+          return;
+        }
+        pending = null; // loaded but unusable — allow a retry (never memoise the rejection)
+        reject(new Error("Revolut checkout SDK loaded but RevolutCheckout is unavailable."));
+      };
+      script.onerror = () => {
+        pending = null; // transient CDN failure — allow a retry
+        reject(new Error("Could not load the Revolut checkout SDK."));
+      };
+      doc.head.appendChild(script);
+    });
+    return pending;
+  };
+}

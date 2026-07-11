@@ -311,6 +311,40 @@ export async function performSwitch(api, targetTier, hooks = {}, subscription) {
   }
 }
 
+// --- Cancel-confirmation copy (TM-629) -------------------------------------------------------------
+
+/**
+ * The confirm-dialog copy for cancelling a subscription, resolved from the describeSubscription() view
+ * so the promise the dialog makes is TRUE for the state the caller is actually in.
+ *
+ * The TM-629 regression this encodes: the dialog used to show ONE reassuring message — "you keep your
+ * current plan until the end of the period you've already paid for" — to every cancellable state. For
+ * a PAST_DUE (dunning) subscription that promise is false: cancelling parks the next charge at the
+ * period end, which is ALREADY in the past, so the next scheduler tick (minutes away) downgrades the
+ * account immediately. A dunning user now gets honest copy instead of a promise the backend breaks
+ * minutes later.
+ *
+ * @param {{paymentProblem?: boolean}} view a describeSubscription() view model.
+ * @returns {{title: string, message: string}}
+ */
+export function cancelDialogCopy(view) {
+  const title = "Cancel your subscription?";
+  if (view && view.paymentProblem === true) {
+    // PAST_DUE: the paid-for period is already over (that's why dunning is retrying) — no reassuring
+    // "you keep your plan" promise; the downgrade lands on the next scheduler tick.
+    return {
+      title,
+      message:
+        "We couldn't collect your last payment, so your paid period has already ended — cancelling moves you to pay-per-event right away.",
+    };
+  }
+  return {
+    title,
+    message:
+      "Renewals stop immediately. You keep your current plan until the end of the period you've already paid for, then move to pay-per-event.",
+  };
+}
+
 // --- DOM half (painter) --------------------------------------------------------------------------
 
 /**
@@ -406,10 +440,12 @@ function subscriptionPanel(subscription, api, onCancelled) {
       class: "tm-btn tm-subscription-cancel",
       text: "Cancel subscription",
       onClick: async () => {
+        // The copy varies by state (TM-629): a PAST_DUE cancel downgrades right away, so the dialog
+        // must not promise "you keep your plan until the period end". Pure + unit-tested above.
+        const copy = cancelDialogCopy(view);
         const sure = await confirmDialog({
-          title: "Cancel your subscription?",
-          message:
-            "Renewals stop immediately. You keep your current plan until the end of the period you've already paid for, then move to pay-per-event.",
+          title: copy.title,
+          message: copy.message,
           confirmLabel: "Cancel subscription",
           cancelLabel: "Keep it",
           danger: true,

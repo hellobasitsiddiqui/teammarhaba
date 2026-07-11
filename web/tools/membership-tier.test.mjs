@@ -26,7 +26,9 @@ import {
   tierOptions,
   firstEventCreditNote,
   performSwitch,
+  cancelDialogCopy,
 } from "../src/assets/membership-tier.js";
+import { describeSubscription } from "../src/assets/membership-subscribe-core.js";
 
 // Subscription fixtures (the GET /me/subscription shapes the state machine keys off — TM-620).
 const NO_SUB = { subscribed: false };
@@ -240,4 +242,57 @@ test("performSwitch: surfaces an api failure via onError without throwing", asyn
   assert.equal(result.ok, false);
   assert.equal(result.error, boom);
   assert.deepEqual(errors, [boom]);
+});
+
+// --- Cancel-confirmation copy (TM-629) --------------------------------------------------------------
+//
+// Regression guard: the cancel confirm dialog used to show ONE reassuring message — "You keep your
+// current plan until the end of the period you've already paid for" — to every cancellable state. For
+// a PAST_DUE (dunning) subscription that promise is FALSE: cancelling parks the next charge at the
+// period end, which is already in the past, so the next scheduler tick downgrades the account within
+// minutes. The copy now varies on describeSubscription().paymentProblem.
+
+test("cancelDialogCopy: PAST_DUE (dunning) must NOT promise the plan is kept until the period end (TM-629)", () => {
+  // Build the view exactly the way the panel does — from the raw GET /me/subscription payload.
+  const pastDue = describeSubscription({
+    subscribed: true,
+    tier: "MONTHLY",
+    status: "PAST_DUE",
+    currentPeriodEnd: "2026-06-10T12:00:00Z", // already in the past — that's why dunning is retrying
+    renewing: true,
+  });
+  assert.equal(pastDue.paymentProblem, true, "precondition: PAST_DUE is the payment-problem state");
+  const copy = cancelDialogCopy(pastDue);
+  // THE regression: the reassuring promise must be gone for a dunning subscription…
+  assert.doesNotMatch(
+    copy.message,
+    /keep your current plan until the end of the period/i,
+    "a PAST_DUE user is downgraded within minutes of cancelling — the dialog must not promise otherwise",
+  );
+  // …replaced by honest right-away copy.
+  assert.match(copy.message, /right away/i, "the dialog states the downgrade is immediate");
+  assert.match(copy.message, /pay-per-event/i, "the dialog says what the account moves to");
+  assert.equal(copy.title, "Cancel your subscription?");
+});
+
+test("cancelDialogCopy: ACTIVE keeps the paid-period promise (it is true there)", () => {
+  const active = describeSubscription({
+    subscribed: true,
+    tier: "MONTHLY",
+    status: "ACTIVE",
+    currentPeriodEnd: "2026-08-10T12:00:00Z",
+    renewing: true,
+  });
+  assert.equal(active.paymentProblem, false);
+  const copy = cancelDialogCopy(active);
+  assert.match(copy.message, /keep your current plan until the end of the period you've already paid for/i);
+  assert.doesNotMatch(copy.message, /right away/i);
+});
+
+test("cancelDialogCopy: defensive — a missing/garbage view falls back to the standard copy, never throws", () => {
+  for (const junk of [undefined, null, {}, { paymentProblem: "yes" }]) {
+    const copy = cancelDialogCopy(junk);
+    assert.equal(copy.title, "Cancel your subscription?");
+    assert.match(copy.message, /keep your current plan/i);
+  }
 });

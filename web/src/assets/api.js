@@ -1341,6 +1341,14 @@ export async function claimEventSpot(id) {
 }
 
 // Bridge for the framework-free page (classic scripts can't `import`).
+//
+// COMPLETENESS CONTRACT (TM-629): every exported helper in this module MUST be listed here. Modules
+// that cannot statically import api.js under Node (the Firebase CDN import chain) — membership-tier.js,
+// membership-receipts.js et al — resolve api at runtime off `window.tmApi` per contract TM-457, so a
+// helper missing from this object is silently `undefined` at the one moment a user clicks (the TM-629
+// finding: `checkout` was exported but never bridged, so a bridge-pattern caller could never start a
+// per-event paid checkout). Guarded by web/tools/api-bridge-drift.test.mjs, which fails when an export
+// is added without a matching bridge entry.
 if (typeof window !== "undefined") {
   window.tmApi = {
     apiFetch,
@@ -1349,6 +1357,7 @@ if (typeof window !== "undefined") {
     submitOnboarding,
     completeOnboarding,
     acceptTerms,
+    getActiveAlerts,
     getMembership,
     switchTier,
     getSubscription,
@@ -1356,6 +1365,7 @@ if (typeof window !== "undefined") {
     cancelSubscription,
     adminGetUserSubscription,
     getMyOrders,
+    checkout,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,
@@ -1372,6 +1382,8 @@ if (typeof window !== "undefined") {
     postConversationMessage,
     editConversationMessage,
     deleteConversationMessage,
+    reactToMessage,
+    unreactFromMessage,
     signalTyping,
     openConversationStream,
     muteConversation,
