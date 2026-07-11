@@ -130,6 +130,36 @@ export function normalizeMembership(resp) {
   return { tier, firstEventCreditAvailable };
 }
 
+// --- Profile membership row (TM-643) -------------------------------------------------------------
+
+/**
+ * The membership summary shown on the Profile screen's membership row (profile.js), derived from the
+ * caller's REAL membership instead of a hardcoded string.
+ *
+ * THE BUG (TM-643): the profile row was pinned to the literal "Pay as you go · first event free" and
+ * ignored the caller's actual tier, so a Monthly (or Diamond) subscriber still saw "Pay as you go"
+ * after subscribing even though GET /me/membership already returned `{"tier":"MONTHLY"}`.
+ *
+ * Pure + node-testable (no DOM / network): takes a `/me/membership`-shaped object — or anything
+ * normalizeMembership can coerce, so an unknown/absent tier safely falls back to the free base — and
+ * returns the row's tier id + display text. The tier NAME is sourced from the shared `tierMeta()`
+ * catalogue (never re-spelled here), so a paid tier reads "Monthly member" / "Diamond member" and can
+ * never drift from the catalogue; the free base keeps the shipped pay-as-you-go copy verbatim.
+ *
+ * @param {{tier?: string, firstEventCreditAvailable?: boolean}|null|undefined} membership
+ * @returns {{tier: string, text: string, paid: boolean}}
+ */
+export function profileMembershipRow(membership) {
+  const { tier } = normalizeMembership(membership);
+  const meta = tierMeta(tier);
+  if (meta.paid) {
+    // Paid tiers (MONTHLY / DIAMOND): "<Tier> member", the tier name reused from the catalogue.
+    return { tier, text: `${meta.label} member`, paid: true };
+  }
+  // Free base (PAY_PER_EVENT, and the safe fallback for anything unknown) — the shipped copy.
+  return { tier, text: "Pay as you go · first event free", paid: false };
+}
+
 // --- Switch availability (the heart of the AC) ---------------------------------------------------
 
 /**

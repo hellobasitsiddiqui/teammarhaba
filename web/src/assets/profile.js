@@ -16,7 +16,7 @@
 // until the HITL TM-184 — when it isn't configured the control degrades to a disabled state rather
 // than hard-failing the page.
 
-import { getMe, updateMe, ApiError } from "./api.js";
+import { getMe, updateMe, getMembership, ApiError } from "./api.js";
 import { currentUser, signOut } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
 import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
@@ -35,6 +35,10 @@ import {
   profileStrength,
   publicSummary,
 } from "./profile-core.js";
+// Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
+// pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
+// and "Manage" links to the membership screen when the feature flag is on.
+import { profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE } from "./membership-tier.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -264,6 +268,36 @@ async function load() {
     state.loading = false;
     renderStatus();
   }
+  // Membership tier (TM-643) — a SEPARATE endpoint (GET /me/membership; MeResponse carries no tier),
+  // fetched fresh (apiFetch uses cache:"no-store") on every profile entry so the row shows the caller's
+  // CURRENT tier, e.g. "Monthly member" right after subscribing, not a stale "Pay as you go".
+  await loadMembership();
+}
+
+/**
+ * Fetch the caller's membership (TM-643) and paint the profile membership row from the REAL tier.
+ * Best-effort and isolated from the /me load: a failed/absent read (or the feature being unavailable)
+ * leaves the free-base default rather than breaking the page — the same defensive posture the
+ * membership screen (enterMembershipTier) takes.
+ */
+async function loadMembership() {
+  try {
+    const membership = await getMembership();
+    paintMembership(membership);
+  } catch (err) {
+    console.warn("[profile] GET /api/v1/me/membership failed:", err?.message ?? err);
+  }
+}
+
+/**
+ * Paint the Profile membership row (TM-643) from the caller's real membership. The tier→text mapping is
+ * the pure, unit-tested profileMembershipRow() (membership-tier.js), so a paid subscriber sees their
+ * actual tier label. No-op when the row isn't built (e.g. mid-teardown).
+ */
+function paintMembership(membership) {
+  const memb = shell?.membership;
+  if (!memb) return;
+  memb.sub.textContent = profileMembershipRow(membership).text;
 }
 
 async function save(event) {
@@ -667,16 +701,25 @@ function buildShell(view) {
     el("p", { class: "tm-muted tm-pf-hint", text: "Add interests so people find you — coming soon." }),
   ]);
 
-  // ── Membership (paper-profile) ── informational row; no membership route exists yet, so "Manage" is
-  // muted, non-interactive text (matches the wireframe affordance without a dead link).
+  // ── Membership (paper-profile) ── the tier row reflects the caller's REAL membership (TM-643): the
+  // sub text is painted from GET /me/membership in load() via paintMembership() (through the pure
+  // profileMembershipRow mapping) rather than a hardcoded "Pay as you go" — so a Monthly/Diamond
+  // subscriber sees their actual tier. It starts on the free-base default and is corrected once the
+  // membership resolves. "Manage" is a live link to the membership screen (#/membership) when the
+  // membership feature flag is ON; while the flag is OFF that route is inert (router.js gates it), so
+  // it stays a muted, non-interactive label rather than a dead link (the original wireframe affordance).
+  const membershipSub = el("div", { class: "tm-pf-sub", text: profileMembershipRow(null).text });
+  const membershipManage = membershipEnabled()
+    ? el("a", { class: "tm-pf-go", href: MEMBERSHIP_ROUTE, text: "Manage →" })
+    : el("span", { class: "tm-pf-go tm-muted", text: "Manage →" });
   const membershipCard = pfCard(
     null,
     [
       el("div", { class: "tm-pf-memb-main" }, [
         el("h3", { class: "tm-pf-ctitle", text: "Membership" }),
-        el("div", { class: "tm-pf-sub", text: "Pay as you go · first event free" }),
+        membershipSub,
       ]),
-      el("span", { class: "tm-pf-go tm-muted", text: "Manage →" }),
+      membershipManage,
     ],
     "tm-pf-memb",
   );
@@ -743,6 +786,8 @@ function buildShell(view) {
     status,
     avatar,
     hub: { name: hubName, meta: hubMeta, initial: hubInitial, bar, barPct, barNudge },
+    // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
+    membership: { sub: membershipSub },
   };
 }
 
