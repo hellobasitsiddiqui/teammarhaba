@@ -103,16 +103,56 @@
   text-decoration: none;
 }
 
-/* The placeholder Pay mount — the seam TM-478 fills with the Revolut card widget. A quiet, dashed,
- * clearly-provisional panel so it reads as "coming soon" rather than a finished control. */
+/* The Pay mount — the REAL Revolut card entry (TM-478 filled the seam; TM-639 made it a finished
+ * control). A solid, recessed Paper panel holding the "Name on card" field, the card iframe and the Pay
+ * button, so the whole payment area reads as one tidy box rather than raw inputs across the width. */
 .tm-checkout-pay-mount {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-4);
   background: var(--surface-2);
-  border: var(--border-width) dashed var(--border);
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
+}
+
+/* --- "Name on card" field (TM-639) --------------------------------------------------------------
+ * Shared by BOTH payment views — the per-event Pay mount above and the Subscribe checkout
+ * (membership-subscribe.js), which render the same buildCardholderNameField() helper. Revolut rejects a
+ * one-word cardholder name, so each view renders its own required "Name on card" input above the card
+ * iframe; these rules give it the Paper look. The `.tm-input` base + hand-drawn wobble come from
+ * styles.css. Kept in THIS stylesheet because the shared helper lives in membership-checkout.js, and
+ * both screens link this sheet globally, so the subscribe screen inherits it too. */
+.tm-cardholder-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tm-cardholder-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tm-cardholder-label-text {
+  font-family: var(--font-display);
+  font-size: var(--fs-2);
+  color: var(--fg);
+}
+
+.tm-cardholder-input {
+  width: 100%;
+  font-family: var(--font-sans);
+}
+
+/* The inline validation hint. Space is reserved (min-height) so revealing it never shifts the card
+ * field below it. */
+.tm-cardholder-error {
+  margin: 0;
+  min-height: 1.1em;
+  color: var(--danger);
+  font-size: var(--fs-1);
 }
 
 .tm-checkout-pay-note {
