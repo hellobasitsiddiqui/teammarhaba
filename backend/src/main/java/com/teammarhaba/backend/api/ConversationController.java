@@ -8,6 +8,7 @@ import com.teammarhaba.backend.chat.MessagePostService;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.Set;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -107,6 +108,18 @@ public class ConversationController {
     @GetMapping("/me/conversations/unread-total")
     UnreadTotalResponse unreadTotal(@AuthenticationPrincipal VerifiedUser caller) {
         return new UnreadTotalResponse(conversations.unreadTotal(caller));
+    }
+
+    /**
+     * The thread's mentionable roster (TM-469) — its active members except the caller, each as
+     * {@code (userId, displayName, role)} — the candidate list the composer's @mention autocomplete
+     * draws from. Members-only ({@code 403} otherwise), so it can't be used to probe threads the caller
+     * isn't in.
+     */
+    @GetMapping("/conversations/{id}/members")
+    List<ConversationMemberResponse> members(
+            @AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return conversations.roster(caller, id);
     }
 
     /** One thread's live messages, chronological and paged. Members-only ({@code 403} otherwise). */
