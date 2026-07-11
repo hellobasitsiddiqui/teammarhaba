@@ -108,6 +108,14 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.LocationRevealPolicy locationRevealPolicy;
 
+    // EventAdminController (TM-523) also resolves the booking-cutoff + cancellation-window policies for
+    // the admin projection — supply them so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.event.BookingCutoffPolicy bookingCutoffPolicy;
+
+    @MockitoBean
+    private com.teammarhaba.backend.event.CancellationPolicy cancellationPolicy;
+
     // NotificationController (TM-454) needs a NotificationFeedService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.notify.NotificationFeedService notificationFeedService;

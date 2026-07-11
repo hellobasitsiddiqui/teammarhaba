@@ -41,6 +41,8 @@ public record UpdateEventRequest(
                         message = "must be a storage object path like event-images/{eventId}")
                 String imagePath,
         @Min(1) @Max(8760) Integer locationRevealHours,
+        @Min(0) @Max(8760) Integer bookingCutoffHours,
+        @Min(0) @Max(8760) Integer cancellationWindowHours,
         @Min(13) @Max(120) Integer ageMin,
         @Min(13) @Max(120) Integer ageMax,
         @Min(0) Integer pricePence,
@@ -112,6 +114,8 @@ public record UpdateEventRequest(
                 capacity,
                 imagePath,
                 locationRevealHours,
+                bookingCutoffHours,
+                cancellationWindowHours,
                 ageMin,
                 ageMax,
                 pricePence,

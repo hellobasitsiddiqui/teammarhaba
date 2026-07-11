@@ -3,6 +3,8 @@ package com.teammarhaba.backend.api;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.event.BookingCutoffPolicy;
+import com.teammarhaba.backend.event.CancellationPolicy;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventAdminService;
 import com.teammarhaba.backend.event.EventAdminService.EventCounts;
@@ -66,10 +68,18 @@ public class EventAdminController {
 
     private final EventAdminService adminService;
     private final LocationRevealPolicy reveal;
+    private final BookingCutoffPolicy cutoff;
+    private final CancellationPolicy cancellation;
 
-    public EventAdminController(EventAdminService adminService, LocationRevealPolicy reveal) {
+    public EventAdminController(
+            EventAdminService adminService,
+            LocationRevealPolicy reveal,
+            BookingCutoffPolicy cutoff,
+            CancellationPolicy cancellation) {
         this.adminService = adminService;
         this.reveal = reveal;
+        this.cutoff = cutoff;
+        this.cancellation = cancellation;
     }
 
     @GetMapping
@@ -85,7 +95,7 @@ public class EventAdminController {
         Map<Long, EventCounts> counts = adminService.attendanceCounts(ids);
         return PageResponse.from(events, event -> {
             EventCounts c = counts.getOrDefault(event.getId(), EventCounts.ZERO);
-            return EventResponse.from(event, reveal, c.going(), c.waitlist());
+            return EventResponse.from(event, reveal, cutoff, cancellation, c.going(), c.waitlist());
         });
     }
 
@@ -93,14 +103,14 @@ public class EventAdminController {
     public EventResponse get(@PathVariable long id) {
         Event event = adminService.get(id);
         EventCounts counts = adminService.attendanceCounts(id);
-        return EventResponse.from(event, reveal, counts.going(), counts.waitlist());
+        return EventResponse.from(event, reveal, cutoff, cancellation, counts.going(), counts.waitlist());
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public EventResponse create(
             @RequestBody @Valid CreateEventRequest request, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.create(caller, request.toDraft()), reveal);
+        return EventResponse.from(adminService.create(caller, request.toDraft()), reveal, cutoff, cancellation);
     }
 
     @PatchMapping("/{id}")
@@ -108,7 +118,7 @@ public class EventAdminController {
             @PathVariable long id,
             @RequestBody @Valid UpdateEventRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.update(caller, id, request.toPatch()), reveal);
+        return EventResponse.from(adminService.update(caller, id, request.toPatch()), reveal, cutoff, cancellation);
     }
 
     /**
@@ -118,6 +128,6 @@ public class EventAdminController {
      */
     @PostMapping("/{id}/cancel")
     public EventResponse cancel(@PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
-        return EventResponse.from(adminService.cancel(caller, id), reveal);
+        return EventResponse.from(adminService.cancel(caller, id), reveal, cutoff, cancellation);
     }
 }
