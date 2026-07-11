@@ -40,22 +40,35 @@ public record RevolutProperties(
     /**
      * Normalises the optional/defaultable fields so the provider never has to null-check them: a blank
      * {@code apiBase}/{@code apiVersion}/{@code currency} falls back to the sandbox/stable default, and a
-     * trailing slash on the base is trimmed so path-joining is unambiguous. Secrets are left exactly as
-     * supplied (blank stays blank — the callers treat blank as "not configured" and fail closed).
+     * trailing slash on the base is trimmed so path-joining is unambiguous.
+     *
+     * <p><b>Every</b> value is whitespace-stripped here at the single config boundary (TM-637). Secret
+     * Manager (and plain {@code .env}) values routinely arrive with a trailing newline; a {@code "\n"} on
+     * {@code secretKey} makes {@code "Bearer <key>\n"} an <em>invalid HTTP header value</em>, so
+     * {@link java.net.http.HttpRequest.Builder#header} throws and EVERY Revolut call 500s — while the same
+     * stray newline on {@code webhookSigningSecret} would silently corrupt the HMAC and reject every
+     * webhook, and on {@code apiBase}/{@code apiVersion} would break the URL/header just as badly. Stripping
+     * once here is defensive and total. A secret that is only whitespace still strips to blank, and blank
+     * still means "not configured" — the callers fail closed exactly as before.
      */
     public RevolutProperties {
-        apiBase = blankTo(apiBase, "https://sandbox-merchant.revolut.com");
+        apiBase = blankTo(strip(apiBase), "https://sandbox-merchant.revolut.com");
         if (apiBase.endsWith("/")) {
             apiBase = apiBase.substring(0, apiBase.length() - 1);
         }
-        apiVersion = blankTo(apiVersion, "2024-09-01");
-        currency = blankTo(currency, "GBP");
-        secretKey = secretKey == null ? "" : secretKey;
-        webhookSigningSecret = webhookSigningSecret == null ? "" : webhookSigningSecret;
+        apiVersion = blankTo(strip(apiVersion), "2024-09-01");
+        currency = blankTo(strip(currency), "GBP");
+        secretKey = strip(secretKey);
+        webhookSigningSecret = strip(webhookSigningSecret);
     }
 
     private static String blankTo(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    /** Null-safe whitespace strip (leading/trailing spaces, tabs, CR, LF) — never returns null. */
+    private static String strip(String value) {
+        return value == null ? "" : value.strip();
     }
 
     /**

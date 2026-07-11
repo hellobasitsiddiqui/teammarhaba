@@ -2,6 +2,7 @@ package com.teammarhaba.backend.payments;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -444,6 +445,63 @@ class RevolutPaymentProviderTest {
         assertThat(props.toString()).doesNotContain("sk_live_super_secret").doesNotContain("wsk_super_secret");
         assertThat(props.toString()).contains("***");
         assertThat(new RevolutProperties(null, baseUrl, API_VERSION, null, "GBP").toString()).contains("(unset)");
+    }
+
+    // ------------------------------------------------------------------ secret sanitisation (TM-637)
+
+    @Test
+    void trimsWhitespaceAndNewlinesFromSecretsAtTheConfigBoundary() {
+        // TM-637 root cause: a secret sourced from Secret Manager / a .env file commonly arrives with a
+        // trailing newline (or stray surrounding spaces). Stripping at the properties boundary means
+        // neither the Bearer header nor the webhook HMAC can be corrupted by it. Pre-fix the constructor
+        // left secrets exactly as supplied, so this asserted trimming did not happen.
+        RevolutProperties props =
+                new RevolutProperties("  sk_test_dummy\n", baseUrl, API_VERSION, "\twsk_test_dummy\r\n", "GBP");
+        assertThat(props.secretKey()).isEqualTo("sk_test_dummy");
+        assertThat(props.webhookSigningSecret()).isEqualTo("wsk_test_dummy");
+    }
+
+    @Test
+    void secretKeyWithATrailingNewlineStillBuildsAValidBearerHeader() {
+        // TM-637: the production 500. "Bearer sk_...\n" is an INVALID HTTP header value, so pre-fix
+        // HttpRequest.Builder.header(...) threw IllegalArgumentException and EVERY create-customer /
+        // create-order call (POST /api/v1/me/subscription/checkout) failed. After trimming, the call
+        // succeeds and the stub receives the clean "Bearer sk_test_dummy".
+        String keyWithNewline = "sk_test_dummy\n";
+        PaymentOrder order = provider(keyWithNewline, WEBHOOK_SECRET).createOrder(500, "GBP", "1");
+
+        assertThat(order.id()).isEqualTo("rev-order-1");
+        assertThat(capturedAuth.get()).isEqualTo("Bearer sk_test_dummy");
+    }
+
+    @Test
+    void secretKeyWithSurroundingSpacesStillBuildsAValidBearerHeader() {
+        // The whitespace sibling of the newline case: leading/trailing spaces are stripped so the header
+        // stays valid and the sent token is exactly the key with no padding.
+        String paddedKey = "   sk_test_dummy   ";
+        PaymentOrder order = provider(paddedKey, WEBHOOK_SECRET).createOrder(500, "GBP", "1");
+
+        assertThat(order.id()).isEqualTo("rev-order-1");
+        assertThat(capturedAuth.get()).isEqualTo("Bearer sk_test_dummy");
+    }
+
+    @Test
+    void aMalformedSecretNeverLeaksIntoTheThrownExceptionMessage() {
+        // TM-637 second defect: the leak. Even after trimming, a key could in theory still carry an
+        // invalid header character (here a control char strip() does NOT remove) — and the JDK's
+        // IllegalArgumentException from .header(...) embeds the offending header value, i.e. the Secret
+        // key, VERBATIM. Pre-fix that raw exception propagated straight to Cloud Logging, leaking
+        // "Bearer sk_...". The fix catches it and rethrows a redacted PaymentProviderException with no
+        // cause, so the secret appears NOWHERE in the message or any nested cause.
+        String malformedKey = "sk_test_dummy" + '\u0001' + "leak";
+        Throwable thrown =
+                catchThrowable(() -> provider(malformedKey, WEBHOOK_SECRET).createOrder(500, "GBP", "1"));
+
+        assertThat(thrown).isInstanceOf(PaymentProviderException.class);
+        for (Throwable t = thrown; t != null; t = t.getCause()) {
+            String message = t.getMessage() == null ? "" : t.getMessage();
+            assertThat(message).doesNotContain("sk_test_dummy").doesNotContain(malformedKey);
+        }
     }
 
     // ------------------------------------------------------------------ helpers

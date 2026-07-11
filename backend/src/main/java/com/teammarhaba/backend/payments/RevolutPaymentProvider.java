@@ -281,12 +281,25 @@ public class RevolutPaymentProvider implements PaymentProvider {
         if (props.secretKey().isBlank()) {
             throw new PaymentProviderException("Revolut secret key is not configured (REVOLUT_SECRET_KEY)");
         }
-        return HttpRequest.newBuilder(URI.create(props.apiBase() + path))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(props.apiBase() + path))
                 .timeout(Duration.ofSeconds(15))
-                .header("Authorization", "Bearer " + props.secretKey())
                 .header("Revolut-Api-Version", props.apiVersion())
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json");
+        // Set Authorization LAST and on its own so a malformed key can never leak (TM-637). The key is
+        // stripped at the config boundary (RevolutProperties), so the trailing-newline case that broke
+        // every call is gone — but if a key somehow still carries an invalid header character, the JDK's
+        // IllegalArgumentException embeds the offending value ("Bearer sk_…") VERBATIM, which would spill
+        // the Secret key straight into Cloud Logging. Catch it and rethrow a redacted message with NO
+        // cause attached, so neither the message nor any nested stack trace can contain the secret.
+        try {
+            builder.header("Authorization", "Bearer " + props.secretKey());
+        } catch (IllegalArgumentException e) {
+            throw new PaymentProviderException(
+                    "Revolut secret key is malformed and cannot be used as an Authorization header "
+                            + "(check REVOLUT_SECRET_KEY for stray characters)");
+        }
+        return builder;
     }
 
     /** Send the request, mapping transport failures and non-2xx statuses to {@link PaymentProviderException}. */
