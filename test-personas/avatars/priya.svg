@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Priya Sharma">
+  <circle cx="80" cy="80" r="76" fill="#EC4899" opacity="0.14"/>
+  <circle cx="80" cy="80" r="74" fill="none" stroke="#EC4899" stroke-width="3" stroke-dasharray="3 7" stroke-linecap="round"/>
+  <path d="M40 152 Q40 112 80 112 Q120 112 120 152 Z" fill="#EC4899" stroke="#2b2b2b" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M44 64 Q40 126 58 132 L60 74 Z" fill="#1c1410" stroke="#2b2b2b" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M116 64 Q120 126 102 132 L100 74 Z" fill="#1c1410" stroke="#2b2b2b" stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="80" cy="72" r="32" fill="#cd853f" stroke="#2b2b2b" stroke-width="3"/>
+  <path d="M48 74 A32 32 0 0 1 112 74 Q96 56 80 56 Q64 56 48 74 Z" fill="#1c1410" stroke="#2b2b2b" stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="80" cy="60" r="2.6" fill="#EC4899"/>
+  <circle cx="70" cy="72" r="3.4" fill="#141414"/>
+  <circle cx="90" cy="72" r="3.4" fill="#141414"/>
+  <circle cx="53" cy="92" r="3" fill="#F5D90A" stroke="#2b2b2b" stroke-width="1.5"/>
+  <circle cx="107" cy="92" r="3" fill="#F5D90A" stroke="#2b2b2b" stroke-width="1.5"/>
+  <path d="M68 86 Q80 97 92 86" fill="none" stroke="#141414" stroke-width="3" stroke-linecap="round"/>
+  <text x="80" y="150" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-size="12" font-weight="700" fill="#ffffff">PS</text>
+</svg>

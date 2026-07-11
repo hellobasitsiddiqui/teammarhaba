@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Joe Okafor">
+  <circle cx="80" cy="80" r="76" fill="#F59E0B" opacity="0.14"/>
+  <circle cx="80" cy="80" r="74" fill="none" stroke="#F59E0B" stroke-width="3" stroke-dasharray="3 7" stroke-linecap="round"/>
+  <path d="M40 152 Q40 112 80 112 Q120 112 120 152 Z" fill="#F59E0B" stroke="#2b2b2b" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="80" cy="72" r="32" fill="#8d5524" stroke="#2b2b2b" stroke-width="3"/>
+  <path d="M50 56 L58 34 L65 52 L73 30 L80 50 L88 30 L95 52 L102 34 L110 56 Z" fill="#241a12" stroke="#2b2b2b" stroke-width="2.5" stroke-linejoin="round"/>
+  <circle cx="70" cy="70" r="3.4" fill="#141414"/>
+  <circle cx="90" cy="70" r="3.4" fill="#141414"/>
+  <path d="M66 84 Q80 98 94 84" fill="none" stroke="#141414" stroke-width="3" stroke-linecap="round"/>
+  <text x="80" y="150" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-size="12" font-weight="700" fill="#ffffff">JO</text>
+</svg>
