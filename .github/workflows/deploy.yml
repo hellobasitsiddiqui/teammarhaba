@@ -461,7 +461,7 @@ jobs:
             "${TRAFFIC_FLAGS[@]}" \
             --tag=candidate \
             --min-instances=1 --max-instances=1 \
-            --cpu=1 --memory=512Mi --cpu-boost \
+            --cpu=1 --memory=1Gi --cpu-boost \
             --add-cloudsql-instances="${CLOUDSQL}" \
             --set-secrets="${SECRETS}" \
             --set-env-vars="${ENV_VARS}" \
