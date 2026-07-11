@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.config.EventListingProperties;
@@ -13,6 +14,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -105,6 +107,18 @@ class EventRepositoryIntegrationTest extends AbstractIntegrationTest {
         Event saved = events.findById(id).orElseThrow();
         assertThat(saved.getCapacity()).isNull();
         assertThat(saved.hasCapacityLimit()).isFalse();
+    }
+
+    @Test
+    void databaseRejectsANonPositiveCapacity() {
+        // Defence in depth behind the API's @Min(1): the ck_events_capacity CHECK (V40, TM-525) means
+        // the DB itself refuses to store a capacity below 1, whatever writes it — so a bad value can
+        // never slip in past the entity layer. NULL (unlimited) and any value >= 1 remain valid.
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Event zeroCap = newEvent("Zero cap", now, now.plus(Duration.ofDays(1)));
+        zeroCap.setCapacity(0);
+
+        assertThatThrownBy(() -> events.saveAndFlush(zeroCap)).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

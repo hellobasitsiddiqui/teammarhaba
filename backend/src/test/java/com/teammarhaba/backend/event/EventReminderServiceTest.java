@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -26,9 +27,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -124,12 +127,32 @@ class EventReminderServiceTest {
         when(markers.saveAndFlush(any(EventReminderSend.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
+    /** Device tokens per user, resolved in one batch by the service (findByUserIdIn, TM-525). */
+    private final Map<Long, List<DeviceToken>> tokensByUser = new HashMap<>();
+
+    /**
+     * Stub the single batched token read the service now performs: given the eligible user ids, return
+     * the union of their registered tokens in id order (so token de-dup/order assertions stay stable).
+     * Lenient because the many due-ness/idempotency tests never reach the fan-out.
+     */
+    @BeforeEach
+    void stubBatchedTokenRead() {
+        lenient().when(deviceTokens.findByUserIdIn(anyCollection())).thenAnswer(inv -> {
+            Collection<Long> ids = inv.getArgument(0);
+            List<DeviceToken> union = new ArrayList<>();
+            for (Long id : ids) {
+                union.addAll(tokensByUser.getOrDefault(id, List.of()));
+            }
+            return union;
+        });
+    }
+
     private void stubTokens(long userId, String... tokenValues) {
         List<DeviceToken> devices = new ArrayList<>();
         for (String t : tokenValues) {
             devices.add(new DeviceToken(userId, t, DevicePlatform.ANDROID, T0));
         }
-        when(deviceTokens.findByUserId(userId)).thenReturn(devices);
+        tokensByUser.put(userId, devices);
     }
 
     private static EventAttendance going(long eventId, long userId) {
@@ -354,10 +377,11 @@ class EventReminderServiceTest {
         ArgumentCaptor<Collection<String>> sent = ArgumentCaptor.forClass(Collection.class);
         verify(push).sendToTokens(sent.capture(), any(PushMessage.class));
         assertThat(sent.getValue()).containsExactly("tok-a", "tok-b", "tok-c");
-        // Ineligible attendees' tokens were never even resolved (always through User first).
-        verify(deviceTokens, never()).findByUserId(2L);
-        verify(deviceTokens, never()).findByUserId(3L);
-        verify(deviceTokens, never()).findByUserId(4L);
+        // One batched token read (TM-525), and it asks for ONLY the eligible ids — the opted-out (2),
+        // disabled (3) and tombstoned (4) attendees are filtered by the rails first, so their tokens
+        // are never even resolved.
+        verify(deviceTokens).findByUserIdIn(List.of(1L, 5L));
+        verify(deviceTokens, never()).findByUserId(any());
     }
 
     @Test

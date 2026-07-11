@@ -24,6 +24,16 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, Long> 
     List<DeviceToken> findByUserId(Long userId);
 
     /**
+     * Every device token owned by any of the given {@code userIds} — the batched counterpart of
+     * {@link #findByUserId(Long)} (TM-525). Fan-out paths that push to a set of recipients (event
+     * reminders, the lifecycle/waitlist attendee notifier) use this single {@code WHERE user_id IN (…)}
+     * read instead of one query per user, so a large GOING list is one round-trip rather than an N+1.
+     * Callers that care about per-user ordering group the result by {@link DeviceToken#getUserId()} and
+     * walk their own recipient order; a user with no token is simply absent from the result.
+     */
+    List<DeviceToken> findByUserIdIn(Collection<Long> userIds);
+
+    /**
      * Whether {@code userId} has at least one registered device token — the "has a device push could
      * reach" half of the admin push-eligibility signal (TM-427). Backs the single-account admin read
      * (GET/PATCH {@code /admin/users/{id}}); the list path uses the batched

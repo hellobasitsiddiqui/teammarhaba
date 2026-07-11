@@ -1,4 +1,4 @@
--- V16__events_age_band — per-event age-group eligibility band (TM-415 / events epic)
+-- V18__events_age_band — per-event age-group eligibility band (TM-415 / events epic)
 --
 -- Events can target an age group. A user may only RSVP / join the waitlist / claim a spot when
 -- their self-reported age (users.age, TM-162) falls within the band, widened by a fixed ±tolerance

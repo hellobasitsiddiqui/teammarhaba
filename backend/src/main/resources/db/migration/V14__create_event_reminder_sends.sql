@@ -1,4 +1,4 @@
--- V12__create_event_reminder_sends — per-(event, milestone) reminder send markers (TM-394)
+-- V14__create_event_reminder_sends — per-(event, milestone) reminder send markers (TM-394)
 --
 -- The idempotency ledger for the event reminder scheduler: one row per (event, milestone) that has
 -- been CLAIMED for sending. The UNIQUE pair is the whole design — it is the cluster-wide "at most

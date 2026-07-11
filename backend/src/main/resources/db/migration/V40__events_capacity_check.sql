@@ -1,0 +1,11 @@
+-- V40__events_capacity_check — a floor of 1 on an event's capacity (TM-525 / events review follow-up)
+--
+-- Defence in depth behind the API's @Min(1) on the create/edit path (EventAdminService): the DB can
+-- never hold a non-positive capacity, whatever writes it. capacity is NULL = unlimited (no waitlisting
+-- ever kicks in, V11's model), so the constraint permits NULL and only bites a stored number < 1.
+--
+-- Added here as a new forward migration rather than by editing V11__create_events (the events table's
+-- original DDL): V11 has long since run in every environment, so altering it would break Flyway's
+-- checksum validation on startup. This mirrors the house pattern — V12 widened events.description and
+-- V18 added ck_events_age_band the same way, by ALTERing the table in a later migration.
+ALTER TABLE events ADD CONSTRAINT ck_events_capacity CHECK (capacity IS NULL OR capacity >= 1);

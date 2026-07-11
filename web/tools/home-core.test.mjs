@@ -115,7 +115,7 @@ test("homeFeed: empty for no cards, or when every card is finished (paper-empty-
 
 test("homeFeed: drops finished events and orders live-now before upcoming", () => {
   const soon = { id: 2, heading: "Soon", startAt: "2026-07-20T09:00:00Z" };
-  const live = { id: 1, heading: "Live one", isHappeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const live = { id: 1, heading: "Live one", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
   const finished = { id: 3, heading: "Old", status: "FINISHED", startAt: "2026-07-01T09:00:00Z" };
 
   const feed = homeFeed([soon, live, finished], CTX);
