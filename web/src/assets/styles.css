@@ -4078,6 +4078,52 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
 .tm-chat-cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tm-chat-cta-arrow { line-height: 1; }
 
+/* Link-preview card (TM-470): the OpenGraph card mounted under a message that contains a URL. Muted,
+   bordered, tappable — reads as an inline preview of the linked page, not a chat bubble. */
+.tm-chat-link-preview {
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--space-1);
+    max-width: 20rem;
+    overflow: hidden;
+    color: inherit;
+    text-decoration: none;
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--fg);
+    border-radius: var(--radius-md);
+}
+.tm-chat-link-preview:hover { filter: brightness(0.98); }
+.tm-chat-link-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tm-chat-link-preview-img {
+    display: block;
+    width: 100%;
+    max-height: 10rem;
+    object-fit: cover;
+    border-bottom: var(--border-width) solid var(--fg);
+}
+.tm-chat-link-preview-body { padding: var(--space-2) var(--space-3); }
+.tm-chat-link-preview-title {
+    font-weight: 600;
+    font-size: var(--fs-2);
+    line-height: 1.3;
+}
+.tm-chat-link-preview-desc {
+    margin-top: var(--space-1);
+    font-size: var(--fs-1);
+    color: var(--muted);
+    /* Clamp the teaser to a couple of lines so a long description doesn't dominate the thread. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.tm-chat-link-preview-host {
+    margin-top: var(--space-1);
+    font-size: var(--fs-1);
+    color: var(--muted);
+    text-transform: lowercase;
+}
+
 /* Admin thread head: the title sits in a row with its type badge, and the head takes an accent rule
    so the one-way "from TeamMarhaba" channel is visibly distinct from an event chat (TM-445). */
 .tm-chat-thread-titlerow {

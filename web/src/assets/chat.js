@@ -51,8 +51,12 @@ import {
   rejoinConversation,
   reactToMessage,
   unreactFromMessage,
+  getLinkPreview,
 } from "./api.js";
 import * as core from "./chat-core.js";
+// TM-470 link previews: pure URL-detection + response-normalisation core (see the delimited
+// `=== TM-470 link preview ===` hook further down, which mounts the card and calls the endpoint).
+import * as linkPreview from "./chat-linkpreview-core.js";
 // TM-585: drive the Chat-tab unread badge's drop from the mark-read path itself. Opening a thread marks
 // it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
 // so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
@@ -924,6 +928,14 @@ function messageRow(m, mine = false) {
     ]));
   }
   if (m.cta) row.append(messageCta(m.cta)); // an in-app deep-link on a normal message → same CTA affordance
+  /* === TM-470 link preview === */
+  // If the body contains an http(s) URL, lazily fetch its OpenGraph card from the dedicated,
+  // SSRF-safe server endpoint (GET /api/v1/link-preview) and render it under the bubble. A fetch
+  // failure / no metadata simply shows no card — the raw URL stays as plain text in the bubble (the
+  // AC's "fall back to a plain link"). Deliberately additive + self-contained: it appends its own node
+  // and mutates nothing else in this renderer, keeping clear of the sibling @mentions work.
+  maybeMountLinkPreview(m, row);
+  /* === end TM-470 link preview === */
   // Reactions (TM-462): the chip row + the interactive react affordance. A confirmed message in a thread
   // the caller can post to gets toggleable chips + a "react" button that opens the emoji picker; a pending
   // echo (no server id yet) or a read-only thread falls back to read-only chips. `interactive` reuses the
@@ -1274,6 +1286,112 @@ function messageCta(cta) {
     el("span", { class: "tm-chat-cta-label", text: cta.label }),
     el("span", { class: "tm-chat-cta-arrow", "aria-hidden": "true", text: "→" }),
   ]);
+}
+
+/* ─────────────────────────────── TM-470 link preview ────────────────────────────────────────────
+ * A self-contained render hook: detect a URL in a message body (via the pure chat-linkpreview-core),
+ * ask the SSRF-safe backend endpoint for its OpenGraph card, and mount a preview under the bubble.
+ * Kept in its own delimited section so it doesn't entangle with the message renderer or the sibling
+ * @mentions work — messageRow only calls maybeMountLinkPreview(m, row).
+ *
+ * Failure is invisible by design (the AC's "fall back to a plain link"): if there's no URL, the fetch
+ * fails, or the page has no usable metadata, nothing is appended and the raw URL simply stays as plain
+ * text in the bubble. The card renders a title (always), an optional description, and an optional image.
+ * ---------------------------------------------------------------------------------------------- */
+
+// Per-session URL→preview memo, so the near-live poll / SSE repaints of a thread don't re-fetch (or
+// re-flicker) a link's card every tick. Stores the resolving Promise so concurrent repaints of the same
+// message share one in-flight request; the backend also caches by URL, this just avoids redundant calls.
+const linkPreviewCache = new Map();
+
+/**
+ * If message `m`'s body contains a previewable URL, mount its link-preview card under the bubble in
+ * `row`. System notices (admin broadcasts) already carry their own deep-link CTA, so they're skipped.
+ * Asynchronous + best-effort: appends a card only once a preview with real content resolves.
+ * @param {Object} m the message view-model.
+ * @param {HTMLElement} row the message row element to append the card to.
+ */
+function maybeMountLinkPreview(m, row) {
+  if (!m || m.system) return;
+  const url = linkPreview.firstPreviewableUrl(m.body);
+  if (!url) return;
+
+  // Anchor node so an async resolve mounts the card in the right place even if the row was appended
+  // after this returns; also lets a repaint tell "already handled this row" apart from "not yet".
+  const slot = el("div", { class: "tm-chat-link-preview-slot", "data-testid": "chat-link-preview-slot" });
+  row.append(slot);
+
+  resolveLinkPreview(url)
+    .then((preview) => {
+      // Guard: the row may have been discarded by a repaint before the fetch resolved, or the preview
+      // may carry no title (nothing worth a card) — in both cases leave the plain link as-is.
+      if (!preview || !preview.hasContent || !slot.isConnected) return;
+      slot.append(linkPreviewCard(preview));
+    })
+    .catch(() => {
+      /* best-effort: a failed preview shows no card (the plain link stays in the bubble) */
+    });
+}
+
+/** Resolve (and memoise) the normalised preview for a URL; a failure memoises `null` (don't refetch). */
+function resolveLinkPreview(url) {
+  if (linkPreviewCache.has(url)) return Promise.resolve(linkPreviewCache.get(url));
+  const promise = getLinkPreview(url)
+    .then((raw) => {
+      const preview = raw ? linkPreview.normalisePreview(raw, url) : null;
+      linkPreviewCache.set(url, preview);
+      return preview;
+    })
+    .catch(() => {
+      linkPreviewCache.set(url, null);
+      return null;
+    });
+  linkPreviewCache.set(url, promise); // dedupe concurrent in-flight fetches for the same URL
+  return promise;
+}
+
+/**
+ * Build the preview card DOM: an accessible link wrapping an optional image, the title, an optional
+ * description, and the link's host as a source line. All fields are rendered as TEXT / an image `src`
+ * (never HTML), and the card links to the previewed URL (opens in a new tab).
+ * @param {{url: string, title: string, description: string, imageUrl: (string|null)}} preview
+ * @returns {HTMLElement}
+ */
+function linkPreviewCard(preview) {
+  const children = [];
+  if (preview.imageUrl) {
+    children.push(el("img", {
+      class: "tm-chat-link-preview-img",
+      src: preview.imageUrl,
+      alt: "",
+      loading: "lazy",
+      // If the image 404s / is blocked, hide it rather than showing a broken-image glyph.
+      onError: (e) => { e.target.style.display = "none"; },
+    }));
+  }
+  const body = [el("div", { class: "tm-chat-link-preview-title", text: preview.title })];
+  if (preview.description) {
+    body.push(el("div", { class: "tm-chat-link-preview-desc", text: preview.description }));
+  }
+  body.push(el("div", { class: "tm-chat-link-preview-host", text: previewHost(preview.url) }));
+  children.push(el("div", { class: "tm-chat-link-preview-body" }, body));
+
+  return el("a", {
+    class: "tm-chat-link-preview",
+    href: preview.url,
+    target: "_blank",
+    rel: "noopener noreferrer nofollow",
+    "data-testid": "chat-link-preview",
+  }, children);
+}
+
+/** The host of the previewed URL for the card's source line (falls back to the raw URL if unparseable). */
+function previewHost(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return String(url ?? "");
+  }
 }
 
 /**
