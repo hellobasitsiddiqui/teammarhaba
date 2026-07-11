@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "teammarhaba-personas",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
