@@ -255,6 +255,7 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
                 null,
                 null,
                 null,
+                null, // venueId (TM-519)
                 "Europe/London",
                 startAt,
                 null,
@@ -294,21 +295,24 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
     }
 
     private static EventPatch patchStartAt(Instant startAt) {
+        // Field order (21): heading, description, locationText, mapUrl, onlineUrl, city, venueId (TM-519),
+        // timezone, startAt, endAt, visibilityStart, visibilityEnd, capacity, imagePath, locationRevealHours,
+        // bookingCutoffHours (TM-523), cancellationWindowHours (TM-523), ageMin, ageMax, pricePence, premium.
         return new EventPatch(
-                null, null, null, null, null, null, null, startAt, null, null, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null, null, null, null, startAt, null, null, null, null, null, null, null,
+                null, null, null, null, null);
     }
 
     private static EventPatch patchLocation(String locationText) {
         return new EventPatch(
                 null, null, locationText, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     private static EventPatch patchDescription(String description) {
         return new EventPatch(
                 null, description, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     private List<Delivery> pushesTitled(String titlePrefix) {

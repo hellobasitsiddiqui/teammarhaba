@@ -16,6 +16,7 @@ public record EventPatch(
         String mapUrl,
         String onlineUrl,
         String city,
+        Long venueId,
         String timezone,
         Instant startAt,
         Instant endAt,
@@ -39,6 +40,7 @@ public record EventPatch(
                 && mapUrl == null
                 && onlineUrl == null
                 && city == null
+                && venueId == null
                 && timezone == null
                 && startAt == null
                 && endAt == null

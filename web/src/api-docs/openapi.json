@@ -741,6 +741,11 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "venueId" : {
+            "format" : "int64",
+            "minimum" : 1,
+            "type" : "integer"
+          },
           "visibilityEnd" : {
             "format" : "date-time",
             "type" : "string"
@@ -751,6 +756,74 @@
           }
         },
         "required" : [ "description", "heading", "locationText", "startAt", "timezone", "visibilityEnd", "visibilityStart" ],
+        "type" : "object"
+      },
+      "CreateVenueRequest" : {
+        "properties" : {
+          "accessibility" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "addressLine" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "indoorOutdoor" : {
+            "enum" : [ "INDOOR", "OUTDOOR", "MIXED" ],
+            "type" : "string"
+          },
+          "latitude" : {
+            "format" : "double",
+            "maximum" : 90.0,
+            "minimum" : -90.0,
+            "type" : "number"
+          },
+          "longitude" : {
+            "format" : "double",
+            "maximum" : 180.0,
+            "minimum" : -180.0,
+            "type" : "number"
+          },
+          "mapUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "name" : {
+            "maxLength" : 160,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "notes" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "parking" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "photoPath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "pattern" : "venue-images/[A-Za-z0-9._-]+",
+            "type" : "string"
+          }
+        },
+        "required" : [ "addressLine", "name" ],
         "type" : "object"
       },
       "DeviceResponse" : {
@@ -1129,6 +1202,10 @@
           "updatedAt" : {
             "format" : "date-time",
             "type" : "string"
+          },
+          "venueId" : {
+            "format" : "int64",
+            "type" : "integer"
           },
           "visibilityEnd" : {
             "format" : "date-time",
@@ -1640,6 +1717,33 @@
         },
         "type" : "object"
       },
+      "PageResponseVenueResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/VenueResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PagedResponseUserResponse" : {
         "properties" : {
           "items" : {
@@ -1990,6 +2094,11 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "venueId" : {
+            "format" : "int64",
+            "minimum" : 1,
+            "type" : "integer"
+          },
           "visibilityEnd" : {
             "format" : "date-time",
             "type" : "string"
@@ -2074,6 +2183,73 @@
         },
         "type" : "object"
       },
+      "UpdateVenueRequest" : {
+        "properties" : {
+          "accessibility" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "addressLine" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "indoorOutdoor" : {
+            "enum" : [ "INDOOR", "OUTDOOR", "MIXED" ],
+            "type" : "string"
+          },
+          "latitude" : {
+            "format" : "double",
+            "maximum" : 90.0,
+            "minimum" : -90.0,
+            "type" : "number"
+          },
+          "longitude" : {
+            "format" : "double",
+            "maximum" : 180.0,
+            "minimum" : -180.0,
+            "type" : "number"
+          },
+          "mapUrl" : {
+            "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "name" : {
+            "maxLength" : 160,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "notes" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "parking" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "photoPath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "pattern" : "venue-images/[A-Za-z0-9._-]+",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "UserResponse" : {
         "properties" : {
           "displayName" : {
@@ -2096,6 +2272,70 @@
             "type" : "boolean"
           },
           "role" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "VenueResponse" : {
+        "properties" : {
+          "accessibility" : {
+            "type" : "string"
+          },
+          "active" : {
+            "type" : "boolean"
+          },
+          "addressLine" : {
+            "type" : "string"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "city" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "createdBy" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "indoorOutdoor" : {
+            "enum" : [ "INDOOR", "OUTDOOR", "MIXED" ],
+            "type" : "string"
+          },
+          "latitude" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "longitude" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "mapUrl" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "parking" : {
+            "type" : "string"
+          },
+          "photoPath" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
             "type" : "string"
           }
         },
@@ -2131,7 +2371,7 @@
         "tags" : [ "alert-admin-controller" ]
       },
       "post" : {
-        "operationId" : "create_1",
+        "operationId" : "create_2",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -2266,7 +2506,7 @@
     },
     "/api/v1/admin/events" : {
       "get" : {
-        "operationId" : "list",
+        "operationId" : "list_1",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -2306,7 +2546,7 @@
         "tags" : [ "event-admin-controller" ]
       },
       "post" : {
-        "operationId" : "create",
+        "operationId" : "create_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -2334,7 +2574,7 @@
     },
     "/api/v1/admin/events/{id}" : {
       "get" : {
-        "operationId" : "get_1",
+        "operationId" : "get_2",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -2359,7 +2599,7 @@
         "tags" : [ "event-admin-controller" ]
       },
       "patch" : {
-        "operationId" : "update_1",
+        "operationId" : "update_2",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -2573,7 +2813,7 @@
     },
     "/api/v1/admin/users" : {
       "get" : {
-        "operationId" : "list_5",
+        "operationId" : "list_6",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -2642,7 +2882,7 @@
     },
     "/api/v1/admin/users/{id}" : {
       "get" : {
-        "operationId" : "get",
+        "operationId" : "get_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -2667,7 +2907,7 @@
         "tags" : [ "user-admin-controller" ]
       },
       "patch" : {
-        "operationId" : "update",
+        "operationId" : "update_1",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -2765,6 +3005,205 @@
         "tags" : [ "user-admin-controller" ]
       }
     },
+    "/api/v1/admin/venues" : {
+      "get" : {
+        "operationId" : "list",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "q",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "active",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseVenueResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateVenueRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VenueResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/venues/{id}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VenueResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      },
+      "patch" : {
+        "operationId" : "update",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateVenueRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VenueResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/venues/{id}/deactivate" : {
+      "post" : {
+        "operationId" : "deactivate",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VenueResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/venues/{id}/reactivate" : {
+      "post" : {
+        "operationId" : "reactivate",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VenueResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "venue-admin-controller" ]
+      }
+    },
     "/api/v1/alerts/active" : {
       "get" : {
         "operationId" : "active",
@@ -2788,7 +3227,7 @@
     },
     "/api/v1/audit" : {
       "get" : {
-        "operationId" : "list_4",
+        "operationId" : "list_5",
         "parameters" : [ {
           "in" : "query",
           "name" : "actorUid",
@@ -3247,7 +3686,7 @@
     },
     "/api/v1/events" : {
       "get" : {
-        "operationId" : "list_3",
+        "operationId" : "list_4",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -3575,7 +4014,7 @@
     },
     "/api/v1/me/conversations" : {
       "get" : {
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -3763,7 +4202,7 @@
     },
     "/api/v1/me/notifications" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "list_2",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",

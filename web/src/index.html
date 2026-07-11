@@ -135,6 +135,8 @@
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
                 <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin-events" href="#/admin/events" hidden>Events</a>
+                <!-- Admin venues console link (TM-519): shown by router.js only for a signed-in ADMIN. -->
+                <a id="nav-admin-venues" href="#/admin/venues" hidden>Venues</a>
                 <!-- Admin messaging link (TM-443 compose → TM-444 sent-history). Now that the sent-history
                      list exists (TM-444), this lands admins on the messages hub (#/admin/messages), from
                      which "New message" opens the compose form. Shown by router.js only for a signed-in
@@ -345,6 +347,15 @@
              submit button — TM-421) onto its own admin page so it scrolls naturally. admin-events.js
              builds it here; router.js owns visibility + the ADMIN gate (same as the events console). -->
         <section id="admin-event-form-view" class="admin-console" aria-label="Event form" hidden></section>
+
+        <!-- Admin venues console (TM-519): ADMIN-only #/admin/venues view. admin-venues.js (imported by
+             router.js) builds the venue library list + create/edit/deactivate flow into this container;
+             router.js owns its visibility + the ADMIN gate (same as the events console). -->
+        <section id="admin-venues-view" class="admin-console" aria-label="Admin venues console" hidden></section>
+
+        <!-- Admin venue form (TM-519): the full-page #/admin/venues/new + #/admin/venues/{id}/edit
+             create/edit form. admin-venues.js builds it here; router.js owns visibility + the ADMIN gate. -->
+        <section id="admin-venue-form-view" class="admin-console" aria-label="Venue form" hidden></section>
 
         <!-- Admin message compose (TM-443): the full-page #/admin/messages/new compose form (audience
              picker + title/body/deep-link + confirm). admin-messages.js (imported by router.js) builds

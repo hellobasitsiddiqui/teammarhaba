@@ -325,6 +325,9 @@ export function buildEventPayload(draft = {}) {
   putText("mapUrl");
   putText("onlineUrl");
   putText("city");
+  // Venue reference (TM-519): the id of a saved venue picked from the library, or omitted for a
+  // one-off free-text location. Sent as an integer id; the server validates it exists + is active.
+  putInt("venueId");
   if (tz !== "") body.timezone = tz;
   putInstant("startAt");
   putInstant("endAt");
@@ -357,6 +360,7 @@ export function toFormModel(event = {}) {
     mapUrl: str(event.mapUrl),
     onlineUrl: str(event.onlineUrl),
     city: str(event.city),
+    venueId: event.venueId == null ? "" : String(event.venueId),
     timezone: tz,
     startAt: utcIsoToZoned(event.startAt, tz),
     endAt: utcIsoToZoned(event.endAt, tz),

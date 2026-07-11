@@ -17,7 +17,8 @@ import java.time.Instant;
  * age-group band (TM-415); both {@code null} = open to all ages. {@code pricePence} is the ticket
  * price in pence and {@code premium} the premium-gating flag (TM-475); both are {@code null} when the
  * admin omitted them on create, in which case {@link EventAdminService} leaves the entity defaults
- * (£5 / not premium) in place.
+ * (£5 / not premium) in place. {@code venueId} optionally references a reusable venue (TM-519);
+ * {@code null} = a one-off free-text location — {@code locationText} stays the display line either way.
  */
 public record EventDraft(
         String heading,
@@ -26,6 +27,7 @@ public record EventDraft(
         String mapUrl,
         String onlineUrl,
         String city,
+        Long venueId,
         String timezone,
         Instant startAt,
         Instant endAt,
