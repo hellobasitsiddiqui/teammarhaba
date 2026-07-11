@@ -95,17 +95,26 @@ test("the Pay button guards double-submit, validates the name, then submits with
     /if\s*\(!isValidCardholderName\([\s\S]{0,40}\)\)\s*\{[\s\S]{0,220}return;/,
     "an invalid cardholder name must block the submit and return without charging",
   );
-  // …then disables the button and submits the card field WITH the validated name (TM-639: no name ⇒
-  // Revolut rejects "Cardholder name must be at least two words").
+  // …then gates the submit on the controller's begin() and submits the card field WITH the validated
+  // name (TM-639: no name ⇒ Revolut rejects "Cardholder name must be at least two words"). Since TM-642
+  // begin() is what moves the machine to PENDING, and the button is disabled in the PENDING onChange
+  // branch (not inline) — so the disable + the submit are pinned via begin() here and the PENDING branch below.
   assert.match(
     SRC,
-    /payBtn\.disabled\s*=\s*true;[\s\S]{0,160}cardField\.submit\(\{\s*name:/,
-    "the Pay handler disables the button and submits the card field with a { name } payload",
+    /if\s*\(!submitCtl\.begin\(\)\)\s*return;[\s\S]{0,120}cardField\.submit\(\{\s*name:/,
+    "the Pay handler starts the controller (begin arms the backstop) then submits with a { name } payload",
   );
   assert.match(
     SRC,
-    /onError:\s*\(message\)\s*=>\s*\{[\s\S]{0,240}payBtn\.disabled\s*=\s*false/,
-    "the widget's onError must re-enable Pay so a declined card can be retried",
+    /case\s+PAYMENT_SUBMIT_STATE\.PENDING:[\s\S]{0,120}payBtn\.disabled\s*=\s*true/,
+    "the PENDING onChange branch disables the button while a charge is in flight",
+  );
+  // The decline (onError) re-enable moved into the controller's ERROR onChange branch since TM-642 (the
+  // widget's onError now just feeds the controller). A declined card must still re-enable Pay for a retry.
+  assert.match(
+    SRC,
+    /case\s+PAYMENT_SUBMIT_STATE\.ERROR:[\s\S]{0,200}payBtn\.disabled\s*=\s*false/,
+    "the ERROR onChange branch re-enables Pay so a declined card can be retried",
   );
 });
 
@@ -141,6 +150,53 @@ test("the card field is themed for the Revolut iframe, and merchant-save moved t
     /createCardField\(\{[\s\S]{0,160}savePaymentMethodFor/,
     "savePaymentMethodFor must no longer sit on createCardField (the contract ignores it there)",
   );
+});
+
+// --- stuck-payment backstop is wired (TM-642) ------------------------------------------------------
+//
+// REGRESSION (TM-642): a card the widget rejects/declines client-side sometimes called NEITHER onSuccess
+// NOR onError, and there was no timeout — so the Subscribe button sat disabled on "Processing payment…"
+// forever. The pure lifecycle machine + timeout backstop live (and are behaviourally tested) in
+// payment-submit-core.test.mjs; these guards pin that the shell actually WIRES it into the submit path.
+
+test("the subscribe shell drives the submit through the node-tested controller + timeout backstop (TM-642)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bcreateCardSubmitController\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the pure submit controller from the core (where the lifecycle machine is unit-tested)",
+  );
+  assert.match(SRC, /createCardSubmitController\(\{/, "…and constructs it");
+  // The real timer is injected (the core stays DOM/timer-free); a genuine setTimeout backstop is armed.
+  assert.match(SRC, /setTimer:\s*\([\s\S]{0,40}\)\s*=>\s*setTimeout\(/, "arms a real setTimeout backstop");
+  assert.match(SRC, /clearTimer:\s*\([\s\S]{0,20}\)\s*=>\s*clearTimeout\(/, "and clears it on settle");
+});
+
+test("the widget callbacks feed the controller, and the TIMEOUT branch re-enables + shows the stuck hint (TM-642)", () => {
+  // onSuccess/onError now delegate to the controller (which owns first-settle-wins / double-fire).
+  assert.match(SRC, /onSuccess:\s*\(\)\s*=>\s*submitCtl\.success\(\)/, "onSuccess feeds the controller");
+  assert.match(SRC, /onError:\s*\(message\)\s*=>\s*submitCtl\.error\(message\)/, "onError feeds the controller");
+  // The TIMEOUT state clears "Processing payment…" (via the shared hint) and re-enables the button.
+  assert.match(
+    SRC,
+    /case\s+PAYMENT_SUBMIT_STATE\.TIMEOUT:[\s\S]{0,400}PAYMENT_STUCK_HINT[\s\S]{0,120}payBtn\.disabled\s*=\s*false/,
+    "the TIMEOUT branch must show PAYMENT_STUCK_HINT and re-enable the button (no more permanent stuck state)",
+  );
+  // The submit still only happens once the controller has moved to PENDING (begin() gates it).
+  assert.match(
+    SRC,
+    /if\s*\(!submitCtl\.begin\(\)\)\s*return;[\s\S]{0,120}cardField\.submit\(/,
+    "begin() (which arms the backstop) must precede cardField.submit()",
+  );
+});
+
+test("the subscribe shell wires best-effort card-field validation feedback (TM-642)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bsummarizeCardValidation\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the defensive onValidation reader from the core",
+  );
+  assert.match(SRC, /onValidation:\s*\(payload\)\s*=>/, "wires the card field's onValidation callback");
+  assert.match(SRC, /summarizeCardValidation\(payload\)/, "…interpreting it defensively");
 });
 
 // --- invalid tier renders a fallback, not a blank screen --------------------------------------------

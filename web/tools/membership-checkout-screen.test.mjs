@@ -54,3 +54,46 @@ test("the per-event card field is themed for the Revolut iframe via a styles obj
     "createCardField must get a styles object (its number/expiry/CVC inputs live in Revolut's iframe)",
   );
 });
+
+// --- stuck-payment backstop is wired (TM-642) ------------------------------------------------------
+//
+// REGRESSION (TM-642): a card the widget rejects/declines client-side sometimes called NEITHER onSuccess
+// NOR onError, and there was no timeout — so the Pay button sat disabled on "Processing payment…"
+// forever. The pure lifecycle machine + timeout backstop live (and are behaviourally tested) in
+// payment-submit-core.test.mjs; these guards pin that the per-event shell actually WIRES it.
+
+test("the per-event Pay flow drives the submit through the controller + timeout backstop (TM-642)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bcreateCardSubmitController\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the pure submit controller from the core (where the lifecycle machine is unit-tested)",
+  );
+  assert.match(SRC, /createCardSubmitController\(\{/, "…and constructs it");
+  assert.match(SRC, /setTimer:\s*\([\s\S]{0,40}\)\s*=>\s*setTimeout\(/, "arms a real setTimeout backstop");
+  assert.match(SRC, /clearTimer:\s*\([\s\S]{0,20}\)\s*=>\s*clearTimeout\(/, "and clears it on settle");
+});
+
+test("the per-event widget callbacks feed the controller, and TIMEOUT re-enables + shows the stuck hint (TM-642)", () => {
+  assert.match(SRC, /onSuccess:\s*\(\)\s*=>\s*submitCtl\.success\(\)/, "onSuccess feeds the controller");
+  assert.match(SRC, /onError:\s*\(message\)\s*=>\s*submitCtl\.error\(message\)/, "onError feeds the controller");
+  assert.match(
+    SRC,
+    /case\s+PAYMENT_SUBMIT_STATE\.TIMEOUT:[\s\S]{0,400}PAYMENT_STUCK_HINT[\s\S]{0,120}payBtn\.disabled\s*=\s*false/,
+    "the TIMEOUT branch must show PAYMENT_STUCK_HINT and re-enable the button (no more permanent stuck state)",
+  );
+  assert.match(
+    SRC,
+    /if\s*\(!submitCtl\.begin\(\)\)\s*return;[\s\S]{0,120}cardField\.submit\(/,
+    "begin() (which arms the backstop) must precede cardField.submit()",
+  );
+});
+
+test("the per-event Pay flow wires best-effort card-field validation feedback (TM-642)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bsummarizeCardValidation\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the defensive onValidation reader from the core",
+  );
+  assert.match(SRC, /onValidation:\s*\(payload\)\s*=>/, "wires the card field's onValidation callback");
+  assert.match(SRC, /summarizeCardValidation\(payload\)/, "…interpreting it defensively");
+});
