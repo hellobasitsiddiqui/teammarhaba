@@ -1,6 +1,6 @@
 {
   "appId": "app.teammarhaba.webview",
-  "appName": "TeamMarhaba",
+  "appName": "Circle",
   "webDir": "web/src",
   "server": {
     "url": "https://teammarhaba.web.app",
