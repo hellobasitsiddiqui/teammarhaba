@@ -112,7 +112,7 @@ public class ChatSeedService {
         long jordan = seededMember("jordan", "Jordan");
         long sam = seededMember("sam", "Sam");
 
-        // ── Event thread A — populated + fully unread (7 messages) ────────────────────────────────
+        // ── Event thread A — populated + fully unread (8 messages, 7 unread for the caller) ───────
         Conversation dogWalk = eventThread(callerId, "Sunday Morning Dog Walk", List.of(priya, jordan, sam));
         Long a = dogWalk.getId();
         system(a, "You joined Sunday Morning Dog Walk");
@@ -122,7 +122,9 @@ public class ChatSeedService {
         human(a, priya, "I'll bring some water and treats for the dogs 💧");
         human(a, sam, "Can't wait — first time joining, excited to meet everyone 🙌");
         human(a, priya, "See you all at the north gate at 9!");
-        // Cursor left null (never read) → all 7 messages count as unread.
+        human(a, jordan, "Max says woof — translation: hurry up, humans 🐾");
+        // Cursor left null (never read) → 7 unread: the system notice + the six OTHER members'
+        // messages. The caller's own message never counts against them (TM-680).
 
         // ── Event thread B — populated but READ (0 unread) so the list shows a mix ────────────────
         Conversation runClub = eventThread(callerId, "Riverside 5k Run Club", List.of(jordan));
@@ -241,7 +243,7 @@ public class ChatSeedService {
             } else {
                 adminThreads++;
             }
-            unreadTotal += messages.countUnread(m.getConversationId(), m.getLastReadAt());
+            unreadTotal += messages.countUnread(m.getConversationId(), m.getUserId(), m.getLastReadAt());
         }
         return new ChatSeedResult(alreadySeeded, eventThreads, adminThreads, unreadTotal);
     }

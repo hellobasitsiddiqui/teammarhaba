@@ -262,7 +262,7 @@ class ConversationMessageRepositoryIntegrationTest extends AbstractIntegrationTe
 
         // A never-read member (null cursor) has everything unread.
         assertThat(membership.getLastReadAt()).isNull();
-        assertThat(messages.countUnread(thread.getId(), null)).isEqualTo(3);
+        assertThat(messages.countUnread(thread.getId(), reader, null)).isEqualTo(3);
 
         // Reading up to the newest message clears the unread count.
         List<Message> newestFirst =
@@ -270,18 +270,61 @@ class ConversationMessageRepositoryIntegrationTest extends AbstractIntegrationTe
         Instant newestAt = newestFirst.getFirst().getCreatedAt();
         membership.markRead(newestAt);
         members.save(membership);
-        assertThat(messages.countUnread(thread.getId(), membership.getLastReadAt())).isZero();
+        assertThat(messages.countUnread(thread.getId(), reader, membership.getLastReadAt())).isZero();
 
         // A message posted after the cursor is unread again (its DB now() is after the cursor).
         messages.save(Message.fromUser(thread.getId(), newUser("unread-d"), "four"));
-        assertThat(messages.countUnread(thread.getId(), newestAt)).isEqualTo(1);
+        assertThat(messages.countUnread(thread.getId(), reader, newestAt)).isEqualTo(1);
 
         // Soft-deleted messages never count toward unread.
         Message four = messages.findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId())
                 .orElseThrow();
         four.softDelete(Instant.now());
         messages.save(four);
-        assertThat(messages.countUnread(thread.getId(), newestAt)).isZero();
+        assertThat(messages.countUnread(thread.getId(), reader, newestAt)).isZero();
+    }
+
+    @Test
+    void ownMessagesNeverCountAsUnreadForTheirSender() {
+        // TM-680: posting doesn't advance the sender's read cursor, so without the sender-exclusion
+        // predicate a member's own just-sent message counted as "unread by them" and badged them for
+        // their own words the moment they left the thread.
+        Conversation thread = conversations.save(Conversation.adminBroadcast());
+        Long sender = newUser("own-msg-sender");
+        Long other = newUser("own-msg-other");
+        ConversationMember senderMembership =
+                members.save(new ConversationMember(thread.getId(), sender, MemberRole.MEMBER));
+        members.save(new ConversationMember(thread.getId(), other, MemberRole.MEMBER));
+
+        // Sender opens the thread (cursor set), then posts AFTER their cursor — the bug's exact shape.
+        Instant openedAt = messages.databaseNow();
+        senderMembership.markRead(openedAt);
+        members.save(senderMembership);
+        messages.save(Message.fromUser(thread.getId(), sender, "my own message"));
+
+        // The sender is never unread for their own message — cursor case AND never-read (null) case.
+        assertThat(messages.countUnread(thread.getId(), sender, senderMembership.getLastReadAt())).isZero();
+        assertThat(messages.countUnread(thread.getId(), sender, null)).isZero();
+        // The other member still counts it.
+        assertThat(messages.countUnread(thread.getId(), other, null)).isEqualTo(1);
+
+        // Same rule in the batched list-path count: no row for the sender (0), one for the other member.
+        Map<Long, Long> senderUnread = messages.unreadCountsForUser(sender).stream()
+                .collect(Collectors.toMap(
+                        MessageRepository.ConversationUnreadCount::getConversationId,
+                        MessageRepository.ConversationUnreadCount::getUnread));
+        assertThat(senderUnread.getOrDefault(thread.getId(), 0L)).isZero();
+        Map<Long, Long> otherUnread = messages.unreadCountsForUser(other).stream()
+                .collect(Collectors.toMap(
+                        MessageRepository.ConversationUnreadCount::getConversationId,
+                        MessageRepository.ConversationUnreadCount::getUnread));
+        assertThat(otherUnread.get(thread.getId())).isEqualTo(1);
+
+        // A system message (null sender) still counts as unread for EVERYONE — don't over-exclude.
+        messages.save(Message.fromSystem(thread.getId(), "system notice", null));
+        assertThat(messages.countUnread(thread.getId(), sender, senderMembership.getLastReadAt()))
+                .isEqualTo(1);
+        assertThat(messages.countUnread(thread.getId(), other, null)).isEqualTo(2);
     }
 
     // ── batched list-path finders (TM-581) ────────────────────────────────────────────────────────
@@ -366,9 +409,9 @@ class ConversationMessageRepositoryIntegrationTest extends AbstractIntegrationTe
         assertThat(unread).doesNotContainKey(fullyRead.getId());
         assertThat(unread.getOrDefault(fullyRead.getId(), 0L)).isZero();
         // Cross-check against the single-thread finder the batch replaces.
-        assertThat(unread.get(neverRead.getId())).isEqualTo(messages.countUnread(neverRead.getId(), null));
+        assertThat(unread.get(neverRead.getId())).isEqualTo(messages.countUnread(neverRead.getId(), user, null));
         assertThat(unread.get(partiallyRead.getId()))
-                .isEqualTo(messages.countUnread(partiallyRead.getId(), partial.getLastReadAt()));
+                .isEqualTo(messages.countUnread(partiallyRead.getId(), user, partial.getLastReadAt()));
     }
 
     @Test
