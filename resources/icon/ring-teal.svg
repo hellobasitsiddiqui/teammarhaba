@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Circle app mark (TM-383): a hollow brand-teal ring on a transparent background.
+     Canonical web-favicon variant — reads on both light and dark browser tabs.
+     Shared source; all other icon surfaces derive from this same geometry. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="32"
+          fill="none"
+          stroke="#0f9d8c" stroke-width="6.5"
+          stroke-linecap="round" stroke-linejoin="round" />
+</svg>

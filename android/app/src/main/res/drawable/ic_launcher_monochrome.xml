@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Circle app mark (TM-383): Android 13+ themed-icon MONOCHROME layer. A single flat
+     ring shape on the 108x108 adaptive canvas; the launcher recolours it to match the
+     user's system theme, so it is drawn in solid white (#FFFFFF) and carries no colour
+     of its own. Same ring geometry as resources/icon/ring-white-foreground.svg
+     (centre 54,54; radius 22; stroke 4.4) so the themed icon matches the coloured icon.
+     Referenced by mipmap-anydpi-v26/ic_launcher.xml via <monochrome>. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 76,54 A 22,22 0 1 1 32,54 A 22,22 0 1 1 76,54 Z" />
+</vector>

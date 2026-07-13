@@ -7,6 +7,14 @@
          clipped. width/initial-scale unchanged from TM-229. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Circle</title>
+    <!-- App favicon (TM-383): the Circle mark — a hollow brand-teal ring. SVG-first so it
+         stays crisp at any size and reads on both light and dark browser tabs. Served at
+         /favicon.svg (deploy copies web/src -> web/dist verbatim; the file lives OUTSIDE
+         /assets/ so the fingerprinter leaves its URL stable). The 32px PNG is the fallback
+         for the few browsers that don't render SVG favicons; both are generated from the
+         shared source resources/icon/ring-teal.svg via scripts/gen-icon.sh. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <!-- Hand-lettered fonts for the Paper theme (TM-529; faces from TM-213). Patrick Hand is the
          body face, Gochi Hand the display face, Shadows Into Light the accent face (see --font-*
          tokens in styles.css). Loaded for every page; if the request fails, Paper degrades to the
