@@ -173,7 +173,7 @@ public class ConversationReadService {
         Long userId = users.provision(caller).getId();
         return members.findByUserIdOrderByJoinedAtDesc(userId).stream()
                 .filter(m -> m.getMute() != MuteState.REMOVED)
-                .mapToLong(m -> messages.countUnread(m.getConversationId(), m.getLastReadAt()))
+                .mapToLong(m -> messages.countUnread(m.getConversationId(), userId, m.getLastReadAt()))
                 .sum();
     }
 
@@ -378,7 +378,7 @@ public class ConversationReadService {
         member.markRead(readCursor); // forward-only, idempotent; dirty-checking flushes on commit
         members.save(member);
 
-        long unread = messages.countUnread(conversationId, member.getLastReadAt());
+        long unread = messages.countUnread(conversationId, userId, member.getLastReadAt());
         return new MarkReadResponse(conversationId, member.getLastReadAt(), unread);
     }
 

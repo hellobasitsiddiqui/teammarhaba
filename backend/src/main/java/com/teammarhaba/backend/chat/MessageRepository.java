@@ -57,26 +57,55 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     Optional<Message> findFirstByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
             Long conversationId);
 
-    /** Every live message in a thread — the "never read" unread total (see {@link #countUnread}). */
-    long countByConversationIdAndDeletedAtIsNull(Long conversationId);
+    /**
+     * Every live message in a thread another member could still have unread for {@code userId} — the
+     * "never read" unread total (see {@link #countUnread}). The member's <em>own</em> messages are
+     * excluded (TM-680): posting doesn't advance the read cursor, so without this predicate a sender's
+     * just-sent message counted as "unread by them" and badged them for their own words. A system
+     * message carries a {@code null} {@code senderId} and still counts for everyone.
+     */
+    @Query(
+            """
+            SELECT COUNT(m) FROM Message m
+            WHERE m.conversationId = :conversationId
+              AND m.deletedAt IS NULL
+              AND (m.senderId IS NULL OR m.senderId <> :userId)
+            """)
+    long countUnreadNeverRead(@Param("conversationId") Long conversationId, @Param("userId") Long userId);
 
-    /** Live messages created after an instant — the unread count once a member has a read cursor. */
-    long countByConversationIdAndDeletedAtIsNullAndCreatedAtAfter(Long conversationId, Instant since);
+    /**
+     * Live messages created after an instant, excluding {@code userId}'s own (TM-680, same rule as
+     * {@link #countUnreadNeverRead}) — the unread count once a member has a read cursor.
+     */
+    @Query(
+            """
+            SELECT COUNT(m) FROM Message m
+            WHERE m.conversationId = :conversationId
+              AND m.deletedAt IS NULL
+              AND m.createdAt > :since
+              AND (m.senderId IS NULL OR m.senderId <> :userId)
+            """)
+    long countUnreadAfter(
+            @Param("conversationId") Long conversationId,
+            @Param("userId") Long userId,
+            @Param("since") Instant since);
 
     /**
      * How many live messages a member has not yet read: those in the thread created after their
-     * {@code lastReadAt} cursor. Passing {@code null} for {@code since} (the member has never opened
-     * the thread) counts <em>all</em> live messages — so the caller can hand the cursor straight
-     * through without a null-guard. Soft-deleted messages never count.
+     * {@code lastReadAt} cursor, <em>excluding their own</em> (TM-680 — your own message is never
+     * unread by you; a {@code null}-sender system message counts for everyone). Passing {@code null}
+     * for {@code since} (the member has never opened the thread) counts <em>all</em> such messages —
+     * so the caller can hand the cursor straight through without a null-guard. Soft-deleted messages
+     * never count.
      *
-     * <p>Branches to two derived-query counts rather than one {@code (:since is null or …)} query on
-     * purpose: a bound-null timestamp parameter leaves Postgres unable to infer the parameter type
-     * ("could not determine data type of parameter"), so the null case gets its own type-free count.
+     * <p>Branches to two counts rather than one {@code (:since is null or …)} query on purpose: a
+     * bound-null timestamp parameter leaves Postgres unable to infer the parameter type ("could not
+     * determine data type of parameter"), so the null case gets its own type-free count.
      */
-    default long countUnread(Long conversationId, Instant since) {
+    default long countUnread(Long conversationId, Long userId, Instant since) {
         return since == null
-                ? countByConversationIdAndDeletedAtIsNull(conversationId)
-                : countByConversationIdAndDeletedAtIsNullAndCreatedAtAfter(conversationId, since);
+                ? countUnreadNeverRead(conversationId, userId)
+                : countUnreadAfter(conversationId, userId, since);
     }
 
     /**
@@ -127,7 +156,10 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
      *
      * <p>Joins each of the user's memberships to its thread's live messages and counts those created
      * after that membership's {@code lastReadAt} cursor (a {@code null} cursor = never opened =
-     * everything unread — same rule as {@link #countUnread}). One membership per (thread, user) — the
+     * everything unread — same rule as {@link #countUnread}), excluding the member's <em>own</em>
+     * messages (TM-680 — posting doesn't move the cursor, so without this a sender was badged for
+     * their own just-sent message; {@code null}-sender system messages still count for everyone).
+     * One membership per (thread, user) — the
      * {@code UNIQUE (conversation_id, user_id)} constraint — so a thread yields at most one row. A
      * thread with <em>nothing</em> unread (cursor past every message, or silent) produces no group row
      * at all, so the caller reads it back as {@code 0} via {@code getOrDefault}. Scoped by user, so the
@@ -141,6 +173,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
             WHERE cm.conversationId = m.conversationId
               AND cm.userId = :userId
               AND m.deletedAt IS NULL
+              AND (m.senderId IS NULL OR m.senderId <> cm.userId)
               AND (cm.lastReadAt IS NULL OR m.createdAt > cm.lastReadAt)
             GROUP BY m.conversationId
             """)

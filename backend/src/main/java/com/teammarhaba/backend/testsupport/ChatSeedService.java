@@ -241,7 +241,7 @@ public class ChatSeedService {
             } else {
                 adminThreads++;
             }
-            unreadTotal += messages.countUnread(m.getConversationId(), m.getLastReadAt());
+            unreadTotal += messages.countUnread(m.getConversationId(), m.getUserId(), m.getLastReadAt());
         }
         return new ChatSeedResult(alreadySeeded, eventThreads, adminThreads, unreadTotal);
     }
