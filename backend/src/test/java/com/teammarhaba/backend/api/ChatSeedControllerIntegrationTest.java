@@ -116,7 +116,7 @@ class ChatSeedControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(byTitle.get("Sunday Morning Dog Walk").get("type").asText()).isEqualTo("EVENT_GROUP");
         assertThat(byTitle.get("Sunday Morning Dog Walk").get("unreadCount").asLong()).isEqualTo(7L);
         assertThat(byTitle.get("Sunday Morning Dog Walk").get("lastMessagePreview").asText())
-                .isEqualTo("See you all at the north gate at 9!");
+                .isEqualTo("Max says woof — translation: hurry up, humans 🐾");
 
         assertThat(byTitle.get("Riverside 5k Run Club").get("unreadCount").asLong())
                 .as("thread B is marked read → 0 unread, so the list shows a read/unread mix")
