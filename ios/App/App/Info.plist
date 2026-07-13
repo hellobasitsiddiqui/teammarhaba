@@ -51,18 +51,19 @@
 	<array>
 		<string>armv7</string>
 	</array>
+	<!-- Portrait lock (TM-667). iPhone is Portrait-only; iPad is Portrait + PortraitUpsideDown.
+	     Landscape is intentionally NOT listed so the app never rotates into it — this mirrors the
+	     Android userPortrait lock in AndroidManifest.xml. iPad is locked to portrait too (no
+	     landscape) because the SPA has no iPad-optimized landscape layout; see TM-667 for the
+	     reviewer-vetoable rationale on the iPad decision. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
