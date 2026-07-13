@@ -111,7 +111,7 @@ class ChatSeedControllerIntegrationTest extends AbstractIntegrationTest {
             byTitle.put(row.get("title").asText(), row);
         }
         assertThat(titles)
-                .containsExactlyInAnyOrder("Sunday Morning Dog Walk", "Riverside 5k Run Club", "TeamMarhaba");
+                .containsExactlyInAnyOrder("Sunday Morning Dog Walk", "Riverside 5k Run Club", "Circle");
 
         assertThat(byTitle.get("Sunday Morning Dog Walk").get("type").asText()).isEqualTo("EVENT_GROUP");
         assertThat(byTitle.get("Sunday Morning Dog Walk").get("unreadCount").asLong()).isEqualTo(7L);
@@ -122,8 +122,8 @@ class ChatSeedControllerIntegrationTest extends AbstractIntegrationTest {
                 .as("thread B is marked read → 0 unread, so the list shows a read/unread mix")
                 .isEqualTo(0L);
 
-        assertThat(byTitle.get("TeamMarhaba").get("type").asText()).isEqualTo("ADMIN_BROADCAST");
-        assertThat(byTitle.get("TeamMarhaba").get("unreadCount").asLong()).isEqualTo(3L);
+        assertThat(byTitle.get("Circle").get("type").asText()).isEqualTo("ADMIN_BROADCAST");
+        assertThat(byTitle.get("Circle").get("unreadCount").asLong()).isEqualTo(3L);
 
         // The aggregate unread route the badge reads (TM-582) agrees with the summed rows.
         JsonNode unread = getJson("/api/v1/me/conversations/unread-total", caller);

@@ -356,7 +356,7 @@ test("toThreadMessages orders oldest-first regardless of the server's page order
 /* ─────────────────────────────── one-way admin messages (TM-445) ──────────────────────────────── */
 
 test("ADMIN_AUTHOR is the app attribution name for a one-way system message", () => {
-  assert.equal(ADMIN_AUTHOR, "TeamMarhaba");
+  assert.equal(ADMIN_AUTHOR, "Circle");
 });
 
 test("deepLinkCta labels each safe in-app route family and coerces loose shapes", () => {

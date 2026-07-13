@@ -151,7 +151,7 @@ class NewMessageNotifierIntegrationTest extends AbstractIntegrationTest {
 
         // Every push-eligible active member receives it (no author to exclude); the EMAIL member does not.
         assertThat(deliveredTokens()).containsExactlyInAnyOrder("tok-b-a", "tok-b-b");
-        assertThat(sender.deliveries().get(0).message().title()).isEqualTo("TeamMarhaba");
+        assertThat(sender.deliveries().get(0).message().title()).isEqualTo("Circle");
         assertThat(sender.deliveries().get(0).message().route()).isEqualTo("#/help");
         assertThat(a).isNotEqualTo(b);
     }

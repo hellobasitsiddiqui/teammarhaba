@@ -60,7 +60,7 @@ export function classifyOverall(signals) {
     return {
       level: Overall.CHECKING,
       title: "Checking status…",
-      detail: "Contacting the TeamMarhaba API…",
+      detail: "Contacting the Circle API…",
     };
   }
 
@@ -68,14 +68,14 @@ export function classifyOverall(signals) {
     return {
       level: Overall.AVAILABLE,
       title: "All systems operational",
-      detail: "The TeamMarhaba API and website are responding normally.",
+      detail: "The Circle API and website are responding normally.",
     };
   }
   if (!backendUp && !webReachable) {
     return {
       level: Overall.OUTAGE,
       title: "Major outage",
-      detail: "We can’t reach the TeamMarhaba API or website right now.",
+      detail: "We can’t reach the Circle API or website right now.",
     };
   }
   // Exactly one side is down → degraded; say which so the page is genuinely informative.

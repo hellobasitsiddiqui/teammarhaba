@@ -155,7 +155,7 @@ async function submit(event) {
   shell.submit.textContent = "Saving…";
   try {
     await submitOnboarding(collectBody());
-    toast("Welcome to TeamMarhaba!", { type: "success" });
+    toast("Welcome to Circle!", { type: "success" });
     // The gate has lifted (server now reports onboardingCompleted). Hand control back to the guard,
     // which re-checks gating and routes the now-onboarded user on to home / their intended route.
     onComplete();

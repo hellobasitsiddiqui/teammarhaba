@@ -273,7 +273,7 @@ export function toConversationRows(items, now = new Date()) {
  * own name, so a one-way admin broadcast reads as "from TeamMarhaba" rather than an anonymous line.
  * Single source of truth shared by the render + its tests.
  */
-export const ADMIN_AUTHOR = "TeamMarhaba";
+export const ADMIN_AUTHOR = "Circle";
 
 /**
  * Turn a message's optional `deepLink` into the tap-through CTA the thread renders, or null when there

@@ -125,7 +125,7 @@ function buildShell(view) {
       el("p", {
         class: "tm-muted",
         id: "terms-intro",
-        text: "Please review and accept our terms and privacy policy to use TeamMarhaba.",
+        text: "Please review and accept our terms and privacy policy to use Circle.",
       }),
       versionLabel,
       links,

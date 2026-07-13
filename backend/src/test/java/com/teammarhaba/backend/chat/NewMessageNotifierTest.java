@@ -174,7 +174,7 @@ class NewMessageNotifierTest {
         notifier().onMessageCreated(Message.fromSystem(CONV_ID, "an announcement", "#/help"));
 
         PushMessage message = capturedMessage();
-        assertThat(message.title()).isEqualTo("TeamMarhaba"); // system / admin "from TeamMarhaba"
+        assertThat(message.title()).isEqualTo("Circle"); // system / admin "from TeamMarhaba"
         assertThat(message.route()).isEqualTo("#/help"); // the message's own validated route wins
     }
 

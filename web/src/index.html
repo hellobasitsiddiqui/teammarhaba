@@ -6,7 +6,7 @@
          notch; styles.css then pads the app shell back in with env(safe-area-inset-*) so content is never
          clipped. width/initial-scale unchanged from TM-229. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>TeamMarhaba</title>
+    <title>Circle</title>
     <!-- Hand-lettered fonts for the Paper theme (TM-529; faces from TM-213). Patrick Hand is the
          body face, Gochi Hand the display face, Shadows Into Light the accent face (see --font-*
          tokens in styles.css). Loaded for every page; if the request fails, Paper degrades to the
@@ -57,7 +57,7 @@
                 <path class="boot-steam" d="M19 14c-1.6-1.6-1.6-3.4 0-5" />
                 <path class="boot-steam" d="M25 14c-1.6-1.6-1.6-3.4 0-5" />
             </svg>
-            <p class="boot-brand">TeamMarhaba</p>
+            <p class="boot-brand">Circle</p>
             <!-- Accent underline-squiggle under the wordmark (paper-splash lockup). Decorative,
                  aria-hidden; inks in --accent via `stroke="currentColor"` on the .boot-squiggle color. -->
             <svg class="boot-squiggle" viewBox="0 0 168 12" preserveAspectRatio="none" fill="none"
@@ -91,7 +91,7 @@
     </svg>
 
     <main class="app">
-        <h1>TeamMarhaba</h1>
+        <h1>Circle</h1>
         <!-- TM-596: the minimal centered brand lockup — the wordmark above ONE tagline, both
              centred by `.app { text-align:center }`. The decorative "hello"/marhaba wave that used
              to sit beside the wordmark and the wavy "hello!" divider that used to sit under this
@@ -99,7 +99,7 @@
              the header is a clean wordmark + single line on every surface. No background is set here
              or on `.app`/`.tagline`, so the lockup inherits each surface's Paper background (the
              per-user accent + wavy/sketchy toggle) rather than imposing a fixed colour. -->
-        <p class="tagline">Find Your People - Make it happen</p>
+        <p class="tagline">Find your people — complete your circle</p>
         <p id="status" class="status">loading…</p>
 
         <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out.
@@ -224,7 +224,7 @@
                          wave doodle-decor.js used to prepend to the "Sign in" heading, so the auth head
                          is a clean centred mark + heading + one tagline. `.auth-head` centres it and sets
                          no background, so it inherits the card/surface theme. -->
-                    <p class="auth-subtitle">Find Your People - Make it happen</p>
+                    <p class="auth-subtitle">Find your people — complete your circle</p>
                 </div>
 
                 <!-- Step 1 — default: ask for the email to send a 6-digit code to. -->

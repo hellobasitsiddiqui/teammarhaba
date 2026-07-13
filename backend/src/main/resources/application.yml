@@ -329,7 +329,7 @@ app:
       smtp:
         enabled: ${MAIL_SMTP_ENABLED:false}     # explicit on-switch; or just set MAIL_HOST
         from: ${APP_MAIL_FROM:no-reply@10xai.co.uk}   # From address on the code email
-        from-name: ${APP_MAIL_FROM_NAME:TeamMarhaba}  # display name shown with the From address
+        from-name: ${APP_MAIL_FROM_NAME:Circle}  # display name shown with the From address
       # Inbox-free test-email hook (TM-312) — the email twin of the SMS test phone number (TM-309).
       # An allow-listed address gets a FIXED, known code and the real send is SKIPPED, so the
       # email-code login can be driven end-to-end in CI without reading an inbox. DISABLED by default

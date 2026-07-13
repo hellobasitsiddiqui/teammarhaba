@@ -31,7 +31,7 @@
 // the OS dialog — good practice and required for a non-surprising first-run permission ask.
 
 export const RATIONALE =
-  "TeamMarhaba uses your location to show events and content near you. " +
+  "Circle uses your location to show events and content near you. " +
   "You can decline — the app still works, you'll just see everything instead of what's nearby.";
 
 // Default options for a single fix. High accuracy is off by default (a coarse fix is enough for

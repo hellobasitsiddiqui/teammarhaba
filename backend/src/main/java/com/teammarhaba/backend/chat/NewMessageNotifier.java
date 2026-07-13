@@ -164,7 +164,7 @@ public class NewMessageNotifier {
      * member message is headed {@code "New message"}. The body carries the actual text (a preview).
      */
     private static String titleFor(Message message) {
-        return message.isSystem() ? "TeamMarhaba" : "New message";
+        return message.isSystem() ? "Circle" : "New message";
     }
 
     /**

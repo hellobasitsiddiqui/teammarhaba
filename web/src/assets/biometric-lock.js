@@ -126,8 +126,8 @@ export function createLockController(deps) {
     awaitingPromptResume = false;
     try {
       const res = await deps.authenticate({
-        reason: "Unlock TeamMarhaba",
-        title: "Unlock TeamMarhaba",
+        reason: "Unlock Circle",
+        title: "Unlock Circle",
         subtitle: "Confirm it's you to continue",
         allowDeviceCredential: true,
       });
@@ -301,7 +301,7 @@ function showOverlay(onUnlockClick) {
 
   const title = document.createElement("h1");
   title.className = "tm-lock-title";
-  title.textContent = "TeamMarhaba is locked";
+  title.textContent = "Circle is locked";
 
   const hint = document.createElement("p");
   hint.className = "tm-lock-hint";

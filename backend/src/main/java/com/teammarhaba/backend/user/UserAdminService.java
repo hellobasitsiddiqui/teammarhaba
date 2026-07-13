@@ -264,7 +264,7 @@ public class UserAdminService {
             push.sendToUser(
                     user.getId(),
                     new PushMessage(
-                            "Your TeamMarhaba account is active again",
+                            "Your Circle account is active again",
                             "An admin has re-enabled your account. Welcome back!",
                             // TM-290: deep-link the tap to the user's own profile — the natural landing
                             // spot after a re-enable. A known route from PushRoutes.KNOWN.
@@ -297,7 +297,7 @@ public class UserAdminService {
         return push.sendToUser(
                 user.getId(),
                 new PushMessage(
-                        "TeamMarhaba test notification", "If you can see this, push is working.", route));
+                        "Circle test notification", "If you can see this, push is working.", route));
     }
 
     private static ResourceNotFoundException notFound() {

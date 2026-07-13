@@ -295,7 +295,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await expect(help.getByRole("heading", { name: "Visual guide" })).toBeVisible();
   const stage = help.locator(".tm-guide-stage").first();
   await expect(stage).toBeVisible();
-  await expect(stage).toHaveAttribute("aria-label", /mock of the TeamMarhaba home screen/i);
+  await expect(stage).toHaveAttribute("aria-label", /mock of the Circle home screen/i);
   // The accessible linear restatement of the callouts (.tm-guide-notes) is present on BOTH viewports.
   await expect(help.locator(".tm-guide-notes li").first()).toBeVisible();
   // The floating callouts overlaid on the stage are shown at desktop width but DELIBERATELY hidden

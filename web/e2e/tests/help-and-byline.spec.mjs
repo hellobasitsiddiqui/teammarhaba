@@ -29,7 +29,7 @@ test.describe("@help Help section (TM-255)", () => {
 
     // The guide covers the basics (AC): what TeamMarhaba is, signing in, editing your profile, support.
     await expect(help.getByRole("heading", { name: "Help" })).toBeVisible();
-    await expect(help.getByRole("heading", { name: "What is TeamMarhaba?" })).toBeVisible();
+    await expect(help.getByRole("heading", { name: "What is Circle?" })).toBeVisible();
     await expect(help.getByRole("heading", { name: "Signing in" })).toBeVisible();
     await expect(help.getByRole("heading", { name: "Editing your profile" })).toBeVisible();
     await expect(help.getByRole("heading", { name: "Get support" })).toBeVisible();
@@ -51,7 +51,7 @@ test.describe("@help Help section (TM-255)", () => {
     const stage = help.locator(".tm-guide-stage").first();
     await expect(stage).toBeVisible();
     // The mock exposes the whole picture to assistive tech via role=img + a descriptive alt (AC4).
-    await expect(stage).toHaveAttribute("aria-label", /mock of the TeamMarhaba home screen/i);
+    await expect(stage).toHaveAttribute("aria-label", /mock of the Circle home screen/i);
 
     // At least one callout note with an arrow is drawn over the mock (AC1).
     await expect(help.locator(".tm-guide-callout").first()).toBeVisible();
