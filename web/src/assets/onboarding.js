@@ -184,6 +184,41 @@ let onComplete = () => {};
 
 // ---- rendering ------------------------------------------------------------------------------
 
+// Small SVG builder for the paper-complete-profile inline field icons + accent squiggle. Uses
+// createElementNS (createElement can't make real SVG) and setAttribute only — no innerHTML seam, in
+// keeping with el()/doodles.js. Purely presentational chrome; touches no field/validation/submit code.
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
+    node.setAttribute(k, String(v));
+  }
+  for (const child of Array.isArray(children) ? children : [children]) {
+    if (child != null) node.append(child);
+  }
+  return node;
+}
+/** A framed line-art icon (stroke=currentColor, so it inks with the field label token). */
+function fieldIcon(paths) {
+  return svg(
+    "svg",
+    {
+      class: "tm-field-icon", viewBox: "0 0 24 24", width: 18, height: 18, fill: "none",
+      stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round",
+      "aria-hidden": "true", focusable: "false",
+    },
+    paths.map((d) => svg("path", { d })),
+  );
+}
+// A leading icon per real field (paper-complete-profile): person for name, pin for location, calendar
+// for age. Keyed by the field property so it never affects the FIELDS array / validation / submit.
+const FIELD_ICONS = {
+  name: () => fieldIcon(["M12 4.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8", "M5.5 20a6.5 6.5 0 0 1 13 0"]),
+  location: () => fieldIcon(["M12 21s6.5-5.5 6.5-10.5a6.5 6.5 0 0 0-13 0C5.5 15.5 12 21 12 21z", "M12 12.5a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4"]),
+  age: () => fieldIcon(["M3.5 6.5q0-1.5 2-1.5h13q2 0 2 1.5v13q0 1.5-2 1.5h-13q-2 0-2-1.5z", "M3.5 9.5h17", "M8 3v3.5M16 3v3.5"]),
+};
+
 function buildField(field) {
   const id = `onboarding-${field.field}`;
   const errorId = `${id}-error`;
@@ -209,13 +244,53 @@ function buildField(field) {
   const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
   const hint = field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null;
 
+  // paper-complete-profile field: an uppercase muted label (via .tm-field-label CSS) + a leading inline
+  // icon sitting inside a wrapper alongside the input. .tm-field-input keeps the icon + input on one row;
+  // the input keeps its id/name/class so validation + submit are unchanged.
+  const icon = FIELD_ICONS[field.field]?.();
+  const inputRow = el("div", { class: "tm-field-input" }, [icon, input]);
+
   const wrapper = el("div", { class: "tm-form-field" }, [
     el("label", { class: "tm-field-label", for: id, text: field.label }),
-    input,
+    inputRow,
     hint,
     error,
   ]);
   return { wrapper, input, error };
+}
+
+// TM-684: avatar upload + bio ship disabled; wire to onboarding payload
+// Both are DISABLED visual stubs only — NOT in the FIELDS array, NOT validated, NOT read by
+// collectBody(); they never touch the onboarding request. Rendered purely to match the mockup.
+function buildAvatarStub() {
+  const cam = svg(
+    "svg",
+    { class: "tm-avatar-cam", viewBox: "0 0 24 24", width: 34, height: 34, fill: "none",
+      stroke: "currentColor", "stroke-width": 1.9, "stroke-linecap": "round", "stroke-linejoin": "round",
+      "aria-hidden": "true", focusable: "false" },
+    [
+      svg("path", { d: "M4 8.5h3l1.4-2h7.2L20 8.5h.5A1.5 1.5 0 0 1 22 10v8a1.5 1.5 0 0 1-1.5 1.5H3.5A1.5 1.5 0 0 1 2 18v-8A1.5 1.5 0 0 1 3.5 8.5" }),
+      svg("circle", { cx: 12, cy: 13.6, r: 3.5 }),
+    ],
+  );
+  const ring = el("div", { class: "tm-avatar-stub", "aria-hidden": "true" }, [cam]);
+  return el("div", { class: "tm-avatar-uploader" }, [
+    ring,
+    el("span", { class: "tm-avatar-uploader-label", text: "Add a photo" }),
+    el("span", { class: "tm-soon-tag", text: "Soon" }),
+  ]);
+}
+
+function buildBioStub() {
+  // A disabled short-bio field stub — matches the field styling but is inert (disabled, no name).
+  const ta = el("textarea", {
+    class: "tm-input tm-textarea", rows: 2, disabled: true, "aria-disabled": "true",
+    placeholder: "A short line about you",
+  });
+  return el("div", { class: "tm-form-field tm-form-field-disabled" }, [
+    el("label", { class: "tm-field-label", text: "Short bio" }, [el("span", { class: "tm-soon-tag", text: "Soon" })]),
+    ta,
+  ]);
 }
 
 function buildShell(view) {
@@ -229,17 +304,37 @@ function buildShell(view) {
   // NB: must NOT be named `submit` — that would shadow the module-level `submit` handler so the
   // form's `onSubmit: submit` binds this button element, not the handler → native submit / reload
   // (the TM-199 shadowing trap). Use `submitBtn`.
-  const submitBtn = el("button", { class: "tm-btn tm-btn-primary", type: "submit" }, "Continue");
+  // paper-complete-profile CTA: primary "Continue" with a trailing arrow glyph (aria-hidden decoration).
+  const submitBtn = el("button", { class: "tm-btn tm-btn-primary tm-cta", type: "submit" }, [
+    el("span", { text: "Continue" }),
+    svg(
+      "svg",
+      { class: "tm-btn-icon", viewBox: "0 0 24 24", width: 18, height: 18, fill: "none",
+        stroke: "currentColor", "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round",
+        "aria-hidden": "true", focusable: "false" },
+      [svg("path", { d: "M5 12h13M13 6l6 6-6 6" })],
+    ),
+  ]);
 
   const form = el("form", { class: "tm-onboarding-form", id: "onboarding-form", novalidate: true, onSubmit: submit }, [
-    el("div", { class: "tm-form-grid" }, fieldNodes),
+    buildAvatarStub(),
+    el("div", { class: "tm-form-grid" }, fieldNodes.length ? [fieldNodes[0], buildBioStub(), ...fieldNodes.slice(1)] : fieldNodes),
     el("div", { class: "tm-form-actions" }, [submitBtn]),
   ]);
 
   clear(view).append(
     el("div", { class: "tm-onboarding-card" }, [
-      el("div", { class: "tm-admin-head" }, [
+      el("div", { class: "tm-admin-head tm-onboarding-head" }, [
+        // Static decorative "Step 1 of 3" chrome — there is no real wizard, so it's a plain pill, no skip.
+        el("span", { class: "tm-step-pill", "aria-hidden": "true", text: "Step 1 of 3" }),
         el("h2", {}, [doodle("host", { class: "tm-doodle-header", title: "Complete your profile" }), "Complete your profile"]),
+        // Accent underline-squiggle under the heading (paper-complete-profile).
+        svg(
+          "svg",
+          { class: "tm-onboarding-squiggle", viewBox: "0 0 180 11", preserveAspectRatio: "none", fill: "none",
+            "aria-hidden": "true", focusable: "false" },
+          [svg("path", { d: "M3 7C34 2.5 56 2.5 82 6s54 4.5 68-.5 30-2 36 1.5", stroke: "currentColor", "stroke-width": 3.2, "stroke-linecap": "round" })],
+        ),
       ]),
       el("p", { class: "tm-muted", id: "onboarding-intro", text: "Just a few details to get you started — you can change these later." }),
       form,

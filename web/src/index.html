@@ -58,9 +58,23 @@
                 <path class="boot-steam" d="M25 14c-1.6-1.6-1.6-3.4 0-5" />
             </svg>
             <p class="boot-brand">TeamMarhaba</p>
+            <!-- Accent underline-squiggle under the wordmark (paper-splash lockup). Decorative,
+                 aria-hidden; inks in --accent via `stroke="currentColor"` on the .boot-squiggle color. -->
+            <svg class="boot-squiggle" viewBox="0 0 168 12" preserveAspectRatio="none" fill="none"
+                 aria-hidden="true" focusable="false">
+                <path d="M4 8C26 3 44 3 64 6.5s44 5 64-.5 26-3 36 1.5" stroke="currentColor"
+                      stroke-width="3.4" stroke-linecap="round" />
+            </svg>
             <!-- Tagline slot: filled by boot-screen.js from the single configurable list (boot-core.js);
-                 empty in the static HTML and faded in on [data-ready] so the swap never reads as a flash. -->
+                 empty in the static HTML and faded in on [data-ready] so the swap never reads as a flash.
+                 The soft accent highlighter is a background gradient on the <p> itself (styles.css), so it
+                 wraps the WHOLE tagline whatever text boot-screen.js writes in (via textContent) — no words
+                 are hardcoded here and the JS text-write is never clobbered. -->
             <p id="boot-tagline" class="boot-tagline"></p>
+            <!-- 3-dot progress beat (paper-splash): the middle dot is the accent + offset ink shadow. -->
+            <div class="boot-beat" aria-hidden="true">
+                <i></i><i class="boot-beat-on"></i><i></i>
+            </div>
         </div>
     </div>
 
@@ -195,6 +209,13 @@
                               stroke="currentColor" stroke-width="2.2" stroke-linecap="round" opacity="0.6" />
                     </svg>
                     <h2>Sign in</h2>
+                    <!-- Accent underline-squiggle under the heading (paper-signin brand lockup).
+                         Decorative, aria-hidden; inks in --accent. -->
+                    <svg class="auth-squiggle" viewBox="0 0 120 10" preserveAspectRatio="none" fill="none"
+                         aria-hidden="true" focusable="false">
+                        <path d="M3 6.5C21 2.5 33 2.5 46 5.5s31 4 45-.5 18-2 26 1" stroke="currentColor"
+                              stroke-width="3" stroke-linecap="round" />
+                    </svg>
                     <!-- TM-596: the login card uses the SAME single tagline as the main header, so the
                          front door and the app read as one lockup. The auth-mark above (the two-figures
                          "find your people" brand mark) is kept — it's the auth surface's own brand mark,
@@ -208,30 +229,66 @@
 
                 <!-- Step 1 — default: ask for the email to send a 6-digit code to. -->
                 <div id="emailcode-step-email" class="auth-step">
-                    <label class="field">
+                    <label class="field auth-field">
                         <span>Email</span>
                         <input id="email" type="email" autocomplete="email" required />
                     </label>
                     <div class="auth-actions">
-                        <button id="emailcode-send-btn" type="submit" form="auth-signed-out">Email me a code</button>
+                        <!-- Full-width accent primary with a trailing arrow (paper-signin CTA). The arrow is
+                             aria-hidden decoration; inks with the button label via currentColor. -->
+                        <button id="emailcode-send-btn" type="submit" form="auth-signed-out" class="auth-cta">
+                            <span>Email me a code</span>
+                            <svg class="auth-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+                                 aria-hidden="true" focusable="false"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+                        </button>
                     </div>
+                    <!-- Lock-icon reassurance line (paper-signin .fhelp): quiet "no passwords" note. -->
+                    <p class="auth-reassure">
+                        <svg class="auth-reassure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                             aria-hidden="true" focusable="false">
+                            <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+                            <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
+                        </svg>
+                        We'll email you a 6-digit code — no passwords to remember.
+                    </p>
                 </div>
 
                 <!-- Step 2 — enter the 6-digit code (revealed after a code is sent). -->
-                <div id="emailcode-step-code" class="auth-step" hidden>
-                    <p class="auth-hint">We emailed a 6-digit code to <strong id="emailcode-sent-to"></strong>.</p>
-                    <label class="field">
+                <!-- TM-683: single input styled as a code field; true 6-box OTP + keypad + resend countdown deferred -->
+                <div id="emailcode-step-code" class="auth-step auth-verify" hidden>
+                    <div class="auth-verify-head">
+                        <h2 class="auth-verify-title">Enter your code</h2>
+                        <p class="auth-hint">We emailed a 6-digit code to <strong id="emailcode-sent-to"></strong>.</p>
+                    </div>
+                    <!-- The real flow uses ONE input. It's styled (styles.css .auth-code-input) as a large,
+                         centred, letter-spaced "code field" that EVOKES the boxed 6-digit look without
+                         building six separate boxes / a keypad / a countdown (all deferred, see above).
+                         id / inputmode / pattern / maxlength are untouched (login.js reads them). -->
+                    <label class="field auth-field auth-code-field">
                         <span>6-digit code</span>
-                        <input id="emailcode-code" type="text" inputmode="numeric" autocomplete="one-time-code"
-                               pattern="\d{6}" maxlength="6" />
+                        <input id="emailcode-code" class="auth-code-input" type="text" inputmode="numeric"
+                               autocomplete="one-time-code" pattern="\d{6}" maxlength="6" />
                     </label>
                     <div class="auth-actions">
-                        <button id="emailcode-verify-btn" type="button">Sign in</button>
-                        <button id="emailcode-resend-btn" type="button" class="secondary">Resend</button>
-                        <button id="emailcode-back-btn" type="button" class="secondary">Use a different email</button>
+                        <!-- Primary "Sign in" with a check glyph (paper-verify .vbtn). -->
+                        <button id="emailcode-verify-btn" type="button" class="auth-cta">
+                            <span>Sign in</span>
+                            <svg class="auth-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+                                 aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5" /></svg>
+                        </button>
+                        <!-- Resend / back restyled as quiet accent links (paper-verify quiet links). -->
+                        <button id="emailcode-resend-btn" type="button" class="secondary auth-quiet-link">Resend</button>
+                        <button id="emailcode-back-btn" type="button" class="secondary auth-quiet-link">Use a different email</button>
                     </div>
                 </div>
 
+                <!-- TM-685: per-field inline validation deferred; single shared banner for now -->
+                <!-- The single shared error surface (login.js writes its textContent). Styled to the
+                     paper-signin--error treatment — danger colour + a warning-triangle icon (a CSS
+                     ::before background so it survives login.js's textContent write; no nested node). -->
                 <p id="auth-error" class="auth-error" role="alert" hidden></p>
 
                 <!-- "Try another way" disclosure: SMS + the existing email+password (TM-234). -->
@@ -259,14 +316,22 @@
                                 <button id="sms-send-btn" type="button">Text me a code</button>
                             </div>
                         </div>
-                        <div id="sms-step-code" class="auth-step" hidden>
-                            <label class="field">
+                        <!-- TM-683: single input styled as a code field; true 6-box OTP + keypad + resend countdown deferred -->
+                        <div id="sms-step-code" class="auth-step auth-verify" hidden>
+                            <label class="field auth-field auth-code-field">
                                 <span>SMS code</span>
-                                <input id="sms-code" type="text" inputmode="numeric" autocomplete="one-time-code"
-                                       pattern="\d{6}" maxlength="6" />
+                                <!-- Single input styled as a code field (see the email verify step). id /
+                                     inputmode / pattern / maxlength untouched (login.js reads them). -->
+                                <input id="sms-code" class="auth-code-input" type="text" inputmode="numeric"
+                                       autocomplete="one-time-code" pattern="\d{6}" maxlength="6" />
                             </label>
                             <div class="auth-actions">
-                                <button id="sms-verify-btn" type="button">Sign in</button>
+                                <button id="sms-verify-btn" type="button" class="auth-cta">
+                                    <span>Sign in</span>
+                                    <svg class="auth-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                         stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+                                         aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5" /></svg>
+                                </button>
                             </div>
                         </div>
                         <!-- Firebase renders the (invisible) reCAPTCHA abuse guard here. -->
@@ -286,9 +351,36 @@
                         </div>
                     </fieldset>
                     <!-- Google sign-in (TM-273): un-parked; handler is in login.js (popup on desktop,
-                         redirect in WebView via TM-230). Its own block, not inside the email+password fieldset. -->
-                    <div class="auth-alt-google">
-                        <button id="google-btn" type="button" class="google">Continue with Google</button>
+                         redirect in WebView via TM-230). Its own block, not inside the email+password fieldset.
+                         Restyled as a bordered white social button (paper-signin .sbtn) with the Google
+                         wordmark glyph; the divider above reads "or continue with". -->
+                    <!-- The divider + both social buttons live INSIDE .auth-alt-google so that when
+                         login.js removes this wrapper in the Android WebView (TM-275, Google is blocked
+                         there), the "or continue with" divider and the Apple stub are removed with it —
+                         no orphaned divider. .auth-alt-google is preserved (login.js keys on it). -->
+                    <div class="auth-alt-google auth-social">
+                        <div class="auth-social-divider" aria-hidden="true"><span>or continue with</span></div>
+                        <button id="google-btn" type="button" class="google auth-sbtn">
+                            <svg class="auth-sbtn-glyph" width="19" height="19" viewBox="0 0 48 48"
+                                 aria-hidden="true" focusable="false">
+                                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.28-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                            </svg>
+                            <span>Continue with Google</span>
+                        </button>
+                        <!-- TM-682: Apple sign-in ships disabled; wire to a real handler -->
+                        <!-- Disabled visual stub only — NOT wired to any handler (no id the auth JS keys on). -->
+                        <button type="button" class="google auth-sbtn auth-sbtn-disabled"
+                                disabled aria-disabled="true">
+                            <svg class="auth-sbtn-glyph" width="18" height="18" viewBox="0 0 24 24"
+                                 fill="currentColor" aria-hidden="true" focusable="false">
+                                <path d="M16.36 12.78c-.02-2.2 1.8-3.26 1.88-3.31-1.02-1.5-2.62-1.7-3.18-1.72-1.35-.14-2.64.8-3.33.8-.69 0-1.75-.78-2.87-.76-1.48.02-2.84.86-3.6 2.18-1.53 2.66-.39 6.6 1.1 8.76.73 1.06 1.6 2.25 2.74 2.2 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.87.69 1.18-.02 1.93-1.08 2.65-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.13 6.02c.6-.73 1.01-1.75.9-2.77-.87.04-1.93.58-2.55 1.31-.56.64-1.05 1.68-.92 2.67.97.08 1.96-.49 2.57-1.21z" />
+                            </svg>
+                            <span>Continue with Apple</span>
+                            <span class="auth-soon-tag">Soon</span>
+                        </button>
                     </div>
                 </div>
             </form>
