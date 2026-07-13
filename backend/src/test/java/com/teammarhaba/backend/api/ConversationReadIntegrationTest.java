@@ -114,7 +114,7 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
 
         JsonNode top = body.get("items").get(0);
         assertThat(top.get("type").asText()).isEqualTo("ADMIN_BROADCAST");
-        assertThat(top.get("title").asText()).isEqualTo("TeamMarhaba"); // fixed broadcast title
+        assertThat(top.get("title").asText()).isEqualTo("Circle"); // fixed broadcast title
         assertThat(top.get("eventId").isNull()).isTrue(); // no event ref for a broadcast
         assertThat(top.get("lastMessagePreview").asText()).isEqualTo("Welcome to TeamMarhaba");
         assertThat(top.get("unreadCount").asLong()).isEqualTo(1); // caller has never read it

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">TeamMarhaba</string>
-    <string name="title_activity_main">TeamMarhaba</string>
+    <string name="app_name">Circle</string>
+    <string name="title_activity_main">Circle</string>
     <string name="package_name">app.teammarhaba.webview</string>
     <string name="custom_url_scheme">app.teammarhaba.webview</string>
 </resources>

@@ -44,13 +44,13 @@ function build(view) {
       el("h2", { text: "Help" }),
       el("p", {
         class: "help-intro",
-        text: "Everything you need to get started with TeamMarhaba.",
+        text: "Everything you need to get started with Circle.",
       }),
 
       section(
-        "What is TeamMarhaba?",
+        "What is Circle?",
         p(
-          "TeamMarhaba is a social meetup app — it helps you find people nearby, organise get-togethers, " +
+          "Circle is a social meetup app — it helps you find people nearby, organise get-togethers, " +
             "and keep the plans (and the chat) in one place. Sign in, set up your profile, and you're ready to go.",
         ),
       ),

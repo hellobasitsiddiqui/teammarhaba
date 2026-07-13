@@ -82,7 +82,7 @@ test.describe("@chat-foundation the seeded chat renders live (TM-587)", () => {
     await expect(rows).toHaveCount(3);
     await expect(page.locator('[data-testid="chat-row"]', { hasText: "Sunday Morning Dog Walk" })).toBeVisible();
     await expect(page.locator('[data-testid="chat-row"]', { hasText: "Riverside 5k Run Club" })).toBeVisible();
-    await expect(page.locator('[data-testid="chat-row"]', { hasText: "TeamMarhaba" })).toBeVisible();
+    await expect(page.locator('[data-testid="chat-row"]', { hasText: "Circle" })).toBeVisible();
 
     const badge = page.locator("#tab-chat-badge");
     await expect(badge).toBeVisible();

@@ -67,7 +67,7 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
                 // fromName is plain ASCII config; fall back to the bare address rather than fail.
                 helper.setFrom(from);
             }
-            helper.setSubject("Your TeamMarhaba sign-in code");
+            helper.setSubject("Your Circle sign-in code");
             // Plain-text first (fallback), then HTML — order matters for multipart/alternative.
             helper.setText(plainTextBody(code), htmlBody(code));
             mailSender.send(message);
@@ -82,7 +82,7 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
     }
 
     private static String plainTextBody(String code) {
-        return "Your TeamMarhaba sign-in code is:\n\n"
+        return "Your Circle sign-in code is:\n\n"
                 + "    " + code + "\n\n"
                 + "Enter it to finish signing in. It expires shortly and can only be used once.\n\n"
                 + "If you didn't request this, you can safely ignore this email.\n\n"
@@ -92,7 +92,7 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
 
     private static String htmlBody(String code) {
         return "<!DOCTYPE html><html><body style=\"font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;\">"
-                + "<p>Your TeamMarhaba sign-in code is:</p>"
+                + "<p>Your Circle sign-in code is:</p>"
                 + "<p style=\"font-size:28px;font-weight:bold;letter-spacing:4px;margin:16px 0;\">"
                 + escape(code)
                 + "</p>"

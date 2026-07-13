@@ -55,7 +55,7 @@ public record ConversationSummaryResponse(
         boolean left) {
 
     /** The fixed title for an {@code ADMIN_BROADCAST} thread — the "from TeamMarhaba" channel. */
-    public static final String ADMIN_BROADCAST_TITLE = "TeamMarhaba";
+    public static final String ADMIN_BROADCAST_TITLE = "Circle";
 
     /** Fallback title for an {@code EVENT_GROUP} whose event is missing/soft-deleted. */
     public static final String EVENT_GROUP_FALLBACK_TITLE = "Event chat";

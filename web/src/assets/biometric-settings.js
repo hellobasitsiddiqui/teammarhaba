@@ -41,7 +41,7 @@ export function buildSecuritySettings() {
   ]);
 
   const hint = el("p", { class: "tm-muted tm-switch-hint" }, [
-    "When on, you'll need your fingerprint or device PIN each time you reopen TeamMarhaba on this device.",
+    "When on, you'll need your fingerprint or device PIN each time you reopen Circle on this device.",
   ]);
 
   const section = el(

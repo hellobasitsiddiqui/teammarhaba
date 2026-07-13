@@ -30,7 +30,7 @@ public record SmtpEmailCodeProperties(boolean enabled, String from, String fromN
             from = "no-reply@10xai.co.uk";
         }
         if (fromName == null || fromName.isBlank()) {
-            fromName = "TeamMarhaba";
+            fromName = "Circle";
         }
     }
 }

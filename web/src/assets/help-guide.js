@@ -65,10 +65,10 @@ export const SCREENS = [
     id: "home",
     title: "Home — your signed-in screen",
     alt:
-      "A mock of the TeamMarhaba home screen: a top navigation bar with Help, Profile, an Admin link, " +
+      "A mock of the Circle home screen: a top navigation bar with Help, Profile, an Admin link, " +
       "an avatar and a Sign out button, above a card showing your signed-in identity.",
     regions: [
-      { label: "TeamMarhaba", box: { x: 4, y: 6, w: 40, h: 12 }, kind: "brand" },
+      { label: "Circle", box: { x: 4, y: 6, w: 40, h: 12 }, kind: "brand" },
       { label: "Help", box: { x: 50, y: 7, w: 9, h: 10 }, kind: "nav" },
       { label: "Profile", box: { x: 60, y: 7, w: 11, h: 10 }, kind: "nav" },
       { label: "Admin", box: { x: 72, y: 7, w: 10, h: 10 }, kind: "nav", anchor: "#nav-admin" },

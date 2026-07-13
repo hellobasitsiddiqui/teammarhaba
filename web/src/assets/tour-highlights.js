@@ -22,7 +22,7 @@
  */
 export const SITE_HIGHLIGHTS = [
   {
-    title: "Welcome to TeamMarhaba 👋",
+    title: "Welcome to Circle 👋",
     body: "A quick 30-second tour of the basics. You can skip anytime — and replay it from Help whenever you like.",
   },
   { target: "#me", title: "This is you", body: "Your identity, verified by the backend. Your profile lives here." },

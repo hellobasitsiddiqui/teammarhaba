@@ -746,7 +746,7 @@ function buildCompose() {
   const preview = el("div", { class: "tm-push-preview", id: "admin-broadcast-preview", "aria-hidden": "true" }, [
     el("div", { class: "tm-push-preview-app" }, [
       doodle("chat", { class: "tm-push-preview-icon" }),
-      el("span", { class: "tm-push-preview-appname", text: "TeamMarhaba · now" }),
+      el("span", { class: "tm-push-preview-appname", text: "Circle · now" }),
     ]),
     previewTitle,
     previewBody,
