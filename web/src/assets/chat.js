@@ -62,6 +62,10 @@ import * as linkPreview from "./chat-linkpreview-core.js";
 // in-message highlight below are the DOM half; all the mention LOGIC (who's mentioned, how to rank
 // candidates, how to splice a pick back in) lives in this framework-free module.
 import * as mentions from "./chat-mentions-core.js";
+// In-thread search (TM-690, rich-chat v1): the pure client-side match/highlight core. The header
+// "Search" toggle + results panel below are the DOM half; all the search LOGIC lives in this
+// framework-free, node-tested module.
+import { searchMessages, queryTokens, highlightSegments, snippet } from "./chat-search-core.js";
 // TM-585: drive the Chat-tab unread badge's drop from the mark-read path itself. Opening a thread marks
 // it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
 // so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
@@ -257,6 +261,106 @@ function buildThreadActions(id, typeKey) {
   }
 
   return el("div", { class: "tm-chat-thread-actions", "data-testid": "chat-thread-actions" }, [muteBtn, leaveBtn]);
+}
+
+/**
+ * In-thread search (TM-690, rich-chat v1). A header "Search" toggle reveals a panel that filters THIS
+ * thread's already-loaded messages (client-side, via chat-search-core) and lists the hits with the
+ * match highlighted; tapping a result jumps to it in the thread (reusing scrollToMessage's smooth-scroll
+ * + flash). Purely additive: it reads `thread.messages` and touches nothing in the render / SSE
+ * pipeline. Covers the loaded thread only — global / full-history search is a separate backend-index
+ * ticket (TM-692). Returns { button, panel } so renderThread can put the toggle in the header actions
+ * and the panel just below the header.
+ */
+function createThreadSearch() {
+  const input = el("input", {
+    class: "tm-chat-search-input",
+    type: "search",
+    placeholder: "Search this chat…",
+    "aria-label": "Search this chat",
+    autocomplete: "off",
+    enterkeyhint: "search",
+    "data-testid": "chat-search-input",
+  });
+  const count = el("p", { class: "tm-chat-search-count", "data-testid": "chat-search-count" });
+  const results = el("ul", { class: "tm-chat-search-results", "data-testid": "chat-search-results" });
+  const panel = el("div", { class: "tm-chat-search", hidden: true, "data-testid": "chat-search" }, [input, count, results]);
+
+  function renderResults() {
+    const query = input.value;
+    const tokens = queryTokens(query);
+    clear(results);
+    if (!tokens.length) {
+      count.textContent = "";
+      return;
+    }
+    const hits = searchMessages(thread.messages, query);
+    if (!hits.length) {
+      count.textContent = "";
+      results.append(el("li", { class: "tm-chat-search-empty", text: "No messages found." }));
+      return;
+    }
+    count.textContent = hits.length === 1 ? "1 match" : `${hits.length} matches`;
+    for (const m of hits) {
+      const line = el(
+        "span",
+        { class: "tm-chat-search-snippet" },
+        highlightSegments(snippet(m.body, tokens), tokens).map((s) =>
+          s.hit ? el("mark", { text: s.text }) : el("span", { text: s.text }),
+        ),
+      );
+      results.append(
+        el("li", {}, [
+          el(
+            "button",
+            {
+              class: "tm-chat-search-result",
+              type: "button",
+              onClick: () => {
+                close();
+                scrollToMessage(m.id);
+              },
+            },
+            [line, m.timeLabel ? el("span", { class: "tm-chat-search-time", text: m.timeLabel }) : null],
+          ),
+        ]),
+      );
+    }
+  }
+
+  function open() {
+    panel.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    input.focus();
+    renderResults();
+  }
+  function close() {
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
+
+  input.addEventListener("input", renderResults);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      input.value = "";
+      close();
+    }
+  });
+
+  const button = el(
+    "button",
+    {
+      class: "tm-chat-thread-action tm-chat-thread-action--search",
+      type: "button",
+      "data-testid": "chat-search-toggle",
+      "aria-label": "Search this chat",
+      "aria-expanded": "false",
+      onClick: () => (panel.hidden ? open() : close()),
+    },
+    [el("span", { class: "tm-chat-thread-action-text", text: "Search" })],
+  );
+
+  return { button, panel };
 }
 
 /**
@@ -464,7 +568,12 @@ async function renderThread(view, id) {
   // The loaded thread carries the self-service actions (mute / leave, TM-471) in its header. The typing
   // indicator (TM-465) sits between the message body and the composer, so "X is typing…" reads directly
   // above where you're about to reply.
-  clear(view).append(threadHeader(meta, buildThreadActions(id, meta.typeKey)), body, typingIndicator, compose);
+  // In-thread search (TM-690): the "Search" toggle joins the header actions; its results panel sits
+  // directly under the header, above the message body.
+  const searchUi = createThreadSearch();
+  const actions = buildThreadActions(id, meta.typeKey);
+  actions.insertBefore(searchUi.button, actions.firstChild);
+  clear(view).append(threadHeader(meta, actions), searchUi.panel, body, typingIndicator, compose);
   repaintBody(); // paints the loaded messages (or the empty state) + scrolls to the newest
   wirePush(); // foreground-push → immediate poll while a thread is open
   startThreadPoll(id);
