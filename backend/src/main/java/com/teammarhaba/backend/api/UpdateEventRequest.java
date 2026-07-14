@@ -47,7 +47,8 @@ public record UpdateEventRequest(
         @Min(13) @Max(120) Integer ageMin,
         @Min(13) @Max(120) Integer ageMax,
         @Min(0) Integer pricePence,
-        Boolean premium) {
+        Boolean premium,
+        @Size(max = 2000) String openingMessage) {
 
     @JsonIgnore
     @AssertTrue(message = "heading must not be blank")
@@ -121,6 +122,7 @@ public record UpdateEventRequest(
                 ageMin,
                 ageMax,
                 pricePence,
-                premium);
+                premium,
+                openingMessage);
     }
 }

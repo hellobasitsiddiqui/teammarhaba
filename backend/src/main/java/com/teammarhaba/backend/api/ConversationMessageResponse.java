@@ -54,6 +54,9 @@ import java.util.List;
  * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
  * @param mine        server-computed: {@code senderId == the verified caller's id} (TM-589) — drives
  *                    own-vs-other alignment; {@code null} only on the caller-independent broadcast frame
+ * @param kind        the message kind (TM-710) — {@code "ATTENDEE"} for an ordinary post,
+ *                    {@code "ANNOUNCEMENT"} for an admin/host announcement (the opening message or an
+ *                    admin-sent announcement); the client renders an announcement visually distinct
  * @param body        the message text (the CURRENT text — an author edit (TM-467) rewrites it in place)
  * @param deepLink    optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
  * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
@@ -69,6 +72,7 @@ public record ConversationMessageResponse(
         Long senderId,
         boolean system,
         Boolean mine,
+        String kind,
         String body,
         String deepLink,
         Instant createdAt,
@@ -98,6 +102,7 @@ public record ConversationMessageResponse(
                 message.getSenderId(),
                 message.isSystem(),
                 mine,
+                message.getKind().name(),
                 message.getBody(),
                 message.getDeepLink(),
                 message.getCreatedAt(),
