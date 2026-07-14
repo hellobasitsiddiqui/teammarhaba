@@ -32,7 +32,7 @@ python3 scripts/gen-dag.py --scope all --write
 ```
 
 Stdlib only (Python 3) — no dependencies. The same `JIRA_*` secrets used by the
-`jira-merge-to-done` Action (TM-86) work here.
+`jira-merge-to-testing` Action (TM-86) work here.
 
 ### Status colours
 To Do · In Progress · In Review · Done — each a Mermaid `classDef`.

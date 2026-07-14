@@ -1,12 +1,13 @@
-name: Jira reconcile merged → Done (backstop)
+name: Jira reconcile merged → Testing (backstop)
 
-# Backstop for jira-merge-to-done.yml. That per-merge Action is the primary path,
-# but the transition job can sit `queued` for minutes behind heavier CI jobs (public
-# repos share a concurrency pool), or a run can be dropped entirely — leaving a merged
-# ticket stranded In Review (observed on TM-456). This sweep runs on a schedule (and on
-# demand) and moves ANY recently-merged PR's TM ticket that is still In Review / In
-# Progress to Done. It makes "Done = merged to main" self-heal within one cron interval,
-# with no dependency on the orchestrator's live session.
+# Backstop for jira-merge-to-testing.yml. That per-merge Action is the primary path, but the
+# transition job can sit `queued` for minutes behind heavier CI jobs (public repos share a
+# concurrency pool), or a run can be dropped entirely — leaving a merged ticket stranded In Review.
+# This sweep runs on a schedule (and on demand) and moves ANY recently-merged PR's TM ticket that is
+# still In Review / In Progress to Testing (the QA gate). It makes "merged to main = Testing"
+# self-heal within one cron interval, with no dependency on the orchestrator's live session. The
+# In-Review/In-Progress-only guard means a ticket QA has already advanced to Done is never dragged
+# back.
 on:
   schedule:
     - cron: '*/10 * * * *'
@@ -29,7 +30,7 @@ jobs:
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Sweep recently-merged PRs → Done
+      - name: Sweep recently-merged PRs → Testing
         run: |
           # Fail soft throughout: this is a janitor, never a gate.
           set -o pipefail
@@ -49,13 +50,14 @@ jobs:
                     "$JIRA_BASE_URL/rest/api/3/issue/$key?fields=status" \
                     | python3 -c "import sys,json;print(json.load(sys.stdin)['fields']['status']['name'])" 2>/dev/null || true)"
 
+            # Only advance tickets still short of the QA gate — never pull a Testing/Done ticket back.
             if [ "$st" = "In Review" ] || [ "$st" = "In Progress" ]; then
               code="$(curl -sS -o /dev/null -w '%{http_code}' \
                        -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
                        -X POST -H 'Content-Type: application/json' \
-                       --data '{"transition":{"id":"51"}}' \
+                       --data '{"transition":{"id":"2"}}' \
                        "$JIRA_BASE_URL/rest/api/3/issue/$key/transitions" || echo 000)"
-              echo "$key was $st → Done (HTTP $code)"
+              echo "$key was $st → Testing (HTTP $code)"
               flipped=$((flipped + 1))
             fi
           done
