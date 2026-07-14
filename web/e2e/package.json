@@ -9,11 +9,14 @@
     "emulator": "firebase emulators:start --only auth,storage --project teammarhaba --config ../../firebase.json",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
+    "test:storage-rules": "firebase emulators:exec --only storage --project teammarhaba --config ../../firebase.json 'node tests/storage-rules.mjs'",
     "report": "playwright show-report",
     "capture:chat": "node capture-chat-foundation.mjs"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.1",
     "@playwright/test": "1.49.1",
+    "firebase": "12.16.0",
     "firebase-admin": "13.0.2",
     "firebase-tools": "13.29.1",
     "pg": "8.13.1"
