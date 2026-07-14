@@ -75,7 +75,7 @@ loop:
   if not prePrVerify(t): continue             # re-read Jira RIGHT BEFORE the PR — bail if someone else got there
   openPr(t)
   onPrRaised(t): transition t -> In Review    # PR open, awaiting merge (still locked)
-  onMergeToMain(t): transition t -> Done      # release downstream
+  onMergeToMain(t): transition t -> Testing   # QA gate (Done after Testing passes); the merge releases downstream
   continue
 ```
 

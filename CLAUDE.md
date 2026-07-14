@@ -30,8 +30,9 @@ assigned. Follow `.claude/skills/jira-task-claim` for the full protocol. In shor
 4. **Do the work** — follow the task's pinned **AGENT EXECUTION PROMPT**.
 5. **PR → In Review** — when you open the PR, transition the task to **In Review** and
    comment `PR: <url>` on the ticket. It stays locked (not a cleared blocker) until merge.
-6. **Merged → Done** — when the PR merges to `main`, transition to **Done**. That unblocks
-   downstream tasks for the next agent.
+6. **Merged → Testing** — when the PR merges to `main`, transition to **Testing** (the QA gate;
+   **Done** is set only after Testing passes — TM-703). The **merge** is what unblocks downstream
+   tasks for the next agent — dependents unlock on merge, not on Done.
 
 Some tasks are console/settings changes with **no PR** (e.g. create the GCP project): skip
 In Review, post a one-line evidence note, and go straight to Done.
@@ -43,7 +44,7 @@ In Review, post a one-line evidence note, and go straight to Done.
 - **Board fields / time tracking:** on **claim** set Start date (`customfield_10015`) **and Due date** (`duedate` = sprint end) — **anyone who works a ticket, agents and the orchestrator alike**; on **PR/In Review** log a **worklog** of actual elapsed (`addWorklogToJiraIssue`); if **blocked/held** set Flagged = Impediment (`customfield_10021`). Story points = the estimate. See `jira-mcp-gotchas` → Time tracking.
 - **Hit a wall? Log it — never fail silently:** comment the blocker + a `[finding → future improvement]` note; for human-only steps (interactive auth, console, secrets) raise a separate human-only ticket (labelled `human`) and link it as a blocker.
 - **Build tool = Gradle (Kotlin DSL)** for the backend going forward — unifies with the Gradle-native Android (TM-88). (The initial backend is still Maven; throwaway on the redo.) Full rationale: `docs/decisions/ADR-0001-gradle-build-standard.md`.
-- **Merged → Done is being automated** (GitHub Action, TM-86): on PR merge the ticket auto-transitions to Done. Until it lands, whoever merges moves the ticket to Done (step 6).
+- **Merged → Testing is automated** (GitHub Action, TM-86 / TM-703): on PR merge the ticket auto-transitions to **Testing** (the QA gate; **Done** only after Testing passes). If the automation doesn't fire, whoever merges moves the ticket to Testing (step 6).
 - **All Jira text = GitHub-flavored markdown, NEVER Jira wiki markup.** The connector renders markdown; wiki syntax (`h3.`, `{code}`, `{{...}}`, `[text|url]`, `*bold*`) shows up broken. Use `###`, fenced ` ``` `, `` `code` ``, `[text](url)`, `**bold**`. **Applies to comments too** (evidence, findings, claims), not just descriptions. See `jira-ticket-writer`.
 
 ## Definition of Done
