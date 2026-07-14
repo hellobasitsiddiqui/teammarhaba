@@ -31,7 +31,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /(responsive-mobile|chat-foundation)\.spec\.mjs/,
+      testIgnore: /(responsive-mobile|chat-foundation|tm709-late-join-history)\.spec\.mjs/,
     },
     // Mobile viewport project (TM-229) — a phone profile (Pixel 5 ≈ 393px wide) so the responsive
     // specs exercise the real narrow-screen layout: hamburger nav, no horizontal page scroll, the
@@ -42,7 +42,7 @@ export default defineConfig({
     {
       name: "mobile-chromium",
       use: { ...devices["Pixel 5"] },
-      testMatch: /(responsive-mobile|golden-path|broadcast-admin|events|chat-foundation)\.spec\.mjs/,
+      testMatch: /(responsive-mobile|golden-path|broadcast-admin|events|chat-foundation|tm709-late-join-history)\.spec\.mjs/,
     },
   ],
   // Serve the static web app (with e2e config injected). The backend + emulator are external.
