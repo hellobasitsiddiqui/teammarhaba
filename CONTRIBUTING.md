@@ -55,8 +55,11 @@ kept deliberately simple and machine-checkable. The same rules apply to everyone
 6. **CODEOWNERS** are requested automatically; at least one owner approval is required.
 7. Address review comments by pushing follow-up commits (don't force-push away history
    mid-review unless asked).
-8. **Merging is done by a maintainer**, not the author — a merge to `main` is what
-   transitions the ticket to Done.
+8. **Merging is done by a maintainer**, not the author — a merge to `main` moves the ticket to
+   **Testing** (the QA gate), **not** straight to Done. **Done is set only after Testing passes.**
+   Lifecycle: **In Progress → In Review** (PR open) **→ Testing** (merged) **→ Done** (QA passed).
+   This is enforced automatically by the Jira merge/reconcile Actions, so it holds for every PR,
+   from everyone — not a manual habit.
 
 ## Local development
 
