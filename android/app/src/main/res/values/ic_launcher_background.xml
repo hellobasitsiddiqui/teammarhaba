@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon background colour (TM-383): brand teal. Matches the native splash
+     backgroundColor (#0f9d8c) in capacitor.config.json and splashBackground in
+     colors.xml, so the launcher tile, splash window, and iOS AppIcon tile all share
+     one teal. The white ring foreground sits on top (mipmap-anydpi-v26/ic_launcher.xml). -->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">#0f9d8c</color>
 </resources>

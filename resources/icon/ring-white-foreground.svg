@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Circle app mark (TM-383): Android adaptive-icon FOREGROUND layer — white ring on a
+     transparent 108x108 canvas. The ring is sized to survive the circular/rounded
+     launcher crop: Android reserves an 18dp margin on every side of the 108dp canvas,
+     leaving a ~66-72dp safe zone. r=22 (dia 44dp) sits comfortably inside that safe
+     zone so the full ring is always visible whatever mask the launcher applies.
+     Background layer is a solid teal colour (see mipmap-anydpi-v26/ic_launcher.xml). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <circle cx="54" cy="54" r="22"
+          fill="none"
+          stroke="#ffffff" stroke-width="4.4"
+          stroke-linecap="round" stroke-linejoin="round" />
+</svg>
