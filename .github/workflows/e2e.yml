@@ -106,6 +106,14 @@ jobs:
             sleep 2
           done
 
+      # TM-704: verify the Storage RULES themselves — an admin can upload to event-images/ &
+      # venue-images/ and non-admins/anonymous can't. Reuses the emulator started above (loaded with
+      # the committed storage.rules). The Playwright specs can't cover this: events.spec.mjs sets
+      # imagePath via the API (TM-392 is API-only), so no bytes ever exercise those rule paths.
+      - name: Verify Storage rules (event/venue image uploads — TM-704)
+        working-directory: web/e2e
+        run: node tests/storage-rules.mjs
+
       - name: Start backend (pointed at the emulator + Postgres)
         env:
           SPRING_PROFILES_ACTIVE: dev
