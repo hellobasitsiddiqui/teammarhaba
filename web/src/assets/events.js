@@ -17,6 +17,7 @@ import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
 import { platformFor } from "./push-env.js";
+import { downloadUrlForPath } from "./storage.js";
 import * as core from "./events-core.js";
 import * as cal from "./calendar-core.js";
 
@@ -408,9 +409,24 @@ function paintDetail(view, detail, me, conversations = []) {
  * doodle placeholder is intentionally dropped — it's `display:none` in clean Paper anyway).
  */
 function detailHero(detail, { live }) {
-  const path = (detail?.imagePath || "").trim();
   const kids = [];
-  if (/^https?:\/\//i.test(path)) kids.push(el("img", { class: "tm-event-hero-img", src: path, alt: "", loading: "lazy" }));
+  // TM-708: imagePath is EITHER an http(s) URL OR a Firebase Storage object path (what the admin
+  // upload persists). Render URLs directly; resolve a storage path to a fresh download URL and set the
+  // src when it arrives. If it can't resolve, drop the <img> so we fall back to the plain placeholder
+  // box (never a broken image). eventImageRef returns null for no image → nothing rendered.
+  const imgRef = core.eventImageRef(detail?.imagePath);
+  if (imgRef) {
+    const img = el("img", { class: "tm-event-hero-img", alt: "", loading: "lazy" });
+    if (imgRef.kind === "url") {
+      img.src = imgRef.value;
+    } else {
+      downloadUrlForPath(imgRef.value).then((url) => {
+        if (url) img.src = url;
+        else img.remove();
+      });
+    }
+    kids.push(img);
+  }
   kids.push(
     el("a", { class: "tm-event-hero-back", href: "#/events", "aria-label": "Back to events" }, [icon("back", 18)]),
   );

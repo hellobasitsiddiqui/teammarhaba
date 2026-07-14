@@ -9,6 +9,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { eventImageRef } from "../src/assets/events-core.js";
+
 import {
   formatWhen,
   formatDateLong,
@@ -677,4 +679,23 @@ test("requiresPaidCheckout: an absent / malformed entitlement is never PAY (fail
   assert.equal(requiresPaidCheckout({}), false);
   assert.equal(requiresPaidCheckout({ decision: "WAT" }), false);
   assert.equal(requiresPaidCheckout({ decision: "pay" }), false); // exact enum only, not a lowered variant
+});
+
+// --- eventImageRef (TM-708): classify imagePath so uploaded (path-stored) images actually render ---
+test("eventImageRef: empty/blank/nullish → null (placeholder box)", () => {
+  for (const v of [undefined, null, "", "   "]) {
+    assert.equal(eventImageRef(v), null, `expected null for ${JSON.stringify(v)}`);
+  }
+});
+
+test("eventImageRef: http(s) URL → rendered directly as the src", () => {
+  assert.deepEqual(eventImageRef("https://cdn.example/e.jpg"), { kind: "url", value: "https://cdn.example/e.jpg" });
+  assert.deepEqual(eventImageRef("http://x/y.png"), { kind: "url", value: "http://x/y.png" });
+});
+
+test("eventImageRef: a Firebase Storage path → resolve before rendering (the TM-708 bug: was dropped)", () => {
+  // The admin upload persists a Storage object path like this; the old renderer only accepted http(s)
+  // URLs, so it silently showed no image. It must now be classified as a resolvable path.
+  assert.deepEqual(eventImageRef("event-images/123"), { kind: "path", value: "event-images/123" });
+  assert.deepEqual(eventImageRef("  event-images/123  "), { kind: "path", value: "event-images/123" });
 });

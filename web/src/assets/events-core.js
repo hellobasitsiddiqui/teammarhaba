@@ -351,6 +351,25 @@ export const MAPS_PLATFORM = Object.freeze({ IOS: "IOS", ANDROID: "ANDROID", WEB
 export const DIRECTIONS_LABEL = "Open in Maps";
 
 /**
+ * Classify an event's stored `imagePath` for rendering (TM-708). The field holds EITHER a full
+ * http(s) URL (legacy / externally hosted) OR a Firebase Storage object path — which is what the admin
+ * image upload actually persists (e.g. `event-images/123`). The previous renderer only accepted an
+ * http(s) URL, so uploaded images (stored as a path) silently never showed. Returns:
+ *   - `null`                    → no image; render the placeholder box.
+ *   - `{ kind: "url",  value }` → use directly as the `<img>` src.
+ *   - `{ kind: "path", value }` → resolve to a download URL before rendering (view calls getDownloadURL).
+ * Pure + synchronous so it's unit-testable; the async path resolution lives in the view (events.js).
+ * @param {string|null|undefined} imagePath
+ * @returns {{kind:"url"|"path", value:string}|null}
+ */
+export function eventImageRef(imagePath) {
+  const path = (imagePath || "").trim();
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return { kind: "url", value: path };
+  return { kind: "path", value: path };
+}
+
+/**
  * Build a platform-correct "open in maps / directions" URL, or null when there's nowhere to point.
  *
  * PURE (no DOM, no Capacitor, no browser globals) so the whole per-platform matrix is unit-tested here;
