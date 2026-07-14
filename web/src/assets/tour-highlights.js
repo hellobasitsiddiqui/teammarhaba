@@ -23,7 +23,7 @@
 export const SITE_HIGHLIGHTS = [
   {
     title: "Welcome to Circle 👋",
-    body: "A quick 30-second tour of the basics. You can skip anytime — and replay it from Help whenever you like.",
+    body: "A quick 30-second tour of the basics. You can skip anytime — and replay it from the Take a tour button whenever you like.",
   },
   { target: "#me", title: "This is you", body: "Your identity, verified by the backend. Your profile lives here." },
   {
@@ -31,7 +31,7 @@ export const SITE_HIGHLIGHTS = [
     title: "Admin console",
     body: "Admins manage user accounts here — roles, access, enable/disable.",
   },
-  { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from Help." },
+  { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from here." },
   { target: "#signout-btn", title: "That's it!", body: "Sign out here when you're done. Welcome aboard 🎉" },
 ];
 
