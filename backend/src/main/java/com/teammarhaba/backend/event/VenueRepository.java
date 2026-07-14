@@ -31,14 +31,20 @@ public interface VenueRepository extends JpaRepository<Venue, Long> {
      *
      * Soft-deleted venues are excluded by the {@code @SQLRestriction}; ordering + paging come from the
      * caller's {@link Pageable}.
+     *
+     * <p>{@code cast(:q as string)} is load-bearing (TM-707): Postgres type-resolves the whole
+     * predicate at plan time, so a null {@code q} bound as an untyped parameter inside
+     * {@code concat()}/{@code lower()} defaults to {@code bytea} and the query dies with
+     * {@code function lower(bytea) does not exist} — the {@code :q is null} guard doesn't help. The
+     * cast keeps the parameter typed as text on both the null and non-null paths.
      */
     @Query(
             """
             select v from Venue v
             where (
                 :q is null
-                or lower(v.name) like lower(concat('%', :q, '%'))
-                or (v.city is not null and lower(v.city) like lower(concat('%', :q, '%')))
+                or lower(v.name) like lower(concat('%', cast(:q as string), '%'))
+                or (v.city is not null and lower(v.city) like lower(concat('%', cast(:q as string), '%')))
               )
               and (:activeOnly = false or v.active = true)
             """)
