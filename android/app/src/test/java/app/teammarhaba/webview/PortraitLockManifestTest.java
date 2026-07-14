@@ -58,12 +58,13 @@ public class PortraitLockManifestTest {
 
         String contents = new String(Files.readAllBytes(manifest.toPath()), StandardCharsets.UTF_8);
 
-        // The MainActivity must be locked to userPortrait (TM-667). userPortrait — not strict
-        // portrait — so foldables/tablets can still flip 180°, while landscape is banned.
+        // The MainActivity must be locked to strict `portrait` (TM-667). userPortrait did NOT hold on
+        // device/emulator (it's sensor/user-preference based, so the app still rotated to landscape);
+        // strict `portrait` is a hard lock the window manager enforces regardless of sensor/user.
         assertTrue(
-            "Portrait lock missing: expected android:screenOrientation=\"userPortrait\" in "
+            "Portrait lock missing: expected android:screenOrientation=\"portrait\" in "
                 + manifest.getAbsolutePath()
                 + ". Do not remove the TM-667 portrait lock.",
-            contents.contains("android:screenOrientation=\"userPortrait\""));
+            contents.contains("android:screenOrientation=\"portrait\""));
     }
 }
