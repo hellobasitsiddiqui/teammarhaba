@@ -323,7 +323,7 @@ function renderUserResults() {
   clear(results);
   const rows = matchingUsers();
   if (!rows.length) {
-    results.append(el("li", { class: "tm-muted tm-msg-results-empty", text: (state.users || []).length ? "No people match your search." : "No accounts yet." }));
+    results.append(el("li", { class: "tm-muted tm-msg-results-empty", text: (state.users || []).length ? "No people match your search." : "No people yet." }));
     return;
   }
   for (const u of rows) {

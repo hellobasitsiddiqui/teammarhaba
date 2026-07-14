@@ -172,7 +172,7 @@ async function sendSms() {
 }
 
 async function verifySms() {
-  if (!smsConfirmation) throw new Error("Request an SMS code first.");
+  if (!smsConfirmation) throw new Error("Please request an SMS code first.");
   await smsConfirmation.confirm((els.smsCode.value || "").trim());
 }
 

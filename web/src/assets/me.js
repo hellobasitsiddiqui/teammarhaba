@@ -30,7 +30,7 @@ onAuthChanged(async (user) => {
     render(`Signed in as ${me.email || me.displayName || me.uid}`);
   } catch (err) {
     // A 401 will already have redirected to login (api.js); anything else we surface quietly.
-    render("could not load profile");
+    render("Could not load your profile.");
     console.warn("[me] GET /api/v1/me failed:", err?.message ?? err);
   }
 });

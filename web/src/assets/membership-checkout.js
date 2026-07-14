@@ -266,7 +266,8 @@ async function startPayment(event, state) {
   try {
     result = await api.checkout(event?.id);
   } catch (err) {
-    setPayStatus(mount, `Could not start payment: ${err?.message ?? err}`);
+    console.warn("[membership] event checkout start failed:", err?.status ?? "", err?.message ?? err);
+    setPayStatus(mount, "Couldn't start payment. Please try again.");
     return;
   }
 
