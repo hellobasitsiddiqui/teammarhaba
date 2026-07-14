@@ -485,7 +485,7 @@ function mapSection(detail, now) {
     );
   }
   if (core.locationView(detail, now).revealed === false) {
-    return el("div", { class: "tm-event-map", "aria-hidden": "true" }, "Map opens once the venue is revealed");
+    return el("div", { class: "tm-event-map" }, "Map opens once the venue is revealed");
   }
   return null;
 }
@@ -589,7 +589,7 @@ function attendeesSection(detail) {
 
   const strip = el("div", { class: "tm-event-avatars", "aria-hidden": "true" });
   for (const a of attendees) {
-    strip.append(el("span", { class: "tm-event-avatar", title: a.displayName || "Member", text: core.initials(a.displayName) }));
+    strip.append(el("span", { class: "tm-event-avatar", title: a.displayName || "Member", text: core.initials(a.displayName) || "?" }));
   }
   if (overflow > 0) strip.append(el("span", { class: "tm-event-avatar tm-event-avatar-more", text: `+${overflow}` }));
 

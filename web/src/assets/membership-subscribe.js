@@ -145,7 +145,8 @@ async function startSubscribePayment(section, tier, generation) {
   try {
     checkout = await api.subscriptionCheckout(tier);
   } catch (err) {
-    failStart(`Could not start the checkout: ${err?.message ?? err}`);
+    console.warn("[membership] subscription checkout start failed:", err?.status ?? "", err?.message ?? err);
+    failStart("Couldn't start checkout. Please try again.");
     return;
   }
   const token = checkout && checkout.paymentToken;

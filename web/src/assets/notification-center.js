@@ -207,7 +207,7 @@ function openInbox() {
       { class: "tm-notif-list" },
       snapshot.length
         ? snapshot.map((entry) => inboxRow(entry, () => close()))
-        : [el("p", { class: "tm-notif-empty", text: "No notifications yet." })],
+        : [el("p", { class: "tm-notif-empty", text: "You're all caught up." })],
     ),
   );
   entries = markAllRead(entries);

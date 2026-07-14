@@ -191,7 +191,7 @@ export function countdownText(ms) {
   const hours = Math.round(mins / 60);
   if (hours < 48) return `in ${hours} h`;
   const days = Math.round(hours / 24);
-  return `in ${days} days`;
+  return `in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
 // ------------------------------------------------------------------ state chips + badges
