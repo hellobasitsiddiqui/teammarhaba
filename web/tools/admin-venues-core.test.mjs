@@ -26,6 +26,7 @@ import {
   buildVenuePayload,
   toVenueFormModel,
   venueSummaryLabel,
+  venueImageRef,
 } from "../src/assets/admin-venues-core.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateVenueRequest) --------------------------------
@@ -148,4 +149,28 @@ test("venueSummaryLabel renders 'Name — City' (or just the name)", () => {
   assert.equal(venueSummaryLabel({ name: "Marhaba Hall", city: "London" }), "Marhaba Hall — London");
   assert.equal(venueSummaryLabel({ name: "Marhaba Hall" }), "Marhaba Hall");
   assert.equal(venueSummaryLabel({}), "Untitled venue");
+});
+
+// --- venue photo classifier (TM-711, twin of eventImageRef / TM-708) --------------------------
+
+test("venueImageRef → null when there's no photo", () => {
+  assert.equal(venueImageRef(null), null);
+  assert.equal(venueImageRef(undefined), null);
+  assert.equal(venueImageRef(""), null);
+  assert.equal(venueImageRef("   "), null);
+});
+
+test("venueImageRef classifies a Storage object path as kind 'path' (what uploadVenueImage persists)", () => {
+  // This is the bug's core: the admin stores `venue-images/{id}`, so it must be resolved (not used as a
+  // src verbatim). Before the render fix nothing consumed photoPath at all.
+  assert.deepEqual(venueImageRef("venue-images/7"), { kind: "path", value: "venue-images/7" });
+  assert.deepEqual(venueImageRef("  venue-images/7  "), { kind: "path", value: "venue-images/7" });
+});
+
+test("venueImageRef classifies an http(s) URL as kind 'url' (legacy / external, used directly)", () => {
+  assert.deepEqual(venueImageRef("https://cdn.example.com/v.jpg"), {
+    kind: "url",
+    value: "https://cdn.example.com/v.jpg",
+  });
+  assert.deepEqual(venueImageRef("HTTP://x/y.png"), { kind: "url", value: "HTTP://x/y.png" });
 });

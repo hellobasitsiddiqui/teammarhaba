@@ -24,7 +24,7 @@
 import { apiFetch, ApiError } from "./api.js";
 import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
-import { isStorageConfigured, uploadVenueImage, validateVenueImageFile, MAX_VENUE_IMAGE_BYTES } from "./storage.js";
+import { isStorageConfigured, uploadVenueImage, validateVenueImageFile, MAX_VENUE_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import {
   NAME_MAX,
   ADDRESS_MAX,
@@ -36,6 +36,7 @@ import {
   validateVenueDraft,
   buildVenuePayload,
   toVenueFormModel,
+  venueImageRef,
 } from "./admin-venues-core.js";
 import { ADMIN_VENUES_ROUTE, adminVenueNewHash, adminVenueEditHash } from "./admin-venues-route.js";
 
@@ -204,6 +205,31 @@ function statusPill(venue) {
     : el("span", { class: "tm-badge tm-badge-off", text: "Deactivated" });
 }
 
+/**
+ * A small square thumbnail for a venue row (TM-711) — the photo that `photoPath` stores was uploaded
+ * but rendered NOWHERE. A "📍" placeholder box shows when there's no photo; when there is, we resolve
+ * the Storage object path to a fresh download URL and swap the `<img>` in. If resolution fails (Storage
+ * off / missing object) we drop the `<img>` and keep the placeholder — never a broken image (mirrors
+ * events.js detailHero, TM-708).
+ */
+function venueThumb(venue) {
+  const placeholder = el("span", { class: "tm-venue-thumb-empty", "aria-hidden": "true", text: "📍" });
+  const frame = el("div", { class: "tm-venue-thumb", "aria-hidden": "true" }, [placeholder]);
+  const ref = venueImageRef(venue?.photoPath);
+  if (!ref) return frame;
+
+  const img = el("img", { class: "tm-venue-thumb-img", alt: "", loading: "lazy" });
+  const show = (url) => {
+    if (!url) return; // keep the placeholder — never a broken <img>
+    img.src = url;
+    placeholder.hidden = true;
+    frame.append(img);
+  };
+  if (ref.kind === "url") show(ref.value);
+  else downloadUrlForPath(ref.value).then(show);
+  return frame;
+}
+
 function renderStats() {
   const total = Math.max(state.totalVenues, state.venues.length);
   const active = state.venues.filter((v) => v.active).length;
@@ -280,8 +306,13 @@ function renderTable() {
     pageRows.map((venue) =>
       el("tr", { dataset: { venueId: String(venue.id) } }, [
         el("td", {}, [
-          el("span", { class: "tm-event-heading", text: venue.name || "—" }),
-          el("span", { class: "tm-muted tm-venue-address", text: venue.addressLine || "" }),
+          el("div", { class: "tm-venue-cell" }, [
+            venueThumb(venue),
+            el("div", { class: "tm-venue-cell-text" }, [
+              el("span", { class: "tm-event-heading", text: venue.name || "—" }),
+              el("span", { class: "tm-muted tm-venue-address", text: venue.addressLine || "" }),
+            ]),
+          ]),
         ]),
         el("td", { class: "tm-muted", text: venue.city || "—" }),
         el("td", { class: "tm-muted", text: venue.capacity == null ? "—" : String(venue.capacity) }),
@@ -530,6 +561,24 @@ function buildPhotoControl(venue) {
     preview.hidden = false;
     placeholder.hidden = true;
   });
+
+  // TM-711: seed the preview from the EXISTING photo when editing a venue that already has one and no
+  // new file has been picked. photoPath is a Firebase Storage object path (`venue-images/{id}`) — the
+  // write-only field that previously rendered nowhere — so resolve it to a fresh download URL. A URL
+  // (legacy/external) is used directly. If resolution fails (Storage off, object missing) we keep the
+  // placeholder rather than showing a broken image, mirroring events.js detailHero (TM-708).
+  const existingRef = venueImageRef(venue?.photoPath);
+  if (existingRef) {
+    const showExisting = (url) => {
+      // A pick between resolve start and finish wins — never clobber the admin's newer object-URL preview.
+      if (!url || pendingFile) return;
+      preview.src = url;
+      preview.hidden = false;
+      placeholder.hidden = true;
+    };
+    if (existingRef.kind === "url") showExisting(existingRef.value);
+    else downloadUrlForPath(existingRef.value).then(showExisting);
+  }
 
   const node = el("section", { class: "tm-event-image", "aria-label": "Venue photo" }, [
     frame,
