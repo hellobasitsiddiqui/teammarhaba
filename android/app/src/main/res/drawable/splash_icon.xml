@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dedicated Android-12 splash icon (TM-664): the white TeamMarhaba ring on a TRANSPARENT
+     canvas, so windowSplashScreenBackground (@color/splashBackground teal) shows through.
+
+     Why not @mipmap/ic_launcher (the previous value): the adaptive launcher icon is a white
+     ring on a TEAL background, and its ring sits near the outer edge (safe for the launcher's
+     ~66-72dp safe zone). The Android-12 system splash (a) discards the icon's own background
+     and paints windowSplashScreenBackground — the SAME teal — instead, and (b) masks the icon
+     to a TIGHTER inner circle than the launcher. So the ring got clipped and the result was
+     teal-on-teal: a plain teal box with no visible logo (TM-664).
+
+     This drawable fixes both: a foreground-only white ring (no teal fill -> contrasts the teal
+     splash field) sized well inside the splash safe zone. For a no-background splash icon the
+     visible area is the centre ~2/3 of the 288dp window (radius ~96 from centre 144); the ring's
+     outer radius (66 + half of 13 stroke ≈ 72.5) sits comfortably inside that, so it is never
+     clipped. Same ring geometry/source as resources/icon/ring-white-foreground.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="13"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M78,144 a66,66 0 1,0 132,0 a66,66 0 1,0 -132,0" />
+</vector>

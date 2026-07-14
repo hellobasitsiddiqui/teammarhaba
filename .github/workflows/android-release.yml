@@ -102,6 +102,12 @@ jobs:
       - name: Compile the APK (assembleDebug)
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      # Run the JVM unit tests — cheap config-regression guards (splash icon TM-664, portrait lock
+      # TM-667) that read res/manifest source directly. assembleDebug does NOT run these, so without
+      # this step the guards were dead code and could silently regress.
+      - name: Run Android unit tests (config-regression guards)
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
       # Hand the debug APK back as an artifact so a reviewer can sideload it from the PR without a
       # local Android toolchain (it is NOT a release — debug-keystore signed, applicationId .debug).
       - name: Upload debug APK
