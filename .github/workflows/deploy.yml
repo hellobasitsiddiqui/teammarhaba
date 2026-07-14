@@ -168,6 +168,11 @@ jobs:
       - name: Deploy Firebase Storage rules
         run: |
           set -o pipefail
+
+          # Pre-deploy gate (TM-704): the committed rules must cover every path the app writes to. A
+          # bad edit that drops the event-images/ or venue-images/ block fails here, before release.
+          node web/tools/check-storage-rules-file.mjs storage.rules "committed storage.rules"
+
           out="$(npx --yes firebase-tools@15.22.0 deploy --only storage --project teammarhaba --non-interactive 2>&1)" || true
           printf '%s\n' "$out"
           # firebase-tools prints "released rules storage.rules to firebase.storage" on a real release.
@@ -176,6 +181,17 @@ jobs:
             exit 1
           fi
           echo "Firebase Storage rules released."
+
+          # Post-release verification (TM-704): confirm the ruleset now IN FORCE actually covers the
+          # required paths — a "released" message alone can't prove *what* released. This is the check
+          # that would have caught the outage: fetch the live release's source and re-run the gate.
+          token="$(gcloud auth print-access-token)"
+          ruleset="$(curl -sf -H "Authorization: Bearer $token" \
+            "https://firebaserules.googleapis.com/v1/projects/teammarhaba/releases/firebase.storage" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["rulesetName"])')"
+          curl -sf -H "Authorization: Bearer $token" "https://firebaserules.googleapis.com/v1/${ruleset}" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["source"]["files"][0]["content"])' > /tmp/released-storage.rules
+          node web/tools/check-storage-rules-file.mjs /tmp/released-storage.rules "the LIVE released ruleset"
 
   backend:
     name: Deploy backend to Cloud Run
