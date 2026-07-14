@@ -66,7 +66,7 @@ All four workflows are fully SHA-pinned (verified for TM-59):
 | `ci.yml` | checkout, setup-java, action-junit-report, upload-artifact, setup-buildx, google-github-actions/auth, docker/login-action, docker/build-push-action |
 | `deploy.yml` | checkout, google-github-actions/auth + setup-gcloud, docker actions |
 | `oidc-smoke.yml` | checkout, google-github-actions/auth |
-| `jira-merge-to-done.yml` | (no `uses:` — pure `gh`/`curl` script) |
+| `jira-merge-to-testing.yml` | (no `uses:` — pure `gh`/`curl` script) |
 
 ---
 

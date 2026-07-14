@@ -155,9 +155,9 @@ One cheap Jira read, **deterministic for this class**: in the **TM-151** double-
 
 *Where possible* — some tasks are console/settings changes with **no PR** (e.g. create the GCP project, enable branch protection). For those there's nothing to review: **skip In Review**, post a one-line **evidence note** (what you changed + a link to the resource/setting), and transition straight to Done.
 
-When the PR **merges to `main`**, `transition t -> Done`. That Done flips every dependent whose last blocker was `t` into *ready* — the next poll picks them up automatically. This is the whole unlock mechanism. (A task only ever reaches Done from In Review via a merge, or directly for no-PR tasks.)
+When the PR **merges to `main`**, the ticket moves to **Testing** (the QA gate; `Done` is set only after Testing passes — TM-703). The **merge itself** — the ticket leaving In Review — is the unlock signal: it flips every dependent whose last blocker was `t` into *ready*, and the next poll picks them up automatically (dependents unlock **on merge**, they do NOT wait for QA/Done). This is the whole unlock mechanism. (A task reaches Testing from In Review via a merge, then Done after QA; a no-PR task can be set Done directly.)
 
-> **Automated since TM-86:** the `Jira merge → Done` GitHub Action (`.github/workflows/jira-merge-to-done.yml`) does this `In Review -> Done` step for you — on merge to `main` it reads the `TM-NNN` key from the branch (or PR title) and transitions that issue to Done. It fails soft (a missing key or unavailable transition never blocks the merge), and requires the one-time repo secrets `JIRA_BASE_URL` / `JIRA_USER_EMAIL` / `JIRA_API_TOKEN`. Agents may still transition manually as a fallback if the secrets aren't configured.
+> **Automated since TM-86:** the `Jira merge → Testing` GitHub Action (`.github/workflows/jira-merge-to-testing.yml`) does this `In Review -> Testing` step for you — on merge to `main` it reads the `TM-NNN` key from the branch (or PR title) and transitions that issue to **Testing** (the QA gate; **Done** is set only after Testing passes — TM-703). It fails soft (a missing key or unavailable transition never blocks the merge), and requires the one-time repo secrets `JIRA_BASE_URL` / `JIRA_USER_EMAIL` / `JIRA_API_TOKEN`. Agents may still transition manually as a fallback if the secrets aren't configured.
 
 ---
 

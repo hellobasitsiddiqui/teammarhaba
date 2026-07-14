@@ -3,7 +3,7 @@
 # Sprint create / start / close / set-goal are UI-only through the Atlassian MCP connector (no sprint
 # tool), so the agent normally has to ask a human to click in the board UI. The Jira Agile REST API
 # supports all of it; this workflow drives it via the existing JIRA_* secrets (same ones
-# jira-merge-to-done.yml uses) — the token never leaves CI. Manual dispatch only.
+# jira-merge-to-testing.yml uses) — the token never leaves CI. Manual dispatch only.
 name: Jira sprint admin
 
 on:
