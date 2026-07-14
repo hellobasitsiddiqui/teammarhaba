@@ -153,17 +153,29 @@ jobs:
         run: npx --yes firebase-tools@15.22.0 deploy --only hosting --project teammarhaba --non-interactive
 
       # Deploy the committed storage.rules (TM-191) too, reusing the same WIF ADC + pinned
-      # firebase-tools as the hosting deploy above. Kept a SEPARATE, NON-FATAL step on purpose
-      # (mirrors the backend job's best-effort "Enable public access"):
-      #   - On a fresh replay where Firebase Storage isn't enabled yet (the human TM-184 step),
-      #     or before gha-deployer has roles/firebaserules.admin, this warns and the deploy stays
-      #     green instead of failing the hosting deploy.
-      #   - NOT folded into `--only hosting,storage` for exactly that reason — a storage error there
-      #     would fail the (already-succeeded) hosting deploy.
-      - name: Deploy Firebase Storage rules (best-effort)
+      # firebase-tools as the hosting deploy above. Kept a SEPARATE step so a storage failure can't
+      # roll back the (already-succeeded) hosting deploy — NOT folded into `--only hosting,storage`.
+      #
+      # It used to be BEST-EFFORT (|| echo ::warning), and that hid a real prod outage (TM-704): the
+      # step 403'd on the serviceusage pre-check for firebasestorage.googleapis.com on EVERY deploy
+      # and was silently skipped, so the live rules stayed frozen at the manual TM-184 avatars-only
+      # deploy. event-images/ (TM-392) and venue-images/ (TM-519) never reached prod, so every admin
+      # event/venue image upload was denied (default-deny) — invisible behind a green deploy.
+      #
+      # So this now FAILS LOUD. The run goes red (hosting is already live, so nothing rolls back) with
+      # the exact remediation whenever the ruleset does not actually release — whether firebase-tools
+      # errors, or exits 0 without releasing. A stale-rules regression can no longer hide behind green.
+      - name: Deploy Firebase Storage rules
         run: |
-          npx --yes firebase-tools@15.22.0 deploy --only storage --project teammarhaba --non-interactive \
-            || echo "::warning::storage rules deploy skipped/failed — is Firebase Storage enabled (TM-184) and does gha-deployer have roles/firebaserules.admin (TM-192)? Not failing the deploy."
+          set -o pipefail
+          out="$(npx --yes firebase-tools@15.22.0 deploy --only storage --project teammarhaba --non-interactive 2>&1)" || true
+          printf '%s\n' "$out"
+          # firebase-tools prints "released rules storage.rules to firebase.storage" on a real release.
+          if ! printf '%s\n' "$out" | grep -q 'released rules'; then
+            echo "::error::Firebase Storage rules did NOT release — the live rules are STALE vs storage.rules, so admin event/venue image uploads will be DENIED (default-deny on unlisted paths; TM-704). Most likely gha-deployer lacks roles/serviceusage.serviceUsageConsumer (the firebasestorage.googleapis.com pre-check 403s) and/or roles/firebaserules.admin (TM-192). Grant both, then re-run Deploy."
+            exit 1
+          fi
+          echo "Firebase Storage rules released."
 
   backend:
     name: Deploy backend to Cloud Run
