@@ -203,3 +203,24 @@ export function venueSummaryLabel(venue = {}) {
   const city = cleanText(venue.city);
   return city ? `${name} — ${city}` : name;
 }
+
+/**
+ * Classify a venue's stored `photoPath` for rendering (TM-711) — the twin of `eventImageRef` in
+ * events-core.js (TM-708). The field holds EITHER a full http(s) URL (legacy / externally hosted) OR a
+ * Firebase Storage object path — which is what `uploadVenueImage` actually persists (e.g.
+ * `venue-images/7`). The photo was stored but rendered NOWHERE, so uploaded venue photos silently never
+ * showed. Returns:
+ *   - `null`                    → no photo; render the placeholder box.
+ *   - `{ kind: "url",  value }` → use directly as the `<img>` src.
+ *   - `{ kind: "path", value }` → resolve to a download URL before rendering (view calls
+ *                                 downloadUrlForPath).
+ * Pure + synchronous so it's unit-testable; the async path resolution lives in the view (admin-venues.js).
+ * @param {string|null|undefined} photoPath
+ * @returns {{kind:"url"|"path", value:string}|null}
+ */
+export function venueImageRef(photoPath) {
+  const path = (photoPath || "").trim();
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return { kind: "url", value: path };
+  return { kind: "path", value: path };
+}
