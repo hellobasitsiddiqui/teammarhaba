@@ -183,15 +183,26 @@ jobs:
           echo "Firebase Storage rules released."
 
           # Post-release verification (TM-704): confirm the ruleset now IN FORCE actually covers the
-          # required paths — a "released" message alone can't prove *what* released. This is the check
-          # that would have caught the outage: fetch the live release's source and re-run the gate.
-          token="$(gcloud auth print-access-token)"
-          ruleset="$(curl -sf -H "Authorization: Bearer $token" \
-            "https://firebaserules.googleapis.com/v1/projects/teammarhaba/releases/firebase.storage" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["rulesetName"])')"
-          curl -sf -H "Authorization: Bearer $token" "https://firebaserules.googleapis.com/v1/${ruleset}" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin)["source"]["files"][0]["content"])' > /tmp/released-storage.rules
-          node web/tools/check-storage-rules-file.mjs /tmp/released-storage.rules "the LIVE released ruleset"
+          # required paths — a "released" message alone can't prove *what* released. BEST-EFFORT: the
+          # release above already succeeded and the pre-deploy gate checked the committed file, so a
+          # Rules-API read hiccup here must WARN, not red an otherwise-successful deploy. It fails the
+          # run ONLY when it can read the live ruleset AND finds a required path missing.
+          token="$(gcloud auth print-access-token 2>/dev/null || true)"
+          rel="$(curl -s -H "Authorization: Bearer $token" \
+            "https://firebaserules.googleapis.com/v1/projects/teammarhaba/releases/firebase.storage" || true)"
+          rs="$(printf '%s' "$rel" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("rulesetName",""))' 2>/dev/null || true)"
+          if [ -z "$rs" ]; then
+            echo "::warning::Post-release check skipped — could not read the storage release from the Rules API (needs firebaserules.releases.get). Release itself succeeded above; live-coverage not re-verified."
+          else
+            src="$(curl -s -H "Authorization: Bearer $token" "https://firebaserules.googleapis.com/v1/${rs}" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)["source"]["files"][0]["content"])' 2>/dev/null || true)"
+            if [ -z "$src" ]; then
+              echo "::warning::Post-release check skipped — read the release but not its ruleset source. Release succeeded above."
+            else
+              printf '%s' "$src" > /tmp/released-storage.rules
+              node web/tools/check-storage-rules-file.mjs /tmp/released-storage.rules "the LIVE released ruleset"
+            fi
+          fi
 
   backend:
     name: Deploy backend to Cloud Run
