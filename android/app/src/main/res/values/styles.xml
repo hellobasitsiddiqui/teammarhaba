@@ -25,11 +25,15 @@
 
          - windowSplashScreenBackground: the TeamMarhaba teal, matching SplashScreen.backgroundColor
            in capacitor.config.json, so the very first frame is branded teal rather than white.
-         - windowSplashScreenAnimatedIcon: the TM-347 fix. Theme.SplashScreen DEFAULTS the centre icon
-           to @android:drawable/sym_def_app_icon — the generic Android placeholder, NOT the launcher
-           icon — which is why no BRANDED splash was ever recognisable on device. Pointing it at the
-           adaptive launcher icon renders the standard masked disc + TeamMarhaba mark on the teal
-           field (Android 12+ natively; pre-12 via the compat starting-window drawable).
+         - windowSplashScreenAnimatedIcon: a DEDICATED splash icon (@drawable/splash_icon, TM-664),
+           NOT @mipmap/ic_launcher. Theme.SplashScreen defaults the centre icon to the generic Android
+           placeholder (@android:drawable/sym_def_app_icon), so a branded icon must be set (TM-347).
+           But pointing it at the adaptive LAUNCHER icon regressed to a plain teal box (TM-664): the
+           launcher icon is a white ring on a teal background, yet the Android-12 splash discards the
+           icon's own background (painting windowSplashScreenBackground — the same teal — instead) AND
+           masks the icon to a tighter circle than the launcher, clipping the edge ring away. The
+           dedicated splash_icon is a foreground-only white ring on transparent, padded for the splash
+           safe zone, so it reads clearly as white-on-teal and is never clipped.
          - postSplashScreenTheme: the theme installSplashScreen() applies once launch completes.
 
          The legacy @drawable/splash bitmap stays as android:background purely for the pre-12
@@ -39,7 +43,7 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
         <item name="windowSplashScreenBackground">@color/splashBackground</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
