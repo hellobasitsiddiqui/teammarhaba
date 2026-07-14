@@ -251,6 +251,29 @@ function mapEventImageUploadError(err) {
   return new Error("Could not upload the event image. Please try again.");
 }
 
+/**
+ * Resolve a Firebase Storage object path (e.g. `event-images/123`) to a fresh download URL, for
+ * RENDERING images whose path — not URL — was persisted on the row (TM-708; event + venue images
+ * store the object path, not a rotating download URL). Returns null when Storage is unconfigured, the
+ * object is missing/unreadable, or the input is empty or already an http(s) URL (callers use those
+ * directly). Never throws — a resolution failure must degrade to the placeholder, not break the page.
+ * Tokens are minted per call (see avatar-cleanup.js), so always resolve at render time.
+ * @param {string|null|undefined} path a Storage object path.
+ * @returns {Promise<string|null>}
+ */
+export async function downloadUrlForPath(path) {
+  const p = (path || "").trim();
+  if (!p || /^https?:\/\//i.test(p)) return null;
+  const store = getStorageOrNull();
+  if (!store) return null;
+  try {
+    return await getDownloadURL(ref(store, p));
+  } catch (err) {
+    console.warn("[storage] could not resolve download URL for", p, err?.code ?? err);
+    return null;
+  }
+}
+
 // Venue photos (TM-519) ride the SAME house Storage pattern as event images: bytes go to
 // `venue-images/{venueId}` (admin-only per storage.rules), and only the OBJECT PATH is persisted on
 // the venue row via the admin API (`PATCH /api/v1/admin/venues/{id}` photoPath). The path is stored
