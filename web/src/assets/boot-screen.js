@@ -90,32 +90,59 @@ export function dismissBoot(win = globalThis) {
   return true;
 }
 
+// How long the boot screen stays up so the ring → smiley → two-line sequence (TM-705) can play. The
+// animation is ~3.1s; we hold a touch past it, then lift. Single tunable knob — lower it to shorten the
+// splash. Under prefers-reduced-motion there's no animation to see, so we skip the hold entirely.
+export const MIN_SHOW_MS = 3200;
+
 /**
- * Wire the boot screen: fill the tagline as early as possible, then dismiss the overlay at first app
- * paint. "First paint" = two animation frames after the DOM is ready — the first frame schedules the
- * initial layout/paint, the second runs once that paint is committed (the honest point the app surface
- * is visible), the same signal splash.js uses to hide the native splash. Deliberately NOT a fixed
- * timer, so we never hold the screen artificially or uncover a still-blank page.
+ * Wire the boot screen: dismiss the overlay once BOTH the app has painted AND the minimum-show window has
+ * elapsed, so the TM-705 launch animation is actually seen. "First paint" = two animation frames after the
+ * DOM is ready (the same signal splash.js uses). Gating on first-paint too means we still never uncover a
+ * still-blank page. Under prefers-reduced-motion the min-show is 0, restoring the original
+ * dismiss-at-first-paint behaviour (no artificial wait). No tagline write anymore — the two brand lines are
+ * static markup animated by CSS (showBootTagline/boot-core are retained but no longer wired here).
  *
  * @param {object} [win=globalThis] injectable window for tests.
  */
 export function initBootScreen(win = globalThis) {
-  // Fill the tagline immediately — this module runs before DOMContentLoaded (deferred module), so the
-  // quip is in place while the app's heavier modules finish booting underneath the overlay.
-  showBootTagline(win);
-
   const doc = win.document;
   if (!doc) return;
 
+  let reduce = false;
+  try {
+    reduce = Boolean(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch {
+    // matchMedia unavailable — treat as "motion allowed" and hold for the animation.
+  }
+  const minShow = reduce ? 0 : MIN_SHOW_MS;
+
+  let painted = false;
+  let minElapsed = minShow === 0;
+  const tryDismiss = () => {
+    if (painted && minElapsed) dismissBoot(win);
+  };
+
   const onPainted = () => {
     const raf = win.requestAnimationFrame || ((cb) => (win.setTimeout || setTimeout)(cb, 16));
-    raf(() => raf(() => dismissBoot(win)));
+    raf(() => raf(() => {
+      painted = true;
+      tryDismiss();
+    }));
   };
 
   if (doc.readyState === "complete" || doc.readyState === "interactive") {
     onPainted();
   } else {
     doc.addEventListener("DOMContentLoaded", onPainted, { once: true });
+  }
+
+  if (minShow > 0) {
+    const setTimer = win.setTimeout || setTimeout;
+    setTimer(() => {
+      minElapsed = true;
+      tryDismiss();
+    }, minShow);
   }
 }
 

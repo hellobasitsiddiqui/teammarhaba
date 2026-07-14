@@ -41,47 +41,31 @@
     <link rel="stylesheet" href="/assets/membership-subscribe.css" />
 </head>
 <body>
-    <!-- Web boot screen (TM-381): a lightweight Paper-themed loading beat shown between the native-splash
-         handoff and the SPA's first paint, greeting each launch with a random playful tagline. It's the
-         FIRST element in <body> and styled (styles.css "Web boot screen") to fill the viewport in the
-         native splash's teal from frame one, so there's no white/unstyled flash while the app's modules
-         load underneath. boot-screen.js fills #boot-tagline (a random pick that avoids an immediate
-         repeat — boot-core.js) and lifts the whole overlay at first app paint (fading to the paper app
-         beneath: teal → paper); it NEVER delays readiness (no artificial wait — if the SPA is
-         cached-instant it just flashes briefly or is skipped). The static wordmark + cup keep it
-         complete-looking even before the tagline fades in. aria-hidden: it's transient loading chrome
-         removed within ~2 frames, so it's kept out of the a11y tree (like a splash screen). The
-         Android/iOS WebView inherits it automatically (same index.html), so one implementation covers
-         web, mobile-web and both native shells. -->
+    <!-- Web boot screen (TM-381, animated in TM-705): a Paper-themed loading beat between the native-splash
+         handoff and the SPA's first paint. It's the FIRST element in <body> and styled (styles.css "Web boot
+         screen") to fill the viewport in the native splash's teal from frame one, so there's no white/unstyled
+         flash while the app's modules load underneath. The white ring (continuing the native-splash ring,
+         TM-664) draws in, eyes pop and a smile sweeps across, then "Find your people" → "Complete your circle"
+         before boot-screen.js lifts the overlay (teal → paper). Unlike the original, boot-screen.js holds it a
+         short minimum so the sequence is seen (reduced-motion opts out — see boot-screen.js). aria-hidden:
+         transient loading chrome kept out of the a11y tree. The Android/iOS WebView inherits it automatically
+         (same index.html), so one implementation covers web, mobile-web and both native shells. -->
     <div id="boot-screen" class="boot-screen" aria-hidden="true">
         <div class="boot-screen-inner">
-            <svg class="boot-mark" viewBox="0 0 48 48" width="52" height="52" fill="none"
-                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+            <!-- Ring → smiley (TM-705): white ring on the teal field (matches the native splash icon), then
+                 eyes + smile animate in. pathLength=100 normalises the draw-on for ring and smile. -->
+            <svg class="boot-mark" viewBox="0 0 240 240" width="124" height="124"
                  aria-hidden="true" focusable="false">
-                <!-- a little hand-drawn cup + saucer with rising steam — nods to the coffee/tea taglines -->
-                <path d="M12 20h20v6a8 8 0 0 1-8 8h-4a8 8 0 0 1-8-8z" />
-                <path d="M32 22h3.5a3.5 3.5 0 0 1 0 7H32" />
-                <path d="M10 38h28" />
-                <path class="boot-steam" d="M19 14c-1.6-1.6-1.6-3.4 0-5" />
-                <path class="boot-steam" d="M25 14c-1.6-1.6-1.6-3.4 0-5" />
+                <circle class="boot-ring" cx="120" cy="120" r="66" pathLength="100" />
+                <circle class="boot-eye boot-eye-l" cx="98" cy="106" r="8" />
+                <circle class="boot-eye boot-eye-r" cx="142" cy="106" r="8" />
+                <path class="boot-smile" d="M96 138 Q120 166 144 138" pathLength="100" />
             </svg>
-            <p class="boot-brand">Circle</p>
-            <!-- Accent underline-squiggle under the wordmark (paper-splash lockup). Decorative,
-                 aria-hidden; inks in --accent via `stroke="currentColor"` on the .boot-squiggle color. -->
-            <svg class="boot-squiggle" viewBox="0 0 168 12" preserveAspectRatio="none" fill="none"
-                 aria-hidden="true" focusable="false">
-                <path d="M4 8C26 3 44 3 64 6.5s44 5 64-.5 26-3 36 1.5" stroke="currentColor"
-                      stroke-width="3.4" stroke-linecap="round" />
-            </svg>
-            <!-- Tagline slot: filled by boot-screen.js from the single configurable list (boot-core.js);
-                 empty in the static HTML and faded in on [data-ready] so the swap never reads as a flash.
-                 The soft accent highlighter is a background gradient on the <p> itself (styles.css), so it
-                 wraps the WHOLE tagline whatever text boot-screen.js writes in (via textContent) — no words
-                 are hardcoded here and the JS text-write is never clobbered. -->
-            <p id="boot-tagline" class="boot-tagline"></p>
-            <!-- 3-dot progress beat (paper-splash): the middle dot is the accent + offset ink shadow. -->
-            <div class="boot-beat" aria-hidden="true">
-                <i></i><i class="boot-beat-on"></i><i></i>
+            <!-- Two brand lines that swap in the same slot: "Find your people" fades in then out, then
+                 "Complete your circle" fades in and holds (it nods to the ring motif + the Circle name). -->
+            <div class="boot-words" aria-hidden="true">
+                <p class="boot-word boot-word-1">Find your people</p>
+                <p class="boot-word boot-word-2">Complete your circle</p>
             </div>
         </div>
     </div>
