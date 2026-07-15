@@ -91,3 +91,27 @@ export function requiresImageContentType(condition) {
   return /isPublicRasterImage\s*\(\s*\)/.test(c)
     || /request\.resource\.contentType\.matches\s*\(/.test(c);
 }
+
+/**
+ * The byte size cap a write-rule condition enforces via `request.resource.size < <N>`, or null when
+ * the rule carries no size guard. Understands the committed rule's `5 * 1024 * 1024` arithmetic form
+ * (evaluated) as well as a plain integer literal, so the caller can assert the exact 5 MB cap rather
+ * than just its presence. This backs the `denyOversizeUpload` property: a venue photo above the cap
+ * must be refused at the rules boundary (the client mirror in storage.js is only a fast pre-check).
+ *
+ * @param {string} condition a condition from {@link writeRuleCondition}.
+ * @returns {number|null} the cap in bytes, or null if the condition has no `request.resource.size <`.
+ */
+export function sizeCapBytes(condition) {
+  const c = String(condition || "");
+  // `request.resource.size < <expr>` where <expr> is either `A * B * C…` or a bare number, up to the
+  // next boundary (&&, end of string). The committed rule is `request.resource.size < 5 * 1024 * 1024`.
+  const m = /request\.resource\.size\s*<\s*([0-9]+(?:\s*\*\s*[0-9]+)*)/.exec(c);
+  if (!m) return null;
+  // Evaluate the product of the integer factors — no operators other than `*` are allowed through the
+  // regex above, so this is a safe arithmetic fold, not an eval of arbitrary text.
+  return m[1]
+    .split("*")
+    .map((n) => Number(n.trim()))
+    .reduce((a, b) => a * b, 1);
+}

@@ -154,3 +154,59 @@ export function formatJoined(iso, now = new Date()) {
   const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
   return `${month} ${d.getFullYear()}`;
 }
+
+/**
+ * TM-752: the profile phone field's character pattern (^\+?[0-9 ()./-]{3,32}$) validates the allowed
+ * CHARACTERS but not the digit COUNT, so "+", "12" and "()." pass as "valid". A real phone number has
+ * 7–15 digits (national minimum ~7; E.164 maximum 15). Returns a user-facing error for an out-of-range
+ * digit count, or "" when acceptable. Empty/blank is allowed (blank = leave the field unchanged).
+ * @param {string} value the raw phone input.
+ * @returns {string} an error message, or "" if acceptable.
+ */
+export function phoneFormatError(value) {
+  const v = String(value ?? "").trim();
+  if (v === "") return "";
+  const digits = (v.match(/[0-9]/g) || []).length;
+  if (digits < 7 || digits > 15) return "Enter a valid phone number (7 to 15 digits).";
+  return "";
+}
+
+/** The valid notification-preference values (TM-162) — shared by the Profile form + its validator. */
+export const NOTIFICATION_PREFS = new Set(["EMAIL", "PUSH", "BOTH"]);
+
+/**
+ * Validate one Profile field's raw value against its rules (TM-162 / TM-752). Pure — returns an error
+ * message, or "" if valid. Empty is always allowed (blank = leave the field unchanged). Extracted from
+ * profile.js so the WHOLE rule is guarded — including that the phone field gets the 7–15 digit check
+ * (phoneFormatError) applied ON TOP of its character-pattern (TM-752), and that the check is
+ * phone-only. profile.js's validateField is now a thin delegate to this.
+ * @param {{key:string,type?:string,min?:number,max?:number,maxLength?:number,pattern?:string}} field
+ * @param {string} raw the raw input value.
+ * @returns {string} an error message, or "" if valid.
+ */
+export function validateProfileField(field, raw) {
+  const value = String(raw ?? "").trim();
+  if (value === "") return "";
+  if (field.type === "number") {
+    const n = Number(value);
+    if (!Number.isInteger(n)) return "Enter a whole number.";
+    if (field.min != null && n < field.min) return `Must be ${field.min} or more.`;
+    if (field.max != null && n > field.max) return `Must be ${field.max} or less.`;
+    return "";
+  }
+  if (field.type === "select") {
+    if (field.key === "notificationPref" && !NOTIFICATION_PREFS.has(value)) return "Choose a valid option.";
+    return "";
+  }
+  if (field.maxLength != null && value.length > field.maxLength) {
+    return `Must be ${field.maxLength} characters or fewer.`;
+  }
+  if (field.pattern && !new RegExp(field.pattern).test(value)) {
+    return "Format looks invalid.";
+  }
+  if (field.key === "phone") {
+    const phoneErr = phoneFormatError(value);
+    if (phoneErr) return phoneErr;
+  }
+  return "";
+}

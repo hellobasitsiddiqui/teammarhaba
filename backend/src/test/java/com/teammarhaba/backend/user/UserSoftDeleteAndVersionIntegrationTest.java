@@ -4,12 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditEvent;
+import com.teammarhaba.backend.audit.AuditRepository;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.membership.MembershipTier;
 import com.teammarhaba.backend.membership.Subscription;
 import com.teammarhaba.backend.membership.SubscriptionRepository;
 import com.teammarhaba.backend.membership.SubscriptionStatus;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -29,6 +33,9 @@ class UserSoftDeleteAndVersionIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private SubscriptionRepository subscriptions;
+
+    @Autowired
+    private AuditRepository audit;
 
     private static VerifiedUser caller(String uid, String email) {
         return new VerifiedUser(uid, email);
@@ -107,6 +114,42 @@ class UserSoftDeleteAndVersionIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(second.getId()).isEqualTo(first.getId()); // same row reactivated, not a duplicate
         assertThat(second.isDeleted()).isFalse();
+    }
+
+    @Test
+    void provision_reactivatesSoftDeletedAccountOnNextSignInNotDuplicate() {
+        // TM-738 P1 (auth): a returning user whose account was soft-deleted must be REACTIVATED on their
+        // next sign-in (provision runs on every authenticated request), never a second row inserted.
+        // Stronger than the sibling above: this pins BOTH invariants the reactivate path guarantees —
+        // (1) exactly ONE users row ever exists for the uid across the whole delete→re-auth cycle (the
+        // firebase_uid unique key would otherwise be an integrity breach), and (2) the audit trail records
+        // the DISTINCT reactivate action (ACCOUNT_REACTIVATED), not a fresh ACCOUNT_PROVISIONED — which is
+        // exactly how a "returning user reactivated" is told apart from "brand-new user created".
+        String uid = "uid-reactivate-audit";
+        User first = userService.provision(caller(uid, "reactivate@example.com")); // first sight -> INSERT
+        userService.softDelete(uid); // tombstone
+        assertThat(users.findByFirebaseUid(uid)).isEmpty(); // hidden from normal queries
+
+        User reAuthed = userService.provision(caller(uid, "reactivate@example.com")); // returns -> reactivate
+
+        // Same row brought back, not a duplicate...
+        assertThat(reAuthed.getId()).isEqualTo(first.getId());
+        assertThat(reAuthed.isDeleted()).isFalse();
+        assertThat(reAuthed.getDeletedAt()).isNull();
+        // ...and there is exactly ONE row for this uid across ALL rows (including any tombstoned ones),
+        // proving re-auth reactivated rather than inserting a second account.
+        assertThat(users.findAll().stream().filter(u -> uid.equals(u.getFirebaseUid())).count())
+                .isEqualTo(1L);
+
+        // The audit trail names the reactivate distinctly: newest-first it is REACTIVATED, then
+        // SOFT_DELETED, then the original PROVISIONED — a returning user, NOT a re-created one (which
+        // would show a second ACCOUNT_PROVISIONED instead).
+        List<AuditEvent> history = audit.findByTargetTypeAndTargetIdOrderByCreatedAtDesc("User", uid);
+        assertThat(history).extracting(AuditEvent::getAction)
+                .containsExactly(
+                        AuditAction.ACCOUNT_REACTIVATED,
+                        AuditAction.ACCOUNT_SOFT_DELETED,
+                        AuditAction.ACCOUNT_PROVISIONED);
     }
 
     @Test

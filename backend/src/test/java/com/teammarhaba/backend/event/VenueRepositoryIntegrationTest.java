@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.user.User;
@@ -12,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 /**
  * Verifies {@link VenueRepository#search} against a real Postgres (Testcontainers).
@@ -29,6 +32,9 @@ class VenueRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private UserRepository users;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private Long creatorId;
 
@@ -81,5 +87,71 @@ class VenueRepositoryIntegrationTest extends AbstractIntegrationTest {
                 .extracting(Venue::getId)
                 .contains(byName.getId(), byCity.getId())
                 .doesNotContain(unrelated.getId());
+    }
+
+    // TM-738 P1 (venues) — two TM-114 aggregate-convention properties on the Venue entity that the
+    // API/service tests don't reach directly: the @SQLRestriction soft-delete filter and the @Version
+    // optimistic lock. Characterization: both are already enforced, so these PASS.
+
+    /**
+     * {@code searchExcludesSoftDeletedVenue} — the entity's {@code @SQLRestriction("deleted_at is
+     * null")} must hide a tombstoned venue from {@code search} (and every normal query), independent
+     * of the {@code active} flag. This is a security/data-integrity negative: a soft-deleted venue is
+     * retired for good and must never resurface in the admin listing or the event-create picker, even
+     * with {@code activeOnly = false} (which still returns deactivated-but-not-deleted rows). Mirrors
+     * {@code UserSoftDeleteAndVersionIntegrationTest.softDeleteHidesFromNormalQueries…}.
+     */
+    @Test
+    void searchExcludesSoftDeletedVenue() {
+        Venue visible = seedVenue("Soft-Delete Probe VISIBLE SD811", "London", true);
+        Venue tombstoned = seedVenue("Soft-Delete Probe TOMBSTONED SD811", "London", true);
+
+        // Tombstone one venue by stamping deleted_at directly (the entity intentionally exposes no
+        // soft-delete setter — venues are retired via `active`, not hard-deleted). The house test
+        // idiom for tombstoning a row whose entity has no deletedAt setter is a native update (mirrors
+        // e.g. EventAttendanceRepositoryIntegrationTest's `update users set deleted_at = now()`); the
+        // entity's @SQLRestriction then excludes it from every read below.
+        jdbc.update("update venues set deleted_at = now() where id = ?", tombstoned.getId());
+
+        // Even the full-inventory search (activeOnly = false, so it would otherwise include
+        // deactivated rows) must NOT return the soft-deleted venue — only the visible one.
+        Page<Venue> page = venues.search("SD811", false, PageRequest.of(0, 100));
+        assertThat(page.getContent())
+                .extracting(Venue::getId)
+                .contains(visible.getId())
+                .doesNotContain(tombstoned.getId());
+
+        // And a direct findById of the tombstoned row is empty too — the restriction is global, not
+        // just on the custom search query.
+        assertThat(venues.findById(tombstoned.getId())).isEmpty();
+    }
+
+    /**
+     * {@code concurrentStaleUpdateReturns409} — the {@code @Version} column gives the venue the house
+     * optimistic-lock guarantee: two writers that both loaded the same version can't silently clobber
+     * each other. The first write wins (bumps the version); the second, now stale, fails the version
+     * check with {@link ObjectOptimisticLockingFailureException} — which
+     * {@code GlobalExceptionHandler.handleOptimisticLock} maps to an HTTP {@code 409 Conflict} at the
+     * API boundary. Mirrors {@code UserSoftDeleteAndVersionIntegrationTest.staleUpdateFailsWith…}.
+     */
+    @Test
+    void concurrentStaleUpdateReturns409() {
+        Venue seeded = seedVenue("Optimistic Lock Probe OL811", "London", true);
+        Long id = seeded.getId();
+
+        // Two independent loads (each detached) ⇒ two copies at the same version.
+        Venue stale = venues.findById(id).orElseThrow();
+        Venue fresh = venues.findById(id).orElseThrow();
+
+        // First writer wins: bumps version 0 -> 1.
+        fresh.setName("first writer wins");
+        venues.saveAndFlush(fresh);
+        assertThat(venues.findById(id).orElseThrow().getVersion()).isGreaterThan(stale.getVersion());
+
+        // Second writer is now stale — its version no longer matches, so the write is rejected rather
+        // than overwriting the first writer's change. This is the exception the API translates to 409.
+        stale.setName("second writer is stale");
+        assertThatThrownBy(() -> venues.saveAndFlush(stale))
+                .isInstanceOf(ObjectOptimisticLockingFailureException.class);
     }
 }

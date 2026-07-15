@@ -18,7 +18,17 @@ import {
   profileStrength,
   publicSummary,
   formatJoined,
+  phoneFormatError,
+  validateProfileField,
 } from "../src/assets/profile-core.js";
+
+// The real Profile field shapes profile.js feeds validateProfileField (TM-162) — so these tests
+// pin the ACTUAL validation path (char-pattern + digit guard together) and the wiring, not just the
+// phoneFormatError helper in isolation.
+const PHONE_FIELD = { key: "phone", type: "tel", maxLength: 32, pattern: "^\\+?[0-9 ()./-]{3,32}$" };
+const CITY_FIELD = { key: "city", type: "text", maxLength: 120 };
+const AGE_FIELD = { key: "age", type: "number", min: 13, max: 120 };
+const NOTIF_FIELD = { key: "notificationPref", type: "select" };
 
 // A realistic /me payload (real MeResponse shape): firstName/lastName/city/age/phone at the top
 // level, plus the Firebase-owned `accountState` block. That block mirrors the actual backend
@@ -158,4 +168,60 @@ test("formatJoined returns '' for missing, invalid and future dates", () => {
   assert.equal(formatJoined("not-a-date", now), "");
   assert.equal(formatJoined("2027-01-01T00:00:00Z", now), "");
   assert.equal(formatJoined("2026-01-15T00:00:00Z", now), "Jan 2026");
+});
+
+// TM-752: the profile phone field's character pattern (^\+?[0-9 ()./-]{3,32}$) checks allowed
+// characters but NOT digit count, so "+", "12", "()." pass as valid. phoneFormatError adds the
+// missing digit-count guard (a real number has 7–15 digits: national min ~7, E.164 max 15).
+test("phoneFormatError: rejects too-few / digit-less phone strings (TM-752)", () => {
+  assert.notEqual(phoneFormatError("12"), "");         // 2 digits
+  assert.notEqual(phoneFormatError("+"), "");          // 0 digits
+  assert.notEqual(phoneFormatError("()."), "");        // 0 digits, previously passed the pattern
+  assert.notEqual(phoneFormatError("123456"), "");     // 6 digits, one short
+  assert.notEqual(phoneFormatError("12345678901234567"), ""); // 17 digits, over E.164 max
+});
+
+test("phoneFormatError: accepts plausible numbers (7–15 digits, formatting allowed)", () => {
+  assert.equal(phoneFormatError("+447700900123"), "");   // 12 digits
+  assert.equal(phoneFormatError("020 7946 0000"), "");    // 11 digits
+  assert.equal(phoneFormatError("+1 (555) 123-4567"), ""); // 11 digits
+  assert.equal(phoneFormatError("1234567"), "");           // 7 digits (lower boundary)
+  assert.equal(phoneFormatError("123456789012345"), "");   // 15 digits (upper boundary)
+});
+
+test("phoneFormatError: empty/blank is allowed (blank = leave unchanged)", () => {
+  assert.equal(phoneFormatError(""), "");
+  assert.equal(phoneFormatError("   "), "");
+  assert.equal(phoneFormatError(null), "");
+  assert.equal(phoneFormatError(undefined), "");
+});
+
+test("validateProfileField: the phone field applies BOTH the char-pattern AND the 7–15 digit guard (TM-752)", () => {
+  assert.notEqual(validateProfileField(PHONE_FIELD, "12"), "");          // too few digits
+  assert.notEqual(validateProfileField(PHONE_FIELD, "+"), "");           // no digits
+  assert.notEqual(validateProfileField(PHONE_FIELD, "()."), "");         // no digits (passed the pattern before)
+  assert.notEqual(validateProfileField(PHONE_FIELD, "abc1234567"), "");  // letters → rejected by the char-pattern
+  assert.equal(validateProfileField(PHONE_FIELD, "+447700900123"), "");  // valid
+  assert.equal(validateProfileField(PHONE_FIELD, "020 7946 0000"), "");  // valid, formatted
+});
+
+test("validateProfileField: the phone digit guard is phone-ONLY — it must not leak to other fields (TM-752 wiring)", () => {
+  assert.equal(validateProfileField(CITY_FIELD, "12"), ""); // '12' is a fine free-text city value
+});
+
+test("validateProfileField: number field enforces integer + min/max (extraction preserves behaviour)", () => {
+  assert.notEqual(validateProfileField(AGE_FIELD, "12"), "");    // below min 13
+  assert.notEqual(validateProfileField(AGE_FIELD, "12.5"), "");  // not an integer
+  assert.notEqual(validateProfileField(AGE_FIELD, "200"), "");   // above max 120
+  assert.equal(validateProfileField(AGE_FIELD, "29"), "");
+});
+
+test("validateProfileField: notificationPref select rejects an unknown option, accepts a valid one", () => {
+  assert.notEqual(validateProfileField(NOTIF_FIELD, "SMOKE"), "");
+  assert.equal(validateProfileField(NOTIF_FIELD, "BOTH"), "");
+});
+
+test("validateProfileField: empty/blank is always allowed (blank = leave unchanged)", () => {
+  assert.equal(validateProfileField(PHONE_FIELD, ""), "");
+  assert.equal(validateProfileField(AGE_FIELD, "   "), "");
 });

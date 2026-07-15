@@ -150,6 +150,41 @@ test("the CONFIRM flow reflects the confirmed RSVP and stays non-throwing on fai
   );
 });
 
+// --- a failed checkout START (402 / 500) surfaces inline and never white-screens (TM-738 P1, TM-760) ---
+//
+// checkoutPayStartSurfaces402_500InlineReEnablesPay: startPayment POSTs api.checkout to open the order
+// server-side; a 402 (payment-required error) / 500 from that call must render an inline, NON-throwing
+// status on the Pay mount (never white-screen the checkout screen). Characterization of the EXISTING
+// startPayment catch — the pure lifecycle/timeout machine is behaviourally tested in
+// payment-submit-core.test.mjs; here the shell wiring is pinned by source guards, like the TM-639/642 ones.
+
+test("a failed checkout START surfaces an inline retry status and never throws out of the screen (TM-760)", () => {
+  const payFn = SRC.slice(SRC.indexOf("async function startPayment"), SRC.indexOf("async function mountRevolutCard"));
+  // The checkout-start POST is wrapped in try/catch so a 402/500 cannot propagate out of the screen.
+  assert.match(
+    payFn,
+    /try\s*\{[\s\S]{0,120}await\s+api\.checkout\(event\?\.id\)[\s\S]{0,80}\}\s*catch\s*\(err\)\s*\{/,
+    "startPayment wraps api.checkout in try/catch so a 402/500 never white-screens the checkout screen",
+  );
+  // The catch surfaces an inline retry status via the Pay mount's aria-live line, then returns (no throw).
+  assert.match(
+    payFn,
+    /catch\s*\(err\)\s*\{[\s\S]{0,220}setPayStatus\(mount,\s*"Couldn't start payment\. Please try again\."\)[\s\S]{0,40}return;/,
+    "a checkout-start failure sets an inline 'try again' status on the mount and returns without throwing",
+  );
+});
+
+test("the Pay button re-enables after a declined charge so the buyer can retry (TM-760)", () => {
+  // The "ReEnablesPay" half: once the card widget is mounted, a declined/errored charge re-enables the Pay
+  // button (the ERROR branch of the TM-642 lifecycle machine) so the buyer can fix the card and retry —
+  // rather than the button sitting disabled forever.
+  assert.match(
+    SRC,
+    /case\s+PAYMENT_SUBMIT_STATE\.ERROR:[\s\S]{0,300}payBtn\.disabled\s*=\s*false/,
+    "a declined/errored charge must re-enable the Pay button for a retry",
+  );
+});
+
 // --- confirmation copy gated on the REAL order status + PENDING resume (TM-743 / TM-744) -----------
 //
 // REGRESSION (TM-743): both the PAY (startPayment) and CONFIRM (startConfirm) flows keyed their
