@@ -170,3 +170,43 @@ export function phoneFormatError(value) {
   if (digits < 7 || digits > 15) return "Enter a valid phone number (7 to 15 digits).";
   return "";
 }
+
+/** The valid notification-preference values (TM-162) — shared by the Profile form + its validator. */
+export const NOTIFICATION_PREFS = new Set(["EMAIL", "PUSH", "BOTH"]);
+
+/**
+ * Validate one Profile field's raw value against its rules (TM-162 / TM-752). Pure — returns an error
+ * message, or "" if valid. Empty is always allowed (blank = leave the field unchanged). Extracted from
+ * profile.js so the WHOLE rule is guarded — including that the phone field gets the 7–15 digit check
+ * (phoneFormatError) applied ON TOP of its character-pattern (TM-752), and that the check is
+ * phone-only. profile.js's validateField is now a thin delegate to this.
+ * @param {{key:string,type?:string,min?:number,max?:number,maxLength?:number,pattern?:string}} field
+ * @param {string} raw the raw input value.
+ * @returns {string} an error message, or "" if valid.
+ */
+export function validateProfileField(field, raw) {
+  const value = String(raw ?? "").trim();
+  if (value === "") return "";
+  if (field.type === "number") {
+    const n = Number(value);
+    if (!Number.isInteger(n)) return "Enter a whole number.";
+    if (field.min != null && n < field.min) return `Must be ${field.min} or more.`;
+    if (field.max != null && n > field.max) return `Must be ${field.max} or less.`;
+    return "";
+  }
+  if (field.type === "select") {
+    if (field.key === "notificationPref" && !NOTIFICATION_PREFS.has(value)) return "Choose a valid option.";
+    return "";
+  }
+  if (field.maxLength != null && value.length > field.maxLength) {
+    return `Must be ${field.maxLength} characters or fewer.`;
+  }
+  if (field.pattern && !new RegExp(field.pattern).test(value)) {
+    return "Format looks invalid.";
+  }
+  if (field.key === "phone") {
+    const phoneErr = phoneFormatError(value);
+    if (phoneErr) return phoneErr;
+  }
+  return "";
+}

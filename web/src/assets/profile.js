@@ -34,7 +34,8 @@ import {
   identitySummary,
   profileStrength,
   publicSummary,
-  phoneFormatError,
+  validateProfileField,
+  NOTIFICATION_PREFS,
 } from "./profile-core.js";
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
@@ -98,7 +99,7 @@ const FIELDS = [
   },
 ];
 
-const NOTIFICATION_VALUES = new Set(["EMAIL", "PUSH", "BOTH"]);
+// Notification-pref values live in profile-core.js (NOTIFICATION_PREFS) — shared with the validator.
 
 // Best-guess fillers for the timezone/locale fields (TM-167 union), so a user can one-tap their
 // current values instead of typing an IANA/BCP-47 string. Both fail soft to "" if the browser
@@ -134,32 +135,10 @@ const $ = (id) => document.getElementById(id);
  * what the user actually typed so we never block clearing a field.
  */
 function validateField(field, raw) {
-  const value = (raw ?? "").trim();
-  if (value === "") return "";
-  if (field.type === "number") {
-    const n = Number(value);
-    if (!Number.isInteger(n)) return "Enter a whole number.";
-    if (field.min != null && n < field.min) return `Must be ${field.min} or more.`;
-    if (field.max != null && n > field.max) return `Must be ${field.max} or less.`;
-    return "";
-  }
-  if (field.type === "select") {
-    if (field.key === "notificationPref" && !NOTIFICATION_VALUES.has(value)) return "Choose a valid option.";
-    return "";
-  }
-  if (field.maxLength != null && value.length > field.maxLength) {
-    return `Must be ${field.maxLength} characters or fewer.`;
-  }
-  if (field.pattern && !new RegExp(field.pattern).test(value)) {
-    return "Format looks invalid.";
-  }
-  // TM-752: the phone character-pattern above allows too-short / digit-less values (e.g. "+", "12",
-  // "()."); require a plausible digit count (7–15) on top of it. Pure rule, unit-tested in profile-core.
-  if (field.key === "phone") {
-    const phoneErr = phoneFormatError(value);
-    if (phoneErr) return phoneErr;
-  }
-  return "";
+  // Thin delegate to the pure, unit-tested rule in profile-core.js (TM-162/TM-752). Keeping the logic
+  // there means the behaviour — incl. the phone 7–15 digit guard on top of the char-pattern — is
+  // guarded by tests, not just this DOM shell.
+  return validateProfileField(field, raw);
 }
 
 /** Show/clear the inline error message for a field and reflect it on the input for a11y. */
@@ -200,7 +179,7 @@ function fillForm(profile) {
     const input = shell.fields.get(field.key).input;
     const value = profile?.[field.key];
     if (field.type === "select") {
-      input.value = NOTIFICATION_VALUES.has(value) ? value : "EMAIL";
+      input.value = NOTIFICATION_PREFS.has(value) ? value : "EMAIL";
     } else {
       input.value = value == null ? "" : String(value);
     }
