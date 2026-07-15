@@ -166,3 +166,53 @@ test("no geolocation API anywhere degrades to 'unavailable' without throwing", a
   const res2 = await getCurrentPosition({}, {});
   assert.equal(res2.status, "unavailable");
 });
+
+// --- P2 edge coverage (TM-762): message-string classification + coarse-only grant ----------
+//
+// Both branches below exercise EXISTING behaviour the sibling tests above leave uncovered — the
+// Capacitor error shape (a thrown Error with a message string but NO numeric W3C `.code`) and the
+// Android coarse-only permission grant. They characterize what the helper already does; no source
+// change is expected (they pass green as-is).
+
+// The W3C-code path is well-covered (code 1/3), and the native path proves a *denied*-message throw
+// maps to "denied". But classifyError also has a message-STRING timeout branch and a catch-all
+// "unavailable" fallback for an unrecognised message — the Capacitor plugin rejects with a bare
+// Error (no numeric code), so these are the branches that actually fire on native. Assert both,
+// and confirm the thrown message is surfaced (never swallowed) in the tagged result.
+test("native: a thrown timeout MESSAGE (no numeric code) classifies as 'timeout'", async () => {
+  const plugin = {
+    checkPermissions: async () => ({ location: "granted" }),
+    getCurrentPosition: async () => {
+      throw new Error("Location request timed out");
+    },
+  };
+  const res = await getCurrentPosition({}, nativeWin(plugin));
+  assert.equal(res.status, "timeout");
+  assert.match(res.error, /timed out/i, "the original failure message is carried through, not swallowed");
+});
+
+test("native: an unrecognised failure MESSAGE (no numeric code) falls back to 'unavailable'", async () => {
+  const plugin = {
+    checkPermissions: async () => ({ location: "granted" }),
+    getCurrentPosition: async () => {
+      throw new Error("Position unavailable");
+    },
+  };
+  const res = await getCurrentPosition({}, nativeWin(plugin));
+  // Not "denied"/"permission" and not "timed out"/"timeout" → the safe catch-all.
+  assert.equal(res.status, "unavailable");
+});
+
+// Android can grant COARSE location only (fine denied). ensureNativePermission reads
+// `status.location || status.coarseLocation`, so a status that reports coarseLocation="granted"
+// with no `location` field must still be treated as granted and proceed to a fix. The sibling
+// native tests only ever supply `location`, so the coarse-only fallback is otherwise untested.
+test("native: a COARSE-only permission grant (no fine `location`) still proceeds to a fix", async () => {
+  const plugin = {
+    checkPermissions: async () => ({ coarseLocation: "granted" }), // no `location` key at all
+    getCurrentPosition: async () => okPosition,
+  };
+  const res = await getCurrentPosition({}, nativeWin(plugin));
+  assert.equal(res.status, "ok");
+  assert.deepEqual(res.coords, { latitude: 51.5, longitude: -0.12, accuracy: 25 });
+});

@@ -106,6 +106,34 @@ test("rollup: samples outside the Day window are dropped", () => {
   );
 });
 
+// P2 edge coverage (TM-762): the EXACT window-inclusion boundary. The test above only proves a
+// sample two whole days old is dropped — far outside. The interesting boundary is the OLDEST bucket
+// still on the axis: a sample in `first` (24h − 15min ago) must land in the first bar, and one just
+// one bucket earlier (`first − BUCKET_MS`) must be dropped. This pins the `key < first` guard so a
+// future off-by-one can't silently start dropping the oldest visible window (or admitting an
+// off-axis sample that would land in no bar). Characterizes existing behaviour → passes green.
+test("rollup: the oldest on-axis window is inclusive; one bucket earlier is dropped (day-window edge)", () => {
+  const starts = dayBucketStarts(NOW);
+  const first = starts[0]; // oldest bucket-start still on the axis (24h − 15min ago)
+
+  // A sample landing squarely in the first (oldest) window — mid-bucket so bucketStart(ts) === first.
+  const onEdge = { ts: first + 60_000, latencyMs: 80, ok: true };
+  // A sample one whole bucket earlier — just off the axis, must be dropped.
+  const justBefore = { ts: first - BUCKET_MS + 60_000, latencyMs: 80, ok: true };
+
+  const buckets = rollup([onEdge, justBefore], { nowMs: NOW });
+
+  assert.equal(buckets[0].start, first, "the first bar is the oldest on-axis window");
+  assert.equal(buckets[0].count, 1, "the on-edge sample is included in the oldest window");
+  assert.equal(buckets[0].hasData, true);
+  assert.equal(buckets[0].avgLatencyMs, 80);
+
+  // The just-before sample landed in no bar at all — total across every bucket is exactly the one
+  // on-edge sample, proving the earlier one was dropped rather than folded into some window.
+  const total = buckets.reduce((n, b) => n + b.count, 0);
+  assert.equal(total, 1, "the sample one bucket before the axis is dropped entirely");
+});
+
 test("latencyBaseline: median of non-empty buckets (a single spike doesn't drag it up)", () => {
   const buckets = [
     { avgLatencyMs: 100 },
