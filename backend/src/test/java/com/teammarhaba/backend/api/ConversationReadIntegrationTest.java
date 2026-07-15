@@ -599,6 +599,13 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         messages.save(Message.fromSystem(kicked, "k1", null));
         messages.save(Message.fromSystem(kicked, "k2", null));
 
+        // A thread the caller SELF-LEFT (LEFT, TM-471), with unread messages → excluded entirely (TM-730):
+        // like a kicked one it is hidden and the read gate denies it, so its unread could never be cleared.
+        Long left = newBroadcastThread();
+        addMember(left, userId, MemberRole.MEMBER, MuteState.LEFT);
+        messages.save(Message.fromSystem(left, "l1", null));
+        messages.save(Message.fromSystem(left, "l2", null));
+
         // A thread the caller is NOT a member of → never counted.
         Long foreign = newBroadcastThread();
         addMember(foreign, newUser("conv-unread-total-other-" + UUID.randomUUID()), MemberRole.MEMBER, MuteState.NONE);
@@ -606,6 +613,28 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
 
         // Only the never-read thread's three messages count.
         assertThat(unreadTotalOf(uid)).isEqualTo(3);
+    }
+
+    @Test
+    void unreadTotalExcludesSelfLeftThreadsTheMemberCanNeverClear() throws Exception {
+        // TM-730: a LEFT (self-left) thread's unread used to accrue into the Chat-tab badge total, yet the
+        // read/mark-read gate denies a LEFT member — so they could never mark it read to clear it, leaving
+        // the badge permanently inflated. It must contribute 0, exactly like a kicked (REMOVED) thread.
+        String uid = "conv-unread-total-left-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+
+        Long left = newBroadcastThread();
+        addMember(left, userId, MemberRole.MEMBER, MuteState.LEFT);
+        messages.save(Message.fromSystem(left, "seen-nothing-1", null));
+        messages.save(Message.fromSystem(left, "seen-nothing-2", null));
+
+        // The badge is 0 even though the LEFT thread carries two never-read messages.
+        assertThat(unreadTotalOf(uid)).isZero();
+
+        // And the member genuinely cannot clear it: mark-read on a self-left thread is a 403 (the gate),
+        // so without this fix the unread would be stuck forever.
+        mockMvc.perform(post("/api/v1/conversations/" + left + "/read").with(caller(uid)))
+                .andExpect(status().isForbidden());
     }
 
     @Test

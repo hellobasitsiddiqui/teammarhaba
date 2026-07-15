@@ -3,10 +3,12 @@ package com.teammarhaba.backend.chat;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Clock;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +51,9 @@ public class ChatModerationService {
 
     private final ConversationMemberRepository members;
     private final MessageRepository messages;
+    private final UserRepository users;
     private final AuditService audit;
+    private final ApplicationEventPublisher publisher;
     private final Clock clock;
 
     /** Audit {@code target_type} for a moderation action — the conversation it acted within. */
@@ -58,16 +62,27 @@ public class ChatModerationService {
     /** Spring-wired constructor — real wall clock. */
     @Autowired
     public ChatModerationService(
-            ConversationMemberRepository members, MessageRepository messages, AuditService audit) {
-        this(members, messages, audit, Clock.systemUTC());
+            ConversationMemberRepository members,
+            MessageRepository messages,
+            UserRepository users,
+            AuditService audit,
+            ApplicationEventPublisher publisher) {
+        this(members, messages, users, audit, publisher, Clock.systemUTC());
     }
 
     /** Test-visible constructor: inject a fixed {@link Clock} so the soft-delete instant is deterministic. */
     ChatModerationService(
-            ConversationMemberRepository members, MessageRepository messages, AuditService audit, Clock clock) {
+            ConversationMemberRepository members,
+            MessageRepository messages,
+            UserRepository users,
+            AuditService audit,
+            ApplicationEventPublisher publisher,
+            Clock clock) {
         this.members = members;
         this.messages = messages;
+        this.users = users;
         this.audit = audit;
+        this.publisher = publisher;
         this.clock = clock;
     }
 
@@ -138,6 +153,17 @@ public class ChatModerationService {
                 TARGET_CONVERSATION,
                 conversationId.toString(),
                 Map.of("userId", userId, "mute", state.name()));
+
+        // TM-730: a REMOVED member loses thread access, but their live SSE stream keeps delivering frames
+        // until it times out (membership is only checked at connect). Revoke it — publish an AFTER_COMMIT
+        // event so the stream is cut only once this removal is durable (a rollback leaves the stream). We
+        // resolve userId → Firebase uid here (the stream registry keys by uid); a soft-deleted/absent
+        // account resolves to null, which the listener treats as a no-op (the connect-time gate on the
+        // client's reconnect is the backstop). READ_ONLY members may still READ, so their stream stays.
+        if (state == MuteState.REMOVED) {
+            String ownerUid = users.findById(userId).map(u -> u.getFirebaseUid()).orElse(null);
+            publisher.publishEvent(new ConversationMemberRevokedEvent(conversationId, ownerUid));
+        }
 
         return member;
     }
