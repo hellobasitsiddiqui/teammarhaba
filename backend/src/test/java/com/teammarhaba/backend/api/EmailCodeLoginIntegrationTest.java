@@ -234,6 +234,36 @@ class EmailCodeLoginIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void verify_firebaseAdminFailureMapsTo502() throws Exception {
+        // TM-738 P1 (auth): a CORRECT code passes our own verification, but minting the session then
+        // depends on the Firebase Admin SDK (lookup/create the account -> mint a custom token). If that
+        // upstream call fails, the request was fine but the identity provider did not answer — so the
+        // GlobalExceptionHandler maps the FirebaseAuthException to a 502 Bad Gateway (RFC 7807), NOT a
+        // 500 (a bug on our side) or a 401 (a bad code). This exercises the real controller + advice
+        // wiring: our request is well-formed and the code is right, yet the upstream failure surfaces
+        // distinctly as an upstream (502) fault the client can retry.
+        String email = requestCodeFor("upstream-502");
+        String code = mailer.codes.get(email);
+        assertThat(code).matches("\\d{6}");
+
+        // Make the Admin-SDK account lookup throw a NON-USER_NOT_FOUND FirebaseAuthException (i.e. the
+        // provider itself erred, not "no such user" — which would instead create the account). It
+        // propagates out of EmailCodeService.verify unchanged and reaches the handler.
+        com.google.firebase.auth.FirebaseAuthException upstreamError =
+                org.mockito.Mockito.mock(com.google.firebase.auth.FirebaseAuthException.class);
+        when(upstreamError.getAuthErrorCode())
+                .thenReturn(com.google.firebase.auth.AuthErrorCode.INVALID_ID_TOKEN);
+        when(firebaseAuth.getUserByEmail(email)).thenThrow(upstreamError);
+
+        mockMvc.perform(post("/api/v1/auth/email-code/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"code\":\"" + code + "\"}"))
+                .andExpect(status().isBadGateway())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(502));
+    }
+
+    @Test
     void peekEndpointIsClosedWhenEmulatorHostUnset() throws Exception {
         // TM-738 P0 (auth): the emulator-only code-peek (which hands back the plaintext login code for
         // the e2e harness) must be CLOSED in any real environment. Both its beans are gated on
