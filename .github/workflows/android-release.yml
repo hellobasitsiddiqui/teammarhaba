@@ -363,6 +363,15 @@ jobs:
           if [ -z "$URL" ]; then echo "::error::could not resolve backend Cloud Run URL"; exit 1; fi
           sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/assets/config.js
           grep apiBaseUrl web/dist/assets/config.js
+          # This job publishes the WHOLE Hosting site (firebase deploy --only hosting), so it must
+          # inject EVERY deploy-time config the same way deploy.yml does — otherwise a release ships
+          # a broken page. The standalone /status page (TM-182) carries its OWN one-line config
+          # outside /assets (so it isn't broken by fingerprinting) and does NOT read the config.js
+          # above; without this second injection every Android release republishes /status with the
+          # 127.0.0.1 dev default and the live /status health banner breaks (TM-735). Mirror
+          # deploy.yml exactly.
+          sed -i "s#http://127.0.0.1:8080#${URL}#" web/dist/status/status-config.js
+          grep apiBaseUrl web/dist/status/status-config.js
 
       - name: Inject web build version into config.js
         if: ${{ steps.secrets.outputs.present == 'true' }}
