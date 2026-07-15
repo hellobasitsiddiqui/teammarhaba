@@ -34,11 +34,16 @@ class UserListIntegrationTest extends AbstractIntegrationTest {
         // The chat tables (TM-435) also FK-reference users — message.sender_id has no ON DELETE
         // action (same convention as events.created_by), so a leftover message would block the user
         // wipe; clear the chat dependents (message → conversation_member → conversation) first too.
+        // Venues (TM-391/V41) also FK-reference users — venues.created_by is NOT NULL REFERENCES
+        // users with no ON DELETE action, so a leftover venue created by a prior test blocks the
+        // user wipe (TM-719). Clear venues before users too; events.venue_id is ON DELETE SET NULL
+        // so order relative to events doesn't matter.
         jdbc.update("DELETE FROM message");
         jdbc.update("DELETE FROM conversation_member");
         jdbc.update("DELETE FROM conversation");
         jdbc.update("DELETE FROM event_attendance");
         jdbc.update("DELETE FROM events");
+        jdbc.update("DELETE FROM venues");
         jdbc.update("DELETE FROM users");
         // Five active accounts: ada, bea, cyd, dan, eve.
         users.save(new User("uid-ada", "ada@example.com", "Ada"));
