@@ -289,9 +289,10 @@ class EmailCodeServiceTest {
 
     @Test
     void allowListedDomainAddress_getsFixedCode_noSend_andVerifies() throws Exception {
-        // Allow-list the @teammarhaba.test domain with a fixed code; real send must be skipped.
+        // Allow-list the @teammarhaba.test domain with an explicit non-default fixed code (TM-725: the
+        // default 123456 is rejected for an enabled hook); real send must be skipped.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         String testEmail = "e2e@teammarhaba.test";
@@ -306,7 +307,7 @@ class EmailCodeServiceTest {
         assertThat(mailer.lastCode).isNull();
 
         // The fixed code verifies (and only the fixed code).
-        String token = svc.verify(testEmail, "123456");
+        String token = svc.verify(testEmail, "424242");
         assertThat(token).isEqualTo("token-test");
     }
 
@@ -331,7 +332,7 @@ class EmailCodeServiceTest {
     @Test
     void allowListedAddress_wrongCodeStillRejected() {
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request("e2e@teammarhaba.test");
@@ -346,17 +347,17 @@ class EmailCodeServiceTest {
     void nonAllowListedAddress_unaffectedByEnabledHook() throws Exception {
         // Hook ON for @teammarhaba.test, but a real address must keep random code + real send.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request(EMAIL); // ada@example.com — not allow-listed
 
         // A real (random) code was emailed, and it is NOT the fixed code.
         assertThat(mailer.sends).containsExactly(EMAIL);
-        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("424242");
 
         // The fixed code does NOT work for a real address; the emailed code does.
-        assertThatThrownBy(() -> svc.verify(EMAIL, "123456"))
+        assertThatThrownBy(() -> svc.verify(EMAIL, "424242"))
                 .isInstanceOf(EmailCodeException.class);
     }
 
@@ -364,13 +365,13 @@ class EmailCodeServiceTest {
     void lookalikeDomain_isNotAllowListed() {
         // "evil-teammarhaba.test" must NOT match the "@teammarhaba.test" suffix — real send path applies.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request("attacker@evil-teammarhaba.test");
 
         assertThat(mailer.sends).containsExactly("attacker@evil-teammarhaba.test");
-        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("424242");
     }
 
     @Test
@@ -383,6 +384,44 @@ class EmailCodeServiceTest {
 
         assertThat(mailer.sends).containsExactly("anyone@teammarhaba.test");
         assertThat(mailer.lastCode).matches("\\d{6}");
+    }
+
+    // --- Fail-closed test-login guard (TM-725) ---
+
+    @Test
+    void enabledHook_withDefaultCode_failsClosedAtConstruction() {
+        // An enabled hook (non-empty allow-list) MUST NOT ship the well-known default 123456.
+        assertThatThrownBy(
+                        () -> new EmailCodeProperties.TestEmail(
+                                List.of("@teammarhaba.test"), List.of(), "123456"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.auth.email-code.test");
+    }
+
+    @Test
+    void enabledHook_withBlankCode_failsClosedAtConstruction() {
+        // An enabled hook with a missing/blank code is rejected — no silent fallback to a default.
+        assertThatThrownBy(
+                        () -> new EmailCodeProperties.TestEmail(
+                                List.of(), List.of("ci-bot@teammarhaba.test"), " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.auth.email-code.test");
+    }
+
+    @Test
+    void enabledHook_withExplicitNonDefaultCode_isAccepted() {
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
+        assertThat(test.isEnabled()).isTrue();
+        assertThat(test.fixedCode()).isEqualTo("424242");
+    }
+
+    @Test
+    void disabledHook_toleratesDefaultOrBlankCode() {
+        // With an empty allow-list the code is inert, so the default/blank is harmless and never throws.
+        assertThat(EmailCodeProperties.TestEmail.disabled().isEnabled()).isFalse();
+        assertThat(new EmailCodeProperties.TestEmail(List.of(), List.of(), "123456").isEnabled()).isFalse();
+        assertThat(new EmailCodeProperties.TestEmail(List.of(), List.of(), "").isEnabled()).isFalse();
     }
 
     /** A fresh provider mock returning the shared firebaseAuth — for tests that build their own service. */

@@ -107,8 +107,12 @@ public record EmailCodeProperties(
      *       take the test path. Matched case-insensitively; a leading {@code @} is optional.</li>
      *   <li>{@code allowedAddresses} — explicit full addresses (e.g. {@code e2e@teammarhaba.test}) that
      *       take the test path. Matched case-insensitively after trim.</li>
-     *   <li>{@code fixedCode} — the known code returned for allow-listed addresses (e.g. {@code 123456}).
-     *       Defaults to {@code 123456} but is inert unless the allow-list is non-empty.</li>
+     *   <li>{@code fixedCode} — the known code returned for allow-listed addresses. There is NO shipped
+     *       default: when the hook is <em>enabled</em> (a non-empty allow-list) an explicit,
+     *       <strong>non-default</strong> code MUST be configured or startup fails loudly (fail-closed,
+     *       TM-725). This stops the well-known default {@code 123456} ever going live behind an
+     *       accidentally-enabled test hook. When the hook is disabled (empty allow-list) the code is
+     *       inert and its value is irrelevant.</li>
      * </ul>
      *
      * <p>Flagging these accounts as {@code accountType=test} is follow-up <strong>TM-311</strong>, not in
@@ -116,23 +120,37 @@ public record EmailCodeProperties(
      */
     public record TestEmail(List<String> allowedDomains, List<String> allowedAddresses, String fixedCode) {
 
-        private static final String DEFAULT_FIXED_CODE = "123456";
+        /**
+         * The well-known Firebase/e2e default one-time code. Deliberately NOT a shipped fallback: an
+         * <em>enabled</em> hook that resolves to this code fails startup (TM-725), so the default can
+         * never silently go live. Kept only to reject it.
+         */
+        static final String DEFAULT_FIXED_CODE = "123456";
 
         public TestEmail {
             // Empty (not null) lists so callers never have to null-check; normalise to lowercase so the
             // membership check is a plain, case-insensitive contains/endsWith against a normalised email.
             allowedDomains = normaliseDomains(allowedDomains);
             allowedAddresses = normaliseAddresses(allowedAddresses);
-            if (fixedCode == null || fixedCode.isBlank()) {
-                fixedCode = DEFAULT_FIXED_CODE;
-            } else {
-                fixedCode = fixedCode.trim();
+            fixedCode = fixedCode == null ? "" : fixedCode.trim();
+
+            // Fail-closed (TM-725): if the test hook is enabled (something is allow-listed) it MUST have
+            // an explicit, non-default code. A missing/blank code — or the well-known default 123456 —
+            // is rejected at startup rather than shipped to prod. When the hook is disabled the code is
+            // inert (matches() short-circuits on isEnabled()), so an empty value is harmless.
+            boolean enabled = !allowedDomains.isEmpty() || !allowedAddresses.isEmpty();
+            if (enabled && (fixedCode.isBlank() || fixedCode.equals(DEFAULT_FIXED_CODE))) {
+                throw new IllegalArgumentException(
+                        "app.auth.email-code.test is enabled (a non-empty allow-list) but no explicit "
+                                + "non-default fixed-code is set. Configure app.auth.email-code.test.fixed-code "
+                                + "(EMAIL_CODE_TEST_FIXED_CODE) to a value other than the default \""
+                                + DEFAULT_FIXED_CODE + "\", or clear the allow-list to disable the hook.");
             }
         }
 
         /** The default: empty allow-list => disabled, so prod is a no-op and real users are unaffected. */
         static TestEmail disabled() {
-            return new TestEmail(List.of(), List.of(), DEFAULT_FIXED_CODE);
+            return new TestEmail(List.of(), List.of(), "");
         }
 
         /** The hook is OFF unless something is allow-listed — the prod safety gate (cf. TM-309). */
