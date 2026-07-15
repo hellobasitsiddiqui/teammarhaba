@@ -18,6 +18,7 @@ import {
   profileStrength,
   publicSummary,
   formatJoined,
+  phoneFormatError,
 } from "../src/assets/profile-core.js";
 
 // A realistic /me payload (real MeResponse shape): firstName/lastName/city/age/phone at the top
@@ -158,4 +159,30 @@ test("formatJoined returns '' for missing, invalid and future dates", () => {
   assert.equal(formatJoined("not-a-date", now), "");
   assert.equal(formatJoined("2027-01-01T00:00:00Z", now), "");
   assert.equal(formatJoined("2026-01-15T00:00:00Z", now), "Jan 2026");
+});
+
+// TM-752: the profile phone field's character pattern (^\+?[0-9 ()./-]{3,32}$) checks allowed
+// characters but NOT digit count, so "+", "12", "()." pass as valid. phoneFormatError adds the
+// missing digit-count guard (a real number has 7–15 digits: national min ~7, E.164 max 15).
+test("phoneFormatError: rejects too-few / digit-less phone strings (TM-752)", () => {
+  assert.notEqual(phoneFormatError("12"), "");         // 2 digits
+  assert.notEqual(phoneFormatError("+"), "");          // 0 digits
+  assert.notEqual(phoneFormatError("()."), "");        // 0 digits, previously passed the pattern
+  assert.notEqual(phoneFormatError("123456"), "");     // 6 digits, one short
+  assert.notEqual(phoneFormatError("12345678901234567"), ""); // 17 digits, over E.164 max
+});
+
+test("phoneFormatError: accepts plausible numbers (7–15 digits, formatting allowed)", () => {
+  assert.equal(phoneFormatError("+447700900123"), "");   // 12 digits
+  assert.equal(phoneFormatError("020 7946 0000"), "");    // 11 digits
+  assert.equal(phoneFormatError("+1 (555) 123-4567"), ""); // 11 digits
+  assert.equal(phoneFormatError("1234567"), "");           // 7 digits (lower boundary)
+  assert.equal(phoneFormatError("123456789012345"), "");   // 15 digits (upper boundary)
+});
+
+test("phoneFormatError: empty/blank is allowed (blank = leave unchanged)", () => {
+  assert.equal(phoneFormatError(""), "");
+  assert.equal(phoneFormatError("   "), "");
+  assert.equal(phoneFormatError(null), "");
+  assert.equal(phoneFormatError(undefined), "");
 });

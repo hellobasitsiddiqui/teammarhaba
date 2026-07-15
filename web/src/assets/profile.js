@@ -34,6 +34,7 @@ import {
   identitySummary,
   profileStrength,
   publicSummary,
+  phoneFormatError,
 } from "./profile-core.js";
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
@@ -151,6 +152,12 @@ function validateField(field, raw) {
   }
   if (field.pattern && !new RegExp(field.pattern).test(value)) {
     return "Format looks invalid.";
+  }
+  // TM-752: the phone character-pattern above allows too-short / digit-less values (e.g. "+", "12",
+  // "()."); require a plausible digit count (7–15) on top of it. Pure rule, unit-tested in profile-core.
+  if (field.key === "phone") {
+    const phoneErr = phoneFormatError(value);
+    if (phoneErr) return phoneErr;
   }
   return "";
 }

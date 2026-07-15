@@ -154,3 +154,19 @@ export function formatJoined(iso, now = new Date()) {
   const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
   return `${month} ${d.getFullYear()}`;
 }
+
+/**
+ * TM-752: the profile phone field's character pattern (^\+?[0-9 ()./-]{3,32}$) validates the allowed
+ * CHARACTERS but not the digit COUNT, so "+", "12" and "()." pass as "valid". A real phone number has
+ * 7–15 digits (national minimum ~7; E.164 maximum 15). Returns a user-facing error for an out-of-range
+ * digit count, or "" when acceptable. Empty/blank is allowed (blank = leave the field unchanged).
+ * @param {string} value the raw phone input.
+ * @returns {string} an error message, or "" if acceptable.
+ */
+export function phoneFormatError(value) {
+  const v = String(value ?? "").trim();
+  if (v === "") return "";
+  const digits = (v.match(/[0-9]/g) || []).length;
+  if (digits < 7 || digits > 15) return "Enter a valid phone number (7 to 15 digits).";
+  return "";
+}
