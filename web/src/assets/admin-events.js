@@ -25,7 +25,8 @@ import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
 import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
-import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES } from "./storage.js";
+import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
+import { eventImageRef } from "./events-core.js";
 import {
   HEADING_MAX,
   DESCRIPTION_MAX,
@@ -677,6 +678,25 @@ function buildImageControl(event) {
     preview.hidden = false;
     placeholder.hidden = true;
   });
+
+  // TM-712: seed the preview from the EXISTING image when editing an event that already has one and no
+  // new file has been picked. imagePath is EITHER an http(s) URL (legacy/external) OR a Firebase Storage
+  // object path (`event-images/{id}`) — the write-only field that previously only fed a text hint here,
+  // so an already-set image never previewed on edit-open. Resolve a path to a fresh download URL; a URL
+  // is used directly. If resolution fails (Storage off, object missing) we keep the placeholder rather
+  // than showing a broken image — mirroring events.js detailHero (TM-708) and admin-venues.js (TM-711).
+  const existingRef = eventImageRef(event?.imagePath);
+  if (existingRef) {
+    const showExisting = (url) => {
+      // A pick between resolve start and finish wins — never clobber the admin's newer object-URL preview.
+      if (!url || pendingFile) return;
+      preview.src = url;
+      preview.hidden = false;
+      placeholder.hidden = true;
+    };
+    if (existingRef.kind === "url") showExisting(existingRef.value);
+    else downloadUrlForPath(existingRef.value).then(showExisting);
+  }
 
   const node = el("section", { class: "tm-event-image", "aria-label": "Event image" }, [
     frame,
