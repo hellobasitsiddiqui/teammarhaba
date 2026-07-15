@@ -34,26 +34,53 @@ function clean(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// The most events the "near you" feed will surface at once. The finding (TM-662) notes the old feed
+// was UNBOUNDED — it rendered every matching event. Home is a glanceable digest, not the full browse
+// list (that's #/events), so we cap the card count; the CTA leads to the full list for the rest.
+const NEAR_YOU_MAX = 12;
+
+/**
+ * Normalise a city for comparison: trim + collapse inner whitespace + lowercase, so cosmetic
+ * differences ("Mk" vs "mk", " Milton  Keynes ") never split the same place into two. Returns "" for a
+ * blank/missing value (an unknown city matches nothing). Pure so the filter stays unit-testable.
+ * @param {?string} value
+ * @returns {string}
+ */
+function cityKey(value) {
+  return clean(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Does this event belong to the viewer's city? An event's location key is its APPROXIMATE `city` (which
+ * is always exposed, even before the exact-venue reveal of TM-408) with `locationText` as a fallback
+ * only when `city` is absent. A blank/missing viewer city (the caller degrades to unfiltered) never
+ * reaches here. Pure comparison — the whole reason the filter lives in home-core.js.
+ * @param {Object} card an EventCard.
+ * @param {string} viewerKey the normalised viewer city (from {@link cityKey}).
+ * @returns {boolean}
+ */
+function cardMatchesCity(card, viewerKey) {
+  const cardKey = cityKey(card?.city) || cityKey(card?.locationText);
+  return cardKey !== "" && cardKey === viewerKey;
+}
+
 /**
  * The section context line under the "Events near you" title.
  *
- * HONESTY (TM-734): the feed this sits over is the FULL upcoming listing — {@link homeFeed} applies no
- * city filter and no date window (it renders every happening-now + upcoming event, soonest-first). The
- * old wireframe copy "<city> · this week" asserted BOTH a city filter and a one-week bound that the
- * listing does not apply — a line that reads as a promise the feed silently breaks (a global event in
- * three months shows under "Milton Keynes · this week"). So the line describes what is ACTUALLY shown:
- * "Upcoming meetups". The viewer's city is still surfaced, but only as an honest location HINT ("near
- * <city>"), never as a filter claim; unknown city degrades to plain "Upcoming meetups near you".
+ * TM-662: the feed IS now scoped to the viewer's city ({@link homeFeed} filters by it), so the line
+ * honestly names that city as the scope — "Meetups near <city>". When the viewer's city is unknown the
+ * feed is NOT filtered (it degrades to the full upcoming listing), so the line must NOT claim a city it
+ * doesn't have; it stays the neutral "Upcoming meetups near you".
  *
- * When a real city filter and/or a date window land on the listing, this line should regain the
- * corresponding wording (and a matching test) — until then it must not claim scoping the feed lacks.
+ * We still do not claim a "this week" date bound (TM-734): the listing applies no date window, so the
+ * line never promises one. When a real date window lands, this line should regain that wording (+ test).
  *
  * @param {?string} city the viewer's city, or null/blank when unknown.
  * @returns {string}
  */
 export function homeContextLine(city) {
   const c = clean(city);
-  return c ? `Upcoming meetups near ${c}` : "Upcoming meetups near you";
+  return c ? `Meetups near ${c}` : "Upcoming meetups near you";
 }
 
 /**
@@ -111,15 +138,34 @@ export function homeCardModel(card, { tz, locale, now = Date.now() } = {}) {
  * The Home feed view-model: the visible listing (finished dropped defensively) in the surfaced order
  * — anything happening now first, then upcoming, each soonest-first — mapped to card models, plus the
  * empty-vs-populated decision that swaps in the `paper-empty-home` state.
+ *
+ * NEAR-YOU FILTER (TM-662): when the viewer's `city` is known, the feed is SCOPED to events in that
+ * city — an event in London never surfaces under a "Meetups near Mk" header. City match is normalised
+ * (case/whitespace-insensitive; see {@link cardMatchesCity}) against the event's approximate `city`
+ * (with `locationText` as a fallback). When the viewer's city is unknown the feed CANNOT be scoped
+ * honestly, so it degrades to the full unfiltered listing (paired with the neutral "near you" label
+ * from {@link homeContextLine}, which makes no city claim). The result is bounded to {@link
+ * NEAR_YOU_MAX} — Home is a glanceable digest, and the CTA / #/events carries the full list.
+ *
  * @param {Object[]} cards the raw EventCard listing.
- * @param {{tz?: string, locale?: string, now?: number}} [ctx]
+ * @param {{city?: ?string, tz?: string, locale?: string, now?: number}} [ctx] `city` is the viewer's.
  * @returns {{isEmpty: boolean, cards: Object[]}}
  */
-export function homeFeed(cards, { tz, locale, now = Date.now() } = {}) {
+export function homeFeed(cards, { city, tz, locale, now = Date.now() } = {}) {
   const { happeningNow, upcoming } = listingBuckets(cards, now);
   const ordered = [...happeningNow, ...upcoming];
+
+  // Scope to the viewer's city when we know it; otherwise show the full listing (the label degrades
+  // to a neutral "near you" that makes no city promise). An empty result is a legitimate empty state
+  // (no local events yet), not an error.
+  const viewerKey = cityKey(city);
+  const scoped = viewerKey ? ordered.filter((c) => cardMatchesCity(c, viewerKey)) : ordered;
+
+  // Bound the digest (the finding notes the old feed was unbounded).
+  const bounded = scoped.slice(0, NEAR_YOU_MAX);
+
   return {
-    isEmpty: ordered.length === 0,
-    cards: ordered.map((c) => homeCardModel(c, { tz, locale, now })),
+    isEmpty: bounded.length === 0,
+    cards: bounded.map((c) => homeCardModel(c, { tz, locale, now })),
   };
 }

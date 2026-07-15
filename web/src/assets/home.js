@@ -119,7 +119,9 @@ export async function enterHome() {
   setContext(homeContextLine(me?.city));
 
   const cards = Array.isArray(data?.items) ? data.items : [];
-  const model = homeFeed(cards, { tz: VIEWER_TZ, locale: LOCALE });
+  // Scope the feed to the viewer's city so "near you" is actually near them (TM-662) — the same city
+  // that labels the context line above, so the header and the events under it can never disagree.
+  const model = homeFeed(cards, { city: me?.city, tz: VIEWER_TZ, locale: LOCALE });
 
   clear(feed);
   if (model.isEmpty) {
