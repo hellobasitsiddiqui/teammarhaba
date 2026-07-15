@@ -119,15 +119,18 @@ class EmailCodeLoginIntegrationTest extends AbstractIntegrationTest {
     void perIpRequestFloodHits429RegardlessOfDistinctAddresses(@Autowired EmailCodeProperties props)
             throws Exception {
         // The varied-address DoS the per-address cooldown can't catch (TM-247): every call uses a
-        // DISTINCT address (so the send cooldown never fires) but the SAME spoofed client IP via
-        // X-Forwarded-For. After ipRequestLimit calls the coarse per-IP limit returns 429. A unique
-        // forwarded IP keeps this test's budget independent of the other tests' 127.0.0.1 traffic.
+        // DISTINCT address (so the send cooldown never fires) but the SAME client IP. After
+        // ipRequestLimit calls the coarse per-IP limit returns 429. The forwarded header mirrors the real
+        // Cloud Run shape "<client>, <cloud-run-hop>" (TM-732: the client IP is the entry the trusted
+        // proxy appended, counted from the right — NOT the spoofable leftmost), and the unique client IP
+        // keeps this test's budget independent of the other tests' traffic.
         String floodIp = "198.18.0.99";
+        String forwardedFor = floodIp + ", 130.211.0.1"; // client, then the Cloud Run front-end hop
         int limit = props.ipRequestLimit();
 
         for (int i = 0; i <= limit; i++) {
             var result = mockMvc.perform(post("/api/v1/auth/email-code/request")
-                            .header("X-Forwarded-For", floodIp)
+                            .header("X-Forwarded-For", forwardedFor)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"email\":\"ipflood-" + i + "@example.com\"}"))
                     .andReturn();

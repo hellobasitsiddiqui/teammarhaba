@@ -342,7 +342,9 @@ app:
         # Comma-separated explicit addresses that take the test path.
         allowed-addresses: ${EMAIL_CODE_TEST_ALLOWED_ADDRESSES:}
         # The known code returned for allow-listed addresses; inert unless the allow-list is non-empty.
-        fixed-code: ${EMAIL_CODE_TEST_FIXED_CODE:123456}
+        # NO shipped default (TM-725): an enabled hook must set an explicit, non-default code via
+        # EMAIL_CODE_TEST_FIXED_CODE or startup fails — the well-known 123456 is never shipped to prod.
+        fixed-code: ${EMAIL_CODE_TEST_FIXED_CODE:}
 
 # Populates /actuator/info (authenticated). Static, non-sensitive identity.
 info:

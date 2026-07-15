@@ -179,37 +179,66 @@ public class EmailCodeService {
     public String verify(String rawEmail, String rawCode) throws FirebaseAuthException {
         String email = normalise(rawEmail);
         String code = rawCode == null ? "" : rawCode.trim();
+        String codeHash = hash(code);
 
-        PendingCode current = pending.getIfPresent(email);
-        if (current == null) {
-            throw new EmailCodeException(EmailCodeException.Reason.CODE_INVALID, "That code is not valid.");
-        }
-        if (clock.instant().isAfter(current.expiresAt())) {
-            pending.invalidate(email);
-            throw new EmailCodeException(
-                    EmailCodeException.Reason.CODE_EXPIRED, "That code has expired. Please request a new one.");
-        }
-        if (!constantTimeEquals(current.codeHash(), hash(code))) {
-            // Burn the code once the attempt budget is exhausted, so a short numeric code can't be
-            // brute-forced; otherwise just consume one attempt and let the caller retry.
-            if (current.attemptsLeft() <= 1) {
-                pending.invalidate(email);
-                throw new EmailCodeException(
-                        EmailCodeException.Reason.VERIFY_RATE_LIMITED,
-                        "Too many incorrect attempts. Please request a new code.");
+        // Resolve the outcome under an ATOMIC read-modify-write on the pending entry (TM-732). The old
+        // code did a getIfPresent -> decide -> put/invalidate, so two concurrent wrong guesses could both
+        // read the same attemptsLeft, both decrement from it, and lose one decrement — letting an attacker
+        // fan out parallel requests to get more than maxVerifyAttempts tries at a short numeric code.
+        // Caffeine's asMap() is a ConcurrentMap; compute() runs the whole decision atomically per key, so
+        // every wrong guess consumes exactly one attempt and the cap holds under concurrency. The lambda
+        // is pure bookkeeping (no I/O) — the Firebase token mint stays OUTSIDE it.
+        VerifyOutcome[] captured = {null};
+        pending.asMap().compute(email, (key, current) -> {
+            if (current == null) {
+                captured[0] = VerifyOutcome.INVALID;
+                return null; // absent -> stays absent
             }
-            pending.put(email, current.withOneFewerAttempt());
-            throw new EmailCodeException(EmailCodeException.Reason.CODE_INVALID, "That code is not valid.");
+            if (clock.instant().isAfter(current.expiresAt())) {
+                captured[0] = VerifyOutcome.EXPIRED;
+                return null; // burn the expired entry
+            }
+            if (!constantTimeEquals(current.codeHash(), codeHash)) {
+                // Burn the code once the attempt budget is exhausted, so a short numeric code can't be
+                // brute-forced; otherwise consume exactly one attempt and let the caller retry.
+                if (current.attemptsLeft() <= 1) {
+                    captured[0] = VerifyOutcome.RATE_LIMITED;
+                    return null; // last attempt spent -> burn
+                }
+                captured[0] = VerifyOutcome.INVALID;
+                return current.withOneFewerAttempt(); // atomic decrement
+            }
+            // Correct: burn the single-use code here (atomically), so a token is never issued twice for it.
+            captured[0] = VerifyOutcome.CORRECT;
+            return null;
+        });
+
+        switch (captured[0]) {
+            case INVALID -> throw new EmailCodeException(
+                    EmailCodeException.Reason.CODE_INVALID, "That code is not valid.");
+            case EXPIRED -> throw new EmailCodeException(
+                    EmailCodeException.Reason.CODE_EXPIRED, "That code has expired. Please request a new one.");
+            case RATE_LIMITED -> throw new EmailCodeException(
+                    EmailCodeException.Reason.VERIFY_RATE_LIMITED,
+                    "Too many incorrect attempts. Please request a new code.");
+            case CORRECT -> {
+                // Fall through to the token mint below.
+            }
         }
 
-        // Correct: burn the single-use code BEFORE minting, so a token is never issued twice for it.
-        pending.invalidate(email);
         lastSent.invalidate(email);
-
         String uid = resolveOrCreateUid(email);
         String token = firebaseAuth.getObject().createCustomToken(uid);
         log.info("Minted a custom token for an email-code login.");
         return token;
+    }
+
+    /** The mutually-exclusive results of one atomic {@code verify} attempt (TM-732). */
+    private enum VerifyOutcome {
+        INVALID,
+        EXPIRED,
+        RATE_LIMITED,
+        CORRECT
     }
 
     /**
@@ -239,8 +268,11 @@ public class EmailCodeService {
     }
 
     private String generateCode() {
-        int bound = (int) Math.pow(10, props.length());
-        int value = random.nextInt(bound);
+        // Full-entropy uniform pick in [0, 10^length). Use long maths: 10^length overflows an int at
+        // length >= 10 (a supported length — @Min(4), no max), which would collapse the bound to a
+        // negative/tiny value and gut the code's entropy. long holds up to 10^18 (length 18).
+        long bound = (long) Math.pow(10, props.length());
+        long value = random.nextLong(bound);
         return String.format("%0" + props.length() + "d", value);
     }
 

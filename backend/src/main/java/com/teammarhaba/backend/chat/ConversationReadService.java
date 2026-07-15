@@ -173,22 +173,37 @@ public class ConversationReadService {
     @Transactional(readOnly = true)
     public long unreadTotal(VerifiedUser caller) {
         Long userId = users.provision(caller).getId();
-        // The threads that actually count toward the badge: everything the caller is still a member of
-        // (a REMOVED/kicked membership contributes nothing), mirroring the list + access gates.
+        // The threads that count toward the badge: only threads the caller can still open. A REMOVED
+        // (kicked) member is excluded, and so is a LEFT (self-left, TM-471) one — both hide the thread
+        // and are denied by the read/mark-read gate (NONE/READ_ONLY only), so their unread can never be
+        // cleared and must not swell the badge (TM-730). Gate on the same readable rule the access gate uses.
         Set<Long> conversationIds = members.findByUserIdOrderByJoinedAtDesc(userId).stream()
-                .filter(m -> m.getMute() != MuteState.REMOVED)
+                .filter(ConversationReadService::countsTowardUnread)
                 .map(ConversationMember::getConversationId)
                 .collect(Collectors.toSet());
         if (conversationIds.isEmpty()) {
             return 0L;
         }
-        // One batched grouped query for every thread's unread, then sum only the non-removed threads.
-        // unreadCountsForUser spans all the caller's memberships (removed included), so intersect with
-        // the non-removed set above so a kicked thread never adds to the badge.
+        // One batched grouped query for every thread's unread (TM-727: the badge endpoint was an N+1 in
+        // the caller's thread count), then sum only the badge-eligible threads. unreadCountsForUser spans
+        // all the caller's memberships, so intersect with the eligible set above.
         return unreadCounts(userId, conversationIds).entrySet().stream()
                 .filter(e -> conversationIds.contains(e.getKey()))
                 .mapToLong(Map.Entry::getValue)
                 .sum();
+    }
+
+    /**
+     * Whether a membership contributes to the caller's unread badge (TM-730): only a thread the caller can
+     * still <em>open</em>. This is exactly the {@link #requireMember} readability rule — {@link
+     * MuteState#NONE} (incl. self-muted, whose mute only silences push) or {@link MuteState#READ_ONLY} — so
+     * a {@link MuteState#REMOVED} (kicked) OR {@link MuteState#LEFT} (self-left) membership counts nothing:
+     * both hide the thread and both are denied by the read/mark-read gate, so their unread could never be
+     * cleared and must not swell the badge.
+     */
+    private static boolean countsTowardUnread(ConversationMember member) {
+        MuteState mute = member.getMute();
+        return mute == MuteState.NONE || mute == MuteState.READ_ONLY;
     }
 
     /**

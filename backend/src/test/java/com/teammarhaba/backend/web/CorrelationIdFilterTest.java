@@ -53,6 +53,40 @@ class CorrelationIdFilterTest {
     }
 
     @Test
+    void rejectsOversizedInboundRequestId() throws Exception {
+        // TM-724: an over-long inbound id must NOT be reflected — it's discarded for a fresh id.
+        String huge = "a".repeat(5000);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Request-Id", huge);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        String traceId = runAndCaptureTraceId(request, response);
+
+        assertThat(traceId).isNotEqualTo(huge);
+        assertThat(traceId.length()).isLessThanOrEqualTo(CorrelationIdFilter.MAX_ID_LENGTH);
+        assertThat(response.getHeader("X-Request-Id")).isEqualTo(traceId);
+    }
+
+    @Test
+    void rejectsInboundRequestIdWithControlOrInjectionChars() throws Exception {
+        // TM-724: CRLF / control chars (log-forging, response-splitting) fail the allow-list and are
+        // replaced by a generated id rather than reflected into the log MDC or the response header.
+        for (String hostile : new String[] {
+            "abc\r\nX-Injected: 1", "trace\nFAKE LOG LINE", "id with spaces", "bad;value", "../../etc"
+        }) {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.addHeader("X-Request-Id", hostile);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            String traceId = runAndCaptureTraceId(request, response);
+
+            assertThat(traceId).as("hostile id %s must be rejected", hostile).isNotEqualTo(hostile);
+            assertThat(traceId).matches("[A-Za-z0-9._-]{1,64}");
+            assertThat(response.getHeader("X-Request-Id")).isEqualTo(traceId);
+        }
+    }
+
+    @Test
     void usesCloudRunTraceContextWhenPresent() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Cloud-Trace-Context", "abc123def456/789;o=1");

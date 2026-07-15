@@ -1,10 +1,12 @@
 package com.teammarhaba.backend.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseAuthException;
 import com.google.firebase.auth.FirebaseToken;
 import jakarta.servlet.FilterChain;
 import java.util.Map;
@@ -35,14 +37,19 @@ class FirebaseAuthenticationFilterTest {
         when(token.getClaims()).thenReturn(claims);
 
         FirebaseAuth auth = mock(FirebaseAuth.class);
-        when(auth.verifyIdToken("good-token")).thenReturn(token);
+        // The filter verifies with checkRevoked=true (TM-723), so stub the two-arg overload.
+        when(auth.verifyIdToken("good-token", true)).thenReturn(token);
 
+        return authenticateWith(auth, "good-token");
+    }
+
+    private Authentication authenticateWith(FirebaseAuth auth, String bearer) throws Exception {
         @SuppressWarnings("unchecked")
         ObjectProvider<FirebaseAuth> provider = mock(ObjectProvider.class);
         when(provider.getObject()).thenReturn(auth);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Bearer good-token");
+        request.addHeader("Authorization", "Bearer " + bearer);
         new FirebaseAuthenticationFilter(provider)
                 .doFilter(request, new MockHttpServletResponse(), mock(FilterChain.class));
         return SecurityContextHolder.getContext().getAuthentication();
@@ -83,5 +90,22 @@ class FirebaseAuthenticationFilterTest {
         assertThat(authentication.getAuthorities())
                 .extracting("authority")
                 .containsExactly("ROLE_ADMIN");
+    }
+
+    /**
+     * TM-723: verification uses {@code checkRevoked=true}, so a token whose session was revoked (e.g.
+     * an admin demotion revoking the user's refresh tokens) fails verification and the request is left
+     * unauthenticated — the fast lockout path. The Admin SDK signals this by throwing from the two-arg
+     * {@code verifyIdToken(token, true)}; the filter treats it like any verification failure (→ 401).
+     */
+    @Test
+    void revokedTokenLeavesRequestUnauthenticated() throws Exception {
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(auth.verifyIdToken(eq("revoked-token"), eq(true)))
+                .thenThrow(mock(FirebaseAuthException.class));
+
+        Authentication authentication = authenticateWith(auth, "revoked-token");
+
+        assertThat(authentication).isNull();
     }
 }

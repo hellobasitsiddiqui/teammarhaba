@@ -50,7 +50,11 @@ public class FirebaseAuthenticationFilter extends OncePerRequestFilter {
         String token = bearerToken(request);
         if (token != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
-                FirebaseToken decoded = firebaseAuth.getObject().verifyIdToken(token);
+                // checkRevoked=true also rejects a token whose session was revoked (a demotion,
+                // disable, or explicit revokeRefreshTokens) — the fast lockout path — not just an
+                // expired/malformed one. A revoked token surfaces as a FirebaseAuthException, caught
+                // below like any other verification failure and mapped to the uniform 401.
+                FirebaseToken decoded = firebaseAuth.getObject().verifyIdToken(token, true);
                 VerifiedUser user = new VerifiedUser(decoded.getUid(), decoded.getEmail());
                 // Map the `role` custom claim -> a ROLE_* authority (TM-110); fail-safe to USER.
                 Role role = RoleClaims.roleFrom(decoded.getClaims());

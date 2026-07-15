@@ -867,3 +867,40 @@ export function typingLabel(typists, now) {
   const extra = names.length - 2;
   return `${names[0]}, ${names[1]} and ${extra} ${extra === 1 ? "other" : "others"} are typing…`;
 }
+
+/* ── Viewer admin-flag cache (TM-710 / TM-736) ──────────────────────────────────────────────────── */
+
+/**
+ * A resettable cache of the viewer's admin flag (TM-736) — drives whether the event-chat composer
+ * offers the "Send as announcement" affordance (TM-710). `resolve()` returns the cached flag, or
+ * awaits `fetchMe()` once and caches `role === "ADMIN"` (case-insensitive); a fetch failure caches
+ * `false` — the affordance simply stays hidden and the server gate remains authoritative.
+ *
+ * `invalidate()` resets the cache to unresolved. The TM-736 bug was a cache WITHOUT this: chat.js
+ * held the flag in a module-level variable resolved once and never reset, so a value captured before
+ * the ADMIN claim was live (a boot/auth race), or under a previous signed-in user, stuck for the whole
+ * session and the toggle never mounted. The DOM layer now calls invalidate() on every auth change
+ * (mirroring appearance-sync.js / nav-avatar.js), so the next resolve re-fetches the CURRENT user.
+ *
+ * Pure and DOM-free — `fetchMe` is injected, so a plain-Node test can drive both halves.
+ * @param {() => Promise<{role?: string}>} fetchMe resolves the caller's /me (api.js getMe in prod).
+ * @returns {{resolve: () => Promise<boolean>, invalidate: () => void}}
+ */
+export function createAdminFlagCache(fetchMe) {
+  let cached = null; // null = unresolved; boolean once resolved
+  return {
+    async resolve() {
+      if (cached !== null) return cached;
+      try {
+        const me = await fetchMe();
+        cached = String(me?.role ?? "").toUpperCase() === "ADMIN";
+      } catch {
+        cached = false; // can't tell → treat as non-admin (the server still gates the endpoint)
+      }
+      return cached;
+    },
+    invalidate() {
+      cached = null;
+    },
+  };
+}

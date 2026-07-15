@@ -56,6 +56,9 @@ import {
   unreactFromMessage,
   getLinkPreview,
 } from "./api.js";
+// TM-736: the admin-flag cache resets on every auth change (see viewerAdminFlag below), so a flag
+// resolved before the ADMIN claim was live — or for a previous user — can't stick for the session.
+import { onAuthChanged } from "./auth.js";
 import * as core from "./chat-core.js";
 // TM-470 link previews: pure URL-detection + response-normalisation core (see the delimited
 // `=== TM-470 link preview ===` hook further down, which mounts the card and calls the endpoint).
@@ -125,23 +128,18 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   announceMode: false };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
-// The viewer's admin flag (TM-710), cached once — drives whether the event-chat composer offers the
-// "Send as announcement" affordance. null = not yet resolved; resolved best-effort from GET /me so a
-// failed lookup simply hides the affordance (a non-admin can't post an announcement anyway — the server
-// gate is authoritative). It's the caller's own role, stable for the session.
-let viewerIsAdmin = null;
+// The viewer's admin flag (TM-710), cached per signed-in user — drives whether the event-chat composer
+// offers the "Send as announcement" affordance. Resolved best-effort from GET /me so a failed lookup
+// simply hides the affordance (a non-admin can't post an announcement anyway — the server gate is
+// authoritative). TM-736: the cache is INVALIDATED on every auth change (mirroring appearance-sync.js /
+// nav-avatar.js) — a flag resolved before the ADMIN claim was live (a boot/auth race), or under a
+// previous user on the same session, must not stick as a stale `false` and suppress the toggle. The
+// pure cache logic lives in chat-core.createAdminFlagCache (node-tested); this is just the wiring.
+const viewerAdminFlag = core.createAdminFlagCache(getMe);
+onAuthChanged(() => viewerAdminFlag.invalidate());
 
-/** Resolve (once) whether the viewer is an admin, best-effort — a failure leaves the affordance hidden. */
-async function resolveViewerIsAdmin() {
-  if (viewerIsAdmin !== null) return viewerIsAdmin;
-  try {
-    const me = await getMe();
-    viewerIsAdmin = String(me?.role ?? "").toUpperCase() === "ADMIN";
-  } catch {
-    viewerIsAdmin = false; // can't tell → treat as non-admin (server still gates the endpoint)
-  }
-  return viewerIsAdmin;
-}
+/** Resolve whether the viewer is an admin, best-effort — a failure leaves the affordance hidden. */
+const resolveViewerIsAdmin = viewerAdminFlag.resolve;
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
 // appear instantly without waiting for the poll; navigating away (or into another thread) closes it.

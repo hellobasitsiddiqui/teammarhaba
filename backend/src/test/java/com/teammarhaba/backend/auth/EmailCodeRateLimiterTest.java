@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.teammarhaba.backend.security.ForwardedClientIp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -88,12 +89,18 @@ class EmailCodeRateLimiterTest {
     }
 
     @Test
-    void clientIpPrefersLeftmostXForwardedForEntry() {
+    void clientIpTakesTheEntryCloudRunAppended_notTheSpoofableLeftmost() {
+        // TM-732: Cloud Run APPENDS the real client IP as the LAST X-Forwarded-For entry; everything to
+        // its left is caller-supplied. With one trusted hop the real client is the second-from-last
+        // entry. A caller prepending "203.0.113.7" (the old code's answer) must NOT be trusted.
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.setRemoteAddr("169.254.0.1"); // the proxy's socket address — must be ignored
-        request.addHeader(EmailCodeRateLimiter.FORWARDED_FOR_HEADER, "203.0.113.7, 70.41.3.18, 150.172.238.178");
+        request.setRemoteAddr("169.254.0.1"); // the proxy's socket address — irrelevant when the header is trusted
+        request.addHeader(
+                ForwardedClientIp.FORWARDED_FOR_HEADER, "203.0.113.7, 70.41.3.18, 150.172.238.178");
 
-        assertThat(EmailCodeRateLimiter.clientIp(request)).isEqualTo("203.0.113.7");
+        // trustedHops=1 -> take index (3 - 1 - 1) = 1 -> "70.41.3.18" (what the front end saw), not the
+        // attacker-prepended "203.0.113.7".
+        assertThat(EmailCodeRateLimiter.clientIp(request)).isEqualTo("70.41.3.18");
     }
 
     @Test
