@@ -250,6 +250,88 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.longitude").value(-0.12));
     }
 
+    // TM-738 P1 (venues) — create-body validation negatives that today are only asserted for `name`
+    // (createRejectsBlankName above) and the coordinate pair. These pin the remaining
+    // CreateVenueRequest constraints — @NotBlank addressLine, the @Size column-mirroring caps, and the
+    // @DecimalMin/Max/@Min numeric bounds — so a body the DB would reject (or an out-of-range value)
+    // is stopped at the validation boundary with a field-scoped RFC-7807 error, never persisted.
+    // Characterization: the annotations already enforce these, so these PASS.
+
+    @Test
+    void createRejectsBlankAddressLine() throws Exception {
+        // addressLine is @NotBlank (required, like name). A present-but-empty address is never
+        // meaningful — it must be a field-scoped 400, the same shape as createRejectsBlankName.
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-addr"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("12 High Street, London E1 6AA", "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'addressLine')]").exists());
+    }
+
+    @Test
+    void createRejectsFieldOverCap() throws Exception {
+        // Per-field @Size caps mirror the V41 columns (name VARCHAR(160), city VARCHAR(120)). A value
+        // over the cap must be rejected at bean-validation BEFORE it can hit the DB, with a
+        // field-scoped RFC-7807 error naming the offending field — proving the app catches it, not
+        // that a database constraint later blows up as an opaque 500.
+        String cityOverCap = "x".repeat(121); // city @Size(max = 120)
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-cap"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"city\": \"London\"", "\"city\": \"" + cityOverCap + "\"")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'city')]").exists());
+
+        // name @Size(max = 160) is the other required-field cap — same rejection shape.
+        String nameOverCap = "y".repeat(161);
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-cap"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("Marhaba Community Hall", nameOverCap)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'name')]").exists());
+    }
+
+    @Test
+    void createRejectsOutOfRangeCoordinatesAndCapacity() throws Exception {
+        // The numeric-bound constraints: latitude @DecimalMin("-90.0")/@DecimalMax("90.0"),
+        // longitude @DecimalMin("-180.0")/@DecimalMax("180.0"), capacity @Min(1). An out-of-range
+        // value is a field-scoped 400 — a coordinate that can't be a real geo point, or a capacity
+        // below one, must never persist.
+
+        // latitude past the 90° pole (with a valid longitude so the pair rule is satisfied and the
+        // range check is what fires).
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-range"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 120", "\"latitude\": 90.5, \"longitude\": -0.12")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'latitude')]").exists());
+
+        // longitude past the 180° meridian.
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-range"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 120", "\"latitude\": 51.5, \"longitude\": 180.5")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'longitude')]").exists());
+
+        // capacity below 1 — @Min(1). A place that can seat nobody is not a usable venue.
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-range"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace("\"capacity\": 120", "\"capacity\": 0")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'capacity')]").exists());
+    }
+
     // --- Edit (PATCH) ---
 
     @Test
@@ -287,6 +369,78 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(auditActionsFor(id)).doesNotContain(AuditAction.VENUE_UPDATED);
     }
 
+    // TM-738 P1 (venues) — UpdateVenueRequest behaviours the existing edit tests don't pin: the
+    // photoPath round-trip (the console PATCHes the uploaded object path after a create), the
+    // present-but-blank guards on the required fields, and the "single coordinate edge is allowed on
+    // PATCH" rule (create demands both edges; PATCH may set just one, since the row may already hold
+    // its partner). Characterization: the DTO + service already do this, so these PASS.
+
+    @Test
+    void updatePersistsAndReturnsPhotoPath() throws Exception {
+        // A venue photo is uploaded to Storage first, then its object path is PATCHed onto the row
+        // (the house avatar/image pattern — the id can't exist before creation). A well-formed
+        // `venue-images/{id}` path must be accepted, persisted, and echoed back in the 200 body.
+        Venue seeded = seedVenue("Photo target", true);
+        long id = seeded.getId();
+        String photoPath = "venue-images/" + id;
+
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-photo-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"photoPath\":\"" + photoPath + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.photoPath").value(photoPath));
+
+        // The path really landed on the row (not just reflected in the response).
+        assertThat(venues.findById(id).orElseThrow().getPhotoPath()).isEqualTo(photoPath);
+        assertThat(auditActionsFor(id)).contains(AuditAction.VENUE_UPDATED);
+    }
+
+    @Test
+    void updateRejectsBlankNameAndAddressLine() throws Exception {
+        // On PATCH, name/addressLine are optional (null = leave unchanged) but must NOT be set to a
+        // present-but-blank value — the @AssertTrue isNameUsable()/isAddressLineUsable() guards. A
+        // whitespace-only value must be a validation 400, never a blank required field written to the
+        // row (which would then violate the NOT NULL/meaningful contract everywhere the venue is used).
+        Venue seeded = seedVenue("Keep the name", true);
+        long id = seeded.getId();
+
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-blank-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"));
+
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-blank-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressLine\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"));
+
+        // Neither doomed PATCH landed — the venue's original name survives.
+        assertThat(venues.findById(id).orElseThrow().getName()).isEqualTo("Keep the name");
+    }
+
+    @Test
+    void updateAllowsSingleCoordinateEdge() throws Exception {
+        // Unlike create (which demands both latitude AND longitude), a PATCH may carry just one edge:
+        // the row may already hold its partner, so the coordinate-pair rule is enforced only when the
+        // patch itself carries both. Patch a lone longitude and it must persist without a 400.
+        Venue seeded = seedVenue("Coordinate edit", true);
+        long id = seeded.getId();
+
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-coord-patch"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longitude\":-0.09}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longitude").value(-0.09));
+
+        assertThat(venues.findById(id).orElseThrow().getLongitude()).isEqualTo(-0.09);
+    }
+
     // --- Deactivate / reactivate ---
 
     @Test
@@ -316,6 +470,31 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.active").value(true));
         assertThat(venues.findById(id).orElseThrow().isActive()).isTrue();
         assertThat(auditActionsFor(id)).contains(AuditAction.VENUE_REACTIVATED);
+    }
+
+    @Test
+    void reactivateOnAlreadyActiveIsIdempotentNoReAudit() throws Exception {
+        // TM-738 P1 (venues): reactivate mirrors deactivate's idempotency. deactivateKeepsTheRecord…
+        // above pins the deactivate side (a repeat deactivate does not re-audit); this pins the
+        // reactivate side directly on an ALREADY-active venue. VenueAdminService.reactivate returns
+        // the venue unchanged and — because it never transitions — records NO VENUE_REACTIVATED audit
+        // row. If that early-return guard regressed, a no-op reactivate would spam the audit trail.
+        Venue seeded = seedVenue("Already active", true);
+        long id = seeded.getId();
+
+        mockMvc.perform(post("/api/v1/admin/venues/{id}/reactivate", id).with(admin("venues-admin-react")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true));
+
+        // No transition happened, so nothing was audited.
+        assertThat(auditActionsFor(id)).doesNotContain(AuditAction.VENUE_REACTIVATED);
+        assertThat(venues.findById(id).orElseThrow().isActive()).isTrue();
+
+        // A second reactivate is likewise a clean no-op — still no audit row.
+        mockMvc.perform(post("/api/v1/admin/venues/{id}/reactivate", id).with(admin("venues-admin-react")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true));
+        assertThat(auditActionsFor(id)).doesNotContain(AuditAction.VENUE_REACTIVATED);
     }
 
     // --- List / search ---
