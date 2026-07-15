@@ -232,6 +232,15 @@ public class UserAdminService {
                     Map.of("enabled", enabled));
             if (reEnabled) {
                 notifyAccountReEnabled(user);
+            } else {
+                // Suspend/disable (TM-741/TM-742): the users.enabled=false flag is now enforced inbound by
+                // FirebaseAuthenticationFilter, so access is blocked in the very next request. Revoke the
+                // Firebase refresh tokens too (defense-in-depth, mirroring the demotion path): combined
+                // with the filter's checkRevoked verification it also kills any already-issued token on a
+                // node that hasn't yet seen the DB flag, and stops the account minting fresh ones.
+                // Best-effort (self-disable is already blocked above), so a revoke failure never rolls
+                // back the suspend — the DB flag + inbound gate remain the source of truth.
+                revokeSessions(user.getFirebaseUid(), id);
             }
         }
         if (role != null && role != user.getRole()) {

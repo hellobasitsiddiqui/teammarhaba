@@ -25,6 +25,22 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByFirebaseUid(String firebaseUid);
 
     /**
+     * True iff an <em>active</em> account exists for this uid <strong>and it is suspended</strong>
+     * ({@code enabled = false}). The inbound authorization gate the auth filter consults per request
+     * (TM-741/TM-742): an admin "disable/suspend" flips {@code users.enabled = false}, and this is what
+     * turns that DB flag into an immediate access block — the filter refuses to authenticate a suspended
+     * caller (→ uniform 401) rather than relying on a slow token-TTL expiry or Firebase revocation.
+     *
+     * <p>Deliberately a derived existence check, not a fetch: it must NOT break just-in-time provisioning
+     * (TM-112). A brand-new caller has no row yet, so this returns {@code false} → the request authenticates
+     * and the account is provisioned downstream (created {@code enabled}). Only a persisted, active,
+     * suspended row returns {@code true}. Soft-deleted rows are excluded by the entity's
+     * {@code @SQLRestriction}, so a tombstoned account is "no active row" here — its lifecycle is owned by
+     * the soft-delete path, not this gate. Cheap: an indexed {@code firebase_uid} lookup, no entity load.
+     */
+    boolean existsByFirebaseUidAndEnabledFalse(String firebaseUid);
+
+    /**
      * Lookup that <em>includes</em> soft-deleted rows — the restore/reactivation path. A native query
      * bypasses the {@code @SQLRestriction} (which only rewrites Hibernate-generated SQL). At most one
      * row exists per uid (firebase_uid is globally unique), so the result is unambiguous.

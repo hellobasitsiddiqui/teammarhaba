@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseAuthException;
 import com.google.firebase.auth.FirebaseToken;
+import com.teammarhaba.backend.user.UserRepository;
 import jakarta.servlet.FilterChain;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -48,9 +49,15 @@ class FirebaseAuthenticationFilterTest {
         ObjectProvider<FirebaseAuth> provider = mock(ObjectProvider.class);
         when(provider.getObject()).thenReturn(auth);
 
+        // No repository wired here (this is the claim→authority unit): getIfAvailable() returns null, so
+        // the suspend gate (TM-741/TM-742) is absent — exactly the slim-slice fallback it's built for.
+        @SuppressWarnings("unchecked")
+        ObjectProvider<UserRepository> users = mock(ObjectProvider.class);
+        when(users.getIfAvailable()).thenReturn(null);
+
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer " + bearer);
-        new FirebaseAuthenticationFilter(provider)
+        new FirebaseAuthenticationFilter(provider, users)
                 .doFilter(request, new MockHttpServletResponse(), mock(FilterChain.class));
         return SecurityContextHolder.getContext().getAuthentication();
     }
