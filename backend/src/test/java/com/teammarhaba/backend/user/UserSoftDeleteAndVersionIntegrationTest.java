@@ -110,6 +110,33 @@ class UserSoftDeleteAndVersionIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void provision_suspendedThenReAuth_doesNotSilentlyReEnable() {
+        // TM-738 P0 (auth): a suspended account (admin set enabled=false, TM-111) must NOT be silently
+        // switched back on just because the user signs in again. `provision` is reached on every
+        // authenticated request (just-in-time provisioning); its reactivate path only ever touches the
+        // *soft-delete* tombstone (deletedAt) — the `enabled` suspension flag is a DISTINCT lifecycle
+        // (see User's javadoc) and must be left exactly as the admin set it. If provision regressed to
+        // re-enable on re-auth, a suspended user could reinstate themselves simply by re-authenticating.
+        User provisioned = userService.provision(caller("uid-susp", "susp@example.com"));
+        assertThat(provisioned.isEnabled()).isTrue(); // accounts start enabled
+
+        // Suspend the account the way the admin path does (UserAdminService.update -> user.setEnabled),
+        // persisted so the re-provision below reads it back from the DB, not a stale in-memory copy.
+        provisioned.setEnabled(false);
+        users.saveAndFlush(provisioned);
+        assertThat(users.findByFirebaseUid("uid-susp").orElseThrow().isEnabled()).isFalse();
+
+        // Re-authenticate: same uid provisions again (the account was never soft-deleted, so this is the
+        // plain "row exists" read path — no reactivate).
+        User reAuthed = userService.provision(caller("uid-susp", "susp@example.com"));
+
+        // Still the same row, and STILL suspended — provision never re-enabled it.
+        assertThat(reAuthed.getId()).isEqualTo(provisioned.getId());
+        assertThat(reAuthed.isEnabled()).isFalse();
+        assertThat(users.findByFirebaseUid("uid-susp").orElseThrow().isEnabled()).isFalse();
+    }
+
+    @Test
     void staleUpdateFailsWithOptimisticLockConflict() {
         userService.provision(caller("uid-ol", "ol@example.com"));
 

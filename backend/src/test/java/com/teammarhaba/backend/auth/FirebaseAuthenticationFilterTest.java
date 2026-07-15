@@ -3,6 +3,8 @@ package com.teammarhaba.backend.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.google.firebase.auth.FirebaseAuth;
@@ -114,5 +116,49 @@ class FirebaseAuthenticationFilterTest {
         Authentication authentication = authenticateWith(auth, "revoked-token");
 
         assertThat(authentication).isNull();
+    }
+
+    /**
+     * TM-738 P0 (auth): the suspension gate (TM-741/TM-742) at the unit level. Even a fully VALID,
+     * non-revoked token must NOT authenticate a suspended account — the filter consults
+     * {@code users.enabled} via {@link UserRepository#existsByFirebaseUidAndEnabledFalse} and, on a
+     * suspended uid, clears the security context in the SAME request (never sets a {@code VerifiedUser}),
+     * so the chain's entry point produces the uniform 401. It still proceeds down the chain (so the entry
+     * point can run) rather than short-circuiting with a body of its own. This pins the security-negative
+     * directly on the filter, independent of the full HTTP integration path: if this gate regressed, a
+     * suspended user's still-live token (valid for its ~1h TTL) would silently regain API access.
+     */
+    @Test
+    void filter_suspendedUidClearsContextInSameRequest_unit() throws Exception {
+        FirebaseToken token = mock(FirebaseToken.class);
+        when(token.getUid()).thenReturn("suspended-uid");
+        when(token.getEmail()).thenReturn("suspended@example.com");
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(auth.verifyIdToken("valid-but-suspended-token", true)).thenReturn(token);
+
+        @SuppressWarnings("unchecked")
+        ObjectProvider<FirebaseAuth> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(auth);
+
+        // Repository IS wired this time (the full-app case), and reports the uid as suspended.
+        UserRepository repo = mock(UserRepository.class);
+        when(repo.existsByFirebaseUidAndEnabledFalse("suspended-uid")).thenReturn(true);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<UserRepository> users = mock(ObjectProvider.class);
+        when(users.getIfAvailable()).thenReturn(repo);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer valid-but-suspended-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+        new FirebaseAuthenticationFilter(provider, users).doFilter(request, response, chain);
+
+        // Context left EMPTY despite the valid token — the suspended account never authenticates.
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        // The gate was actually consulted for this uid...
+        verify(repo).existsByFirebaseUidAndEnabledFalse("suspended-uid");
+        // ...and the request still flows down the chain exactly once so the entry point can emit the 401
+        // (the filter refuses by leaving the context empty, not by writing its own response).
+        verify(chain, times(1)).doFilter(request, response);
     }
 }
