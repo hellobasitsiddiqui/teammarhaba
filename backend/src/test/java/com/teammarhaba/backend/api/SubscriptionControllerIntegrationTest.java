@@ -206,4 +206,52 @@ class SubscriptionControllerIntegrationTest extends AbstractIntegrationTest {
                         .content("{\"tier\":\"MONTHLY\"}"))
                 .andExpect(status().isUnauthorized());
     }
+
+    /**
+     * A phone-only account (a verified token that carries a uid but NO email) can open the Subscribe
+     * checkout (TM-762 / TM-738 P2 membership). Firebase phone sign-in yields exactly this principal —
+     * {@link VerifiedUser#email()} is {@code null} — and the checkout path JIT-provisions the account
+     * ({@code UserService.provision} → {@code new User(uid, null, null)}) and hands the null email/phone/
+     * displayName to {@code payments.createCustomer(...)}. The existing lifecycle test always uses an
+     * email-bearing caller, so nothing pins that a phone-only buyer isn't rejected at provisioning or at
+     * the customer-create seam. This characterises existing behaviour (no source change): the checkout
+     * returns 200 with the locked price + widget token, and a PENDING INITIAL charge is recorded against
+     * the freshly-provisioned, null-email account.
+     */
+    @Test
+    void phoneOnlyAccountCanOpenSubscribeCheckout() throws Exception {
+        // A phone-only caller: a valid uid, NO email (what Firebase phone auth produces).
+        var phoneOnly = authentication(
+                new UsernamePasswordAuthenticationToken(new VerifiedUser("uid-sub-phone", null), null, List.of()));
+
+        // Distinct provider order/customer ids for THIS test: the class shares a real Postgres with no
+        // per-test rollback, and provider_order_id is UNIQUE (V38) — reusing the @BeforeEach stub's
+        // "rev-it-order-1" would collide with the lifecycle test's charge row. Own customer too, so the
+        // saved-payment-method lookup is unambiguous.
+        when(payments.createCustomer(any(), any(), any())).thenReturn("cust-phone-1");
+        when(payments.createOrderForCustomer(anyInt(), eq("GBP"), anyString(), eq("cust-phone-1")))
+                .thenReturn(new PaymentOrder("rev-it-phone-1", "tok-phone-1"));
+        when(payments.findMerchantSavedPaymentMethod("cust-phone-1")).thenReturn(Optional.of("pm-phone-1"));
+
+        mockMvc.perform(post("/api/v1/me/subscription/checkout")
+                        .with(phoneOnly)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tier\":\"MONTHLY\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tier").value("MONTHLY"))
+                .andExpect(jsonPath("$.amountPence").value(999))
+                .andExpect(jsonPath("$.paymentToken").value("tok-phone-1"))
+                .andExpect(jsonPath("$.provider").value("revolut"));
+
+        // The account was JIT-provisioned with a null email, and a PENDING INITIAL charge was recorded.
+        var user = users.findByFirebaseUid("uid-sub-phone").orElseThrow();
+        assertThat(user.getEmail()).isNull();
+        SubscriptionCharge charge = charges.findByProviderOrderId("rev-it-phone-1").orElseThrow();
+        assertThat(charge.getUserId()).isEqualTo(user.getId());
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.PENDING);
+        assertThat(charge.getKind()).isEqualTo(SubscriptionCharge.Kind.INITIAL);
+        // As with any checkout, the client paying the widget grants nothing yet — no subscription until
+        // the settle webhook lands.
+        assertThat(subscriptions.findByUserId(user.getId())).isEmpty();
+    }
 }
