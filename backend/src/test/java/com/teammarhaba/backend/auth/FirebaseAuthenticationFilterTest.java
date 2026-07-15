@@ -273,4 +273,51 @@ class FirebaseAuthenticationFilterTest {
             filterLogger.setLevel(previousLevel);
         }
     }
+
+    /**
+     * TM-738 P2 (auth) edge: the filter only authenticates when the context is EMPTY — it guards the whole
+     * verify block with {@code getAuthentication() == null}. So if some earlier filter in the chain already
+     * established an {@link Authentication}, this filter must be a pure pass-through: it must NOT re-verify
+     * the bearer token, must NOT touch Firebase, and must leave the pre-existing authentication exactly as
+     * it found it. This pins that idempotent-guard so a future refactor can't accidentally overwrite an
+     * already-authenticated request (or double-hit the Admin SDK) just because a {@code Bearer} header is
+     * also present.
+     */
+    @Test
+    void filter_preExistingAuthenticationIsNotOverwritten() throws Exception {
+        // Seed the context with an authentication that did NOT come from this filter, as an earlier chain
+        // filter would. A distinct principal + authority lets us prove the object is left untouched.
+        VerifiedUser preExisting = new VerifiedUser("pre-existing-uid", "already@example.com");
+        Authentication seeded = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                preExisting,
+                null,
+                java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN")));
+        SecurityContextHolder.getContext().setAuthentication(seeded);
+
+        // A perfectly valid Bearer token is present — the ONLY reason it isn't used is the context guard.
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<FirebaseAuth> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(auth);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<UserRepository> users = mock(ObjectProvider.class);
+        when(users.getIfAvailable()).thenReturn(null);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer some-otherwise-valid-token");
+        FilterChain chain = mock(FilterChain.class);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new FirebaseAuthenticationFilter(provider, users).doFilter(request, response, chain);
+
+        // The pre-existing authentication is left in place, unchanged (same object, same principal/role).
+        Authentication after = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(after).isSameAs(seeded);
+        assertThat(after.getPrincipal()).isEqualTo(preExisting);
+        assertThat(after.getAuthorities()).extracting("authority").containsExactly("ROLE_ADMIN");
+        // The request still flows down the chain exactly once...
+        verify(chain, times(1)).doFilter(request, response);
+        // ...and Firebase was never consulted — the guard short-circuits before any Admin-SDK call, so an
+        // already-authenticated request never pays for (or is overwritten by) a redundant token verify.
+        verify(auth, never()).verifyIdToken(any(String.class), any(Boolean.class));
+    }
 }

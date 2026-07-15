@@ -92,6 +92,43 @@ class EmailCodeLoginIntegrationTest extends AbstractIntegrationTest {
         assertThat(node.get("customToken").asText()).isEqualTo("tok-happy");
     }
 
+    /**
+     * TM-738 P2 (auth) security-negative: the successful verify response must expose ONLY the Firebase
+     * custom token — never the one-time code the caller submitted, the account uid, or the email. The
+     * response is a single-field {@code EmailCodeVerifyResponse(String customToken)}, but nothing pins
+     * that shape at the HTTP boundary, so a future field added to the record (or a switch to returning a
+     * richer object) could silently start leaking the reusable code, the internal uid, or PII. This
+     * asserts the serialized JSON has exactly one property, {@code customToken}, and that none of the
+     * sensitive inputs/identifiers appear anywhere in the body.
+     */
+    @Test
+    void verify_responseNeverExposesCodeOrUidOnlyCustomToken() throws Exception {
+        String email = requestCodeFor("shape");
+        stubFirebaseUser(email, "uid-shape-secret", "tok-shape");
+        String code = mailer.codes.get(email);
+
+        String json = mockMvc.perform(post("/api/v1/auth/email-code/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"code\":\"" + code + "\"}"))
+                .andExpect(status().isOk())
+                // The token is the ONLY field the response is allowed to carry.
+                .andExpect(jsonPath("$.customToken").value("tok-shape"))
+                // Explicitly assert the sensitive fields are absent (not merely null) at the JSON level.
+                .andExpect(jsonPath("$.code").doesNotExist())
+                .andExpect(jsonPath("$.uid").doesNotExist())
+                .andExpect(jsonPath("$.email").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        // Exactly one property on the object — a new field on the record would fail here.
+        JsonNode node = objectMapper.readTree(json);
+        assertThat(node.isObject()).isTrue();
+        assertThat(node.fieldNames()).toIterable().containsExactly("customToken");
+        // And the raw code + uid must not leak anywhere in the body, whatever the future field name.
+        assertThat(json).doesNotContain(code).doesNotContain("uid-shape-secret");
+    }
+
     @Test
     void wrongCodeIsRejectedWith401() throws Exception {
         String email = requestCodeFor("wrong");
