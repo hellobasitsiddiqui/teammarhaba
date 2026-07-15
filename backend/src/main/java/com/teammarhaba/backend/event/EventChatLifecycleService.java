@@ -5,11 +5,15 @@ import com.teammarhaba.backend.chat.ConversationMember;
 import com.teammarhaba.backend.chat.ConversationMemberRepository;
 import com.teammarhaba.backend.chat.ConversationRepository;
 import com.teammarhaba.backend.chat.MemberRole;
+import com.teammarhaba.backend.chat.Message;
+import com.teammarhaba.backend.chat.MessageCreatedEvent;
+import com.teammarhaba.backend.chat.MessageRepository;
 import com.teammarhaba.backend.chat.MuteState;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,16 +72,22 @@ public class EventChatLifecycleService {
     private final ConversationMemberRepository members;
     private final EventChatClosePolicy closePolicy;
     private final EventRepository events;
+    private final MessageRepository messages;
+    private final ApplicationEventPublisher publisher;
 
     public EventChatLifecycleService(
             ConversationRepository conversations,
             ConversationMemberRepository members,
             EventChatClosePolicy closePolicy,
-            EventRepository events) {
+            EventRepository events,
+            MessageRepository messages,
+            ApplicationEventPublisher publisher) {
         this.conversations = conversations;
         this.members = members;
         this.closePolicy = closePolicy;
         this.events = events;
+        this.messages = messages;
+        this.publisher = publisher;
     }
 
     /**
@@ -91,6 +101,10 @@ public class EventChatLifecycleService {
         Conversation conversation = threadFor(event); // get-or-create (host added on create)
         ensureMember(conversation.getId(), event.getCreatedBy(), MemberRole.ADMIN); // host: always a member
         ensureMember(conversation.getId(), userId, MemberRole.MEMBER);
+        // The chat has opened (the thread exists + has a first GOING member): auto-post the configured
+        // opening message once, as an announcement (TM-710). Idempotent — the event's
+        // opening_message_posted_at stamp guards it, so a re-open / redeploy never duplicates it.
+        postOpeningMessageIfPending(event, conversation);
     }
 
     /**
@@ -218,6 +232,34 @@ public class EventChatLifecycleService {
         return conversations
                 .findByEventId(event.getId())
                 .orElseGet(() -> conversations.save(Conversation.forEvent(event.getId())));
+    }
+
+    /**
+     * Auto-post the event's configured opening message once, as an ANNOUNCEMENT (TM-710), the first time
+     * its chat opens — a no-op when no opening message is configured (AC: nothing auto-posted then).
+     *
+     * <p><b>Idempotent.</b> The guard is the persisted {@link Event#getOpeningMessagePostedAt()} stamp:
+     * this fires only when {@link Event#hasPendingOpeningMessage()} (a non-blank message that has not
+     * been stamped), and it stamps {@link Event#markOpeningMessagePosted} in the same transaction as the
+     * post. So a re-open (a second GOING landing calling {@link #onGoing}), a redeploy, or a replayed
+     * thread-create can never post it twice — the stamp is already set. All {@link #onGoing} calls for
+     * one event serialise behind the RSVP transaction's {@code SELECT ... FOR UPDATE} on the events row,
+     * so even two concurrent first-GOING landings can't both slip past the guard.
+     *
+     * <p>The announcement is posted with a {@code null} sender (a system "from TeamMarhaba" opening
+     * message — there is no acting author on the RSVP path), audited-free here (the RSVP flow owns its
+     * own audit), and publishes the same {@link MessageCreatedEvent} the ordinary post does so the
+     * push + live-SSE fan-outs reach the thread's members after commit.
+     */
+    private void postOpeningMessageIfPending(Event event, Conversation conversation) {
+        if (!event.hasPendingOpeningMessage()) {
+            return; // no opening message, or already posted once — nothing to do
+        }
+        Message opening =
+                messages.saveAndFlush(Message.announcement(conversation.getId(), null, event.getOpeningMessage()));
+        event.markOpeningMessagePosted(Instant.now()); // idempotency stamp, flushed on commit
+        events.save(event);
+        publisher.publishEvent(new MessageCreatedEvent(opening));
     }
 
     /**

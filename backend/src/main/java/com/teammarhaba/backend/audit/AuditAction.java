@@ -105,6 +105,16 @@ public enum AuditAction {
     EVENT_CHAT_MESSAGE_POSTED,
 
     /**
+     * An admin/host posted an ANNOUNCEMENT-kind message to an event group thread — either via the
+     * admin announcement endpoint {@code POST /api/v1/conversations/{id}/announcements} or the one-shot
+     * auto-posted event opening message (TM-710, epic Event Chat). One row per announcement carrying the
+     * conversation id as the target and the created message id in its metadata; the durable text lives
+     * in the {@code message} row. Distinct from {@link #EVENT_CHAT_MESSAGE_POSTED} (an ordinary attendee
+     * post) so the log tells an admin announcement apart from a normal message.
+     */
+    EVENT_CHAT_ANNOUNCEMENT_POSTED,
+
+    /**
      * An app admin removed (soft-deleted) a chat message via {@code POST
      * /api/v1/admin/conversations/{conversationId}/messages/{messageId}/remove} (TM-449, epic Event
      * Chat). One row per removal carrying the conversation id as the target and the removed message id

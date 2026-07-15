@@ -58,6 +58,8 @@ import java.time.Instant;
  *     both {@code null} = open to all ages) — TM-415
  * @param pricePence                   ticket price in pence (minor units, GBP); {@code 0} = free — TM-475
  * @param premium                      whether the event is gated as premium — TM-475
+ * @param openingMessage               the optional group-chat opening message ({@code null} = none),
+ *     auto-posted once as an announcement when the event's chat first opens — TM-710
  * @param status                       {@code PUBLISHED} or {@code CANCELLED}
  * @param past                         whether the event has already ended (TM-518) — the temporal
  *     {@link com.teammarhaba.backend.event.EventPhasePolicy#isFinished finished} verdict, not the
@@ -99,6 +101,7 @@ public record EventResponse(
         Integer ageMax,
         int pricePence,
         boolean premium,
+        String openingMessage,
         String status,
         boolean past,
         Long createdBy,
@@ -169,6 +172,7 @@ public record EventResponse(
                 event.getAgeMax(),
                 event.getPricePence(),
                 event.isPremium(),
+                event.getOpeningMessage(),
                 event.getStatus().name(),
                 past,
                 event.getCreatedBy(),

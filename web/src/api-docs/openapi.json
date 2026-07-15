@@ -577,6 +577,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "kind" : {
+            "type" : "string"
+          },
           "mine" : {
             "type" : "boolean"
           },
@@ -744,6 +747,11 @@
           },
           "onlineUrl" : {
             "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "openingMessage" : {
+            "maxLength" : 2000,
             "minLength" : 0,
             "type" : "string"
           },
@@ -1200,6 +1208,9 @@
             "type" : "string"
           },
           "onlineUrl" : {
+            "type" : "string"
+          },
+          "openingMessage" : {
             "type" : "string"
           },
           "past" : {
@@ -1798,6 +1809,17 @@
         },
         "type" : "object"
       },
+      "PostAnnouncementRequest" : {
+        "properties" : {
+          "body" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "body" ],
+        "type" : "object"
+      },
       "PostMessageRequest" : {
         "properties" : {
           "body" : {
@@ -2101,6 +2123,11 @@
           },
           "onlineUrl" : {
             "maxLength" : 2048,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "openingMessage" : {
+            "maxLength" : 2000,
             "minLength" : 0,
             "type" : "string"
           },
@@ -3370,6 +3397,43 @@
           }
         },
         "tags" : [ "email-code-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/announcements" : {
+      "post" : {
+        "operationId" : "postAnnouncement",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PostAnnouncementRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConversationMessageResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
       }
     },
     "/api/v1/conversations/{id}/leave" : {
