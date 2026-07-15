@@ -173,6 +173,65 @@ class EmailCodeServiceTest {
     }
 
     @Test
+    void concurrentWrongGuessesCannotExceedTheAttemptCap() throws Exception {
+        // TM-732 regression: the verify attempt counter was a non-atomic getIfPresent -> decide -> put.
+        // Two concurrent wrong guesses could both read the same attemptsLeft and both decrement from it,
+        // losing a decrement — so an attacker fanning out parallel requests got MORE than
+        // maxVerifyAttempts (5) tries at a short numeric code. With the atomic asMap().compute() the cap
+        // holds no matter how many threads race: at most (cap - 1) guesses ever see "wrong, budget left"
+        // (CODE_INVALID); the one that spends the last attempt burns the code (VERIFY_RATE_LIMITED); and
+        // every guess after that finds no outstanding code. The correct code must NOT work afterwards.
+        service.request(EMAIL);
+        String correct = mailer.lastCode;
+        String wrong = nudge(correct);
+
+        int threads = 64; // far more than the cap of 5 — maximise the race window
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(threads);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger codeInvalid = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger rateLimited = new java.util.concurrent.atomic.AtomicInteger();
+
+        List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();
+                    service.verify(EMAIL, wrong); // all-wrong guesses, hammered simultaneously
+                } catch (EmailCodeException e) {
+                    if (e.reason() == EmailCodeException.Reason.CODE_INVALID) {
+                        codeInvalid.incrementAndGet();
+                    } else if (e.reason() == EmailCodeException.Reason.VERIFY_RATE_LIMITED) {
+                        rateLimited.incrementAndGet();
+                    }
+                } catch (Exception ignored) {
+                    // no other checked exception is expected on the wrong-code path
+                }
+            }));
+        }
+        ready.await();
+        go.countDown(); // release all threads at once
+        for (java.util.concurrent.Future<?> f : futures) {
+            f.get();
+        }
+        pool.shutdown();
+
+        // The budget is 5. A guess returns CODE_INVALID only while budget remained (attempts 1..4), so at
+        // most 4 responses can be CODE_INVALID *with an outstanding code* — plus any that raced in after
+        // the burn and found nothing (also CODE_INVALID). The decisive, race-proof invariant is that the
+        // code is genuinely burned: the CORRECT code no longer works and no token was ever minted.
+        assertThat(rateLimited.get())
+                .as("exactly one guess spends the final attempt and burns the code")
+                .isEqualTo(1);
+        assertThatThrownBy(() -> service.verify(EMAIL, correct))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+        verify(firebaseAuth, never()).createCustomToken(anyString());
+    }
+
+    @Test
     void floodOfDistinctAddressesLeavesInMemoryStateBounded() {
         // The DoS the TM-238 review found: an attacker scripts `request` with millions of distinct,
         // validly-formed random addresses. With unbounded maps this grew the heap without limit; with
