@@ -101,6 +101,11 @@ const THREAD_POLL_MS = 15000;
 // poll during a send so it can't race the optimistic echo. `bodyEl` is repainted on change; the composer
 // input persists across body repaints.
 const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sending: false, poll: null, bodyEl: null,
+  // TM-721: a monotonic revision counter bumped on every LIVE (SSE) mutation of `thread.messages`.
+  // pollThread snapshots it before its fetch and discards the response if it changed meanwhile — an SSE
+  // frame that landed during the in-flight poll is newer, so the poll's wholesale replace must not
+  // clobber it (a later poll tick reconciles). `polling` guards against two overlapping poll responses.
+  rev: 0, polling: false,
   // Reply / quote (TM-466): `replyTo` is the composer's active reply target ({ id, excerpt, ... } from
   // core.replyTargetFrom) or null; `composerInput` / `replyPreviewEl` are refs so beginReply/clearReply
   // can toggle the composer's quoted-preview bar and re-focus the input across body repaints.
@@ -656,6 +661,7 @@ function openLiveThread(id, token) {
       // gave us the resolved reply quote + our read receipt) it PATCHes rather than whole-row replacing,
       // so a lean broadcast echo can't drop the reply quote / receipt or double-render the bubble (TM-731).
       thread.messages = core.mergeLiveMessage(thread.messages, m);
+      thread.rev++; // TM-721: mark a live change so an in-flight poll can't clobber this newer message
       repaintBody();
     },
     // Live edit (TM-467): an author reworded a message — apply it as a body/editedAt PATCH to the copy we
@@ -668,6 +674,7 @@ function openLiveThread(id, token) {
       thread.messages = core.applyMessageEdit(thread.messages, {
         id: patchId, body: raw?.body, editedAt: raw?.editedAt,
       });
+      thread.rev++; // TM-721: a live edit is newer than any in-flight poll snapshot
       repaintBody();
     },
     // Live delete (TM-467): an author took a message back — drop it from the open thread by id. If we were
@@ -679,6 +686,7 @@ function openLiveThread(id, token) {
       if (thread.editingId === goneId) { thread.editingId = null; thread.editDraft = ""; }
       thread.mineIds.delete(goneId);
       thread.messages = core.removeMessageById(thread.messages, goneId);
+      thread.rev++; // TM-721: a live delete is newer than any in-flight poll snapshot
       repaintBody();
     },
     // Typing indicator (TM-465): fold each received `typing` signal into the typist list (keyed + expiring
@@ -1184,14 +1192,26 @@ async function pollThread(id) {
   // Pause while a send OR an inline edit (TM-467) is in flight/open, so the poll's repaint can't race the
   // optimistic echo or clobber the open editor's in-progress text.
   if (thread.sending || thread.savingEdit || thread.editingId) return;
+  // TM-721: don't overlap poll fetches — a second tick (or a push-triggered refresh) firing while one is
+  // still in flight would have both wholesale-replace thread.messages, out of order. One at a time.
+  if (thread.polling) return;
+  // Snapshot the live-revision counter BEFORE the fetch. If an SSE frame mutates thread.messages while
+  // this request is in flight it bumps thread.rev; we then know our snapshot is stale and drop it rather
+  // than clobbering the newer live message with an older server page (a later tick reconciles).
+  const revAtFetch = thread.rev;
+  thread.polling = true;
   let data;
   try {
     data = await getConversationMessages(id);
   } catch (err) {
     console.warn("[chat] thread poll failed:", err?.message ?? err);
     return;
+  } finally {
+    thread.polling = false;
   }
-  if (thread.id !== id) return;
+  // Discard the response if we've navigated to another thread, or if a live (SSE) update landed while it
+  // was in flight — that update is newer than this snapshot, so its incremental state wins.
+  if (thread.id !== id || thread.rev !== revAtFetch) return;
   const next = core.toThreadMessages(data?.items);
   if (core.threadSignature(next) === core.threadSignature(thread.messages)) return; // nothing new
   thread.messages = next;

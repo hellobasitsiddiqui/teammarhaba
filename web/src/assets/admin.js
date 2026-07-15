@@ -25,6 +25,7 @@ import { doodle } from "./doodles.js";
 import { confirmSensitiveAction } from "./biometric-confirm.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
+import { clampPage } from "./admin-paging-core.js";
 import {
   MAX_TITLE,
   MAX_BODY,
@@ -136,6 +137,11 @@ async function fetchUsersPage(page, size) {
 }
 
 export async function loadUsers() {
+  // TM-721 re-entry guard: a second Refresh while a load is already running would start a whole second
+  // concurrent page walk (fetchAllUsers walks EVERY page), doubling the request volume and racing two
+  // result sets into state.users. Bail if one's in flight — mirrors the guarded sibling in
+  // admin-messages.js (which gates on state.usersLoading).
+  if (state.loading) return;
   state.loading = true;
   state.error = null;
   render();
@@ -911,6 +917,10 @@ function renderTable() {
     return;
   }
 
+  // TM-721: clamp a stale page index BEFORE slicing. A mutation (disable/role-change filtering a row out,
+  // or a narrower search) can shrink `rows` below the current page's start; without this the slice is
+  // empty and we'd paint a blank table while renderPager (which clamps too late) shows "Page 1 of 1".
+  state.page = clampPage(state.page, rows.length, state.pageSize);
   const start = state.page * state.pageSize;
   const pageRows = rows.slice(start, start + state.pageSize);
 

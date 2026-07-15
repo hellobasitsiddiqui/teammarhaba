@@ -55,6 +55,7 @@ import {
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
 import { adminVenueNewHash } from "./admin-venues-route.js";
+import { clampPage } from "./admin-paging-core.js";
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-inventory walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 events)
@@ -265,6 +266,10 @@ function renderTable() {
     return;
   }
 
+  // TM-721: clamp a stale page index BEFORE slicing (see admin-paging-core.js). Cancelling/deleting the
+  // last event on a page shrinks `rows` below the page start; without this we'd paint a blank table while
+  // the pager (which clamps too late) reads "Page 1 of 1".
+  state.page = clampPage(state.page, rows.length, state.pageSize);
   const start = state.page * state.pageSize;
   const pageRows = rows.slice(start, start + state.pageSize);
 
