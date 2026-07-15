@@ -399,7 +399,22 @@ jobs:
           set -euo pipefail
           REVOLUT_SECRETS=""
           # Always point the app at the sandbox base (non-sensitive). Go-live swaps this to merchant.revolut.com.
-          REVOLUT_ENV="REVOLUT_API_BASE=https://sandbox-merchant.revolut.com"
+          REVOLUT_API_BASE_URL="https://sandbox-merchant.revolut.com"
+          REVOLUT_ENV="REVOLUT_API_BASE=${REVOLUT_API_BASE_URL}"
+          # Money-safety interlock (TM-728): the SERVER-SIDE membership flag ships true in prod
+          # (MEMBERSHIP_ENABLED=true in the deploy step below), so the paid endpoints are reachable — while
+          # this API base is pinned to SANDBOX. That means a caller could obtain paid entitlements against
+          # sandbox test cards with no real money collected. This is EXPECTED pre-go-live (the web
+          # `membership` UI flag is still OFF, and go-live is the deliberate human swap to merchant.revolut.com
+          # + live keys, TM-599). We surface it LOUDLY here — non-fatal, so it never reds a green deploy or
+          # hacks around the intentional pin — so the mismatch is a conscious decision at go-live, not a
+          # silent accident. When REVOLUT_API_BASE moves to the live host this warning stops firing.
+          case "${REVOLUT_API_BASE_URL}" in
+            *sandbox*)
+              echo "::warning::MONEY-SAFETY (TM-728): membership is server-enabled (MEMBERSHIP_ENABLED=true) while REVOLUT_API_BASE is SANDBOX (${REVOLUT_API_BASE_URL}) — paid entitlements are obtainable with test cards and NO real money is collected. Expected pre-go-live (web membership UI flag still OFF); at go-live swap the base to merchant.revolut.com + live keys (TM-599)."
+              echo "- ⚠️ **Payments point at SANDBOX** while membership is server-enabled — no real money is collected (expected pre-go-live; resolve at go-live per TM-599)." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
           if gcloud secrets describe teammarhaba-revolut-sandbox-secret --project="${PROJECT}" >/dev/null 2>&1; then
             echo "Secret teammarhaba-revolut-sandbox-secret found — wiring Revolut create-order (TM-478)."
             REVOLUT_SECRETS="REVOLUT_SECRET_KEY=teammarhaba-revolut-sandbox-secret:latest"

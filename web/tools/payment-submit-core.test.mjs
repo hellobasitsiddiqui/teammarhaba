@@ -38,9 +38,15 @@ test("PAYMENT_STUCK_HINT is the shared retryable copy shown when a submit gets s
   assert.match(PAYMENT_STUCK_HINT, /try again/i);
 });
 
-test("PAYMENT_SUBMIT_TIMEOUT_MS is a sane positive backstop window (TM-642)", () => {
+test("PAYMENT_SUBMIT_TIMEOUT_MS is a sane backstop window that clears an interactive 3DS/SCA challenge (TM-642/TM-728)", () => {
   assert.ok(Number.isInteger(PAYMENT_SUBMIT_TIMEOUT_MS) && PAYMENT_SUBMIT_TIMEOUT_MS > 0);
-  assert.ok(PAYMENT_SUBMIT_TIMEOUT_MS >= 10000, "long enough to clear a real round-trip incl. 3DS/SCA");
+  // Widened from 30s (TM-728): the backstop must NOT fire while a real bank OTP / app-approval challenge
+  // is still on screen — that routinely runs past 30s, and the false timeout then told a charged user
+  // their payment failed. 120s is the floor for "comfortably clears an interactive challenge".
+  assert.ok(
+    PAYMENT_SUBMIT_TIMEOUT_MS >= 120000,
+    "long enough to clear an interactive 3DS/SCA challenge (not just a round-trip)",
+  );
 });
 
 // --- the pure state machine ------------------------------------------------------------------------
@@ -76,19 +82,22 @@ test("onSuccess while PENDING settles to SUCCESS — terminal and NOT retryable 
   assert.equal(isPaymentRetryable(next), false, "a paid charge is never re-enabled for retry");
 });
 
-test("PRECEDENCE: a SUCCESS that arrives AFTER a TIMEOUT does NOT override the shown error (TM-642)", () => {
-  // The defined precedence: the FIRST terminal event of an attempt wins. We already told the user it
-  // didn't go through and re-enabled the button (they may have retried), so a late success from the
-  // timed-out attempt must not silently flip the UI to success. The state stays TIMEOUT.
+test("PRECEDENCE: a SUCCESS that arrives AFTER a TIMEOUT WINS — never leave 'failed' over a real charge (TM-728)", () => {
+  // Money-safety correction (TM-728): a TIMEOUT is only our own backstop ("we heard nothing in time"),
+  // NOT a provider verdict — the classic case is the backstop firing while a slow 3DS/SCA challenge is
+  // still on screen. If the user then completes the challenge and the charge lands, onSuccess arrives
+  // late: it MUST override the timeout so a genuinely-CHARGED user is not told their payment failed.
   assert.equal(
     nextPaymentSubmitState(PAYMENT_SUBMIT_STATE.TIMEOUT, PAYMENT_SUBMIT_EVENT.SUCCESS),
-    PAYMENT_SUBMIT_STATE.TIMEOUT,
+    PAYMENT_SUBMIT_STATE.SUCCESS,
   );
-  // Symmetrically, a late error/timeout after an error is ignored too (first terminal wins).
+  // An ERROR terminal is a REAL provider decline and stays authoritative: a stray success after a hard
+  // decline is still ignored (this is not the timeout case — the provider told us it failed).
   assert.equal(
     nextPaymentSubmitState(PAYMENT_SUBMIT_STATE.ERROR, PAYMENT_SUBMIT_EVENT.SUCCESS),
     PAYMENT_SUBMIT_STATE.ERROR,
   );
+  // A late error/timeout after a timeout is still ignored — only a genuine SUCCESS corrects a timeout.
   assert.equal(
     nextPaymentSubmitState(PAYMENT_SUBMIT_STATE.TIMEOUT, PAYMENT_SUBMIT_EVENT.ERROR),
     PAYMENT_SUBMIT_STATE.TIMEOUT,
@@ -175,25 +184,33 @@ test("controller: the backstop firing settles a stuck submit to TIMEOUT (fail-be
   const ctl = createCardSubmitController({ ...timer, onChange: (s) => emits.push(s) });
 
   ctl.begin(); // → PENDING (widget never calls back)
-  timer.fire(); // the 30s backstop elapses
+  timer.fire(); // the backstop window elapses
 
   assert.equal(ctl.getState(), PAYMENT_SUBMIT_STATE.TIMEOUT);
   assert.equal(isPaymentRetryable(ctl.getState()), true, "the button re-enables after a stuck submit");
   assert.deepEqual(emits, [PAYMENT_SUBMIT_STATE.PENDING, PAYMENT_SUBMIT_STATE.TIMEOUT]);
 });
 
-test("controller: a late onSuccess AFTER the timeout is a no-op — no double-fire, error stays shown (TM-642)", () => {
+test("controller: a late onSuccess AFTER the timeout RECOVERS to SUCCESS — never strand a charged user on 'failed' (TM-728)", () => {
+  // Money-safety (TM-728): the backstop fired (e.g. mid-3DS), so we briefly showed the stuck hint and
+  // re-enabled the button. When the challenge then completes and the charge lands, the real onSuccess
+  // arrives late — it must move the controller to SUCCESS and emit that change so the view corrects the
+  // message and runs its paid/activate effect, instead of leaving a genuinely-charged user on "failed".
   const timer = fakeTimer();
   const emits = [];
   const ctl = createCardSubmitController({ ...timer, onChange: (s) => emits.push(s) });
 
   ctl.begin(); // → PENDING
-  timer.fire(); // → TIMEOUT (shown to the user, button re-enabled)
-  const late = ctl.success(); // the real callback finally arrives, too late
+  timer.fire(); // → TIMEOUT (stuck hint shown, button re-enabled)
+  const late = ctl.success(); // the real callback finally arrives after the challenge finished
 
-  assert.equal(late, null, "a late success after settle returns null (ignored)");
-  assert.equal(ctl.getState(), PAYMENT_SUBMIT_STATE.TIMEOUT, "the shown timeout state is preserved");
-  assert.deepEqual(emits, [PAYMENT_SUBMIT_STATE.PENDING, PAYMENT_SUBMIT_STATE.TIMEOUT], "no second emit");
+  assert.equal(late, PAYMENT_SUBMIT_STATE.SUCCESS, "a late success after a timeout recovers to SUCCESS");
+  assert.equal(ctl.getState(), PAYMENT_SUBMIT_STATE.SUCCESS, "the charged state wins over the timeout");
+  assert.deepEqual(
+    emits,
+    [PAYMENT_SUBMIT_STATE.PENDING, PAYMENT_SUBMIT_STATE.TIMEOUT, PAYMENT_SUBMIT_STATE.SUCCESS],
+    "the SUCCESS recovery is emitted so the view corrects the stuck-hint and runs the paid effect",
+  );
 });
 
 test("controller: onError while PENDING settles to ERROR, disarms the backstop, passes the detail (TM-642)", () => {

@@ -352,6 +352,12 @@ public class EventRsvpService {
         // (a no-op for the host, or someone who was never a chat member). In-transaction, so the
         // membership change commits atomically with the attendance delete.
         chatLifecycle.onLeave(event, user.getId());
+        // NOTE (TM-728): the first-event credit is deliberately NOT returned here. The direct un-RSVP
+        // verb (DELETE /rsvp) leaving a FREE-first event must forfeit the credit — otherwise a
+        // pay-per-event caller could RSVP a priced event free, leave, and RSVP the next one free again,
+        // looping the first-event freebie forever (the TM-625a abuse the paid-gate integration test
+        // pins). Only a genuine paid-commitment reversal via /checkout/cancel returns the credit, inside
+        // the window; that reversal lives in CheckoutService.cancel — the single money-safety owner.
         // A committed late cancel bumps the strike counter AND appends a reliability ledger row (TM-409),
         // both inside this transaction (dirty-checking + the audit write flush on commit). A free cancel
         // still reports the account's current standing so the client can keep its banner in step.

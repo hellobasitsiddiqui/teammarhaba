@@ -254,7 +254,7 @@ public class SubscriptionService {
             }
             case PENDING, FAILED -> {
                 if (charge.getKind() == SubscriptionCharge.Kind.INITIAL) {
-                    activate(charge, now);
+                    settleInitialCharge(charge, now);
                 } else {
                     healRenewal(charge, now);
                 }
@@ -369,6 +369,54 @@ public class SubscriptionService {
         if (!membershipProps.enabled()) {
             throw new ResourceNotFoundException(MEMBERSHIP_OFF);
         }
+    }
+
+    /**
+     * A settled INITIAL charge on the plain (non-superseded) path (TM-728): decide, under the user
+     * lock, whether the captured money buys an activation or must be refunded — mirroring the two
+     * guards {@link #settleSupersededCharge} already applies to a late superseded settle, which the
+     * direct INITIAL path was missing:
+     *
+     * <ul>
+     *   <li><b>Soft-deleted / vanished buyer</b> — {@link #activate}'s restricted
+     *       {@link UserService#getById} throws for a tombstoned (or missing) account, 500-looping the
+     *       webhook forever with the money captured but never activated and never refunded. The money
+     *       is still owed back: flag {@code REFUND_DUE} + refund, never a crash or a silent drop.</li>
+     *   <li><b>Already-ACTIVE subscription</b> — a second INITIAL settle against an account that is
+     *       already actively subscribed is duplicate money (the mirror of the handled SUPERSEDED
+     *       refund case). {@link #activate} would silently reset the live period, swallowing this paid
+     *       month; instead flag {@code REFUND_DUE} + refund. A CANCELED / PAST_DUE subscription is NOT
+     *       active — that is the legitimate re-subscribe path (which credits any residual paid time),
+     *       so it still activates.</li>
+     * </ul>
+     *
+     * Runs under the user-row lock taken by {@link #confirmCharge}.
+     */
+    private void settleInitialCharge(SubscriptionCharge charge, Instant now) {
+        User account = users.findAnyById(charge.getUserId()).orElse(null);
+        if (account == null || account.isDeleted()) {
+            log.warn(
+                    "INITIAL provider order {} settled for deleted/missing account {} — flagging "
+                            + "REFUND_DUE and refunding (TM-728).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            charge.markRefundDue(now);
+            tryRefundCharge(charge, now);
+            return;
+        }
+        Subscription subscription =
+                subscriptions.findByUserId(charge.getUserId()).orElse(null);
+        if (subscription != null && subscription.getStatus() == SubscriptionStatus.ACTIVE) {
+            log.warn(
+                    "INITIAL provider order {} settled for user {} who is already actively subscribed "
+                            + "— duplicate capture; flagging REFUND_DUE and refunding (TM-728).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            charge.markRefundDue(now);
+            tryRefundCharge(charge, now);
+            return;
+        }
+        activate(charge, now);
     }
 
     /**

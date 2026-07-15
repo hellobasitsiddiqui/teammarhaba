@@ -14,6 +14,7 @@ import com.teammarhaba.backend.config.CancellationWindowProperties;
 import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.config.ReliabilityProperties;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.Membership;
 import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.user.User;
@@ -190,6 +191,30 @@ class EventRsvpServiceCancellationTest {
         assertThat(result.message()).contains("would count as a late cancellation").contains("your 1st");
         assertThat(user.getLateCancelCount()).as("nothing written on a dry-run").isZero();
         verify(attendance, never()).deleteByEventIdAndUserId(anyLong(), anyLong());
+    }
+
+    // ------------------------------------------------------------------ first-event credit (TM-728)
+
+    @Test
+    void inWindowLeaveViaDirectUnRsvpDoesNotReturnTheFirstEventCredit() {
+        // TM-728 / TM-625a: the direct un-RSVP verb (DELETE /rsvp) must NOT hand the first-event credit
+        // back, even inside the refund window. If it did, a pay-per-event caller could RSVP a priced
+        // event free on their credit, leave, and RSVP the next priced event free again — looping the
+        // freebie forever. Only a genuine paid-commitment reversal via /checkout/cancel returns the
+        // credit (CheckoutService.cancel, the single money-safety owner). cancelRsvp never touches it.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(48)), AttendanceState.GOING); // 48h > 24h → in-window
+        Membership membership = new Membership(USER_ID, Instant.now());
+        membership.consumeFirstEventCredit(EVENT_ID, Instant.now()); // spent by the direct RSVP on THIS event
+
+        CancelResult result = service().cancelRsvp(caller, EVENT_ID);
+
+        assertThat(result.lateCancel()).isFalse();
+        assertThat(membership.isFirstEventCreditUsed()).as("credit stays spent on a direct leave").isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(EVENT_ID);
+        verify(attendance).deleteByEventIdAndUserId(EVENT_ID, USER_ID);
+        // cancelRsvp is not the credit owner — it never resolves the membership.
+        verify(memberships, never()).getOrEnrol(caller);
     }
 
     // ------------------------------------------------------------------ change window

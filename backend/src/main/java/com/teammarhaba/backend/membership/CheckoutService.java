@@ -351,7 +351,9 @@ public class CheckoutService {
 
         // Drop the attendance and get the window verdict in one place (TM-414): lateCancel == true means
         // we are PAST the refundable cut-off (inside the final window before start) -> forfeit; false
-        // means an early cancel -> reversible. Also 409s if the event has already started.
+        // means an early cancel -> reversible. Also 409s if the event has already started. The direct
+        // un-RSVP verb (DELETE /rsvp) deliberately never returns the credit (TM-728) — this checkout
+        // path is the single owner of the genuine paid-commitment reversal.
         CancelResult cancel = rsvps.cancelRsvp(caller, eventId, false);
 
         Order order = orders.findByUserIdAndEventId(user.getId(), eventId).orElse(null);
