@@ -14,6 +14,7 @@ import { test } from "node:test";
 import {
   resolvePriceState,
   checkoutPayload,
+  isConfirmedCheckout,
   formatPrice,
   normalizeTier,
   isValidCardholderName,
@@ -271,4 +272,36 @@ test("checkoutPayload tolerates a missing event id", () => {
     chargePence: 500,
     currency: "GBP",
   });
+});
+
+// --- confirmation gating (TM-743) --------------------------------------------------------------
+// REGRESSION (TM-743): the checkout screen keyed its "You're confirmed for this event." copy purely on
+// `paymentRequired === false`, but the backend returns paymentRequired:false for ANY non-PENDING existing
+// order on an idempotent repeat — including the terminal, NON-attending FAILED (declined card) / EXPIRED
+// (abandoned) / CANCELLED / REFUNDED states. So a buyer whose card was declined, returning to the screen,
+// was falsely told they were confirmed for an event they never paid for. isConfirmedCheckout keys the copy
+// on the REAL order status instead. These pin the gate; the view (membership-checkout.js) calls it.
+
+test("isConfirmedCheckout is true ONLY for a CONFIRMED order (TM-743)", () => {
+  assert.equal(isConfirmedCheckout({ paymentRequired: false, order: { status: "CONFIRMED" } }), true);
+});
+
+test("isConfirmedCheckout is false for a terminal order even though paymentRequired is false (TM-743)", () => {
+  // The exact regression: an idempotent repeat over a terminal order returns paymentRequired:false, which
+  // must NOT read as a live confirmation.
+  for (const status of ["FAILED", "EXPIRED", "CANCELLED", "REFUNDED", "REFUND_DUE", "REFUND_ABANDONED"]) {
+    assert.equal(
+      isConfirmedCheckout({ paymentRequired: false, order: { status } }),
+      false,
+      `a ${status} order is not a confirmation`,
+    );
+  }
+});
+
+test("isConfirmedCheckout is false for a PENDING order and defensive on missing/absent order (TM-743)", () => {
+  assert.equal(isConfirmedCheckout({ paymentRequired: true, order: { status: "PENDING" } }), false);
+  assert.equal(isConfirmedCheckout({ paymentRequired: false }), false, "no order → not confirmed");
+  assert.equal(isConfirmedCheckout(null), false);
+  assert.equal(isConfirmedCheckout(undefined), false);
+  assert.equal(isConfirmedCheckout({ order: {} }), false, "absent status → not confirmed");
 });

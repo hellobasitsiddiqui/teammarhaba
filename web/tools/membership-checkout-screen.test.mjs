@@ -126,11 +126,14 @@ test("the CONFIRM button POSTs the frictionless RSVP via api.checkout, no longer
 
 test("the CONFIRM flow reflects the confirmed RSVP and stays non-throwing on failure (TM-726)", () => {
   const confirmFn = SRC.slice(SRC.indexOf("async function startConfirm"));
-  // A frictionless settle (paymentRequired === false, or no card needed) reflects the reservation.
+  // A frictionless settle reflects the reservation — gated on the REAL confirmed order status via the
+  // shared isConfirmedCheckout predicate, NOT merely on paymentRequired===false (TM-743): an idempotent
+  // repeat over a terminal FAILED/EXPIRED/CANCELLED/REFUNDED order also returns paymentRequired:false and
+  // must not be mistaken for a live confirmation.
   assert.match(
     confirmFn,
-    /paymentRequired\s*===\s*false[\s\S]{0,160}reflectPaid\(/,
-    "a paymentRequired:false response must reflect the confirmed reservation",
+    /isConfirmedCheckout\(result\)[\s\S]{0,160}reflectPaid\(/,
+    "a CONFIRMED order (not merely paymentRequired:false) must reflect the confirmed reservation",
   );
   // Failure is caught and surfaced inline (never thrown), and the button is re-enabled to retry.
   assert.match(confirmFn, /catch\s*\([\s\S]{0,400}setPayStatus\(/, "a failed reserve must surface inline, not throw");
@@ -145,4 +148,52 @@ test("the CONFIRM flow reflects the confirmed RSVP and stays non-throwing on fai
     /if\s*\(action\s*&&\s*action\.disabled\)\s*return;/,
     "an in-flight guard must ignore a double-tap while the POST is running",
   );
+});
+
+// --- confirmation copy gated on the REAL order status + PENDING resume (TM-743 / TM-744) -----------
+//
+// REGRESSION (TM-743): both the PAY (startPayment) and CONFIRM (startConfirm) flows keyed their
+// "You're confirmed for this event." copy purely on `paymentRequired === false`. The backend returns
+// paymentRequired:false for ANY non-PENDING existing order on an idempotent repeat — including the
+// terminal, NON-attending FAILED (declined card) / EXPIRED / CANCELLED / REFUNDED states — so a buyer
+// whose card was declined, returning to the screen, was falsely told they were confirmed. The fix gates
+// the copy on the shared node-tested isConfirmedCheckout predicate (order.status === "CONFIRMED").
+//
+// TM-744: resuming a PENDING per-event payment used to dead-end because the backend never re-minted a
+// token. Now that it re-mints (TM-739), startPayment mounts the widget with the returned token; the shell
+// must NOT swallow that with a false confirmation before reading the token.
+
+test("both checkout flows gate the confirmation copy on the shared CONFIRMED-status predicate (TM-743)", () => {
+  assert.match(
+    SRC,
+    /import\s*\{[^}]*\bisConfirmedCheckout\b[^}]*\}\s*from\s*"\.\/membership-checkout-core\.js"/,
+    "imports the pure CONFIRMED-status predicate from the core (where it is unit-tested)",
+  );
+  // The old, buggy gate — a bare `paymentRequired === false` immediately followed by reflectPaid — must be
+  // gone from BOTH flows (it falsely confirmed terminal orders).
+  assert.doesNotMatch(
+    SRC,
+    /paymentRequired\s*===\s*false\s*\)\s*\{\s*reflectPaid\(/,
+    "the old paymentRequired===false → reflectPaid gate must be gone (it falsely confirmed terminal orders)",
+  );
+  // The PAY flow reflects the paid state only for a genuinely CONFIRMED order.
+  const payFn = SRC.slice(SRC.indexOf("async function startPayment"));
+  assert.match(
+    payFn,
+    /isConfirmedCheckout\(result\)[\s\S]{0,160}reflectPaid\(/,
+    "startPayment must gate 'You're confirmed' on a CONFIRMED order, not merely paymentRequired:false",
+  );
+});
+
+test("the PAY flow reads the re-minted token to resume a PENDING order rather than dead-ending (TM-744)", () => {
+  const payFn = SRC.slice(SRC.indexOf("async function startPayment"));
+  // The confirmed-status check comes BEFORE the token read, so a re-minted PENDING resume (paymentRequired
+  // true, fresh token, status PENDING) falls through to the token and mounts the widget — not a false
+  // confirmation and not the "could not be initialised" dead end.
+  assert.match(
+    payFn,
+    /isConfirmedCheckout\(result\)[\s\S]{0,800}const\s+token\s*=\s*result\s*&&\s*result\.paymentToken/,
+    "the CONFIRMED gate must precede the token read so a re-minted PENDING token is used to resume",
+  );
+  assert.match(payFn, /mountRevolutCard\(mount,\s*token,/, "the resumed token mounts the card widget");
 });

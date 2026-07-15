@@ -33,6 +33,7 @@ import {
   CARDHOLDER_NAME_HINT,
   createCardSubmitController,
   summarizeCardValidation,
+  isConfirmedCheckout,
   PAYMENT_STUCK_HINT,
   PAYMENT_SUBMIT_STATE,
   CHECKOUT_MODE,
@@ -284,14 +285,24 @@ async function startConfirm(action, event, state) {
     return;
   }
 
-  // A frictionless confirm settles server-side with paymentRequired:false — reflect the reservation.
-  if (!result || result.paymentRequired === false) {
+  // A frictionless confirm settles server-side as a CONFIRMED order — reflect the reservation. Gated on the
+  // REAL order status, not merely paymentRequired===false (TM-743): an idempotent repeat over a terminal
+  // FAILED/EXPIRED/CANCELLED/REFUNDED order also returns paymentRequired:false, and must NOT be mistaken for
+  // a live confirmation.
+  if (isConfirmedCheckout(result)) {
     reflectPaid(mount, "You're confirmed for this event.");
     return; // stays disabled — the place is reserved, nothing more to do
   }
-  // The entitlement changed under us and payment IS now required — hand off to the card flow rather than
-  // silently dropping it. startPayment re-reads the mount and drives the widget from the same result.
-  startPayment(event, state);
+  // Not confirmed. If payment is now required (an entitlement change, or a resumed/re-opened PENDING order),
+  // hand off to the card flow rather than silently dropping it — startPayment re-reads the mount and drives
+  // the widget from a fresh checkout that carries the token. Otherwise the order is in an unexpected
+  // non-attending state: re-enable and prompt a retry instead of falsely claiming success.
+  if (result && result.paymentRequired) {
+    startPayment(event, state);
+    return;
+  }
+  setPayStatus(mount, "Couldn't reserve your place. Please try again.");
+  if (action) action.disabled = false;
 }
 
 /**
@@ -317,11 +328,18 @@ async function startPayment(event, state) {
     return;
   }
 
-  // A frictionless confirm slipped through (e.g. an entitlement change) — reflect it, no card needed.
-  if (result && result.paymentRequired === false) {
+  // A frictionless confirm slipped through (e.g. an entitlement change) — reflect it, no card needed. Gated
+  // on the REAL order status (TM-743), not merely paymentRequired===false: an idempotent repeat over a
+  // terminal FAILED/EXPIRED/CANCELLED/REFUNDED order also returns paymentRequired:false with no live RSVP,
+  // and must never be rendered as "You're confirmed".
+  if (isConfirmedCheckout(result)) {
     reflectPaid(mount, "You're confirmed for this event.");
     return;
   }
+  // Resume / re-mint (TM-739/TM-744): a repeat checkout of a still-PENDING order (or a re-opened terminal
+  // one) now returns a FRESH single-use provider token, so the widget can be mounted again. This is the
+  // token the client uses to resume — no separate resume endpoint is needed. Only when the server genuinely
+  // returns no token (a real init failure) do we surface the retry hint.
   const token = result && result.paymentToken;
   if (!token) {
     setPayStatus(mount, "Payment could not be initialised. Please try again.");

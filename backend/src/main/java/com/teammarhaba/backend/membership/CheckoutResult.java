@@ -21,11 +21,11 @@ import com.teammarhaba.backend.event.RsvpResult;
  * @param paymentRequired {@code true} when the order is {@code PENDING} and the caller still owes payment
  * @param rsvp            where the RSVP landed on a fresh frictionless confirm, else {@code null}
  * @param paymentToken    the payment provider's <b>temporary</b> client token to mount the checkout widget
- *                        (Revolut order token, TM-478) — present only on a FRESH PAY commitment; {@code null}
- *                        for FREE/INCLUDED and for an idempotent repeat (the token is single-use and not
- *                        persisted, so a repeat PENDING checkout returns "payment required" without a fresh
- *                        token — the client re-initiates checkout to obtain a new one). Null ⇒ omitted from
- *                        the JSON (global {@code NON_NULL}), so a no-charge receipt never carries the field.
+ *                        (Revolut order token, TM-478) — present on a FRESH PAY commitment AND on a resume of
+ *                        a still-{@code PENDING} order, where a new single-use token is minted onto the same
+ *                        row so the client can re-mount the widget (TM-739). {@code null} for FREE/INCLUDED and
+ *                        for a truly-idempotent repeat of a live/settled order. Null ⇒ omitted from the JSON
+ *                        (global {@code NON_NULL}), so a no-charge receipt never carries the field.
  */
 public record CheckoutResult(OrderView order, boolean paymentRequired, RsvpResult rsvp, String paymentToken) {
 
@@ -44,9 +44,16 @@ public record CheckoutResult(OrderView order, boolean paymentRequired, RsvpResul
     }
 
     /**
-     * An idempotent repeat: the existing order, unchanged; paymentRequired follows its PENDING state. No
-     * fresh token — the provider token is single-use and not stored, so a client resuming a PENDING order
-     * re-initiates checkout to get a new one.
+     * A truly-idempotent repeat: the existing order, unchanged, with no fresh token. Used for a LIVE or
+     * settled order — {@code CONFIRMED} (a held commitment) or a {@code REFUND_DUE}/{@code REFUNDED}/
+     * {@code REFUND_ABANDONED} row whose money is still being unwound. {@code paymentRequired} follows the
+     * PENDING state, which is {@code false} for all of these — the caller is not re-prompted to pay.
+     *
+     * <p>A still-{@code PENDING} order is <em>not</em> routed here (TM-739): re-checkout re-mints a fresh
+     * provider token onto that same row via {@link #paymentRequired} so the client can resume, rather than
+     * returning a "payment required" with a null token the client can never act on. A terminal
+     * {@code FAILED}/{@code EXPIRED}/{@code CANCELLED} order is likewise not routed here — it is re-opened
+     * for a brand-new checkout (see {@code CheckoutService.checkout}).
      */
     static CheckoutResult existing(Order order) {
         return new CheckoutResult(OrderView.from(order), order.getStatus() == OrderStatus.PENDING, null, null);

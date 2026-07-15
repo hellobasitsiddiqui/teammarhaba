@@ -154,6 +154,14 @@ public class Order {
     }
 
     /**
+     * Bump {@code updated_at} without a status change (TM-739) — used when a still-PENDING order is resumed
+     * and a fresh provider reference is minted onto it, so the row records the resume.
+     */
+    public void touch(Instant when) {
+        this.updatedAt = when;
+    }
+
+    /**
      * Settle a PAY order on a verified payment webhook (TM-478): {@code PENDING → CONFIRMED}. Only a
      * still-{@code PENDING} order transitions — a repeat webhook for an already-{@code CONFIRMED} (or
      * reversed) order is a no-op, so a redelivered notification never double-confirms or resurrects a
@@ -214,6 +222,62 @@ public class Order {
     /** {@code true} while this order can still be reversed — it has not already been cancelled/refunded. */
     public boolean isReversible() {
         return status == OrderStatus.PENDING || status == OrderStatus.CONFIRMED;
+    }
+
+    /**
+     * {@code true} for a <em>terminal, non-attending</em> order — one that ended without a live RSVP and
+     * captured no money that is still ours to keep: a declined initial payment ({@link OrderStatus#FAILED}),
+     * an abandoned/TTL-swept checkout ({@link OrderStatus#EXPIRED}), or an in-window cancel of an unpaid
+     * order ({@link OrderStatus#CANCELLED}). These are the states a fresh checkout for the same (user, event)
+     * may re-open (TM-739): the buyer has no place held and owes nothing, so barring them from ever paying
+     * again — as the unconditional idempotency short-circuit did — silently killed a willing purchase.
+     *
+     * <p>Deliberately excludes {@link OrderStatus#CONFIRMED} (a live commitment — re-checkout stays a no-op),
+     * {@link OrderStatus#REFUND_DUE}/{@link OrderStatus#REFUNDED}/{@link OrderStatus#REFUND_ABANDONED} (a
+     * refund is in flight or a money-owed debt is unresolved — re-opening would race the refund bookkeeping).
+     */
+    public boolean isTerminalNonAttending() {
+        return status == OrderStatus.FAILED
+                || status == OrderStatus.EXPIRED
+                || status == OrderStatus.CANCELLED;
+    }
+
+    /**
+     * Re-open this terminal order back to {@link OrderStatus#PENDING} for a fresh PAY checkout (TM-739),
+     * clearing the previous provider reference so a new provider order + token can be minted onto the same
+     * row. The {@code UNIQUE (user_id, event_id)} constraint means we cannot insert a second order for this
+     * pair, so a re-checkout after a FAILED/EXPIRED/CANCELLED order re-uses this very row rather than a new
+     * one. Guarded to {@linkplain #isTerminalNonAttending terminal-non-attending} states so a live/settled
+     * order can never be silently reset. Returns {@code true} iff this call actually re-opened the order.
+     */
+    public boolean reopenForCheckout(Instant when) {
+        if (!isTerminalNonAttending()) {
+            return false;
+        }
+        this.status = OrderStatus.PENDING;
+        this.provider = null;
+        this.providerOrderId = null;
+        this.updatedAt = when;
+        return true;
+    }
+
+    /**
+     * Re-open this terminal order straight to {@link OrderStatus#CONFIRMED} for a fresh FREE/INCLUDED
+     * checkout (TM-739), clearing any stale provider reference. The £0 frictionless path never touches a
+     * provider, so there is no token to mint — the RSVP is confirmed by the caller in the same transaction.
+     * {@code amount_pence} is {@code updatable = false} at the mapping (the original charge is immutable),
+     * so this keeps the row's recorded amount; a FREE/INCLUDED terminal order was already £0. Guarded to
+     * terminal-non-attending states. Returns {@code true} iff this call actually re-opened the order.
+     */
+    public boolean reopenConfirmed(Instant when) {
+        if (!isTerminalNonAttending()) {
+            return false;
+        }
+        this.status = OrderStatus.CONFIRMED;
+        this.provider = null;
+        this.providerOrderId = null;
+        this.updatedAt = when;
+        return true;
     }
 
     /**
