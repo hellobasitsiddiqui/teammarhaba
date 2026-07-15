@@ -54,6 +54,7 @@ import {
   canEditWithinWindow,
   applyMessageEdit,
   removeMessageById,
+  createAdminFlagCache,
 } from "../src/assets/chat-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
@@ -873,4 +874,46 @@ test("toThreadMessage: carries the announcement flag from the message kind", () 
   // A legacy message with no kind is a normal attendee message, never an announcement.
   const legacy = toThreadMessage({ id: 9, body: "hi", createdAt: "2026-07-14T11:02:00Z" }, now);
   assert.equal(legacy.announcement, false);
+});
+
+/* ─────────────────── viewer admin-flag cache (TM-736 announce-toggle fix) ─────────────────────── */
+
+test("createAdminFlagCache: invalidate() drops the cached flag so a re-resolve picks up the new role (TM-736)", async () => {
+  // The TM-736 repro: /me first answers non-admin (the flag resolved before the ADMIN claim was
+  // live, or for a previous user), then admin. A cache WITHOUT invalidate keeps the stale `false`
+  // for the whole session and the announce toggle never mounts — this test FAILS on that shape.
+  const roles = [{ role: "MEMBER" }, { role: "ADMIN" }];
+  let fetches = 0;
+  const cache = createAdminFlagCache(async () => roles[fetches++]);
+
+  assert.equal(await cache.resolve(), false); // first resolve: non-admin, and it caches…
+  assert.equal(await cache.resolve(), false); // …so a repeat resolve answers from cache, no re-fetch
+  assert.equal(fetches, 1);
+
+  cache.invalidate(); // auth changed (chat.js wires this to onAuthChanged)
+
+  assert.equal(await cache.resolve(), true); // re-fetches → the now-admin role is seen
+  assert.equal(await cache.resolve(), true); // and the fresh value is cached again
+  assert.equal(fetches, 2);
+});
+
+test("createAdminFlagCache: resolves role case-insensitively and only for ADMIN", async () => {
+  assert.equal(await createAdminFlagCache(async () => ({ role: "admin" })).resolve(), true);
+  assert.equal(await createAdminFlagCache(async () => ({ role: "ADMIN" })).resolve(), true);
+  assert.equal(await createAdminFlagCache(async () => ({ role: "MEMBER" })).resolve(), false);
+  assert.equal(await createAdminFlagCache(async () => ({})).resolve(), false);
+  assert.equal(await createAdminFlagCache(async () => null).resolve(), false);
+});
+
+test("createAdminFlagCache: a failed /me caches false (affordance hidden), and invalidate() allows recovery", async () => {
+  let fail = true;
+  const cache = createAdminFlagCache(async () => {
+    if (fail) throw new Error("boom");
+    return { role: "ADMIN" };
+  });
+  assert.equal(await cache.resolve(), false); // failure → non-admin, never throws to the caller
+  fail = false;
+  assert.equal(await cache.resolve(), false); // the failure result is cached like any other
+  cache.invalidate();
+  assert.equal(await cache.resolve(), true); // …until an auth change resets it
 });
