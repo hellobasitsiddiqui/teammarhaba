@@ -651,9 +651,11 @@ function openLiveThread(id, token) {
       if (token !== renderToken || thread.id !== String(id)) return;
       const m = core.toThreadMessage(raw);
       if (!m.id) return; // a frame without an id can't be de-duped safely — skip it
-      // De-dupe by id: upsertMessage replaces any existing copy, so an own-echo, a replay, or a
-      // poll-fetched duplicate never renders twice. Then repaint from the one source of truth.
-      thread.messages = core.upsertMessage(thread.messages, m);
+      // De-dupe by id AND preserve the rich fields the fan-out frame can't carry: mergeLiveMessage
+      // inserts a new message, but for one we already hold (the own-send case — the POST response already
+      // gave us the resolved reply quote + our read receipt) it PATCHes rather than whole-row replacing,
+      // so a lean broadcast echo can't drop the reply quote / receipt or double-render the bubble (TM-731).
+      thread.messages = core.mergeLiveMessage(thread.messages, m);
       repaintBody();
     },
     // Live edit (TM-467): an author reworded a message — apply it as a body/editedAt PATCH to the copy we
@@ -1750,6 +1752,14 @@ function linkPreviewCard(preview) {
       src: preview.imageUrl,
       alt: "",
       loading: "lazy",
+      // Privacy hardening (TM-731): this image is hot-linked to a THIRD-PARTY origin, so every reader's
+      // browser fetches it directly. Strip the referrer at the element (defence-in-depth over the app-wide
+      // Referrer-Policy: no-referrer header) so the previewed site never learns which thread/page the
+      // reader is on, and fetch it anonymously (no cookies/credentials) so it can't be a per-user beacon.
+      // NOTE: this removes the referrer + credential leak; it does NOT hide the reader's IP/presence from
+      // the third party — fully closing that needs a same-origin image proxy (see TM-731 PR notes).
+      referrerpolicy: "no-referrer",
+      crossorigin: "anonymous",
       // If the image 404s / is blocked, hide it rather than showing a broken-image glyph.
       onError: (e) => { e.target.style.display = "none"; },
     }));
