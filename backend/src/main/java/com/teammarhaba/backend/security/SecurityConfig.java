@@ -5,6 +5,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.teammarhaba.backend.auth.FirebaseAuthenticationFilter;
 import com.teammarhaba.backend.auth.RestAccessDeniedHandler;
 import com.teammarhaba.backend.auth.RestAuthenticationEntryPoint;
+import com.teammarhaba.backend.user.UserRepository;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -60,6 +61,7 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             ObjectProvider<FirebaseAuth> firebaseAuth,
+            ObjectProvider<UserRepository> users,
             ObjectMapper objectMapper,
             ObjectProvider<RateLimiter> rateLimiter,
             ObjectProvider<RateLimitProperties> rateLimitProperties,
@@ -67,8 +69,11 @@ public class SecurityConfig {
             throws Exception {
         // The auth filter that establishes the VerifiedUser principal. Held in a variable so the
         // rate-limit filter (TM-158) can be slotted in right AFTER it — that way the SecurityContext
-        // already carries the uid, letting RateLimiter key its bucket per-account (else per-IP).
-        FirebaseAuthenticationFilter firebaseAuthenticationFilter = new FirebaseAuthenticationFilter(firebaseAuth);
+        // already carries the uid, letting RateLimiter key its bucket per-account (else per-IP). The
+        // repository is passed (lazily) so the filter can enforce the suspend/disable gate inbound
+        // (TM-741/TM-742) — a suspended account is refused per request, not just cut off from push.
+        FirebaseAuthenticationFilter firebaseAuthenticationFilter =
+                new FirebaseAuthenticationFilter(firebaseAuth, users);
         http.authorizeHttpRequests(auth -> auth.requestMatchers(
                                 "/health",
                                 "/version",
