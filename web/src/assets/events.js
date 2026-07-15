@@ -653,7 +653,15 @@ function actionSection(view, detail, now, me) {
 
   // The reminder / context note (enabled state) or, for a disabled button, the honest reason (+ link).
   if (model.primary?.disabled && model.primary.reason) {
-    const reason = el("p", { class: "tm-event-reason tm-muted", "data-testid": "event-action-reason", text: model.primary.reason });
+    // The disabled primary button points its aria-describedby at this id (see actionButton), so the
+    // reason must actually carry `id="event-action-reason"` — a data-testid alone left the reference
+    // dangling and screen readers with no description of WHY the button is disabled (TM-727).
+    const reason = el("p", {
+      class: "tm-event-reason tm-muted",
+      id: "event-action-reason",
+      "data-testid": "event-action-reason",
+      text: model.primary.reason,
+    });
     if (model.primary.link) {
       reason.append(" ");
       reason.append(el("a", { href: model.primary.link.href, class: "tm-event-reason-link" }, model.primary.link.label));

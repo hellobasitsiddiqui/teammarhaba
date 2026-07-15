@@ -163,23 +163,33 @@ public class ConversationReadService {
      * <p>Deliberately far cheaper than {@code list}: it needs neither the thread rows, the event headings,
      * the last-message previews, nor the activity sort — only each membership's own unread. So it fetches
      * the same non-removed memberships (a {@link MuteState#REMOVED} / kicked membership contributes nothing,
-     * mirroring the list + access gates) and folds each one's {@link MessageRepository#countUnread} — the
-     * identical per-member count {@link #summary} computes — against that member's {@code lastReadAt}
-     * cursor (a {@code null} cursor = never opened = every live message unread). Per-caller, so the same
-     * threads yield a different total for two people; {@code 0} for a brand-new account with no memberships.
+     * mirroring the list + access gates) and sums the same batched, conversation-id-keyed grouped unread
+     * counts {@link #list} uses ({@link MessageRepository#unreadCountsForUser} — one query for every thread,
+     * with the identical cursor + own-message rules {@link MessageRepository#countUnread} applies), rather
+     * than firing one {@code countUnread} per membership (TM-727: the badge endpoint was an N+1 in the
+     * caller's thread count). Per-caller, so the same threads yield a different total for two people;
+     * {@code 0} for a brand-new account with no memberships.
      */
     @Transactional(readOnly = true)
     public long unreadTotal(VerifiedUser caller) {
         Long userId = users.provision(caller).getId();
-        return members.findByUserIdOrderByJoinedAtDesc(userId).stream()
-                // The badge only counts threads the caller can still open. A REMOVED (kicked) member is
-                // excluded, but so must a LEFT (self-left, TM-471) one: a LEFT member has hidden the thread
-                // and — like a kicked one — is denied by the read/mark-read gate (requireMember accepts only
-                // NONE/READ_ONLY), so they can NEVER mark it read to clear its unread. Counting a LEFT
-                // thread here permanently inflated the Chat-tab badge with unread the member had no way to
-                // discharge (TM-730). Gate on the same "visible/readable" rule the access gate uses.
+        // The threads that count toward the badge: only threads the caller can still open. A REMOVED
+        // (kicked) member is excluded, and so is a LEFT (self-left, TM-471) one — both hide the thread
+        // and are denied by the read/mark-read gate (NONE/READ_ONLY only), so their unread can never be
+        // cleared and must not swell the badge (TM-730). Gate on the same readable rule the access gate uses.
+        Set<Long> conversationIds = members.findByUserIdOrderByJoinedAtDesc(userId).stream()
                 .filter(ConversationReadService::countsTowardUnread)
-                .mapToLong(m -> messages.countUnread(m.getConversationId(), userId, m.getLastReadAt()))
+                .map(ConversationMember::getConversationId)
+                .collect(Collectors.toSet());
+        if (conversationIds.isEmpty()) {
+            return 0L;
+        }
+        // One batched grouped query for every thread's unread (TM-727: the badge endpoint was an N+1 in
+        // the caller's thread count), then sum only the badge-eligible threads. unreadCountsForUser spans
+        // all the caller's memberships, so intersect with the eligible set above.
+        return unreadCounts(userId, conversationIds).entrySet().stream()
+                .filter(e -> conversationIds.contains(e.getKey()))
+                .mapToLong(Map.Entry::getValue)
                 .sum();
     }
 

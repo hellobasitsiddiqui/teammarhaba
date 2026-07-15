@@ -209,9 +209,17 @@ public class ChatStreamService {
      * test can register a fake/mock emitter with an owner without going through the servlet stack.
      */
     void register(long conversationId, SseEmitter emitter, String ownerUid) {
-        streamsByConversation
-                .computeIfAbsent(conversationId, key -> new CopyOnWriteArraySet<>())
-                .add(emitter);
+        // Add the emitter INSIDE the compute so the set is never observed empty between its creation
+        // and the first add: computeIfAbsent runs atomically per key, so a concurrent heartbeat prune
+        // (which only removes a set it finds empty, and only via the map's remove(key, value) guard)
+        // cannot delete the set mid-registration and orphan the just-added stream. Returning the same
+        // set instance whether it was just created or already present keeps every caller wired to the
+        // live map value.
+        streamsByConversation.compute(conversationId, (key, existing) -> {
+            Collection<SseEmitter> streams = existing != null ? existing : new CopyOnWriteArraySet<>();
+            streams.add(emitter);
+            return streams;
+        });
         if (ownerUid != null) {
             streamOwner.put(emitter, ownerUid);
         }
@@ -377,11 +385,18 @@ public class ChatStreamService {
                     dropQuietly(streams, emitter);
                 }
             }
-            // A thread nobody is connected to any more leaves no residual key.
-            streams.remove(null); // no-op guard; sets never hold null, keeps intent explicit
-            if (streams.isEmpty()) {
-                streamsByConversation.remove(conversationId, streams);
-            }
+            // A thread nobody is connected to any more leaves no residual key. Do the emptiness check
+            // and the removal atomically under compute so a stream that registers into this set between
+            // an unguarded isEmpty() and remove() is never pruned away: register() mutates the mapped
+            // set inside its own compute, so evaluating isEmpty() here (inside compute, holding the bin
+            // lock) sees register's add either fully before or fully after — never a set that looks
+            // empty now but gains a member a moment later.
+            streamsByConversation.compute(conversationId, (key, current) -> {
+                if (current != null && current.isEmpty()) {
+                    return null; // drop the key; a fresh stream re-creates it via register()
+                }
+                return current;
+            });
         });
     }
 
