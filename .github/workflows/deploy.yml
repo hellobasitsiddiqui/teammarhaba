@@ -518,10 +518,23 @@ jobs:
           # code go together: enabling the allow-list without the secret would (correctly) fail the boot.
           E2E_ENV=""
           E2E_SECRETS=""
+          # Gate on the secret EXISTING too, not just the address variable (TM-749). The address (repo
+          # variable E2E_TEST_LOGIN_ADDRESS) and the fixed-code secret are meant to be set together, but
+          # if they drift — variable set, secret never created — a MISSING test-only secret must NOT
+          # hard-fail the PRODUCTION deploy. This mirrors the MAIL (TM-253) and Revolut (TM-478) blocks
+          # above, which each gate on `gcloud secrets describe <secret>`. When the secret is absent we
+          # deploy WITHOUT the e2e hook (it's simply off until the secret lands); prod is never blocked
+          # by a test convenience. The backend also refuses to boot the hook without a non-default code
+          # (TM-725), so address-without-secret would otherwise fail the boot too — belt and braces.
           if [ -n "${E2E_TEST_LOGIN_ADDRESS}" ]; then
-            E2E_ENV="EMAIL_CODE_TEST_ALLOWED_ADDRESSES=${E2E_TEST_LOGIN_ADDRESS}"
-            E2E_SECRETS="EMAIL_CODE_TEST_FIXED_CODE=teammarhaba-e2e-test-login-code:latest"
-            echo "- Test-login (e2e): ON for the allow-listed test address; fixed code from Secret Manager (TM-312/TM-725)." >> "$GITHUB_STEP_SUMMARY"
+            if gcloud secrets describe teammarhaba-e2e-test-login-code --project="${PROJECT}" >/dev/null 2>&1; then
+              E2E_ENV="EMAIL_CODE_TEST_ALLOWED_ADDRESSES=${E2E_TEST_LOGIN_ADDRESS}"
+              E2E_SECRETS="EMAIL_CODE_TEST_FIXED_CODE=teammarhaba-e2e-test-login-code:latest"
+              echo "- Test-login (e2e): ON for the allow-listed test address; fixed code from Secret Manager (TM-312/TM-725)." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::E2E_TEST_LOGIN_ADDRESS is set but secret teammarhaba-e2e-test-login-code is missing — deploying WITHOUT the e2e test-login hook (TM-749). Create the secret to enable it."
+              echo "- Test-login (e2e): SKIPPED — secret teammarhaba-e2e-test-login-code missing (TM-749)." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           # Fold the e2e fixed-code secret into the secret join (empty -> no stray comma).
           SECRETS="${SECRETS}${E2E_SECRETS:+,${E2E_SECRETS}}"
