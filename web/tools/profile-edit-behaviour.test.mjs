@@ -147,6 +147,7 @@ function loadProfileModule(deps) {
     "  clear, el, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, profileStrength, publicSummary,\n" +
+    "  validateProfileField,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
 
@@ -206,6 +207,9 @@ const deps = {
   identitySummary: core.identitySummary,
   profileStrength: core.profileStrength,
   publicSummary: core.publicSummary,
+  // profile.js's validateField delegates to the pure validateProfileField in profile-core.js (TM-763):
+  // inject the REAL one so the eval copy's validation runs instead of throwing ReferenceError under Node 20.
+  validateProfileField: core.validateProfileField,
   // membership-tier.js is import-safe (no CDN); use the real pure mapping.
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
   membershipEnabled: () => false,
