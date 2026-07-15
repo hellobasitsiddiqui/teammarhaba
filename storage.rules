@@ -28,6 +28,14 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // Raster-image content types allowed for PUBLICLY-READABLE uploads (TM-722). We deliberately do NOT
+    // accept `image/svg+xml`: an SVG is an active document (it can carry inline <script>/onload), so a
+    // public-read SVG served from the storage origin is a stored-XSS vector. Every public upload path
+    // here (avatars, event-images, venue-images) is world-readable, so all restrict to raster formats.
+    function isPublicRasterImage() {
+      return request.resource.contentType.matches('image/(png|jpeg|jpg|gif|webp|avif|heic|heif)');
+    }
+
     match /avatars/{uid} {
       // Anyone may read an avatar (public, non-secret display image).
       allow read: if true;
@@ -37,7 +45,7 @@ service firebase.storage {
       allow create, update: if request.auth != null
                             && request.auth.uid == uid
                             && request.resource.size < 5 * 1024 * 1024
-                            && request.resource.contentType.matches('image/.*');
+                            && isPublicRasterImage();
 
       // The owner may also delete their own avatar (used by the re-upload cleanup path). A delete has
       // no `request.resource`, so it carries only the owner check — not the size/content-type checks.
@@ -54,7 +62,7 @@ service firebase.storage {
       allow create, update: if request.auth != null
                             && request.auth.token.role == 'ADMIN'
                             && request.resource.size < 5 * 1024 * 1024
-                            && request.resource.contentType.matches('image/.*');
+                            && isPublicRasterImage();
 
       // Admins may also delete an event image (re-upload cleanup / event retired). No
       // `request.resource` on delete, so only the role check applies.
@@ -70,7 +78,7 @@ service firebase.storage {
       allow create, update: if request.auth != null
                             && request.auth.token.role == 'ADMIN'
                             && request.resource.size < 5 * 1024 * 1024
-                            && request.resource.contentType.matches('image/.*');
+                            && isPublicRasterImage();
 
       // Admins may delete a venue photo (re-upload cleanup / venue retired).
       allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';

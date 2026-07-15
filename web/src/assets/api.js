@@ -15,6 +15,7 @@
 
 import { getIdToken } from "./auth.js";
 import { createSseParser } from "./chat-core.js";
+import { shouldAttachToken } from "./api-token-target-core.js";
 
 // Where to send the user when authentication can't be established. The login view is the
 // `#/login` hash route owned by the guard/router (TM-109); this is the single seam. Kept as
@@ -27,6 +28,11 @@ const INTENDED_KEY = "tm.intendedRoute";
 function apiBaseUrl() {
   const cfg = (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG) || {};
   return (cfg.apiBaseUrl || "").replace(/\/+$/, "");
+}
+
+/** The app's own origin (for same-origin token scoping, TM-722), or null outside a browser. */
+function currentOrigin() {
+  return typeof window !== "undefined" && window.location ? window.location.origin : null;
 }
 
 /** Resolve a request target: pass an absolute URL through, otherwise prefix the API base. */
@@ -68,11 +74,17 @@ export function redirectToLogin() {
  */
 export async function apiFetch(path, options = {}) {
   const url = resolveUrl(path);
+  // Only ever attach the ID token to OUR backend (configured API base or same-origin). An absolute URL
+  // to any other origin — or a non-http pseudo-URL — is sent unauthenticated so no bearer token can be
+  // exfiltrated off-origin (TM-722 token-target scoping).
+  const attachToken = shouldAttachToken(url, apiBaseUrl(), currentOrigin());
 
   const send = async (forceRefresh) => {
-    const token = await getIdToken(forceRefresh);
     const headers = new Headers(options.headers || {});
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (attachToken) {
+      const token = await getIdToken(forceRefresh);
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
     return fetch(url, { ...options, headers });
   };
 
