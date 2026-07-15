@@ -37,6 +37,7 @@ class MentionNotifierTest extends AbstractIntegrationTest {
     private long bobId;
     private long eveId; // an active member who has self-muted this thread (TM-471)
     private long daveId; // a real account that is NOT a member of the thread
+    private long roscoeId; // a READ_ONLY member — outside the active (MuteState.NONE) roster entirely
 
     @BeforeEach
     void seed() {
@@ -52,11 +53,13 @@ class MentionNotifierTest extends AbstractIntegrationTest {
         bobId = user("Bob");
         eveId = user("Eve");
         daveId = user("Dave");
+        roscoeId = user("Roscoe");
 
         activeMember(authorId);
         activeMember(aliceId);
         activeMember(bobId);
         selfMutedMember(eveId);
+        readOnlyMember(roscoeId);
         // Dave is intentionally NOT added as a member — a mention of him must resolve to nobody.
     }
 
@@ -104,6 +107,31 @@ class MentionNotifierTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void readOnlyMemberIsExcludedFromEveryoneExpansion() {
+        // A READ_ONLY member (organiser-restricted / admin-muted) is not part of the active roster the
+        // notifier builds from (findByConversationIdAndMute(..., MuteState.NONE)), so @everyone — which
+        // expands only over that active set — never reaches them. This is a DISTINCT exclusion from Eve's
+        // self-mute (she stays MuteState.NONE and is dropped by the receivesPush() filter instead).
+        notifier.notifyMentions(post("heads up @everyone"));
+
+        assertThat(hasMention(aliceId)).isTrue(); // a genuinely active member is notified
+        assertThat(hasMention(roscoeId)).isFalse(); // ...but the READ_ONLY member is outside the roster
+    }
+
+    @Test
+    void explicitMentionOfAReadOnlyMemberNotifiesNobody() {
+        // Even an individual @Name that resolves to a real account with a live membership row does NOT
+        // notify a READ_ONLY member: their name is never on the mentionable roster (only MuteState.NONE
+        // members are), so the resolver finds no match — mirroring the non-member ("@Dave") case, but for
+        // a member whose row exists yet is muted/read-only.
+        int written = notifier.notifyMentions(post("could you check this @Roscoe?"));
+
+        assertThat(written).isZero();
+        assertThat(hasMention(roscoeId)).isFalse();
+        assertThat(hasMention(aliceId)).isFalse();
+    }
+
+    @Test
     void hereExpandsToOnlineMembersOnly() {
         // Register a live stream owned by Alice's uid so presence reports her online; Bob stays offline.
         streams.register(threadId, new SseEmitter(), "Alice");
@@ -138,6 +166,12 @@ class MentionNotifierTest extends AbstractIntegrationTest {
     private void selfMutedMember(long userId) {
         ConversationMember m = new ConversationMember(threadId, userId, MemberRole.MEMBER);
         m.muteNotifications(); // active member, but has silenced this thread (TM-471)
+        members.save(m);
+    }
+
+    private void readOnlyMember(long userId) {
+        ConversationMember m = new ConversationMember(threadId, userId, MemberRole.MEMBER);
+        m.setMute(MuteState.READ_ONLY); // may read but not post; outside the active roster and push (TM-435)
         members.save(m);
     }
 
