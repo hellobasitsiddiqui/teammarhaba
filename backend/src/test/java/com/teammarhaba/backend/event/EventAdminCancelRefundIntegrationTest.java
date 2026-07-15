@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.event;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,6 +13,7 @@ import com.teammarhaba.backend.membership.Order;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.membership.OrderStatus;
 import com.teammarhaba.backend.payments.PaymentProvider;
+import com.teammarhaba.backend.payments.PaymentProviderException;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Instant;
@@ -19,6 +21,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -78,6 +81,41 @@ class EventAdminCancelRefundIntegrationTest extends AbstractIntegrationTest {
         // the reversal is proven persisted in the cancel transaction, not just a mutated in-memory instance.
         Order refreshed = orders.findById(order.getId()).orElseThrow();
         assertThat(refreshed.getStatus()).isEqualTo(OrderStatus.REFUNDED);
+        assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.CANCELLED);
+    }
+
+    @Test
+    void adminCancelWhenTheProviderRefundFailsLeavesTheOrderRefundDueForTheSweep() {
+        // The durability half of the money-safety fix (TM-740/TM-726): tryRefund is best-effort — a provider
+        // refund that throws PaymentProviderException must NOT roll back the cancel. The order is flagged
+        // REFUND_DUE *before* the provider call, so on failure it STAYS REFUND_DUE (the debt is never lost)
+        // for the scheduled RefundSweepService to retry, and the event still commits CANCELLED. Pins that a
+        // refund hiccup leaves a recoverable owed-money row rather than a stranded CONFIRMED order or a rolled
+        // back cancel.
+        when(paymentProvider.currency()).thenReturn("GBP");
+        // The gateway rejects / is unreachable — refund throws. tryRefund swallows it (never throws onward).
+        Mockito.doThrow(new PaymentProviderException("gateway down"))
+                .when(paymentProvider)
+                .refund(any(), Mockito.anyInt(), any(), any());
+
+        Event event = paidEvent();
+        Order order = seedPaidConfirmedOrder(event.getId());
+        VerifiedUser adminCaller = adminCaller();
+
+        // The cancel completes despite the refund failure — tryRefund never rethrows.
+        admin.cancel(adminCaller, event.getId());
+
+        // The refund WAS attempted for this captured order (the failure is a provider-side reject, not a skip).
+        verify(paymentProvider)
+                .refund(eq(order.getProviderOrderId()), eq(PREMIUM_PRICE), eq("GBP"), eq(String.valueOf(order.getId())));
+
+        // Re-read fresh from the DB: the order is REFUND_DUE (owed, retryable), NOT REFUNDED and NOT left
+        // CONFIRMED — so the RefundSweepService will pick it up and retry. The debt is durable, not lost.
+        Order refreshed = orders.findById(order.getId()).orElseThrow();
+        assertThat(refreshed.getStatus())
+                .as("a failed provider refund must leave the order REFUND_DUE for the sweep to retry")
+                .isEqualTo(OrderStatus.REFUND_DUE);
+        // And the cancel itself still committed — the refund hiccup did not roll back the status flip.
         assertThat(events.findById(event.getId()).orElseThrow().getStatus()).isEqualTo(EventStatus.CANCELLED);
     }
 

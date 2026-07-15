@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -152,6 +154,57 @@ class EventRsvpPaidGateIntegrationTest extends AbstractIntegrationTest {
                         .getState())
                 .as("a refused claim must leave the member exactly where they were")
                 .isEqualTo(AttendanceState.WAITLISTED);
+        Mockito.verifyNoInteractions(paymentProvider);
+    }
+
+    // ------------------------------------------------------------------ only a CONFIRMED order settles
+
+    @ParameterizedTest(name = "a {0} order does NOT buy a join on a PAY event")
+    @EnumSource(
+            value = OrderStatus.class,
+            names = {"PENDING", "CANCELLED", "REFUND_DUE", "REFUNDED", "REFUND_ABANDONED", "FAILED", "EXPIRED"})
+    void onlyAConfirmedOrderSettlesThePaidGate_nonConfirmedOrderIsRefused(OrderStatus status) throws Exception {
+        // The paid-gate settle check keys on CONFIRMED alone (guardPaidEventJoin: the join passes only if a
+        // CONFIRMED order exists for the (user, event)). Every OTHER status — a PENDING charge that never
+        // settled, a CANCELLED/REFUND_DUE/REFUNDED reversal, a FAILED/EXPIRED/abandoned order — leaves the
+        // money uncovered, so the direct RSVP on a PAY event must still be a 402: an unsettled/undone order
+        // must never buy a free join. Regression pin for the money-side settle rule (TM-625).
+        Event event = premiumEvent();
+        String uid = "uid-gate-order-" + status;
+        Long userId = seedUser(uid);
+        // Seed exactly one order for this (user, event) at the non-CONFIRMED status under test — a real
+        // captured-money amount, so this is not the £0/no-charge shortcut but a genuine paid order that is
+        // simply not (or no longer) settled.
+        orders.save(new Order(userId, event.getId(), PREMIUM_PRICE, status, Instant.now()));
+
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(caller(uid)))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.detail").value(containsString("checkout")));
+
+        assertThat(attendanceCount(event.getId(), userId))
+                .as("a non-CONFIRMED order must write NO attendance row — it never bought a join")
+                .isZero();
+        Mockito.verifyNoInteractions(paymentProvider); // refused outright — no provider order either
+    }
+
+    @Test
+    void aConfirmedOrderForADifferentEventDoesNotSettleThisPayEvent() throws Exception {
+        // The settle check is scoped to THIS event's (user, event) order — a CONFIRMED order the caller
+        // holds for a *different* paid event must not leak coverage onto this one. Pins the eventId scope of
+        // the gate: paying for event A can never free-join event B.
+        Event paidForEvent = premiumEvent();
+        Event target = premiumEvent();
+        Long userId = seedUser("uid-gate-order-other-event");
+        // A settled order — but for the OTHER event, not the one being joined.
+        orders.save(new Order(userId, paidForEvent.getId(), PREMIUM_PRICE, OrderStatus.CONFIRMED, Instant.now()));
+
+        mockMvc.perform(post("/api/v1/events/" + target.getId() + "/rsvp").with(caller("uid-gate-order-other-event")))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.detail").value(containsString("checkout")));
+
+        assertThat(attendanceCount(target.getId(), userId))
+                .as("a CONFIRMED order for a different event does not settle this one")
+                .isZero();
         Mockito.verifyNoInteractions(paymentProvider);
     }
 
