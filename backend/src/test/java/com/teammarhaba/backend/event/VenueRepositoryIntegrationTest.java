@@ -10,6 +10,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -153,5 +154,53 @@ class VenueRepositoryIntegrationTest extends AbstractIntegrationTest {
         stale.setName("second writer is stale");
         assertThatThrownBy(() -> venues.saveAndFlush(stale))
                 .isInstanceOf(ObjectOptimisticLockingFailureException.class);
+    }
+
+    // TM-738 P2 (venues) — two edge/boundary properties the existing suite doesn't isolate: the
+    // city-only branch of the search predicate, and the DB-level capacity CHECK. Characterization:
+    // both already hold, so these PASS with no source change.
+
+    /**
+     * {@code searchMatchesCityIndependentOfName} — the search predicate is a name-OR-city match
+     * ({@code lower(v.name) like … or lower(v.city) like …}), so a query that appears ONLY in a
+     * venue's city (and nowhere in its name) must still find it. The existing
+     * {@code searchWithTextQueryStillMatchesNameAndCityCaseInsensitively} proves both branches fire in
+     * one run, but its {@code byCity} row happens to carry the same "QQ707" token that also matches its
+     * name-branch sibling — so it doesn't isolate the city branch on its own. This pins the city OR-arm
+     * independently: the search token is absent from every name here and present only in the city.
+     */
+    @Test
+    void searchMatchesCityIndependentOfName() {
+        // Match token "CityOnly812" lives in the city, never in a name — so a hit can only come via the
+        // city branch of the predicate, not the name branch.
+        Venue byCity = seedVenue("Northgate Rooms NG812", "CityOnly812borough", true);
+        // A control whose NAME contains the token would (wrongly) pass a name-only search — but here
+        // neither name nor city carries "CityOnly812", so it must be excluded.
+        Venue neither = seedVenue("Northgate Rooms NG812 (annex)", "London", true);
+
+        Page<Venue> page = venues.search("cityonly812", false, PageRequest.of(0, 100));
+
+        assertThat(page.getContent())
+                .extracting(Venue::getId)
+                .contains(byCity.getId()) // found purely by its city
+                .doesNotContain(neither.getId()); // token in neither field ⇒ excluded
+    }
+
+    /**
+     * {@code capacityBelowOneRejectedAtDbCheck} — defence in depth behind the API's {@code @Min(1)}:
+     * the {@code CHECK (capacity IS NULL OR capacity >= 1)} constraint (V41) means the DB itself
+     * refuses to store a sub-1 capacity, whatever code path writes it — so a bad value can never slip
+     * in past the Bean-Validation layer (e.g. a future direct-repository writer). NULL (unspecified)
+     * and any value {@code >= 1} stay valid. Mirrors
+     * {@code EventRepositoryIntegrationTest.databaseRejectsANonPositiveCapacity} for the event table.
+     */
+    @Test
+    void capacityBelowOneRejectedAtDbCheck() {
+        Venue zeroCap = new Venue("Zero-Cap Hall ZC812", "Zero-Cap Hall ZC812 address", creatorId, Instant.now());
+        zeroCap.setCapacity(0);
+
+        // The CHECK fires at flush time; Spring translates the SQL constraint violation to
+        // DataIntegrityViolationException.
+        assertThatThrownBy(() -> venues.saveAndFlush(zeroCap)).isInstanceOf(DataIntegrityViolationException.class);
     }
 }
