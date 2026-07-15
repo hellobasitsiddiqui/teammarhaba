@@ -20,7 +20,8 @@ Jira: TM-XXXX
 <!-- Commands run, tests added, manual checks. Paste relevant output if useful. -->
 
 - [ ] `cd backend && ./mvnw -B verify` is green (build + tests + Spotless)
-- [ ] New/changed behaviour is covered by tests
+- [ ] Test written first (fails before the fix/feature, passes after) — see CONTRIBUTING → Testing
+- [ ] OR: refactor only — behaviour-preserving, existing tests unchanged and green
 - [ ] No secrets, real `.env`, or keys committed
 
 ## Notes for reviewers

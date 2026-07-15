@@ -73,19 +73,78 @@ cd backend && ./mvnw -B verify
 
 This runs Spotless (format gate), the test suite, and produces the CycloneDX SBOM.
 
-## Testing — a bug fix ships with its test
+## Testing — tests land before code (test-first)
 
-**Every bug fix ships with a regression test, written test-first.** Before changing the code, add a
-test that **reproduces the defect** — it must **fail on the current code** and **pass once the fix
-lands**. This proves the fix works and stops the bug ever silently coming back. It is part of the
-Definition of Done: a bug-fix PR without a failing-first regression test is not complete.
+**Every behaviour change — bug fix _or_ new feature — is written test-first.** Write the test at
+the right layer, commit it so it **fails on the current code** (red), then write the code that
+makes it pass (green). This is a hard **Definition of Done** for people and agents alike: a
+`feat`/`fix` PR without a failing-first test that now passes is **not complete**. A refactor is
+the one exception — see below.
+
+### Bug fixes ship with a regression test
+
+Before changing the code, add a test that **reproduces the defect** — it must **fail on the
+current code** and **pass once the fix lands**. This proves the fix works and stops the bug ever
+silently coming back.
 
 - Put the test where the logic is testable. If the defect lives in a side-effectful module,
   **extract the pure logic** into its own module and test that (e.g. `settleOrFallback` was pulled
   out of `router.js` into `async-util.js` to backfill the TM-307 login-dead-end guard).
-- Prefer a fast unit test (backend JUnit / web `node --test`) over a slow e2e where the logic
-  allows it; add an e2e only when the bug is genuinely integration-level.
 - Name the test after the defect so the guard is self-documenting (reference the ticket).
+
+### Features ship with tests proving each acceptance criterion
+
+A feature PR carries tests that **prove each acceptance criterion** on the ticket, written
+*before* the implementation. Work criterion by criterion: write the test for the next AC, watch
+it fail, implement until it passes, repeat. A feature whose ACs aren't each pinned by a test is
+not done — "it works when I click around" is not evidence.
+
+### Choose the right layer
+
+- **Pure logic** → unit test: web `web/tools/*.test.mjs` (`node --test`), backend `*Test.java`
+  (JUnit).
+- **Cross-component / DB / HTTP** → integration test: backend `*IntegrationTest.java` (Spring
+  Boot + Testcontainers Postgres harness).
+- **User-facing flow** → e2e: `web/e2e/tests/*.spec.mjs` (Playwright).
+
+Prefer the fastest layer the logic allows — a unit test over an integration test, an integration
+test over an e2e. Add an e2e only when the behaviour is genuinely end-to-end.
+
+### Refactor exception — behaviour-preserving, no new tests
+
+A `refactor` PR changes **no behaviour**, so it does **not** add new tests. Its proof is the
+existing suite staying **green and unchanged** — unchanged tests passing *is* the evidence of
+behaviour preservation. If you find yourself changing a test to make a "refactor" pass, it isn't
+a refactor: it's a behaviour change and belongs in a `feat`/`fix` PR, test-first. See
+[Refactoring](#refactoring) below.
+
+### CI guard
+
+[`test-first-guard.yml`](./.github/workflows/test-first-guard.yml) enforces the cheap
+approximation on every PR: a `feat`/`fix` branch that touches production source
+(`backend/src/main/**`, `web/src/**`) but **no test file** (`*Test.java`, `*.test.mjs`,
+`web/e2e/tests/**`) fails with a pointer back here. `refactor`/`docs`/`chore`/`test` branches are
+exempt. For the rare legitimate exception (e.g. a config-only fix with nothing testable), apply
+the **`no-test-justified`** label and say why in the PR body — the guard then skips. If the guard
+can't tell what type a PR is, it warns instead of blocking.
+
+## Refactoring
+
+Refactoring is a first-class change type (`refactor/TM-<id>-…` branches), with its own rules —
+they pair with the test-first rule above:
+
+- **A refactor goes in its own PR**, separate from any behaviour change. Never mix a refactor
+  with a feature or fix — the reviewer can't tell the safe mechanical moves from the risky
+  behavioural ones.
+- **The proof of a refactor is the unchanged, still-green test suite.** A refactor PR must not
+  change test assertions — changed tests = a behaviour change, which belongs in a `feat`/`fix`
+  PR. (This is exactly why the CI test-first guard exempts `refactor` PRs.)
+- **Small, named steps** (Extract Function, Rename, Move…) over one giant rewrite — a sequence of
+  obvious moves reviews in minutes; a big-bang rewrite doesn't.
+- **Refactoring untested code:** write **characterization tests first** to pin the current
+  behaviour, then refactor under them. Never refactor untested code blind.
+- **Boy Scout Rule:** small opportunistic cleanups riding along in a feature PR are welcome, but
+  anything non-trivial gets its own `refactor` PR.
 
 ## API contract (OpenAPI drift check)
 
