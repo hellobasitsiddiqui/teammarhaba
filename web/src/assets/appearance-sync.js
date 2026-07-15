@@ -12,7 +12,7 @@
 // The profile settings control (appearance-settings.js) drives live CHANGES + persistence; this
 // module owns the load-time APPLY. Both go through appearance-core so there is one contract.
 
-import { onAuthChanged } from "./auth.js";
+import { onAuthChanged, currentUser } from "./auth.js";
 import { getMe } from "./api.js";
 import {
   applyAppearance,
@@ -21,6 +21,7 @@ import {
   DEFAULT_ACCENT_ID,
   DEFAULT_SKETCHY,
 } from "./appearance-core.js";
+import { sessionKey, isResponseCurrent } from "./session-guard-core.js";
 
 function safeStorage() {
   try {
@@ -39,8 +40,13 @@ onAuthChanged(async (user) => {
     if (storage) clearHint(storage);
     return;
   }
+  // TM-720: capture who this sync is FOR. A /me that resolves AFTER the user has signed out (or
+  // switched) must be dropped — otherwise it repaints the previous user's accent and rewrites the
+  // boot hint the sign-out branch above just cleared, leaking their look onto the shared device.
+  const startedFor = sessionKey(user);
   try {
     const me = await getMe();
+    if (!isResponseCurrent(startedFor, sessionKey(currentUser()))) return;
     const applied = applyAppearance(document, {
       accentId: me.themeAccent,
       sketchy: me.themeSketchy,

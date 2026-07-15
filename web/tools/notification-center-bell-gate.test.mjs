@@ -17,7 +17,8 @@
 import assert from "node:assert/strict";
 import { test, beforeEach, afterEach } from "node:test";
 
-import { notifyForegroundPush, initNotificationCenter } from "../src/assets/notification-center.js";
+import { notifyForegroundPush, initNotificationCenter, clearNotificationInbox } from "../src/assets/notification-center.js";
+import { STORAGE_KEY } from "../src/assets/notification-inbox.js";
 
 // ── A minimal fake DOM — only the surface notification-center.js + ui.js's el()/toast() touch. ──────
 
@@ -226,4 +227,33 @@ test("static bell present: a stray recovery bell (mounted pre-static) is removed
   const bells = nav.querySelectorAll(".tm-notif-bell");
   assert.equal(bells.length, 1, "only the static bell remains");
   assert.equal(bells[0].id, "nav-notif-bell");
+});
+
+// ── Sign-out inbox wipe (TM-720) ────────────────────────────────────────────────────────────────
+// The foreground-push inbox is per-user recovery state; a sign-out on a shared device must clear it
+// (in memory, in localStorage, and the badge) so the previous user's pushes don't re-surface for the
+// next. clearNotificationInbox() is what the module wires to onSignedOut(); here we drive it directly.
+
+test("clearNotificationInbox: wipes the in-memory inbox, storage, and the bell badge", () => {
+  const nav = freshDom({ withStaticBell: false });
+  const storage = global.window.localStorage;
+
+  notifyForegroundPush(PUSH);
+  assert.ok(storage.getItem(STORAGE_KEY), "precondition: the push was persisted");
+  const bellBefore = doc.getElementById("tm-notif-bell");
+  assert.ok(bellBefore && !bellBefore.hidden, "precondition: the recovery bell is showing");
+
+  clearNotificationInbox();
+
+  // Storage emptied (either removed or an empty array — both read back as no entries).
+  const raw = storage.getItem(STORAGE_KEY);
+  assert.ok(raw === null || raw === "[]", "storage cleared on sign-out");
+  // The recovery bell hides once the inbox is empty (its visibility is entries.length > 0).
+  const bellAfter = doc.getElementById("tm-notif-bell");
+  assert.ok(!bellAfter || bellAfter.hidden, "the bell hides once the inbox is empty");
+  // A fresh hydrate from the cleared store yields nothing — the next user starts clean (the bell,
+  // if still in the DOM, stays hidden because the inbox is empty).
+  initNotificationCenter();
+  const bells = nav.querySelectorAll(".tm-notif-bell");
+  assert.ok(bells.every((b) => b.hidden), "no visible bell for the next user's empty inbox");
 });

@@ -29,6 +29,7 @@ import {
   readHint,
   writeHint,
   clearHint,
+  createAppearancePersister,
 } from "../src/assets/appearance-core.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -158,4 +159,89 @@ test("the boot hint round-trips and stores the resolved colour (server stays the
 
   clearHint(storage);
   assert.equal(storage.getItem(HINT_KEY), null);
+});
+
+// ---------------------------------------------------------------------------------------------
+// createAppearancePersister — sequenced persistence (TM-720)
+// ---------------------------------------------------------------------------------------------
+//
+// The user can flip accent/toggle faster than a PATCH round-trips, so two writes can be in flight
+// and resolve out of order. The persister must:
+//   • never let a stale FAILED request revert a newer (successful or newer-pending) change, and
+//   • report a real error only for the LATEST request, so the UI settles on the last user pick.
+
+/** A controllable async patch: each call returns a promise you resolve/reject by hand, in any order. */
+function deferredPatch() {
+  const calls = [];
+  const patch = (body) => {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    calls.push({ body, resolve, reject });
+    return promise;
+  };
+  return { patch, calls };
+}
+
+test("persister: a failed OLDER request does NOT revert a newer change", async () => {
+  const { patch, calls } = deferredPatch();
+  const reverts = [];
+  const errors = [];
+  const p = createAppearancePersister({
+    patch,
+    revert: (previous) => reverts.push(previous),
+    onError: (err, superseded) => errors.push({ err, superseded }),
+  });
+
+  // User picks A (previous = base), then B (previous = A) before A's PATCH has resolved.
+  const runA = p.run({ themeAccent: "a" }, { accentId: "base", sketchy: true });
+  const runB = p.run({ themeAccent: "b" }, { accentId: "a", sketchy: true });
+
+  // A fails LAST (out of order) — but B is now the latest, so A's failure must be swallowed.
+  calls[1].resolve({}); // B succeeds
+  calls[0].reject(new Error("boom")); // A fails, but it's superseded
+  const [, resA] = await Promise.all([runB, runA]);
+
+  assert.deepEqual(reverts, [], "no revert — the stale failure must not undo B");
+  assert.equal(resA.ok, false);
+  assert.equal(resA.superseded, true, "A knows it was superseded");
+  assert.equal(errors.length, 1, "onError still fired for A…");
+  assert.equal(errors[0].superseded, true, "…but flagged superseded so the caller can stay silent");
+});
+
+test("persister: the LATEST request's failure DOES revert (to its own previous)", async () => {
+  const { patch, calls } = deferredPatch();
+  const reverts = [];
+  const errors = [];
+  const p = createAppearancePersister({
+    patch,
+    revert: (previous) => reverts.push(previous),
+    onError: (err, superseded) => errors.push({ superseded }),
+  });
+
+  const run = p.run({ themeAccent: "b" }, { accentId: "a", sketchy: false });
+  calls[0].reject(new Error("nope"));
+  const res = await run;
+
+  assert.equal(res.ok, false);
+  assert.equal(res.superseded, false, "it's the latest → not superseded");
+  assert.deepEqual(reverts, [{ accentId: "a", sketchy: false }], "reverts to ITS previous state");
+  assert.deepEqual(errors, [{ superseded: false }], "onError fires as a real (surfaced) error");
+});
+
+test("persister: a successful latest request neither reverts nor errors", async () => {
+  const { patch, calls } = deferredPatch();
+  const reverts = [];
+  let errored = false;
+  const p = createAppearancePersister({ patch, revert: (x) => reverts.push(x), onError: () => (errored = true) });
+
+  const run = p.run({ themeSketchy: false }, { accentId: "teal", sketchy: true });
+  calls[0].resolve({ ok: true });
+  const res = await run;
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(reverts, [], "success never reverts");
+  assert.equal(errored, false, "success never errors");
 });
