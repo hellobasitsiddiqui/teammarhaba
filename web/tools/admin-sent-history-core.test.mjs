@@ -20,6 +20,7 @@ import {
   rangeIndicator,
   isEmptyHistory,
 } from "../src/assets/admin-sent-history-core.js";
+import { recallControlModel, RECALL_LABEL, RECALLED_LABEL } from "../src/assets/admin-message-recall-core.js";
 
 // A representative history row (USER target) each test tweaks — mirrors AdminSentHistoryResponse.
 const row = (over = {}) => ({
@@ -37,6 +38,22 @@ const row = (over = {}) => ({
 
 test("DEFAULT_PAGE_SIZE is a sane small page", () => {
   assert.ok(DEFAULT_PAGE_SIZE > 0 && DEFAULT_PAGE_SIZE <= 50);
+});
+
+// The recall control is mounted per sent-history row (TM-734). These assert the exact row shape the
+// list read projects drives the shared recall-core correctly — a live row offers recall, a RECALLED
+// row shows the terminal state — which is what admin-sent-history.js's rowDetail now renders.
+test("a live sent-history row (status SENT) offers recall from its detail (TM-734)", () => {
+  const model = recallControlModel(row({ status: "SENT" }));
+  assert.equal(model.canRecall, true);
+  assert.equal(model.label, RECALL_LABEL);
+});
+
+test("a recalled sent-history row (status RECALLED) shows the terminal state, no re-recall (TM-734)", () => {
+  const model = recallControlModel(row({ status: "RECALLED" }));
+  assert.equal(model.recalled, true);
+  assert.equal(model.canRecall, false);
+  assert.equal(model.label, RECALLED_LABEL);
 });
 
 test("audienceTypeLabel maps the three dimensions and falls back for the unknown", () => {

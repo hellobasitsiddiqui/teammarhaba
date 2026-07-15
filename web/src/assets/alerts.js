@@ -19,7 +19,7 @@
 
 import { getActiveAlerts } from "./api.js";
 import { el, clear } from "./ui.js";
-import { visibleAlerts, alertsSignature, recordDismissal, levelClass, ariaRole, showsDismissControl, dismissControl } from "./alerts-core.js";
+import { visibleAlerts, alertsSignature, recordDismissal, levelClass, ariaRole, showsDismissControl, dismissControl, adoptActiveResult } from "./alerts-core.js";
 
 const HOST_ID = "tm-alerts";
 const POLL_MS = 5 * 60 * 1000; // ~5-minute light poll; the banner is not real-time.
@@ -122,13 +122,16 @@ function render() {
 }
 
 /**
- * Fetch the active alerts and re-render. Best-effort: getActiveAlerts() already swallows network/HTTP
- * errors to [] (the poll must never throw into the shell), so a transient outage just leaves the last
- * rendered state until the next tick.
+ * Fetch the active alerts and re-render. Best-effort: getActiveAlerts() never throws into the shell —
+ * it returns the array on success or `null` on a network/HTTP failure. TM-734: we must only ADOPT a
+ * real result; a failed fetch (`null`) is IGNORED so the last-rendered banners stand — otherwise a
+ * single transient blip would wipe a PERSISTENT CRITICAL operator notice for up to a full poll interval.
+ * adoptActiveResult (core) makes that decision.
  */
 export async function refresh() {
   if (typeof document === "undefined") return;
-  applyActive(await getActiveAlerts());
+  const { adopt, alerts } = adoptActiveResult(await getActiveAlerts());
+  if (adopt) applyActive(alerts);
 }
 
 /**

@@ -24,6 +24,8 @@ import {
   INDOOR_OUTDOOR_OPTIONS,
   validateVenueDraft,
   buildVenuePayload,
+  clearedOptionalVenueFields,
+  CLEARABLE_OPTIONAL_VENUE_FIELDS,
   toVenueFormModel,
   venueSummaryLabel,
   venueImageRef,
@@ -143,6 +145,34 @@ test("toVenueFormModel ∘ buildVenuePayload round-trips a VenueResponse", () =>
   assert.equal(body.latitude, 51.5);
   assert.equal(body.longitude, -0.12);
   assert.equal(body.indoorOutdoor, "MIXED");
+});
+
+// --- clearedOptionalVenueFields: the silent-no-op guard on edit (TM-734) ----------------------
+
+test("clearedOptionalVenueFields flags an optional the admin blanked that the PATCH can't clear (TM-734)", () => {
+  const original = {
+    name: "Marhaba Hall",
+    addressLine: "12 High Street",
+    city: "London",
+    notes: "Meet at the north entrance.",
+    capacity: 120,
+  };
+  // The admin blanked notes + capacity; buildVenuePayload omits them, so the server keeps the old value.
+  const draft = validDraft({ notes: "", capacity: "", city: "London" });
+  const cleared = clearedOptionalVenueFields(original, draft);
+  assert.deepEqual(new Set(cleared), new Set(["notes", "capacity"]));
+  assert.equal(cleared.includes("city"), false); // unchanged → not reported
+});
+
+test("clearedOptionalVenueFields returns [] when nothing was cleared, and on create (TM-734)", () => {
+  const original = { name: "Hall", addressLine: "1 St", notes: "keep me", capacity: 50 };
+  assert.deepEqual(clearedOptionalVenueFields(original, validDraft({ notes: "keep me", capacity: "50" })), []);
+  assert.deepEqual(clearedOptionalVenueFields(null, validDraft({ notes: "" })), []);
+});
+
+test("CLEARABLE_OPTIONAL_VENUE_FIELDS excludes the required name/addressLine (TM-734)", () => {
+  assert.equal(CLEARABLE_OPTIONAL_VENUE_FIELDS.includes("name"), false);
+  assert.equal(CLEARABLE_OPTIONAL_VENUE_FIELDS.includes("addressLine"), false);
 });
 
 test("venueSummaryLabel renders 'Name — City' (or just the name)", () => {
