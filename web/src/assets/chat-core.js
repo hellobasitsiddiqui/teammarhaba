@@ -374,6 +374,20 @@ export function toQuotedPreview(replyTo) {
 }
 
 /**
+ * Whether a message is an admin/host ANNOUNCEMENT (TM-710) — the auto-posted event opening message, or
+ * an admin-sent announcement — as classified server-side by the message `kind`. Case-insensitive and
+ * defensive: only the exact {@code "ANNOUNCEMENT"} kind counts; a missing / unknown kind (every
+ * pre-TM-710 message, whose kind is {@code "ATTENDEE"} or absent) is a normal attendee message. Kept
+ * pure (no DOM) so the announcement-vs-attendee decision is unit-tested here, not in the DOM renderer.
+ * @param {{kind?: string}} msg a ConversationMessageResponse (or its view-model).
+ * @returns {boolean} true iff this is an announcement-kind message.
+ */
+export function isAnnouncement(msg) {
+  const kind = msg?.kind;
+  return typeof kind === "string" && kind.trim().toUpperCase() === "ANNOUNCEMENT";
+}
+
+/**
  * Map one ConversationMessageResponse to the message view-model the thread renders. The read API does
  * not expose the caller's own numeric id (GET /api/v1/me has no id), so TM-438 cannot mark a message
  * as "mine" / draw out-going ticks purely from the payload. `system` messages (an admin broadcast, or an
@@ -409,6 +423,10 @@ export function toThreadMessage(msg, now = new Date()) {
     id: String(m.id ?? ""),
     body: String(m.body ?? ""),
     system: Boolean(m.system),
+    // TM-710: an admin/host ANNOUNCEMENT (the auto-posted opening message, or an admin-sent
+    // announcement) renders visually distinct + attributed as an announcement. Classified server-side
+    // via the message `kind` and echoed here so the renderer never re-derives it.
+    announcement: isAnnouncement(m),
     // TM-589: the server-computed own flag (strictly true only when the caller authored it); null on the
     // caller-independent broadcast frame → false here. Drives own-vs-other alignment + edit/delete gating.
     mine: m.mine === true,

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -147,6 +148,27 @@ public class ConversationController {
             @PathVariable Long id,
             @Valid @RequestBody PostMessageRequest body) {
         return posts.post(caller, id, body.body(), body.replyToMessageId());
+    }
+
+    /**
+     * Post an admin/host ANNOUNCEMENT to the event's group thread (TM-710). Gated
+     * {@code @PreAuthorize("hasRole('ADMIN')")} server-side — a non-admin is a uniform {@code 403} and
+     * an anonymous caller a {@code 401} from the security chain — so only an admin can post an
+     * announcement-type message, whatever the UI allows. Unlike the ordinary {@link #post}, this path is
+     * <em>not</em> member-gated: an admin may announce in any event chat, even one they don't attend
+     * (fixing the admin-send gap where a non-attendee admin had no membership row and was refused). The
+     * thread must exist ({@code 404} otherwise) and be open ({@code 409} once closed); the body is
+     * validated (non-blank, ≤ 500) before it gets here. Returns the created announcement ({@code 201}),
+     * which also triggers the push + live-SSE fan-out to the thread's members.
+     */
+    @PostMapping("/conversations/{id}/announcements")
+    @PreAuthorize("hasRole('ADMIN')")
+    @ResponseStatus(HttpStatus.CREATED)
+    ConversationMessageResponse postAnnouncement(
+            @AuthenticationPrincipal VerifiedUser caller,
+            @PathVariable Long id,
+            @Valid @RequestBody PostAnnouncementRequest body) {
+        return posts.postAnnouncement(caller, id, body.body());
     }
 
     /**

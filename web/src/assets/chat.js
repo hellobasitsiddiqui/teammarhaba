@@ -42,6 +42,8 @@ import {
   getConversationMembers,
   markConversationRead,
   postConversationMessage,
+  postConversationAnnouncement,
+  getMe,
   editConversationMessage,
   deleteConversationMessage,
   signalTyping,
@@ -116,8 +118,30 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   // from GET /conversations/{id}/members), loaded best-effort once per thread open. It feeds BOTH the
   // composer's @mention autocomplete and the in-message highlight (a mention only chips up if its member
   // is in this list). `mentionBox` is the live autocomplete dropdown element (null when closed).
-  members: [], mentionBox: null };
+  members: [], mentionBox: null,
+  // Admin announcements (TM-710): `announceMode` is whether the admin composer is currently set to post
+  // an ANNOUNCEMENT (vs an ordinary message). Only ever true for an admin viewer on an event group chat;
+  // toggled by the composer's announcement switch and reset on each thread open.
+  announceMode: false };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
+
+// The viewer's admin flag (TM-710), cached once — drives whether the event-chat composer offers the
+// "Send as announcement" affordance. null = not yet resolved; resolved best-effort from GET /me so a
+// failed lookup simply hides the affordance (a non-admin can't post an announcement anyway — the server
+// gate is authoritative). It's the caller's own role, stable for the session.
+let viewerIsAdmin = null;
+
+/** Resolve (once) whether the viewer is an admin, best-effort — a failure leaves the affordance hidden. */
+async function resolveViewerIsAdmin() {
+  if (viewerIsAdmin !== null) return viewerIsAdmin;
+  try {
+    const me = await getMe();
+    viewerIsAdmin = String(me?.role ?? "").toUpperCase() === "ADMIN";
+  } catch {
+    viewerIsAdmin = false; // can't tell → treat as non-admin (server still gates the endpoint)
+  }
+  return viewerIsAdmin;
+}
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
 // appear instantly without waiting for the poll; navigating away (or into another thread) closes it.
@@ -785,6 +809,14 @@ function buildComposer(id, meta) {
     autocomplete: "off",
     "data-testid": "chat-input",
   });
+  // Admin announcements (TM-710): an admin viewing an EVENT group chat gets a "Send as announcement"
+  // toggle. Off = an ordinary message (the member-gated post); on = an ANNOUNCEMENT via the admin
+  // endpoint. Wired asynchronously (the role lookup is a promise) and purely additive — it's absent for
+  // a non-admin or an admin-broadcast thread, so the ordinary composer is untouched for everyone else.
+  // The server gate is authoritative regardless of what this toggle shows.
+  thread.announceMode = false; // reset per composer build (per thread open)
+  const announceBar = el("div", { class: "tm-chat-announce-bar", hidden: true, "data-testid": "chat-announce-bar" });
+  maybeMountAnnounceToggle(id, meta, announceBar);
   const sendBtn = el(
     "button",
     { class: "tm-chat-send", type: "submit", "aria-label": "Send", disabled: true, "data-testid": "chat-send" },
@@ -800,7 +832,7 @@ function buildComposer(id, meta) {
     class: "tm-chat-mention-box", hidden: true, role: "listbox",
     "aria-label": "Mention a member", "data-testid": "chat-mention-box",
   });
-  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [mentionBox, replyPreview, input, sendBtn]);
+  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [announceBar, mentionBox, replyPreview, input, sendBtn]);
   thread.composerInput = input;
   thread.replyPreviewEl = replyPreview;
   thread.mentionBox = mentionBox;
@@ -828,6 +860,36 @@ function buildComposer(id, meta) {
     send(id, form, input, sendBtn);
   });
   return form;
+}
+
+/**
+ * Mount the admin "Send as announcement" toggle (TM-710) into the composer, best-effort and async.
+ * Only for an ADMIN viewer on an EVENT group chat (typeKey !== "admin"): an admin-broadcast thread is
+ * already read-only/announcement-only, and a non-admin can't post an announcement (the server gates it).
+ * Resolving the role is a promise, so this mutates the (already-mounted) `bar` once it settles; if the
+ * viewer isn't an admin, or the thread was left meanwhile, it leaves the bar hidden — the ordinary
+ * composer is entirely unchanged for everyone else.
+ */
+async function maybeMountAnnounceToggle(id, meta, bar) {
+  if (meta.typeKey === "admin") return; // admin-broadcast threads have no attendee composer to augment
+  const isAdmin = await resolveViewerIsAdmin();
+  if (!isAdmin || thread.id !== String(id)) return; // not an admin, or navigated away mid-resolve
+  const checkbox = el("input", {
+    type: "checkbox", class: "tm-chat-announce-check", id: `chat-announce-${id}`,
+    "data-testid": "chat-announce-toggle",
+    onChange: (e) => {
+      thread.announceMode = Boolean(e.target.checked);
+      if (thread.composerInput) {
+        thread.composerInput.placeholder = thread.announceMode ? "Post an announcement…" : "Message the group…";
+      }
+    },
+  });
+  bar.append(el("label", { class: "tm-chat-announce-label", for: `chat-announce-${id}` }, [
+    checkbox,
+    el("span", { class: "tm-chat-announce-glyph", "aria-hidden": "true", text: "📣" }),
+    el("span", { text: "Send as announcement" }),
+  ]));
+  bar.hidden = false;
 }
 
 /* === TM-469 mentions === */
@@ -1045,7 +1107,12 @@ async function send(id, form, input, sendBtn) {
   repaintBody(); // optimistic echo, dimmed + "Sending…"
 
   try {
-    const saved = await postConversationMessage(id, draft.value, { replyToMessageId: replyTarget?.id });
+    // Admin announcement (TM-710): when the admin toggle is on, post via the announcement endpoint
+    // (kind ANNOUNCEMENT, not member-gated). Otherwise the ordinary member-gated message post. An
+    // announcement is a top-level post, so any reply target is ignored for it.
+    const saved = thread.announceMode
+      ? await postConversationAnnouncement(id, draft.value)
+      : await postConversationMessage(id, draft.value, { replyToMessageId: replyTarget?.id });
     if (thread.id !== String(id)) return; // navigated away mid-send — drop silently
     thread.pending = thread.pending.filter((p) => p.id !== localId);
     const model = core.toThreadMessage(saved);
@@ -1184,6 +1251,11 @@ function emptyThread() {
  * @param {boolean} mine whether to render it as an out-going bubble.
  */
 function messageRow(m, mine = false) {
+  // Admin/host announcement (TM-710): the auto-posted opening message or an admin-sent announcement.
+  // Rendered as a distinct, centred announcement block — attributed as an announcement (host / admin) —
+  // whether it's a system "from TeamMarhaba" post or an admin-authored one, so it never renders as an
+  // ordinary attendee bubble. Checked BEFORE the plain system branch (an announcement subsumes it).
+  if (m.announcement) return announcementNotice(m);
   if (m.system) return systemNotice(m);
 
   const side = mine ? "tm-chat-msg tm-chat-msg--out" : "tm-chat-msg tm-chat-msg--in";
@@ -1558,6 +1630,25 @@ function setReactionsOnMessage(id, reactions) {
  * a time stamp, and the optional deep-link CTA. All of it text-only nodes via el(), so an admin-authored
  * body / link can never inject markup.
  */
+/**
+ * An admin/host ANNOUNCEMENT (TM-710): the auto-posted event opening message, or a message an admin
+ * sent through the announcement composer. Rendered as a centred, visually-distinct announcement block —
+ * a "📣 Announcement" attribution, the body, its stamp, and a tap-through CTA when it carries a safe
+ * in-app deep-link — so it reads unmistakably differently from an attendee bubble, whoever authored it.
+ */
+function announcementNotice(m) {
+  const notice = el("div", { class: "tm-chat-system tm-chat-announcement", "data-testid": "chat-announcement" }, [
+    el("div", { class: "tm-chat-from" }, [
+      el("span", { class: "tm-chat-from-glyph", "aria-hidden": "true", text: "📣" }),
+      el("span", { class: "tm-chat-from-name", text: "Announcement" }),
+    ]),
+    el("p", { class: "tm-chat-system-text", text: m.body }),
+  ]);
+  if (m.timeLabel) notice.append(el("div", { class: "tm-chat-system-stamp" }, [el("span", { text: m.timeLabel })]));
+  if (m.cta) notice.append(messageCta(m.cta));
+  return notice;
+}
+
 function systemNotice(m) {
   const notice = el("div", { class: "tm-chat-system tm-chat-system--admin", "data-testid": "chat-system" }, [
     el("div", { class: "tm-chat-from" }, [

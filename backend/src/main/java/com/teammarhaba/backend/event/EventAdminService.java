@@ -207,6 +207,9 @@ public class EventAdminService {
         if (draft.premium() != null) {
             event.setPremium(draft.premium());
         }
+        // Optional group-chat opening message (TM-710): null/blank = none. Auto-posted once as an
+        // announcement when the event's chat first opens; the length cap is enforced at the request edge.
+        event.setOpeningMessage(draft.openingMessage());
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);
 
@@ -300,6 +303,11 @@ public class EventAdminService {
         // equals-means-no-op semantics work; the primitives unbox back through the setters.
         applyIfChanged(patch.pricePence(), event.getPricePence(), event::setPricePence, "pricePence", changed);
         applyIfChanged(patch.premium(), event.isPremium(), event::setPremium, "premium", changed);
+        // Optional group-chat opening message (TM-710): null = leave unchanged (house PATCH convention).
+        // Editing it before the chat has opened simply changes what gets auto-posted; once posted (the
+        // idempotency stamp is set) a later edit does not re-post — the auto-post is one-shot.
+        applyIfChanged(
+                patch.openingMessage(), event.getOpeningMessage(), event::setOpeningMessage, "openingMessage", changed);
 
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);
