@@ -8,14 +8,19 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseToken;
 import com.google.firebase.auth.UserMetadata;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.user.Role;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserAdminService;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Instant;
 import java.util.List;
@@ -23,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
@@ -51,6 +57,10 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
      */
     @MockBean
     private FirebaseAuth firebaseAuth;
+
+    /** The real admin disable/suspend path (flips {@code enabled=false} + audits) — TM-741/TM-742. */
+    @Autowired
+    private UserAdminService userAdmin;
 
     private static RequestPostProcessor caller(String uid, String email) {
         return authentication(new UsernamePasswordAuthenticationToken(new VerifiedUser(uid, email), null, List.of()));
@@ -586,5 +596,46 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     @Test
     void rejectsAnonymousWith401() throws Exception {
         mockMvc.perform(get("/api/v1/me")).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * TM-738 P0 (profile, security-negative): PATCH /me — the caller's own profile-write endpoint — must
+     * be refused for a SUSPENDED account, in the very same request, through the real security chain.
+     *
+     * <p>The other MeController tests inject a {@link VerifiedUser} principal directly (bypassing the
+     * {@code FirebaseAuthenticationFilter}), so they never exercise the {@code enabled=false} suspension
+     * gate. This drives PATCH /me through the ACTUAL filter with a valid-verifying token whose account an
+     * admin has just suspended: a valid Firebase token is necessary but not sufficient — the inbound
+     * {@code users.enabled} gate (TM-741/TM-742) clears the context, so the entry point returns the uniform
+     * RFC 7807 401 and the mutation never reaches the controller. The 401 lands before body validation, so
+     * a well-formed patch body is still refused (no write, no partial update). This mirrors
+     * {@code FirebaseAuthIntegrationTest.suspendedAccountIsRejectedEvenWithAValidToken} on the read side and
+     * pins the same invariant on the profile WRITE seam the audit called out.
+     */
+    @Test
+    void patchMeRefusedForSuspendedAccount() throws Exception {
+        // Seed an active account, then take the real admin "disable" action (flips enabled=false + audits).
+        // A distinct acting-admin uid avoids the self-disable protection (an admin can't disable itself).
+        User target = users.save(new User("uid-suspended-patch", "suspended@example.com", "Target"));
+        userAdmin.update(target.getId(), false, (Role) null, "admin-uid");
+
+        // A token that still verifies cleanly (checkRevoked=true) — the account is suspended only in OUR DB,
+        // not the token. Exactly the gap the inbound gate closes.
+        FirebaseToken token = mock(FirebaseToken.class);
+        when(token.getUid()).thenReturn("uid-suspended-patch");
+        when(token.getEmail()).thenReturn("suspended@example.com");
+        when(firebaseAuth.verifyIdToken("suspended-patch-token", true)).thenReturn(token);
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer suspended-patch-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Should Not Persist\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Unauthorized"));
+
+        // The refused write must have left NO trace — the suspended row's display name is untouched.
+        assertThat(users.findByFirebaseUid("uid-suspended-patch").orElseThrow().getDisplayName())
+                .isEqualTo("Target");
     }
 }
