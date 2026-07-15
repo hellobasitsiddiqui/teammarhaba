@@ -3,6 +3,7 @@ package com.teammarhaba.backend.event;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.membership.CheckoutService;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
@@ -72,6 +73,7 @@ public class EventAdminService {
     private final ApplicationEventPublisher lifecycle;
     private final EntityManager entityManager;
     private final EventPhasePolicy phase;
+    private final CheckoutService checkout;
 
     public EventAdminService(
             EventRepository events,
@@ -81,7 +83,8 @@ public class EventAdminService {
             AuditService audit,
             ApplicationEventPublisher lifecycle,
             EntityManager entityManager,
-            EventPhasePolicy phase) {
+            EventPhasePolicy phase,
+            CheckoutService checkout) {
         this.events = events;
         this.attendance = attendance;
         this.venues = venues;
@@ -90,6 +93,7 @@ public class EventAdminService {
         this.lifecycle = lifecycle;
         this.entityManager = entityManager;
         this.phase = phase;
+        this.checkout = checkout;
     }
 
     /**
@@ -336,6 +340,15 @@ public class EventAdminService {
      * event returns it unchanged and does <em>not</em> re-audit or re-publish, so TM-397 can never
      * double-notify from a double click. Audits {@link AuditAction#EVENT_CANCELLED} and publishes
      * {@code CANCELLED} on the actual transition.
+     *
+     * <p><strong>Money reversal (TM-740).</strong> Cancelling a <em>paid</em> event now refunds every paid
+     * attendee: each money-bearing {@code CONFIRMED} order on the event is driven to {@code REFUND_DUE} and
+     * refunded via the existing checkout refund machinery ({@link CheckoutService#refundOrdersForCancelledEvent},
+     * reusing the same {@code tryRefund} + {@code RefundSweepService} retry safety net a self-serve cancel
+     * uses). Without this, an admin cancel stranded captured money: no order was reversed, and because a
+     * cancelled event reads as "not found", attendees could not self-serve their own refund either. The
+     * reversal runs in this transaction, so the REFUND_DUE bookkeeping commits atomically with the status
+     * flip; it is idempotent and a no-op for a free event with no paid orders.
      */
     @Transactional
     public Event cancel(VerifiedUser caller, long id) {
@@ -349,6 +362,12 @@ public class EventAdminService {
             return event; // already cancelled — idempotent no-op
         }
         event.cancel(Instant.now()); // dirty-checking flushes on commit
+
+        // Reverse captured money for every paid attendee (TM-740): the admin cancel is the single point where
+        // a paid event's stranded funds are returned. Idempotent and a no-op when the event has no paid
+        // orders; failures leave rows REFUND_DUE for the RefundSweepService to retry. Runs before the audit /
+        // lifecycle publish so the whole cancel — status flip, refunds, audit — commits or rolls back together.
+        checkout.refundOrdersForCancelledEvent(id);
 
         audit.record(
                 caller.uid(),

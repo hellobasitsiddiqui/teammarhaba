@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.membership.CheckoutService;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
@@ -51,8 +52,9 @@ class EventAdminPricingGuardTest {
         ApplicationEventPublisher lifecycle = mock(ApplicationEventPublisher.class);
         EntityManager entityManager = mock(EntityManager.class);
         EventPhasePolicy phase = mock(EventPhasePolicy.class);
+        CheckoutService checkout = mock(CheckoutService.class);
         service = new EventAdminService(
-                events, attendance, venues, users, audit, lifecycle, entityManager, phase);
+                events, attendance, venues, users, audit, lifecycle, entityManager, phase, checkout);
 
         User creator = mock(User.class);
         when(creator.getId()).thenReturn(7L);

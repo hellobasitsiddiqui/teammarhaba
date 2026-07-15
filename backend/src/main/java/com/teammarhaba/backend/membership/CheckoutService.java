@@ -470,6 +470,50 @@ public class CheckoutService {
     }
 
     /**
+     * Reverse the captured money for <em>every</em> paid attendee when an admin cancels an event (TM-740).
+     * The admin cancel path ({@code EventAdminService.cancel}) flips the event to {@code CANCELLED} but did
+     * no money reversal, and — because a cancelled event reads as "not found" — attendees could not even
+     * self-serve their own refund via {@code POST /events/{id}/checkout/cancel} (it 404s once the event is
+     * hidden). Net: captured money for every paid attendee was stranded with no automated or self-service
+     * recovery. This closes that gap centrally, on the admin action itself.
+     *
+     * <p>For each money-bearing {@code CONFIRMED} order on the event (a settled PAY order with a non-zero
+     * amount) it marks the order {@code REFUND_DUE} and issues the provider refund — exactly the reversal
+     * {@link #cancel} performs for a single self-serve cancel, reused here per attendee. Failures leave the
+     * row {@code REFUND_DUE} (never lost), so the scheduled {@link RefundSweepService} retries until it
+     * succeeds — the same safety net every other refund path relies on. {@code PENDING} orders (no charge
+     * captured) are deliberately left untouched: they never settle now (the event is gone), and the TTL
+     * sweep ({@code PendingOrderSweepService}) expires + best-effort-voids them; a late settle of one is
+     * caught by {@link #confirmPaid}'s settle-after-terminal race handling.
+     *
+     * <p><strong>Idempotent + safe with zero paid orders.</strong> Only still-{@code CONFIRMED} orders are
+     * selected, so a repeat call after the first reversal finds nothing (the rows are now
+     * {@code REFUND_DUE}/{@code REFUNDED}) and does nothing; an event with no paid orders selects an empty
+     * set and is a no-op. Runs inside the caller's cancel transaction, so the REFUND_DUE bookkeeping commits
+     * atomically with the event-status flip.
+     *
+     * @return the number of orders driven to a refund (0 when there were no money-bearing orders)
+     */
+    @Transactional
+    public int refundOrdersForCancelledEvent(long eventId) {
+        Instant now = Instant.now();
+        int reversed = 0;
+        for (Order order : orders.findByEventIdAndStatus(eventId, OrderStatus.CONFIRMED)) {
+            if (order.getAmountPence() <= 0) {
+                continue; // £0 FREE/INCLUDED order — no captured money to return, leave it as attendance history
+            }
+            order.markRefundDue(now);
+            tryRefund(order, now);
+            reversed++;
+        }
+        if (reversed > 0) {
+            log.info("Admin cancel of event {} reversed {} paid order(s) — flagged REFUND_DUE and refunding (TM-740).",
+                    eventId, reversed);
+        }
+        return reversed;
+    }
+
+    /**
      * Issue the provider refund a {@code REFUND_DUE} order owes (TM-623), best-effort: success moves the
      * order to {@code REFUNDED} (terminal — the money is back); failure logs and leaves it
      * {@code REFUND_DUE} so nothing about the debt is lost — the scheduled {@link RefundSweepService}

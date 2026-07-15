@@ -18,6 +18,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     Optional<Order> findByUserIdAndEventId(Long userId, Long eventId);
 
     /**
+     * Every order for one event in a given {@code status} (TM-740) — the query the admin-cancel refund
+     * fan-out uses to enumerate the money-bearing ({@code CONFIRMED}) orders on a cancelled event so each
+     * can be driven to {@code REFUND_DUE} and refunded. Small result set in practice (one row per paid
+     * attendee), so no dedicated index; the enclosing cancel is a rare admin action, not a hot path.
+     */
+    List<Order> findByEventIdAndStatus(Long eventId, OrderStatus status);
+
+    /**
      * The order that went to a payment provider under {@code providerOrderId} (TM-478) — the webhook match
      * key. The {@code V37} partial-unique index makes it at most one row, so a settled-payment webhook
      * resolves to exactly the local order to confirm (or none, if we never created it).
