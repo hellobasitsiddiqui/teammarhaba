@@ -8,6 +8,15 @@ name: Jira reconcile merged → Testing (backstop)
 # self-heal within one cron interval, with no dependency on the orchestrator's live session. The
 # In-Review/In-Progress-only guard means a ticket QA has already advanced to Done is never dragged
 # back.
+#
+# TM-725 guard — a ticket that was DELIBERATELY REOPENED after merge (someone pulled a merged ticket
+# back to In Progress / In Review to do follow-up work) must NOT be auto-re-closed every 10 minutes.
+# The status-name-only guard above can't tell "never reached Testing yet" from "was Testing, then
+# reopened on purpose". So before transitioning we inspect the issue changelog: if the ticket has
+# ALREADY been moved into Testing (or Done) at least once, its current In Review / In Progress state
+# is a deliberate reopen, and we SKIP it. We only auto-advance tickets this sweep has never closed
+# once — the primary per-merge Action already handled the first transition, so the backstop only
+# rescues genuinely-stranded tickets, never fights a human.
 on:
   schedule:
     - cron: '*/10 * * * *'
@@ -52,6 +61,20 @@ jobs:
 
             # Only advance tickets still short of the QA gate — never pull a Testing/Done ticket back.
             if [ "$st" = "In Review" ] || [ "$st" = "In Progress" ]; then
+              # TM-725: skip a ticket that has ALREADY reached Testing/Done at least once — its current
+              # In Review / In Progress state is a deliberate reopen, not a stranded merge. Inspect the
+              # changelog once (expand=changelog) and look for any status transition whose TO-status was
+              # Testing or Done. Fail-soft: if the changelog can't be read, fall through and advance (the
+              # old behaviour) rather than silently stranding a genuinely-stuck ticket.
+              reached_qa="$(curl -sS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+                      "$JIRA_BASE_URL/rest/api/3/issue/$key?expand=changelog&fields=status" \
+                      | python3 -c "import sys,json; d=json.load(sys.stdin); qa={'testing','done'}; items=[i for h in d.get('changelog',{}).get('histories',[]) for i in h.get('items',[])]; print('yes' if any(i.get('field')=='status' and (i.get('toString') or '').strip().lower() in qa for i in items) else 'no')" 2>/dev/null || echo unknown)"
+
+              if [ "$reached_qa" = "yes" ]; then
+                echo "$key is $st but has already been Testing/Done once → deliberate reopen, skipping (TM-725)."
+                continue
+              fi
+
               code="$(curl -sS -o /dev/null -w '%{http_code}' \
                        -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
                        -X POST -H 'Content-Type: application/json' \

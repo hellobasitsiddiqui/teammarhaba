@@ -3,9 +3,26 @@ name: OIDC smoke (deploy auth)
 # Proves GitHub Actions can authenticate to GCP via Workload Identity Federation
 # (keyless — no service-account JSON key) and act as the least-privilege deploy SA.
 # Set up in TM-67. The real deploy workflows live in TM-55 / TM-60 / TM-61.
+#
+# TM-725 hardening — this smoke test IMPERSONATES the deploy SA (gha-deployer@), so a run that can
+# reach the WIF auth step can mint privileged deploy-SA credentials. It must NOT be mintable from an
+# arbitrary PR (a fork PR or an untrusted contributor branch). Two layers now gate it:
+#   1. Trigger scope: no blanket `pull_request` (which fires for every PR incl. forks). Only
+#      `workflow_dispatch` (a maintainer runs it on purpose) and `push` to `main` (post-merge, a
+#      trusted ref only maintainers can write). Fork PRs can't run it at all.
+#   2. Job condition + environment: the job only runs for the canonical repo (never a fork's copy),
+#      and binds to the protected `deploy-auth` GitHub Environment so its branch/approval protection
+#      rules (and any environment-scoped review) apply before the OIDC token is issued.
+#
+# HUMAN FOLLOW-UP (org/GCP — cannot be done in this repo): tighten the Workload Identity Pool
+# provider's attribute-condition / the SA's principalSet binding so it only trusts
+# `attribute.repository == "hellobasitsiddiqui/teammarhaba"` AND a trusted ref
+# (e.g. `attribute.ref == "refs/heads/main"` or `attribute.event_name != "pull_request"`). The
+# workflow gate below is defence-in-depth; the WIF trust policy is the authoritative restriction.
 
 on:
-  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,6 +32,10 @@ permissions:
 jobs:
   oidc-smoke:
     runs-on: ubuntu-latest
+    # Never mint deploy-SA creds from a fork's copy of the repo; bind to the protected environment so
+    # its branch/approval rules gate the OIDC token (TM-725).
+    if: ${{ github.repository == 'hellobasitsiddiqui/teammarhaba' }}
+    environment: deploy-auth
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
