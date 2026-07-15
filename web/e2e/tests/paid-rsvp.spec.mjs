@@ -258,7 +258,8 @@ test("@membership @payments per-event PAY: checkout PENDING → settle webhook �
   // RSVP. Read the provider order id (the match key) from the DB — the client response never exposes it. ─
   const pending = await readOrderForEvent(event.id, EVENT_GOER.email);
   const webhookRes = await injectSettleWebhook(pending.providerOrderId);
-  expect(webhookRes.status()).toBe(200); // verified + accepted (401 would mean the signature didn't verify)
+  // injectSettleWebhook returns a native fetch Response — `status` is a PROPERTY, not a method.
+  expect(webhookRes.status).toBe(200); // verified + accepted (401 would mean the signature didn't verify)
   await shot("webhook-injected");
 
   // ── STEP 5: the order is CONFIRMED and a GOING attendance row persists — the settle → confirm → RSVP the

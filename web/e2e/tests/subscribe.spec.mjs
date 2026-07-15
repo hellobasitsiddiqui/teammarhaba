@@ -180,7 +180,8 @@ test("@membership @subscription subscribe MONTHLY: checkout → settle webhook �
   // Read the provider order id (the match key) from the DB — the client response never exposes it. ──────
   const pending = await readPendingInitialCharge(CHAT_SEED.email);
   const webhookRes = await injectSettleWebhook(pending.providerOrderId);
-  expect(webhookRes.status()).toBe(200); // verified + accepted (401 = signature didn't verify)
+  // injectSettleWebhook returns a native fetch Response — `status` is a PROPERTY, not a method.
+  expect(webhookRes.status).toBe(200); // verified + accepted (401 = signature didn't verify)
   await shot("webhook-injected");
 
   // ── STEP 4: poll GET /me/subscription until the webhook-driven activation shows up — the tier flips to

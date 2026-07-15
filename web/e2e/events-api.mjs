@@ -45,7 +45,16 @@ export async function authHeadersFor({ email, password }) {
  *   • visibility window already open (started an hour ago, ends in 30 days) → visible-now in the list;
  *   • an image (a storage-path `imagePath`, the "image" the ticket calls for) and an explicit
  *     visibility window (the "visibility window") — both round-trip on the created record;
- *   • no age band (CreateEventRequest has no age fields), so the TM-415 age gate never fires.
+ *   • no age band (CreateEventRequest has no age fields), so the TM-415 age gate never fires;
+ *   • pricePence = 0 → a GENUINELY FREE standard event (TM-759). This is load-bearing: the e2e backend
+ *     now runs with MEMBERSHIP_ENABLED=true (so the two payment specs can drive the money path), and
+ *     under that flag a NON-free standard event resolves to PAY for a pay-per-event caller once their
+ *     one first-event credit is spent — so a fresh API RSVP 402s ("Payment required"). Omitting the
+ *     price would default it to £5 (Event.DEFAULT_PRICE_PENCE), which regressed every event/chat/notif
+ *     spec that RSVPs to SET UP its scenario the moment the credit ran out across the shared CI DB /
+ *     retries. A £0 event resolves FREE for EVERY tier & credit state (EntitlementResolver rule 4), so
+ *     these setup RSVPs free-join exactly as they did pre-membership. The payment specs OVERRIDE this
+ *     with premium:true + a real pricePence, so they still exercise a genuine PAY event.
  * Returns the created EventResponse JSON (id, heading, capacity, imagePath, visibilityStart/End, …).
  */
 export async function createEvent(headers, overrides = {}) {
@@ -62,6 +71,7 @@ export async function createEvent(headers, overrides = {}) {
     visibilityStart: iso(now - 36e5), // visible since an hour ago
     visibilityEnd: iso(now + 30 * 864e5), // …until 30 days out
     imagePath: "event-images/e2e-tm400", // valid storage-path pattern; the UI renders a placeholder thumb for it
+    pricePence: 0, // FREE by default (see Javadoc above) — payment specs override with premium + a price
     ...overrides,
   };
   const res = await fetch(`${API_BASE_URL}/api/v1/admin/events`, {
