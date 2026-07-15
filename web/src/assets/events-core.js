@@ -953,3 +953,30 @@ export const ENTITLEMENT_DECISION = Object.freeze({
 export function requiresPaidCheckout(entitlement) {
   return entitlement?.decision === ENTITLEMENT_DECISION.PAY;
 }
+
+/**
+ * Is the current location hash still the detail route for this exact event id? Used by the RSVP
+ * command's post-action re-render guard (TM-733): a command (checkout, a leave that navigates on, a
+ * slow request the user has since left) can resolve after the user has navigated away, and the
+ * command's `finally` re-fetch must NOT paint this event's detail back over the route they moved to.
+ * The detail route is `#/events/{encodeURIComponent(id)}`; compares decoded ids so `%20`/space and
+ * other encodings match regardless of how the current hash spells the id. A blank/undefined hash or
+ * id is never a match.
+ * @param {string} hash the current `window.location.hash`
+ * @param {string|number} id the event id the command acted on
+ * @returns {boolean}
+ */
+export function isViewingEventDetail(hash, id) {
+  if (!hash || id == null || id === "") return false;
+  const prefix = "#/events/";
+  if (!hash.startsWith(prefix)) return false;
+  const rest = hash.slice(prefix.length);
+  if (!rest) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rest);
+  } catch {
+    decoded = rest; // malformed %-escape: fall back to the raw segment
+  }
+  return decoded === String(id);
+}
