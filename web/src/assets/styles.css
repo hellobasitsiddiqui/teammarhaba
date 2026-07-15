@@ -5092,6 +5092,30 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
 .tm-notifs-text-body { font-size: var(--fs-3); line-height: 1.25; }
 .tm-notifs-time { margin-top: 3px; font-size: var(--fs-1); color: var(--muted); }
 
+/* Loading / empty / error states for the real feed (TM-745) — mirrors the bell panel's state styling. */
+.tm-notifs-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-3);
+    text-align: center;
+}
+.tm-notifs-state-text { margin: 0; color: var(--muted); font-size: var(--fs-2); }
+.tm-notifs-retry {
+    font: inherit;
+    font-size: var(--fs-2);
+    font-weight: 600;
+    padding: var(--space-2) var(--space-4);
+    color: var(--accent);
+    background: transparent;
+    border: var(--border-width) solid var(--accent-line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.tm-notifs-retry:hover { background: var(--accent-soft); }
+.tm-notifs-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* ===== Shared UI component library (TM-511) ===================================================
    The approved wireframe kit (design-kit/showcase-paper.html "Design elements · paper" tiles) built
    as reusable `.tm-c-*` components. Every value a theme owns — colour, font, radius, border, shadow,
