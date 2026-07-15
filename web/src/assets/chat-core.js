@@ -617,9 +617,40 @@ export function upsertMessage(messages, message) {
 }
 
 /**
+ * Fold a LIVE-broadcast message frame into the loaded list WITHOUT clobbering fields the broadcast can't
+ * carry (TM-731). A brand-new id is inserted exactly like {@link upsertMessage}; but when we already hold
+ * the row — the common own-send case, where the direct POST response already gave us the RICH message —
+ * the fan-out frame is a lean copy that omits the sender-only `readReceipt` and (for a reply) the resolved
+ * `replyTo` quote. A blind whole-row replace would drop the reply quote + the read receipt (and briefly
+ * double-render). So for an existing id we PATCH in the broadcast's own fields (body / reactions / edit
+ * state / order) while PRESERVING the incumbent's `readReceipt` and `replyTo` whenever the frame lacks them.
+ *
+ * <p>Mirrors {@link applyMessageEdit}'s "field-level merge, never a whole-row replace" rule, generalised
+ * to the whole broadcast frame. Returns a NEW array in `sortAt` order; a frame without an id is a no-op.
+ * @param {Array<{id: string, sortAt: number}>} messages the loaded thread.
+ * @param {{id: string, sortAt: number}} message the broadcast frame (a toThreadMessage view-model).
+ * @returns {Array}
+ */
+export function mergeLiveMessage(messages, message) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (!message || !message.id) return list.slice();
+  const existing = list.find((m) => m.id === message.id);
+  if (!existing) return upsertMessage(list, message);
+  // Preserve the incumbent's sender-only receipt and resolved reply quote when the lean broadcast frame
+  // doesn't carry them — the direct POST response is authoritative for those, the fan-out isn't.
+  const merged = {
+    ...message,
+    readReceipt: message.readReceipt != null ? message.readReceipt : existing.readReceipt,
+    replyTo: message.replyTo != null ? message.replyTo : existing.replyTo,
+  };
+  return upsertMessage(list, merged);
+}
+
+/**
  * A cheap change-signature for a loaded message list, so the near-live poll only repaints the thread
- * when something actually changed (a new/edited message) instead of clobbering scroll position + any
- * in-progress read every tick. Count + last id + last timestamp is enough to catch an appended message.
+ * when something actually changed (a new/edited message, a reaction or a read receipt) instead of
+ * clobbering scroll position + any in-progress read every tick. Count + last id + last timestamp catches
+ * an appended message; the per-message folds below catch in-place changes that leave those three equal.
  * @param {Array<{id: string, sortAt: number}>} messages
  * @returns {string}
  */
@@ -627,11 +658,22 @@ export function threadSignature(messages) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length === 0) return "0";
   const last = list[list.length - 1];
-  // Fold in each message's edited-at so an in-place edit (no new row, so count/last-id/last-sortAt are
-  // all unchanged) still changes the signature — otherwise a poll after someone else edited a message
-  // would see "nothing new" and never repaint the corrected body (TM-467).
-  const edits = list.reduce((acc, m) => acc + (m.editedAt ? `,${m.id}@${m.editedAt}` : ""), "");
-  return `${list.length}:${last.id}:${last.sortAt}${edits}`;
+  // Fold in each message's in-place state so a change that adds NO new row (count / last-id / last-sortAt
+  // all unchanged) still changes the signature — otherwise the poll sees "nothing new" and never repaints:
+  //   • editedAt        — someone else edited a message body (TM-467);
+  //   • reactions        — another member reacted/un-reacted; the chips changed but no row was added, so
+  //                        without this the poll would never render other members' reactions (TM-731);
+  //   • readReceipt.count — a reader opened one of the caller's own messages, changing "Sent" → "Read by N".
+  const marks = list.reduce((acc, m) => {
+    let mark = "";
+    if (m.editedAt) mark += `,${m.id}@${m.editedAt}`;
+    if (Array.isArray(m.reactions) && m.reactions.length) {
+      mark += `,${m.id}#${m.reactions.map((r) => `${r.emoji}:${r.count}:${r.mine ? 1 : 0}`).join("|")}`;
+    }
+    if (m.readReceipt) mark += `,${m.id}$${m.readReceipt.count}`;
+    return acc + mark;
+  }, "");
+  return `${list.length}:${last.id}:${last.sortAt}${marks}`;
 }
 
 /* ─────────────────────────────── Author edit / delete own message (TM-467) ──────────────────────────

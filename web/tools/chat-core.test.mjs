@@ -34,6 +34,7 @@ import {
   classifyPostError,
   pendingMessage,
   upsertMessage,
+  mergeLiveMessage,
   threadSignature,
   createSseParser,
   parseSseFrame,
@@ -539,6 +540,71 @@ test("threadSignature: changes when a message is appended, stable otherwise", ()
   assert.notEqual(threadSignature(a), threadSignature(grown)); // appended → repaint
   assert.equal(threadSignature([]), "0");
   assert.equal(threadSignature(null), "0");
+});
+
+test("threadSignature changes when another member's reaction chips change (TM-731)", () => {
+  // Same count / last-id / last-sortAt — only the reaction chips differ, so the OLD count-based
+  // signature would have said "nothing new" and never repainted the other member's reaction.
+  const base = [{ id: "1", sortAt: 100, reactions: [] }];
+  const reacted = [{ id: "1", sortAt: 100, reactions: [{ emoji: "👍", count: 1, mine: false }] }];
+  assert.notEqual(threadSignature(base), threadSignature(reacted));
+  // A count bump (another member also reacted 👍) is a further change.
+  const reactedMore = [{ id: "1", sortAt: 100, reactions: [{ emoji: "👍", count: 2, mine: false }] }];
+  assert.notEqual(threadSignature(reacted), threadSignature(reactedMore));
+  // `mine` flipping (I reacted) also changes it.
+  const reactedMine = [{ id: "1", sortAt: 100, reactions: [{ emoji: "👍", count: 1, mine: true }] }];
+  assert.notEqual(threadSignature(reacted), threadSignature(reactedMine));
+  // Identical chips → stable (the poll still won't repaint when nothing changed).
+  assert.equal(
+    threadSignature(reacted),
+    threadSignature([{ id: "1", sortAt: 100, reactions: [{ emoji: "👍", count: 1, mine: false }] }]),
+  );
+});
+
+test("threadSignature changes when a read receipt count changes (TM-731)", () => {
+  const sent = [{ id: "1", sortAt: 100, readReceipt: { count: 0, readerIds: [] } }];
+  const read = [{ id: "1", sortAt: 100, readReceipt: { count: 1, readerIds: ["u1"] } }];
+  // "Sent" → "Read by 1": no new row, so without folding the receipt in the poll never repaints it.
+  assert.notEqual(threadSignature(sent), threadSignature(read));
+  // A null receipt (not the caller's own message) differs from a zero-count receipt.
+  assert.notEqual(threadSignature(sent), threadSignature([{ id: "1", sortAt: 100, readReceipt: null }]));
+});
+
+test("mergeLiveMessage preserves the POST-confirmed reply quote + receipt against a lean broadcast (TM-731)", () => {
+  // The rich message we already hold from the direct POST response.
+  const confirmed = {
+    id: "42", sortAt: 200, body: "hi",
+    replyTo: { id: "7", excerpt: "the parent" },
+    readReceipt: { count: 1, readerIds: ["u1"] },
+  };
+  const loaded = [{ id: "1", sortAt: 100 }, confirmed];
+  // The fan-out echo of the SAME message: a lean frame with NO reply quote and NO receipt.
+  const broadcast = { id: "42", sortAt: 200, body: "hi", replyTo: null, readReceipt: null };
+  const merged = mergeLiveMessage(loaded, broadcast);
+  const row = merged.find((m) => m.id === "42");
+  assert.deepEqual(row.replyTo, { id: "7", excerpt: "the parent" }); // reply quote survived
+  assert.deepEqual(row.readReceipt, { count: 1, readerIds: ["u1"] }); // receipt survived
+  assert.equal(merged.length, 2); // de-duped, not double-rendered
+  assert.deepEqual(merged.map((m) => m.id), ["1", "42"]); // order kept
+});
+
+test("mergeLiveMessage inserts a brand-new broadcast message like upsertMessage (TM-731)", () => {
+  const loaded = [{ id: "1", sortAt: 100 }];
+  const fresh = { id: "9", sortAt: 300, body: "new", replyTo: null, readReceipt: null };
+  const merged = mergeLiveMessage(loaded, fresh);
+  assert.deepEqual(merged.map((m) => m.id), ["1", "9"]); // appended in order
+  assert.equal(loaded.length, 1); // input not mutated
+  // A frame without an id is a harmless no-op copy.
+  assert.deepEqual(mergeLiveMessage(loaded, { sortAt: 1 }).map((m) => m.id), ["1"]);
+});
+
+test("mergeLiveMessage applies a broadcast's OWN richer fields when the incumbent lacked them (TM-731)", () => {
+  // Incumbent had no receipt yet; a later broadcast that DOES carry one must win (don't preserve null).
+  const loaded = [{ id: "5", sortAt: 100, body: "x", replyTo: null, readReceipt: null }];
+  const withReceipt = { id: "5", sortAt: 100, body: "x", replyTo: { id: "2" }, readReceipt: { count: 3, readerIds: [] } };
+  const row = mergeLiveMessage(loaded, withReceipt).find((m) => m.id === "5");
+  assert.deepEqual(row.readReceipt, { count: 3, readerIds: [] });
+  assert.deepEqual(row.replyTo, { id: "2" });
 });
 
 /* ─────────────────────────────── live transport: SSE frame parser (TM-464) ─────────────────────── */
