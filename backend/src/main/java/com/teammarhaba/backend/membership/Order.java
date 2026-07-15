@@ -80,6 +80,15 @@ public class Order {
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 
+    /**
+     * How many times the {@code RefundSweepService} has retried the provider refund for a
+     * {@code REFUND_DUE} order (TM-726). Bumped on each failed sweep attempt; once it crosses the sweep's
+     * cap the order is abandoned ({@link OrderStatus#REFUND_ABANDONED}) so a permanently-rejected refund is
+     * not retried forever. Not touched by the inline best-effort refund at issue time.
+     */
+    @Column(name = "refund_attempts", nullable = false)
+    private int refundAttempts;
+
     /** App-managed: set on insert and bumped on every {@linkplain #reverse status change}. */
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
@@ -239,5 +248,26 @@ public class Order {
     public void markRefunded(Instant when) {
         this.status = OrderStatus.REFUNDED;
         this.updatedAt = when;
+    }
+
+    /**
+     * Record one failed sweep refund attempt (TM-726): bump {@link #refundAttempts} and, once it reaches
+     * {@code maxAttempts}, move the order to the terminal {@link OrderStatus#REFUND_ABANDONED} so the sweep
+     * stops retrying a permanently-rejected refund. Below the cap the order stays {@code REFUND_DUE} for
+     * the next pass. Returns {@code true} iff this attempt exhausted the budget (the order is now
+     * abandoned).
+     */
+    public boolean recordFailedRefundAttempt(int maxAttempts, Instant when) {
+        this.refundAttempts++;
+        this.updatedAt = when;
+        if (this.refundAttempts >= maxAttempts) {
+            this.status = OrderStatus.REFUND_ABANDONED;
+            return true;
+        }
+        return false;
+    }
+
+    public int getRefundAttempts() {
+        return refundAttempts;
     }
 }
