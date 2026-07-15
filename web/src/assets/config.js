@@ -51,9 +51,14 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
     opsRepo: "hellobasitsiddiqui/teammarhaba",
     opsJiraBoardUrl: "https://10xai.atlassian.net/jira/software/projects/TM/boards/1",
     flags: Object.freeze({
-        // Membership slice (TM-457): OFF until the tier (TM-480) + pricing/checkout (TM-479) screens
-        // and the backend (TM-474) all land. Flip to true to reveal the membership screens.
-        membership: true,
+        // Membership slice (TM-457): ships OFF (TM-725 — committed default reconciled to match the gate
+        // comments above and every reader's "shipped OFF" note). Stays inert dead code until the tier
+        // (TM-480) + pricing/checkout (TM-479) screens and the backend (TM-474) all land. Injection seam:
+        // the deploy flips this at build time the same sed way it injects apiBaseUrl / buildVersion / the
+        // ops values (see .github/workflows/deploy.yml) — `membership: false` -> `membership: true` —
+        // so go-live is a deploy toggle, not a source edit. Keep the token EXACTLY `membership: false`
+        // so the deploy sed matches.
+        membership: false,
     }),
     payments: Object.freeze({
         // Revolut SANDBOX Merchant PUBLIC key (pk_…) — public by design, ships in the client widget (TM-478).
