@@ -138,6 +138,36 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    void nonAdminForbiddenOnPatchDeactivateReactivate() throws Exception {
+        // nonAdminGetsUniform403 above covers GET/POST-create; this pins the remaining mutating verbs
+        // under the class-level @PreAuthorize("hasRole('ADMIN')"). A non-admin must be denied on the
+        // edit and the lifecycle sub-actions too — and the gate fires BEFORE existence is checked, so
+        // a real venue id yields a uniform 403, never a 404 that would leak whether the id exists.
+        Venue seeded = seedVenue("RBAC lifecycle", true);
+        long id = seeded.getId();
+
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(regularUser("venues-plain-user"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"hijack\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Forbidden"));
+
+        mockMvc.perform(post("/api/v1/admin/venues/{id}/deactivate", id).with(regularUser("venues-plain-user")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Forbidden"));
+
+        mockMvc.perform(post("/api/v1/admin/venues/{id}/reactivate", id).with(regularUser("venues-plain-user")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Forbidden"));
+
+        // The denied edit never landed — the venue is unchanged and still active.
+        Venue reloaded = venues.findById(id).orElseThrow();
+        assertThat(reloaded.getName()).isEqualTo("RBAC lifecycle");
+        assertThat(reloaded.isActive()).isTrue();
+    }
+
     // --- Create ---
 
     @Test
@@ -179,6 +209,23 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation failed"))
                 .andExpect(jsonPath("$.errors[?(@.field == 'name')]").exists());
+    }
+
+    @Test
+    void createRejectsMalformedPhotoPath() throws Exception {
+        // photoPath must be a storage object path shaped like `venue-images/{venueId}` — the
+        // @Pattern(regexp = "venue-images/[A-Za-z0-9._-]+") on CreateVenueRequest. A path that
+        // escapes that prefix (a traversal-shaped "../../secrets/leak" here) must be rejected at the
+        // validation boundary with a field-scoped RFC-7807 error, never persisted.
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-photo"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace(
+                                "\"indoorOutdoor\": \"INDOOR\"",
+                                "\"indoorOutdoor\": \"INDOOR\", \"photoPath\": \"../../secrets/leak\"")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'photoPath')]").exists());
     }
 
     @Test
