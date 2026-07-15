@@ -59,6 +59,11 @@ jobs:
       E2E_API_BASE_URL: http://127.0.0.1:8080
       E2E_AUTH_EMULATOR_HOST: 127.0.0.1:9099
       E2E_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
+      # TM-759: the webhook signing secret the Playwright process (membership-webhook.mjs) signs the injected
+      # settle webhook with. MUST equal the backend's REVOLUT_WEBHOOK_SIGNING_SECRET (set on the backend
+      # step) so the HMAC verifies — else the injected webhook is rejected 401 and no order settles. DUMMY
+      # test-only value; NOT a real Revolut secret.
+      E2E_REVOLUT_WEBHOOK_SIGNING_SECRET: e2e-revolut-webhook-signing-secret
 
     steps:
       - name: Checkout
@@ -114,12 +119,47 @@ jobs:
         working-directory: web/e2e
         run: node tests/storage-rules.mjs
 
+      # TM-759: a LOOPBACK Revolut Merchant-API stub the e2e backend's REVOLUT_API_BASE points at, so the
+      # membership PAY + Subscribe specs (paid-rsvp / subscribe, TM-738) can drive the REAL provider's
+      # create-order / create-customer calls with no reachable sandbox. Started BEFORE the backend so the
+      # base URL is answerable the moment a checkout fires. Same background-process + curl-readiness shape
+      # as the emulator/backend steps above.
+      - name: Start Revolut stub (loopback Merchant API — TM-759)
+        working-directory: web/e2e
+        run: |
+          node revolut-stub.mjs > /tmp/revolut-stub.log 2>&1 &
+          echo "Waiting for the Revolut stub on :9210…"
+          for i in $(seq 1 30); do
+            curl -sf "http://127.0.0.1:9210/health" > /dev/null && { echo "revolut stub up"; break; }
+            sleep 1
+          done
+          curl -sf "http://127.0.0.1:9210/health" > /dev/null || { echo "revolut stub failed to start"; cat /tmp/revolut-stub.log; exit 1; }
+
       - name: Start backend (pointed at the emulator + Postgres)
         env:
           SPRING_PROFILES_ACTIVE: dev
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/teammarhaba
           SPRING_DATASOURCE_USERNAME: app
           SPRING_DATASOURCE_PASSWORD: devpassword
+          # TM-759: turn the membership money paths ON server-side so the checkout/subscribe endpoints are
+          # reachable (default OFF → CheckoutService throws AccessDeniedException(PAYMENTS_OFF) = 403, the
+          # exact CI failure the payment specs hit). The e2e backend runs SPRING_PROFILES_ACTIVE=dev, so it
+          # does NOT inherit the prod deploy's hardcoded MEMBERSHIP_ENABLED — it must be set here.
+          MEMBERSHIP_ENABLED: "true"
+          # Keep the renewal scheduler bean OFF (it needs BOTH flags true). The specs drive the INITIAL
+          # charge by injected webhook; no background renewal must fire mid-suite.
+          SUBSCRIPTIONS_ENABLED: "false"
+          # Point the REAL RevolutPaymentProvider at the loopback stub started above (default is the real
+          # sandbox base, unreachable in CI). All outbound Merchant-API calls land on 127.0.0.1:9210.
+          REVOLUT_API_BASE: http://127.0.0.1:9210
+          # Any NON-BLANK secret — authorisedRequest() refuses to send an unauthenticated create-order when
+          # this is blank (throws before any HTTP call). DUMMY test-only value; the stub does not validate it.
+          REVOLUT_SECRET_KEY: sk_e2e_stub_secret
+          # The webhook signing secret. MUST match what membership-webhook.mjs signs the injected settle
+          # webhook with — the job-level E2E_REVOLUT_WEBHOOK_SIGNING_SECRET is set to this SAME value so the
+          # HMAC the spec computes and the one the backend recomputes agree (else every webhook → 401).
+          # DUMMY test-only value.
+          REVOLUT_WEBHOOK_SIGNING_SECRET: e2e-revolut-webhook-signing-secret
           # Disable the per-client API rate limiter (TM-158) for the browser-e2e backend (TM-595). The
           # limiter defaults to 120 req/min PER CLIENT, keyed by uid. The browser suite is a synthetic
           # load, not a real user: EVERY admin spec (admin-walkthrough, broadcast-admin, theme-visual,
@@ -221,4 +261,5 @@ jobs:
           path: |
             /tmp/backend.log
             /tmp/firebase-emulator.log
+            /tmp/revolut-stub.log
           if-no-files-found: warn

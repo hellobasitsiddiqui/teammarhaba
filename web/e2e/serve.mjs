@@ -39,6 +39,16 @@ const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
     // intercepts clicks (e.g. the admin disable-confirm dialog). Off in prod (flag absent) — tours.js
     // honours this; replaying a tour from the Help menu is unaffected.
     suppressAutoTours: true,
+    // TM-759: the WEB membership flag stays OFF here (matching prod / the committed config.js), so the
+    // served app behaves EXACTLY as before membership for every spec — a browser RSVP on a priced event
+    // free-joins rather than routing through routePaidCheckout, and the profile hub renders no membership
+    // card. Turning it on GLOBALLY (an earlier revision did) regressed the whole non-payment suite: it
+    // detoured the events-spec RSVP into checkout and broke the onboarding→profile render.
+    //
+    // The two payment specs (paid-rsvp / subscribe, TM-738) that DO need the flag turn it on FOR
+    // THEMSELVES, before any app script runs, via page.addInitScript (they also inject the payments/Revolut
+    // widget block there) — so membership is scoped to exactly those two specs, not the served app at large.
+    // See the beforeEach in paid-rsvp.spec.mjs / subscribe.spec.mjs.
 });
 `;
 
