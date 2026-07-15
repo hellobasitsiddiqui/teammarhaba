@@ -6,6 +6,7 @@ import com.teammarhaba.backend.membership.Entitlement;
 import com.teammarhaba.backend.membership.EntitlementDecision;
 import com.teammarhaba.backend.membership.EntitlementReason;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.Membership;
 import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.membership.OrderStatus;
@@ -314,6 +315,16 @@ public class EventRsvpService {
         // (a no-op for the host, or someone who was never a chat member). In-transaction, so the
         // membership change commits atomically with the attendance delete.
         chatLifecycle.onLeave(event, user.getId());
+        // First-event credit return (TM-728): a caller who leaves via DELETE /rsvp inside the refund
+        // window (i.e. NOT a late cancel) gets their one first-event credit back if THIS event is the
+        // one that consumed it — the same reversal /checkout/cancel performs (CheckoutService.cancel),
+        // now shared by the direct un-RSVP verb. Before this, leaving via DELETE /rsvp instead of
+        // /checkout/cancel silently forfeited the credit even inside the window, so the freebie was
+        // stranded consumed for good. Skipped on a late cancel (window missed ⇒ forfeit stands) and a
+        // no-op leave (no attendance held). Idempotent: reversing an unused/already-returned credit,
+        // or one consumed by a different event, is a guarded no-op — safe when /checkout/cancel also
+        // routes through here.
+        returnFirstEventCreditIfInWindow(caller, eventId, lateCancel, now);
         // A committed late cancel bumps the strike counter AND appends a reliability ledger row (TM-409),
         // both inside this transaction (dirty-checking + the audit write flush on commit). A free cancel
         // still reports the account's current standing so the client can keep its banner in step.
@@ -465,6 +476,28 @@ public class EventRsvpService {
             return;
         }
         memberships.getOrEnrol(directCaller).consumeFirstEventCredit(eventId, now);
+    }
+
+    /**
+     * Return the caller's first-event credit when they leave {@code eventId} via the direct un-RSVP verb
+     * inside the refund window (TM-728) — the mirror of {@link #consumeFirstEventCreditOnCommitment} and
+     * the same reversal {@code CheckoutService.cancel} performs. Runs only on a committed, in-window leave
+     * ({@code lateCancel == false}); a late cancel forfeits the credit exactly as it forfeits a paid
+     * charge. No-op unless this account's one credit is actually used and points at THIS event — so a
+     * leave that surrendered nothing, an unused credit, or a credit spent on a different event all pass
+     * through untouched. Idempotent by construction (the membership points at exactly one event), so it
+     * stays correct when {@code /checkout/cancel} — which routes through this same
+     * {@link #cancelRsvp(VerifiedUser, Long, boolean)} — also runs.
+     */
+    private void returnFirstEventCreditIfInWindow(
+            VerifiedUser caller, Long eventId, boolean lateCancel, Instant now) {
+        if (lateCancel) {
+            return; // window missed — the forfeit stands, exactly as for a paid charge
+        }
+        Membership membership = memberships.getOrEnrol(caller);
+        if (membership.isFirstEventCreditUsed() && eventId.equals(membership.getFirstEventCreditEventId())) {
+            membership.reverseFirstEventCredit(now);
+        }
     }
 
     /**

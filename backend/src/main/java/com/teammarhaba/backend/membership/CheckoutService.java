@@ -342,9 +342,20 @@ public class CheckoutService {
         users.lockForUpdate(user.getId()); // consistent user-then-event lock order; serialises the reverse
         Instant now = Instant.now();
 
+        // Whether THIS event is the one holding the account's first-event credit — captured BEFORE the
+        // leave, because the direct un-RSVP verb now performs the in-window credit return itself (TM-728,
+        // in EventRsvpService.cancelRsvp), so reading the flag afterwards would always see it cleared. The
+        // membership points at exactly one event; getOrEnrol returns the same managed instance the leave
+        // reversal mutated in this transaction.
+        Membership membership = memberships.getOrEnrol(caller);
+        boolean thisEventHeldCredit =
+                membership.isFirstEventCreditUsed() && eventId.equals(membership.getFirstEventCreditEventId());
+
         // Drop the attendance and get the window verdict in one place (TM-414): lateCancel == true means
         // we are PAST the refundable cut-off (inside the final window before start) -> forfeit; false
-        // means an early cancel -> reversible. Also 409s if the event has already started.
+        // means an early cancel -> reversible. Also 409s if the event has already started. The leave
+        // itself returns the first-event credit when it is an in-window cancel of exactly this event
+        // (TM-728) — the single source of truth for the credit reversal, shared by DELETE /rsvp.
         CancelResult cancel = rsvps.cancelRsvp(caller, eventId, false);
 
         Order order = orders.findByUserIdAndEventId(user.getId(), eventId).orElse(null);
@@ -353,14 +364,13 @@ public class CheckoutService {
             return CheckoutCancelResult.of(false, false, cancel, order);
         }
 
-        // Inside the window: return the first-event credit if THIS event is the one that consumed it (the
-        // membership points at exactly one event). Checked BEFORE the order guard (TM-629): a direct
-        // FREE-first RSVP consumes the credit with no order row at all, so an order-first early return
-        // would silently forfeit the credit on an in-window cancel of exactly that commitment.
-        Membership membership = memberships.getOrEnrol(caller);
-        boolean creditReturned =
-                membership.isFirstEventCreditUsed() && eventId.equals(membership.getFirstEventCreditEventId());
-        if (creditReturned) {
+        // Inside the window: return the first-event credit if THIS event is the one that consumed it. The
+        // leave (TM-728) already performs this same reversal for an in-window cancel, so this is now a
+        // guarded, idempotent belt-and-braces reversal — reverseFirstEventCredit on an already-cleared
+        // credit is a no-op — kept so the checkout path stays correct in isolation. creditReturned is the
+        // pre-leave signal (the flag is cleared by now), NOT a re-read of the mutated membership.
+        boolean creditReturned = thisEventHeldCredit;
+        if (membership.isFirstEventCreditUsed() && eventId.equals(membership.getFirstEventCreditEventId())) {
             membership.reverseFirstEventCredit(now);
         }
 

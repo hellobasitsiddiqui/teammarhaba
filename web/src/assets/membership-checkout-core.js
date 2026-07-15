@@ -293,12 +293,16 @@ export function normalizeCardholderName(name) {
 export const PAYMENT_STUCK_HINT = "Payment didn't go through — check your card details and try again.";
 
 /**
- * How long the view waits for a submit callback before declaring the attempt stuck (TM-642). 30s is
- * comfortably longer than a real Revolut round-trip (incl. the 3DS/SCA challenge) yet short enough that
- * a user is not left staring at "Processing payment…" indefinitely. The views inject the real timer;
- * this is the default window.
+ * How long the view waits for a submit callback before declaring the attempt stuck (TM-642, widened
+ * TM-728). The backstop only exists for the genuinely-stuck case (a client-side reject that fires
+ * NEITHER onSuccess NOR onError); it must NOT fire while a real 3DS/SCA challenge is still on screen.
+ * 30s (the original) was shorter than a bank OTP/app-approval step routinely takes, so it tripped
+ * mid-challenge — and a late onSuccess arriving after the user finished the challenge then told a
+ * genuinely-CHARGED user their payment failed (see the TIMEOUT→SUCCESS transition in
+ * {@link nextPaymentSubmitState}). 180s comfortably clears a real interactive challenge while still
+ * bounding the "Processing payment…" wait. The views inject the real timer; this is the default window.
  */
-export const PAYMENT_SUBMIT_TIMEOUT_MS = 30000;
+export const PAYMENT_SUBMIT_TIMEOUT_MS = 180000;
 
 /**
  * The states one card submit moves through (TM-642):
@@ -360,17 +364,21 @@ export function isPaymentPending(state) {
  *                       a redundant SUBMIT stays PENDING (the button already guards double-clicks).
  *   • from SUCCESS:     LOCKED — a payment is never un-succeeded, so a late ERROR/TIMEOUT is ignored,
  *                       and SUBMIT does NOT restart (there is nothing left to pay).
- *   • from ERROR/TIMEOUT (the retryable terminals): a fresh SUBMIT (the user pressing the re-enabled
- *                       button) starts a NEW attempt → PENDING; but a LATE SUCCESS/ERROR/TIMEOUT from
- *                       the ORIGINAL, already-settled attempt is IGNORED.
+ *   • from TIMEOUT:     a late SUCCESS from the same attempt WINS → SUCCESS (TM-728, the money-safety
+ *                       correction — see the precedence note); a fresh SUBMIT (the user pressing the
+ *                       re-enabled button) starts a NEW attempt → PENDING; a late ERROR/TIMEOUT is ignored.
+ *   • from ERROR:       a fresh SUBMIT re-enters PENDING (the retry); a LATE SUCCESS/ERROR/TIMEOUT from
+ *                       the ORIGINAL, already-settled attempt is IGNORED (an explicit decline is authoritative).
  *
- * THE CHOSEN PRECEDENCE (TM-642): the FIRST terminal event of an attempt wins; later callbacks from
- * that same attempt are no-ops. In particular a SUCCESS that arrives AFTER a TIMEOUT does NOT override
- * the shown "try again" error — we have already told the user it did not go through and re-enabled the
- * button (they may even have retried), so silently flipping to success would be more confusing than the
- * honest, server-authoritative outcome (the payment webhook is the real source of truth; the next
- * screen visit reflects any charge that actually landed). Only the user pressing Pay again (a SUBMIT)
- * moves a retryable terminal onward.
+ * THE CHOSEN PRECEDENCE (TM-642, corrected TM-728): the FIRST terminal event of an attempt normally
+ * wins and later callbacks are no-ops — WITH ONE EXCEPTION. A TIMEOUT means only "we heard nothing in
+ * time", NOT "the charge failed"; it is our own backstop, not a provider verdict. So a genuine SUCCESS
+ * that arrives AFTER a TIMEOUT (the classic case: the backstop fired while a 3DS/SCA challenge was still
+ * on screen, then the user completed it and the charge landed) DOES override the timeout — leaving
+ * "payment didn't go through" up while the card was actually CHARGED is the money-safety harm the ticket
+ * flags. An ERROR terminal is a real provider decline and stays authoritative: a stray SUCCESS after an
+ * ERROR is still ignored. SUCCESS stays locked. Only the user pressing Pay again (a SUBMIT) moves an
+ * ERROR terminal onward.
  *
  * @param {string} current a PAYMENT_SUBMIT_STATE value (an unknown value is treated as IDLE).
  * @param {string} event a PAYMENT_SUBMIT_EVENT value.
@@ -386,8 +394,14 @@ export function nextPaymentSubmitState(current, event) {
       // (re)enters PENDING — the retry path for ERROR/TIMEOUT.
       return state === PAYMENT_SUBMIT_STATE.SUCCESS ? state : PAYMENT_SUBMIT_STATE.PENDING;
     case PAYMENT_SUBMIT_EVENT.SUCCESS:
-      // Only an in-flight (PENDING) attempt can succeed. A success after we already settled is ignored.
-      return state === PAYMENT_SUBMIT_STATE.PENDING ? PAYMENT_SUBMIT_STATE.SUCCESS : state;
+      // A success from an in-flight (PENDING) attempt settles to SUCCESS. It ALSO wins over a prior
+      // TIMEOUT (TM-728): a timeout is only our backstop, so a real late success (e.g. after the user
+      // finished a slow 3DS/SCA challenge) means the card WAS charged — never leave "payment failed" up
+      // over a real charge. A success after an explicit ERROR (a real decline) or a locked SUCCESS is
+      // still ignored.
+      return state === PAYMENT_SUBMIT_STATE.PENDING || state === PAYMENT_SUBMIT_STATE.TIMEOUT
+        ? PAYMENT_SUBMIT_STATE.SUCCESS
+        : state;
     case PAYMENT_SUBMIT_EVENT.ERROR:
       return state === PAYMENT_SUBMIT_STATE.PENDING ? PAYMENT_SUBMIT_STATE.ERROR : state;
     case PAYMENT_SUBMIT_EVENT.TIMEOUT:

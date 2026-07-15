@@ -3,6 +3,7 @@ package com.teammarhaba.backend.event;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +14,7 @@ import com.teammarhaba.backend.config.CancellationWindowProperties;
 import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.config.ReliabilityProperties;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.Membership;
 import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.user.User;
@@ -190,6 +192,63 @@ class EventRsvpServiceCancellationTest {
         verify(attendance, never()).deleteByEventIdAndUserId(anyLong(), anyLong());
     }
 
+    // ------------------------------------------------------------------ first-event credit return (TM-728)
+
+    @Test
+    void inWindowLeaveViaDirectUnRsvpReturnsTheFirstEventCredit() {
+        // TM-728: a caller who direct-RSVPd on their first-event credit and then leaves via DELETE /rsvp
+        // (not /checkout/cancel) inside the refund window must get the credit BACK — the same reversal
+        // /checkout/cancel performs. Before the fix the credit was silently forfeited on this path.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(48)), AttendanceState.GOING); // 48h > 24h → in-window
+        Membership membership = new Membership(USER_ID, Instant.now());
+        membership.consumeFirstEventCredit(EVENT_ID, Instant.now()); // spent by the direct RSVP on THIS event
+        when(memberships.getOrEnrol(caller)).thenReturn(membership);
+
+        CancelResult result = service().cancelRsvp(caller, EVENT_ID);
+
+        assertThat(result.lateCancel()).isFalse();
+        assertThat(membership.isFirstEventCreditUsed()).as("credit returned").isFalse();
+        assertThat(membership.getFirstEventCreditEventId()).isNull();
+        verify(attendance).deleteByEventIdAndUserId(EVENT_ID, USER_ID);
+    }
+
+    @Test
+    void lateLeaveViaDirectUnRsvpForfeitsTheFirstEventCredit() {
+        // The forfeiture rule holds on the direct verb too (TM-728): missing the refund window forfeits
+        // the credit exactly as it forfeits a paid charge on /checkout/cancel.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(12)), AttendanceState.GOING); // 12h < 24h → late
+        Membership membership = new Membership(USER_ID, Instant.now());
+        membership.consumeFirstEventCredit(EVENT_ID, Instant.now());
+        // Lenient: a late cancel returns before it ever resolves the membership (the forfeit is that the
+        // reversal is never reached), so this stub documents intent without being exercised.
+        lenient().when(memberships.getOrEnrol(caller)).thenReturn(membership);
+
+        CancelResult result = service().cancelRsvp(caller, EVENT_ID);
+
+        assertThat(result.lateCancel()).isTrue();
+        assertThat(membership.isFirstEventCreditUsed()).as("forfeited on a late cancel").isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(EVENT_ID);
+    }
+
+    @Test
+    void inWindowLeaveDoesNotReturnACreditSpentOnADifferentEvent() {
+        // Only the event that HOLDS the credit returns it: leaving a different event must not hand back
+        // a credit still committed elsewhere.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(48)), AttendanceState.GOING);
+        Membership membership = new Membership(USER_ID, Instant.now());
+        long otherEvent = 99L;
+        membership.consumeFirstEventCredit(otherEvent, Instant.now()); // credit belongs to another event
+        when(memberships.getOrEnrol(caller)).thenReturn(membership);
+
+        service().cancelRsvp(caller, EVENT_ID);
+
+        assertThat(membership.isFirstEventCreditUsed()).as("credit for the other event is untouched").isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(otherEvent);
+    }
+
     // ------------------------------------------------------------------ change window
 
     @Test
@@ -214,6 +273,10 @@ class EventRsvpServiceCancellationTest {
         when(events.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(event));
         when(attendance.findByEventIdAndUserId(EVENT_ID, USER_ID))
                 .thenReturn(Optional.of(new EventAttendance(EVENT_ID, USER_ID, state)));
+        // The in-window credit-return (TM-728) resolves the membership on a committed non-late cancel;
+        // an empty membership (no credit consumed) leaves it a no-op. Lenient — the late-cancel and
+        // preview tests return before reaching it.
+        lenient().when(memberships.getOrEnrol(caller)).thenReturn(new Membership(USER_ID, Instant.now()));
     }
 
     /** Wire provision → user and the locked event, with the caller not on the event at all. */
@@ -221,6 +284,7 @@ class EventRsvpServiceCancellationTest {
         when(users.provision(caller)).thenReturn(user);
         when(events.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(event));
         when(attendance.findByEventIdAndUserId(EVENT_ID, USER_ID)).thenReturn(Optional.empty());
+        lenient().when(memberships.getOrEnrol(caller)).thenReturn(new Membership(USER_ID, Instant.now()));
     }
 
     /** A visible, PUBLISHED event whose start is {@code untilStart} from now (negative = already started). */

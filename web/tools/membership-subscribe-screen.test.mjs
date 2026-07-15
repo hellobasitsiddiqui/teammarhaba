@@ -118,6 +118,38 @@ test("the Pay button guards double-submit, validates the name, then submits with
   );
 });
 
+// --- the payment flow is mount-aware too (TM-728) --------------------------------------------------
+//
+// REGRESSION (stale payment mount, TM-728): startSubscribePayment awaits the checkout POST, the Revolut
+// SDK load + instance init, and GET /me — but ignored its mount generation. The router only HIDES the
+// section on navigation, so hopping to the OTHER tier's subscribe route mid-flight re-rendered the
+// section for the NEW tier while the OLD flow's continuation later mounted the OLD tier's card widget +
+// pay button into it. pollActivation already checked isStale; the widget-mount path must too.
+
+test("startSubscribePayment abandons a stale mount after each await (TM-728)", () => {
+  // It computes an isStale predicate against the mount generation it was started with…
+  assert.match(
+    SRC,
+    /const\s+isStale\s*=\s*\(\)\s*=>\s*generation\s*!==\s*mountGeneration/,
+    "startSubscribePayment must derive an isStale() from its own mount generation",
+  );
+  // …and bails on it BEFORE mounting the card widget. Pin the guard that gates the widget host clear —
+  // the first thing the payment path does with the section after the SDK awaits.
+  assert.match(
+    SRC,
+    /if\s*\(isStale\(\)\)\s*return;[\s\S]{0,200}querySelector\(["'`]\.tm-subscribe-widget/,
+    "a stale check must precede mounting the Revolut card widget (no OLD-tier widget in a re-rendered screen)",
+  );
+  // …and it must guard more than one await point: the checkout POST, the SDK load, and the profile read.
+  // Three isStale() bail-outs is the floor (checkout, SDK/instance, getMe) — the whole point is that a
+  // single guard at the end would still have mounted into a stale screen partway through.
+  const guardCount = (SRC.match(/if\s*\(isStale\(\)\)\s*return;/g) || []).length;
+  assert.ok(
+    guardCount >= 3,
+    `startSubscribePayment must re-check isStale after each await (found ${guardCount}, expected >= 3)`,
+  );
+});
+
 // --- cardholder name field + themed card field (TM-639) --------------------------------------------
 
 test("the shell renders a required 'Name on card' field pre-filled from the profile (TM-639)", () => {
