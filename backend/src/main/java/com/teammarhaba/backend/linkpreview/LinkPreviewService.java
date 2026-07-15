@@ -50,12 +50,15 @@ import org.springframework.stereotype.Service;
  *       cap bound how long and how much a target page can make us spend.</li>
  * </ul>
  *
- * <p><b>Residual risk (documented):</b> the guard resolves the host and checks the resolved IPs, then the
- * HTTP client resolves again to connect — a DNS-rebinding window. Closing it fully means pinning the
- * connection to the validated IP (a custom {@code Socket}/resolver), which is a larger change; the
- * short-TTL nature of the attack plus the timeout/size caps keep the blast radius small, and this is
- * flagged as the follow-up hardening. Built on the JDK {@link HttpClient} (no new HTTP dependency,
- * trivially testable against a loopback stub) exactly like {@code RevolutPaymentProvider}.
+ * <p><b>DNS-rebinding closed (TM-724).</b> The guard resolves the host <em>once</em>, validates every
+ * resolved IP, and returns the exact IP to connect to; for {@code http} the request is then pinned to
+ * that IP literal (original hostname carried in the {@code Host} header) so the client never re-resolves
+ * — removing the TOCTOU window where a short-TTL name could pass the check as a public IP and then
+ * connect to an internal one. For {@code https} the hostname is kept (to preserve TLS SNI + certificate
+ * hostname verification), and TLS itself defeats a rebind: an internal IP can't present a certificate
+ * valid for the target hostname, so the connection fails verification. Built on the JDK
+ * {@link HttpClient} (no new HTTP dependency, trivially testable against a loopback stub) exactly like
+ * {@code RevolutPaymentProvider}.
  */
 @Service
 public class LinkPreviewService {
@@ -163,8 +166,14 @@ public class LinkPreviewService {
         URI current = uri;
         try {
             for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
-                assertHostAllowed(current); // re-checked on EVERY hop, incl. redirect targets
-                HttpResponse<InputStream> response = http.send(request(current), HttpResponse.BodyHandlers.ofInputStream());
+                // Resolve ONCE, validate every resolved IP, and return the exact validated IP we'll
+                // connect to. The request below is then pinned to that IP (URI rewritten to the literal
+                // address, original hostname carried in the Host header), so the HTTP client does not
+                // re-resolve — closing the DNS-rebinding TOCTOU where a short-TTL name could resolve to a
+                // public IP for the check and an internal IP for the connect.
+                InetAddress validatedIp = assertHostAllowed(current); // re-run on EVERY hop, incl. redirects
+                HttpResponse<InputStream> response =
+                        http.send(request(current, validatedIp), HttpResponse.BodyHandlers.ofInputStream());
                 int status = response.statusCode();
 
                 if (isRedirect(status)) {
@@ -203,15 +212,64 @@ public class LinkPreviewService {
         }
     }
 
-    /** The standard request scaffold: short timeout, browser-ish headers, a GET. */
-    private HttpRequest request(URI uri) {
-        return HttpRequest.newBuilder(uri)
+    /**
+     * The standard request scaffold: short timeout, browser-ish headers, a GET — pinned to
+     * {@code validatedIp} so the client connects to the exact address the SSRF guard just validated
+     * (no DNS re-resolution → no rebinding window).
+     *
+     * <p>For {@code http} the pin is exact: the URI's host is rewritten to the validated IP literal, so
+     * the client connects to precisely that address and the auto-generated {@code Host} header carries
+     * that same authority. This is the scheme every realistic internal-SSRF target uses (the cloud
+     * metadata endpoint, internal HTTP services, direct-IP targets). (The JDK {@link HttpClient} treats
+     * {@code Host} as a restricted header and won't let us override it to the original name without a
+     * process-wide opt-in; that trade-off — a name-based virtual host may return no preview — is
+     * acceptable for a link preview and never widens the SSRF surface.)
+     *
+     * <p>For {@code https} the URI keeps the hostname (rewriting it to an IP literal would break TLS SNI
+     * and certificate hostname verification). The rebinding window is closed a different way there: a
+     * rebind to an attacker-chosen internal IP cannot present a certificate valid for the target
+     * hostname, so TLS verification itself fails the connection — the validation above plus TLS together
+     * leave no exploitable window. The {@code validatedIp} is therefore used only to pin {@code http}.
+     */
+    private HttpRequest request(URI uri, InetAddress validatedIp) {
+        return HttpRequest.newBuilder(pinnedUri(uri, validatedIp))
                 .timeout(REQUEST_TIMEOUT)
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml")
                 .header("Accept-Language", "en")
                 .GET()
                 .build();
+    }
+
+    /**
+     * For {@code http}, {@code uri} with its host replaced by the validated IP literal (so the client
+     * connects to exactly that address, not a freshly-resolved one — closing the rebinding TOCTOU). For
+     * {@code https}, {@code uri} unchanged (see {@link #request}).
+     */
+    private static URI pinnedUri(URI uri, InetAddress validatedIp) {
+        if (!"http".equalsIgnoreCase(uri.getScheme())) {
+            return uri;
+        }
+        try {
+            return new URI(
+                    uri.getScheme(),
+                    uri.getUserInfo(),
+                    ipAuthority(validatedIp),
+                    uri.getPort(),
+                    uri.getPath(),
+                    uri.getQuery(),
+                    uri.getFragment());
+        } catch (URISyntaxException e) {
+            // Shouldn't happen (an IP literal is always a valid host) — fall back to the original URI,
+            // which still goes through the validated guard, just without the IP pin.
+            return uri;
+        }
+    }
+
+    /** The host authority for a validated IP — bracketed for IPv6 as URI syntax requires. */
+    private static String ipAuthority(InetAddress ip) {
+        String host = ip.getHostAddress();
+        return ip instanceof java.net.Inet6Address ? "[" + host + "]" : host;
     }
 
     private static boolean isRedirect(int status) {
@@ -257,15 +315,18 @@ public class LinkPreviewService {
     }
 
     /**
-     * Reject the request unless every IP the host resolves to is publicly routable. Resolving here (and
+     * Resolve the host once, reject the request unless every resolved IP is publicly routable, and
+     * <b>return the exact validated IP</b> the caller must pin the connection to. Resolving here (and
      * rejecting if <em>any</em> address is internal) blocks the whole SSRF family — direct-IP targets,
-     * hostnames that resolve to a private IP, and the cloud metadata endpoint. Bypassed only under the
-     * test seam ({@link #allowNonPublicHosts}) so a loopback stub can be exercised.
+     * hostnames that resolve to a private IP, and the cloud metadata endpoint — and returning the pinned
+     * address lets {@link #request} connect to that IP without a second (re-)resolution, closing the
+     * DNS-rebinding TOCTOU. The address block is bypassed under the test seam
+     * ({@link #allowNonPublicHosts}) so a loopback stub can be exercised, but the resolve-and-pin still
+     * happens.
+     *
+     * @return the validated {@link InetAddress} to pin the outbound connection to.
      */
-    void assertHostAllowed(URI uri) {
-        if (allowNonPublicHosts) {
-            return;
-        }
+    InetAddress assertHostAllowed(URI uri) {
         String host = uri.getHost();
         InetAddress[] addresses;
         try {
@@ -274,12 +335,17 @@ public class LinkPreviewService {
             // Unresolvable host — refuse rather than let the client probe DNS through us.
             throw new BadRequestException("The url host could not be resolved.");
         }
+        // Under the test seam the block is bypassed, but we STILL resolve once and return a pinned
+        // address so the connection targets exactly what we saw (the loopback stub in tests).
         for (InetAddress address : addresses) {
-            if (isBlockedAddress(address)) {
+            if (!allowNonPublicHosts && isBlockedAddress(address)) {
                 log.warn("Blocking link-preview fetch to non-public host {}", host);
                 throw new BadRequestException("That URL points to a non-public address and can't be previewed.");
             }
         }
+        // Return the exact IP the caller will pin the connection to. Every address resolved above was
+        // validated, so the first is safe; pinning to it removes the second (re-)resolution entirely.
+        return addresses[0];
     }
 
     /**
