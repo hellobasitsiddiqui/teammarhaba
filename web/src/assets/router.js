@@ -146,11 +146,26 @@ const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_MESSAG
 function isEventsRoute(hash) {
   return hash === EVENTS || hash.startsWith(`${EVENTS}/`);
 }
+/**
+ * TM-721: decodeURIComponent THROWS a URIError on a malformed percent-escape (e.g. a hand-typed or
+ * corrupted deep link like `#/events/%E0%A4%A` or a lone `%`). eventDetailId/chatThreadId run inside
+ * currentRoute() → guard(), so an un-caught throw there crashed the whole router on navigation. Decode
+ * defensively: fall back to the RAW segment on a bad escape (the screen then just shows a "couldn't load"
+ * state for that id rather than the router dying).
+ */
+function safeDecodeSegment(rest) {
+  try {
+    return decodeURIComponent(rest);
+  } catch {
+    return rest;
+  }
+}
+
 /** The detail id from `#/events/{id}`, or null for the list route / a non-events hash. */
 function eventDetailId(hash) {
   if (!hash.startsWith(`${EVENTS}/`)) return null;
   const rest = hash.slice(EVENTS.length + 1);
-  return rest ? decodeURIComponent(rest) : null;
+  return rest ? safeDecodeSegment(rest) : null;
 }
 /** True for the Profile hub (`#/profile`) or the public-profile preview (`#/profile/public`, TM-514). */
 function isProfileRoute(hash) {
@@ -164,7 +179,7 @@ function isChatRoute(hash) {
 function chatThreadId(hash) {
   if (!hash.startsWith(`${CHAT}/`)) return null;
   const rest = hash.slice(CHAT.length + 1);
-  return rest ? decodeURIComponent(rest) : null;
+  return rest ? safeDecodeSegment(rest) : null; // TM-721: don't throw on a malformed %-escape (see above)
 }
 /** True for the membership tier screen route (TM-606) — but ONLY a known route while the membership
  *  feature flag is ON. With the flag OFF this is always false, so `#/membership` is treated as an unknown
@@ -293,6 +308,34 @@ let eventsRouteEntered = null;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
+
+// TM-721: sessionStorage can THROW on mere access — a locked-down WebView, a private/incognito context,
+// or a browser with cookies/site-data blocked raises SecurityError on getItem/setItem, not just on the
+// property lookup. The guard() below leaned on it directly, so in those contexts a routine navigation
+// (e.g. a signed-out deep-link to a protected route) crashed the whole router. These wrappers make the
+// intended-route memory best-effort: it degrades to "forget where they were headed" (they land on the
+// role default after login) instead of throwing. Mirrors api.js's own defensive storage access.
+function safeSessionGet(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeSessionSet(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable (blocked/locked-down) — best-effort, so just skip remembering. */
+  }
+}
+function safeSessionRemove(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* storage unavailable — nothing to clear. */
+  }
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -485,7 +528,7 @@ function guard() {
   const route = currentRoute();
 
   if (!signedIn && isProtected(route)) {
-    sessionStorage.setItem(INTENDED_KEY, route);
+    safeSessionSet(INTENDED_KEY, route);
     go(LOGIN);
     return;
   }
@@ -496,16 +539,16 @@ function guard() {
   if (signedIn && !isOnboarded && route !== ONBOARDING) {
     // Preserve a deep-linked protected target (if not already remembered) so we can return there
     // after the gate; an in-app route like #/profile shouldn't be lost behind the gate.
-    if (route !== LOGIN && !sessionStorage.getItem(INTENDED_KEY)) {
-      sessionStorage.setItem(INTENDED_KEY, route);
+    if (route !== LOGIN && !safeSessionGet(INTENDED_KEY)) {
+      safeSessionSet(INTENDED_KEY, route);
     }
     go(ONBOARDING);
     return;
   }
   // Conversely, an already-onboarded user has no business on the gate — send them on.
   if (signedIn && isOnboarded && route === ONBOARDING) {
-    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
-    sessionStorage.removeItem(INTENDED_KEY);
+    const intended = safeSessionGet(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
+    safeSessionRemove(INTENDED_KEY);
     go(intended);
     return;
   }
@@ -515,24 +558,24 @@ function guard() {
   // the gate card (Help is the public legal/privacy surface, TM-242). Like the onboarding gate, the
   // INTENDED route is preserved so the user lands where they were headed once they accept.
   if (signedIn && isOnboarded && needsTerms && route !== TERMS && route !== HELP) {
-    if (route !== LOGIN && !sessionStorage.getItem(INTENDED_KEY)) {
-      sessionStorage.setItem(INTENDED_KEY, route);
+    if (route !== LOGIN && !safeSessionGet(INTENDED_KEY)) {
+      safeSessionSet(INTENDED_KEY, route);
     }
     go(TERMS);
     return;
   }
   // Conversely, a user who has accepted (or isn't gated) has no business on the terms gate — move on.
   if (signedIn && !needsTerms && route === TERMS) {
-    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
-    sessionStorage.removeItem(INTENDED_KEY);
+    const intended = safeSessionGet(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
+    safeSessionRemove(INTENDED_KEY);
     go(intended);
     return;
   }
   if (signedIn && route === LOGIN) {
     // Land where the user was headed if they deep-linked a protected route before signing in;
     // otherwise by role — an ADMIN goes to the console, everyone else to home (TM-141).
-    const intended = sessionStorage.getItem(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
-    sessionStorage.removeItem(INTENDED_KEY);
+    const intended = safeSessionGet(INTENDED_KEY) || (isAdmin ? ADMIN : HOME);
+    safeSessionRemove(INTENDED_KEY);
     go(intended);
     return;
   }
@@ -844,7 +887,8 @@ const ROLE_RESOLVE_TIMEOUT_MS = 8000;
 //      values (this is what moves a not-yet-onboarded user to the gate, or an ADMIN to the console);
 //   3. surface a visible error if the lookups actually fail/time out — never a silent stall.
 async function resolveRoleThenGuard() {
-  const signedIn = Boolean(currentUser());
+  const user = currentUser();
+  const signedIn = Boolean(user);
   // Signed-out: reset to safe defaults (no gate, non-admin) and skip the network calls entirely.
   if (!signedIn) {
     isAdmin = false;
@@ -853,6 +897,11 @@ async function resolveRoleThenGuard() {
     guard();
     return;
   }
+  // TM-721: pin the uid this resolution belongs to. If the account is SWITCHED (sign out of A, into B)
+  // while the role/onboarding lookups are in flight, applying A's resolved values to B would show B the
+  // wrong role/gate. Checking only "is someone signed in?" below missed this — B *is* signed in, just not
+  // the same user — so we compare uids, not mere presence.
+  const uid = user.uid;
 
   // 1) NAVIGATE FIRST. Don't wait on the network — a confirmed signed-in user must leave `#/login`
   //    now, using whatever cached role/onboarding values we have (fail-safe: non-admin, not gated).
@@ -868,9 +917,11 @@ async function resolveRoleThenGuard() {
     settleOrFallback(getMe(), ROLE_RESOLVE_TIMEOUT_MS, null),
   ]);
 
-  // Bail if the user signed out (or switched) while the lookups were in flight — don't apply stale
-  // values or re-guard for a session that no longer exists.
-  if (!currentUser()) return;
+  // Bail if the user signed out OR switched to a different account while the lookups were in flight —
+  // don't apply stale values or re-guard for a session that no longer exists (or is now someone else).
+  // TM-721: compare the uid, not just "is anyone signed in", so an account switch mid-flight is caught.
+  const now = currentUser();
+  if (!now || now.uid !== uid) return;
 
   isAdmin = adminOutcome.value === "ADMIN";
   isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;

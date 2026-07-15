@@ -42,3 +42,32 @@ export function settleOrFallback(promise, ms, fallback) {
       });
   });
 }
+
+/** Sentinel returned when a {@link singleFlight}-wrapped call is dropped because one is already running. */
+export const DROPPED = Symbol("singleFlight.dropped");
+
+/**
+ * Wrap an async `fn` so that while one invocation is in flight, any further calls are DROPPED (they
+ * return {@link DROPPED} immediately and never invoke `fn` a second time). The latch releases as soon as
+ * the running promise settles — success OR failure — so a rejected run doesn't wedge the guard shut.
+ *
+ * This is the reusable core of TM-721's re-entrancy fixes: a double-tapped event action (events.js
+ * runCommand) or a double-clicked admin Refresh (admin.js loadUsers) would otherwise fire the same
+ * expensive/side-effecting command twice. Pure and DOM-free, so it's unit-testable (async-util.test.mjs).
+ *
+ * @template {(...args: any[]) => Promise<any>} F
+ * @param {F} fn the async function to guard.
+ * @returns {(...args: Parameters<F>) => Promise<Awaited<ReturnType<F>> | typeof DROPPED>}
+ */
+export function singleFlight(fn) {
+  let inFlight = false;
+  return async function guarded(...args) {
+    if (inFlight) return DROPPED;
+    inFlight = true;
+    try {
+      return await fn.apply(this, args);
+    } finally {
+      inFlight = false;
+    }
+  };
+}

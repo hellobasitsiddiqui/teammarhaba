@@ -78,6 +78,12 @@ const state = { cards: [], filter: "all" };
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
+// TM-721: an action command is in flight. A detail action (RSVP / claim / leave) fires an API call and
+// only re-renders (recreating its buttons) once it resolves, so within that async window a double-tap —
+// or a tap on a *different* action button — would fire a duplicate/contradictory command. This single
+// module-level latch makes runCommand re-entrant-safe across the whole detail; the clicked button is also
+// disabled immediately so the in-flight state is visible.
+let commandInFlight = false;
 
 /** Fetch /me for the age gate — fresh each call, degrading to null (age "unknown") on any failure. */
 async function loadMe() {
@@ -714,7 +720,7 @@ function actionButton(view, detail, spec, testid) {
     "data-testid": testid,
     dataset: { kind: spec.kind },
     "aria-describedby": spec.disabled ? "event-action-reason" : null,
-    onClick: () => runCommand(view, detail, spec),
+    onClick: (e) => runCommand(view, detail, spec, e.currentTarget),
   }, spec.label);
 }
 
@@ -769,66 +775,84 @@ async function routePaidCheckout(detail) {
 }
 
 /** Dispatch a control action → the API, then re-render the detail with fresh counts/state. */
-async function runCommand(view, detail, spec) {
+async function runCommand(view, detail, spec, button) {
   if (spec.disabled) return;
+  // TM-721 double-tap guard: ignore a second command while one is already in flight (a fresh render only
+  // replaces the buttons once the current command resolves, so without this a rapid double-tap fires the
+  // command twice and shows two contradictory toasts). Disable the tapped button immediately so the
+  // in-flight state is visible for the whole async round-trip; the re-render at the end restores it.
+  if (commandInFlight) return;
+  commandInFlight = true;
+  if (button) button.disabled = true;
   const id = detail.id;
-
-  // Paid per-event checkout (TM-624): a fresh RSVP that would land the caller GOING must run through the
-  // membership checkout when the event is a PAY event for them (per GET /events/{id}/entitlement) —
-  // otherwise the RSVP button joins paid/premium events for free. Only the join→GOING `rsvp` kind is
-  // gated: joining a WAITLIST is not attendance (no charge until a spot is actually claimed), and leave/
-  // claim are handled by the backend. Inert while the flag is OFF, so behaviour is unchanged there.
-  if (spec.kind === "rsvp" && membershipEnabled()) {
-    const handledByCheckout = await routePaidCheckout(detail);
-    if (handledByCheckout) return; // checkout screen owns the order + payment (or aborted on error)
-  }
-
-  // RSVP that lands GOING gets the confirm dialog ("we'll remind you the day before").
-  if (spec.confirm) {
-    const ok = await confirmDialog({
-      title: spec.confirm.title,
-      message: spec.confirm.message,
-      confirmLabel: spec.confirm.confirmLabel || "Confirm",
-    });
-    if (!ok) return;
-  }
-  // Leaving (cancel RSVP / leave the waitlist) confirms too, so it's not a one-tap mistake.
-  if (spec.kind === "leave") {
-    // Pre-flight a GOING cancel with DELETE ?preview=true (TM-525): a committed spot given up inside
-    // the cancellation window is a late-cancel strike, so warn about it in the confirm dialog BEFORE
-    // the member commits. Best-effort — if the preview fails we fall back to the base copy and let the
-    // real DELETE surface any error. Only a GOING cancel can be late; a waitlist leave is always free.
-    let preview = null;
-    if (detail.myState === "GOING") {
-      try {
-        preview = await cancelEventRsvp(id, { preview: true });
-      } catch {
-        preview = null;
-      }
-    }
-    const ok = await confirmDialog(core.leaveConfirmModel({ myState: detail.myState, preview }));
-    if (!ok) return;
-  }
+  // Did we actually issue a command (→ a re-render restores the buttons), or bail early (checkout took
+  // over / user cancelled a confirm)? On an early bail nothing re-renders, so re-enable the tapped button.
+  let rerendered = false;
 
   try {
-    if (spec.kind === "rsvp" || spec.kind === "waitlist") {
-      const result = await rsvpToEvent(id);
-      toast(result.state === "GOING" ? "You're going 🎉 — we'll remind you the day before." : "You're on the waiting list — we'll let you know if a spot opens.", { type: "success" });
-    } else if (spec.kind === "claim") {
-      const result = await claimEventSpot(id);
-      toast(result.state === "GOING" ? "You're in! 🎉 See you there." : "Updated.", { type: "success" });
-    } else if (spec.kind === "leave") {
-      await cancelEventRsvp(id);
-      toast("Your RSVP has been removed.", { type: "info" });
+    // Paid per-event checkout (TM-624): a fresh RSVP that would land the caller GOING must run through the
+    // membership checkout when the event is a PAY event for them (per GET /events/{id}/entitlement) —
+    // otherwise the RSVP button joins paid/premium events for free. Only the join→GOING `rsvp` kind is
+    // gated: joining a WAITLIST is not attendance (no charge until a spot is actually claimed), and leave/
+    // claim are handled by the backend. Inert while the flag is OFF, so behaviour is unchanged there.
+    if (spec.kind === "rsvp" && membershipEnabled()) {
+      const handledByCheckout = await routePaidCheckout(detail);
+      if (handledByCheckout) return; // checkout screen owns the order + payment (or aborted on error)
     }
-  } catch (err) {
-    // Surface the backend's specific 409 copy (booking cutoff / one-active-event / age band / lost
-    // claim race) rather than a generic error. A 401 will already have redirected via apiFetch.
-    toast(core.commandErrorMessage(err), { type: "error" });
+
+    // RSVP that lands GOING gets the confirm dialog ("we'll remind you the day before").
+    if (spec.confirm) {
+      const ok = await confirmDialog({
+        title: spec.confirm.title,
+        message: spec.confirm.message,
+        confirmLabel: spec.confirm.confirmLabel || "Confirm",
+      });
+      if (!ok) return;
+    }
+    // Leaving (cancel RSVP / leave the waitlist) confirms too, so it's not a one-tap mistake.
+    if (spec.kind === "leave") {
+      // Pre-flight a GOING cancel with DELETE ?preview=true (TM-525): a committed spot given up inside
+      // the cancellation window is a late-cancel strike, so warn about it in the confirm dialog BEFORE
+      // the member commits. Best-effort — if the preview fails we fall back to the base copy and let the
+      // real DELETE surface any error. Only a GOING cancel can be late; a waitlist leave is always free.
+      let preview = null;
+      if (detail.myState === "GOING") {
+        try {
+          preview = await cancelEventRsvp(id, { preview: true });
+        } catch {
+          preview = null;
+        }
+      }
+      const ok = await confirmDialog(core.leaveConfirmModel({ myState: detail.myState, preview }));
+      if (!ok) return;
+    }
+
+    try {
+      if (spec.kind === "rsvp" || spec.kind === "waitlist") {
+        const result = await rsvpToEvent(id);
+        toast(result.state === "GOING" ? "You're going 🎉 — we'll remind you the day before." : "You're on the waiting list — we'll let you know if a spot opens.", { type: "success" });
+      } else if (spec.kind === "claim") {
+        const result = await claimEventSpot(id);
+        toast(result.state === "GOING" ? "You're in! 🎉 See you there." : "Updated.", { type: "success" });
+      } else if (spec.kind === "leave") {
+        await cancelEventRsvp(id);
+        toast("Your RSVP has been removed.", { type: "info" });
+      }
+    } catch (err) {
+      // Surface the backend's specific 409 copy (booking cutoff / one-active-event / age band / lost
+      // claim race) rather than a generic error. A 401 will already have redirected via apiFetch.
+      toast(core.commandErrorMessage(err), { type: "error" });
+    } finally {
+      // Always re-fetch — even on error the server state may have moved (e.g. a lost claim race means
+      // the spot's gone and we're still waitlisted), so the UI must reflect the truth.
+      rerendered = true;
+      renderDetail(view, id);
+    }
   } finally {
-    // Always re-fetch — even on error the server state may have moved (e.g. a lost claim race means
-    // the spot's gone and we're still waitlisted), so the UI must reflect the truth.
-    renderDetail(view, id);
+    // TM-721: release the double-tap latch once the command settles. On an early bail (checkout/cancel)
+    // no re-render happened, so re-enable the tapped button we disabled up top.
+    commandInFlight = false;
+    if (button && !rerendered) button.disabled = false;
   }
 }
 

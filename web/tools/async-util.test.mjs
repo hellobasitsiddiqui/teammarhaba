@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { settleOrFallback } from "../src/assets/async-util.js";
+import { settleOrFallback, singleFlight, DROPPED } from "../src/assets/async-util.js";
 
 test("resolves with the real value when the promise settles before the timeout", async () => {
   const outcome = await settleOrFallback(Promise.resolve("ADMIN"), 1000, "USER");
@@ -45,4 +45,41 @@ test("a slow-but-in-budget promise still resolves with its real value, not the f
   const outcome = await settleOrFallback(slow, 1000, null);
   assert.equal(outcome.timedOut, false);
   assert.deepEqual(outcome.value, { onboardingCompleted: true });
+});
+
+// --- singleFlight: the reusable re-entrancy guard behind TM-721 (double-tap / double-Refresh) ---------
+
+test("singleFlight drops a concurrent call while one is in flight — the command runs ONCE", async () => {
+  // Models a double-tapped event action / double-clicked admin Refresh: the second tap must not fire a
+  // second command (which showed two contradictory toasts / ran two full account walks).
+  let calls = 0;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const guarded = singleFlight(async () => { calls++; await gate; return calls; });
+
+  const first = guarded();      // starts, then parks on the gate
+  const second = guarded();     // fires WHILE the first is in flight → must be dropped
+  assert.equal(await second, DROPPED, "the re-entrant call is dropped, not run");
+  assert.equal(calls, 1, "the wrapped fn was invoked exactly once");
+
+  release();
+  assert.equal(await first, 1, "the first call still resolves with its real result");
+});
+
+test("singleFlight releases after the run settles — a LATER call runs normally", async () => {
+  let calls = 0;
+  const guarded = singleFlight(async () => ++calls);
+  assert.equal(await guarded(), 1);
+  assert.equal(await guarded(), 2, "once the first settled the latch is open again");
+});
+
+test("singleFlight releases the latch even when the run REJECTS (a failed run can't wedge it shut)", async () => {
+  let attempt = 0;
+  const guarded = singleFlight(async () => {
+    attempt++;
+    if (attempt === 1) throw new Error("boom");
+    return "ok";
+  });
+  await assert.rejects(() => guarded(), /boom/);
+  assert.equal(await guarded(), "ok", "the next call runs — the failed run released the latch in finally");
 });
