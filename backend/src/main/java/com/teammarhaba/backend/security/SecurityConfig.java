@@ -34,8 +34,10 @@ import org.springframework.web.cors.CorsConfigurationSource;
  *       but authenticity-guarded by the {@code Revolut-Signature} HMAC (an unverifiable payload gets a 401).</li>
  * </ul>
  *
- * <p>Everything else — the whole {@code /api/v1} surface and the rest of {@code /actuator/**}
- * ({@code /info}, {@code /metrics}) — is {@code authenticated}. Authentication is established by
+ * <p>The rest of {@code /actuator/**} ({@code /info}, {@code /metrics}) is <strong>ADMIN-only</strong>
+ * (TM-723) — build/config and runtime metrics are an information-disclosure surface, so an authenticated
+ * non-admin gets a {@code 403}, not the data. Everything else — the whole {@code /api/v1} surface — is
+ * {@code authenticated}. Authentication is established by
  * {@link FirebaseAuthenticationFilter} (verifies the {@code Bearer} Firebase ID token); an
  * unauthenticated request to a protected route gets a uniform RFC 7807 {@code 401} from
  * {@link RestAuthenticationEntryPoint}, and an authenticated-but-unauthorized one (e.g. a
@@ -102,6 +104,11 @@ public class SecurityConfig {
                                 // inert there. Lives outside the api package, hence the unprefixed path.
                                 "/auth/email-code/peek")
                         .permitAll()
+                        // Operational actuator endpoints expose build/config and runtime metrics — an
+                        // information-disclosure surface, so restrict them to ADMIN (TM-723). Health
+                        // stays public above for orchestration probes; everything else needs auth.
+                        .requestMatchers("/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
+                        .hasRole("ADMIN")
                         .anyRequest()
                         .authenticated())
                 // CORS for the browser SPA (TM-104). The CorsFilter runs ahead of auth so the

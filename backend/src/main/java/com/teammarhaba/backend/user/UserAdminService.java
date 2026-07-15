@@ -242,6 +242,15 @@ public class UserAdminService {
             } catch (FirebaseAuthException e) {
                 throw new IllegalStateException("Failed to update the role claim for user " + id, e);
             }
+            // A role change only reaches the client on the next ID-token refresh (hourly). For a
+            // demotion (ADMIN -> non-ADMIN) that lag is a privilege-escalation window: the downgraded
+            // admin keeps ADMIN authority until then. Revoke the user's refresh tokens so, combined
+            // with the filter's checkRevoked verification, the old elevated token stops working
+            // promptly (a forced re-auth picks up the new, lower claim). Best-effort: a revoke failure
+            // must not roll back the role change (the claim + row are already the source of truth).
+            if (isDemotion(previous, role)) {
+                revokeSessions(user.getFirebaseUid(), id);
+            }
             user.setRole(role); // dirty-checking flushes on commit
             audit.record(
                     callerUid,
@@ -298,6 +307,39 @@ public class UserAdminService {
                 user.getId(),
                 new PushMessage(
                         "Circle test notification", "If you can see this, push is working.", route));
+    }
+
+    /** A demotion is any change that drops the {@code ADMIN} privilege — the security-sensitive case. */
+    private static boolean isDemotion(Role previous, Role next) {
+        return previous == Role.ADMIN && next != Role.ADMIN;
+    }
+
+    /**
+     * Best-effort revoke of a user's Firebase refresh tokens so a demotion takes effect promptly
+     * (the filter verifies {@code checkRevoked=true}, so already-issued tokens stop verifying). A
+     * revoke failure — or no Admin SDK bean in dev/test/CI — is logged and swallowed: the role
+     * change (claim + row) is the source of truth and must not roll back because a session revoke
+     * couldn't be delivered.
+     */
+    private void revokeSessions(String firebaseUid, long id) {
+        FirebaseAuth auth;
+        try {
+            // getIfAvailable() returns null when no bean is defined; when the lazy definition exists
+            // but creation fails (no ADC in CI) it THROWS — both mean "can't revoke", degrade quietly.
+            auth = firebaseAuth.getIfAvailable();
+        } catch (Exception ex) {
+            log.warn("FirebaseAuth unavailable — could not revoke sessions on demotion of user {}.", id, ex);
+            return;
+        }
+        if (auth == null) {
+            return;
+        }
+        try {
+            auth.revokeRefreshTokens(firebaseUid);
+            log.info("Revoked refresh tokens for user {} on demotion — old elevated token now stops verifying.", id);
+        } catch (Exception ex) {
+            log.warn("Could not revoke sessions on demotion of user {} — role change still applied.", id, ex);
+        }
     }
 
     private static ResourceNotFoundException notFound() {
