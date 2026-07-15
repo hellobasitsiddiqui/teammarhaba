@@ -1,0 +1,104 @@
+name: Test-first guard
+
+# Enforces the test-first Definition of Done (TM-737; CONTRIBUTING.md -> "Testing — tests land
+# before code"): a feat/fix PR that changes production source (backend/src/main/**, web/src/**)
+# must also touch at least one test file (**/*Test.java, **/*.test.mjs, web/e2e/tests/**).
+#
+# Exempt: refactor/docs/chore/test/ci/build branch types (behaviour-preserving or non-code), and
+# PRs carrying the `no-test-justified` label (the escape hatch for the rare legitimate case —
+# justify it in the PR body). If the change type can't be determined, the guard WARNS instead of
+# blocking (fail soft). Pure bash + gh — no external actions beyond checkout, no extra secrets.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: test-first-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-first-guard:
+    name: Tests land before code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check feat/fix PRs touch a test file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # --- Escape hatch: explicit, justified exception -------------------------------
+          labels=$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --jq '.[].name' 2>/dev/null) || labels=""
+          if printf '%s\n' "$labels" | grep -qx 'no-test-justified'; then
+            echo "::notice::'no-test-justified' label present — skipping test-first guard (justify in the PR body)."
+            exit 0
+          fi
+
+          # --- Determine change type: branch prefix first, PR title prefix as fallback ---
+          change_type=""
+          case "$HEAD_REF" in
+            feat/*|feature/*)                          change_type="feat" ;;
+            fix/*|bugfix/*|hotfix/*)                   change_type="fix" ;;
+            refactor/*|docs/*|chore/*|test/*|tests/*|ci/*|build/*) change_type="exempt" ;;
+          esac
+          if [ -z "$change_type" ]; then
+            title_lc=$(printf '%s' "$PR_TITLE" | tr '[:upper:]' '[:lower:]')
+            case "$title_lc" in
+              feat:*|feat\(*|feature:*)                change_type="feat" ;;
+              fix:*|fix\(*|bugfix:*|hotfix:*)          change_type="fix" ;;
+              refactor:*|refactor\(*|docs:*|chore:*|test:*|ci:*|build:*) change_type="exempt" ;;
+            esac
+          fi
+
+          if [ "$change_type" = "exempt" ]; then
+            echo "::notice::Branch/PR type is exempt (refactor/docs/chore/test/ci/build) — a refactor's proof is the existing suite staying green and unchanged. Skipping."
+            exit 0
+          fi
+          if [ -z "$change_type" ]; then
+            # Fail soft: can't tell what kind of change this is — warn, don't block.
+            echo "::warning::Could not determine change type from branch '$HEAD_REF' or the PR title — skipping test-first guard. Use a '<type>/TM-<id>-…' branch (CONTRIBUTING.md -> Branching) so the guard can do its job."
+            exit 0
+          fi
+
+          # --- List changed files (fail soft if the API misbehaves) ----------------------
+          if ! files=$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename'); then
+            echo "::warning::Could not list the PR's changed files — skipping test-first guard."
+            exit 0
+          fi
+
+          prod_changed=""
+          test_touched=""
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              *Test.java|*.test.mjs|web/e2e/tests/*) test_touched="$f" ;;
+              backend/src/main/*|web/src/*)          prod_changed="$f" ;;
+            esac
+          done <<EOF
+          $files
+          EOF
+
+          if [ -z "$prod_changed" ]; then
+            echo "No production source (backend/src/main/**, web/src/**) changed — nothing to guard."
+            exit 0
+          fi
+          if [ -n "$test_touched" ]; then
+            echo "OK: '$change_type' PR changes production source and touches tests (e.g. $test_touched)."
+            exit 0
+          fi
+
+          echo "::error::This '$change_type' PR changes production source (e.g. $prod_changed) but touches NO test file (**/*Test.java, **/*.test.mjs, web/e2e/tests/**). Every behaviour change is written test-first: commit the failing test (red), then the code that makes it pass (green) — see CONTRIBUTING.md -> 'Testing — tests land before code'. If this PR genuinely needs no test, apply the 'no-test-justified' label and justify it in the PR body."
+          exit 1
