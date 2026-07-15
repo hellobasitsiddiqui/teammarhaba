@@ -223,6 +223,90 @@ class CheckoutIntegrationTest extends AbstractIntegrationTest {
                 .isTrue();
     }
 
+    // ------------------------------------------------------------------ re-checkout / re-pay (TM-739)
+
+    @Test
+    void reCheckoutAfterAFailedPaymentReopensAFreshPendingOrderWithANewToken() throws Exception {
+        // REGRESSION (TM-739): the idempotency early-return was UNCONDITIONAL, so a FAILED (declined-card)
+        // order permanently barred the buyer from ever paying for the event — a re-checkout short-circuited
+        // to paymentRequired=false, no token, no new order, and UNIQUE(user_id,event_id) forbade a fresh row.
+        // A declined-card retry is one of the most common real payment flows. The fix re-opens the terminal
+        // row back to PENDING and re-mints a fresh provider order + token onto it.
+        Event event = premiumEvent();
+        var who = caller("uid-co-repay-failed");
+
+        when(paymentProvider.name()).thenReturn("revolut");
+        when(paymentProvider.currency()).thenReturn("GBP");
+        // First checkout mints provider order A + token A; the re-checkout must mint a DIFFERENT B pair.
+        when(paymentProvider.createOrder(anyInt(), anyString(), anyString()))
+                .thenReturn(new PaymentOrder("rev-order-A", "tok-A"))
+                .thenReturn(new PaymentOrder("rev-order-B", "tok-B"));
+
+        // 1) First PAY checkout → a PENDING order + token A.
+        String firstBody = mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("PENDING"))
+                .andExpect(jsonPath("$.paymentToken").value("tok-A"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long firstOrderId = orderId(firstBody);
+        Long userId = users.findByFirebaseUid("uid-co-repay-failed").orElseThrow().getId();
+
+        // 2) The card is declined → the order goes terminal FAILED (the TM-634 decline webhook, simulated
+        // here by flipping the row so the re-checkout path is what is under test, not the webhook).
+        jdbc.update("update orders set status = 'FAILED' where id = ?", firstOrderId);
+
+        // 3) The buyer returns and re-checks-out to retry with a different card. BEFORE the fix this
+        //    dead-ended (paymentRequired=false, no token). Now it re-opens the SAME row to PENDING and
+        //    returns a FRESH token so the widget can be mounted again.
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentRequired").value(true))
+                .andExpect(jsonPath("$.order.status").value("PENDING"))
+                .andExpect(jsonPath("$.order.id").value(firstOrderId.intValue()))
+                .andExpect(jsonPath("$.paymentToken").value("tok-B"));
+
+        // Still exactly ONE order row for this (user, event) — the UNIQUE constraint is respected: the
+        // terminal row was re-used, not duplicated. Its provider ref is the freshly-minted one.
+        Long orderCount = jdbc.queryForObject(
+                "select count(*) from orders where event_id = ? and user_id = ?", Long.class, event.getId(), userId);
+        assertThat(orderCount).isEqualTo(1L);
+        Order reopened = orders.findByUserIdAndEventId(userId, event.getId()).orElseThrow();
+        assertThat(reopened.getStatus()).isEqualTo(com.teammarhaba.backend.membership.OrderStatus.PENDING);
+        assertThat(reopened.getProviderOrderId()).isEqualTo("rev-order-B");
+    }
+
+    @Test
+    void reCheckoutOfAConfirmedOrderStaysIdempotentWithNoReMint() throws Exception {
+        // The other half of the status-aware fix: a LIVE, CONFIRMED commitment must stay truly idempotent —
+        // no fresh token, no second provider order (never re-charge a settled attendance). A FREE first-event
+        // checkout lands a £0 CONFIRMED order with no provider order at all, so a repeat must NOT open one.
+        Event event = standardEvent(2, ChronoUnit.DAYS);
+        var who = caller("uid-co-repay-confirmed");
+
+        when(paymentProvider.name()).thenReturn("revolut");
+        when(paymentProvider.currency()).thenReturn("GBP");
+
+        // 1) FREE first event → a CONFIRMED £0 order, no payment, no provider order.
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.paymentRequired").value(false))
+                .andExpect(jsonPath("$.paymentToken").doesNotExist());
+
+        // 2) A repeat checkout returns the same CONFIRMED order, still no token, still payment-not-required.
+        mockMvc.perform(post("/api/v1/events/" + event.getId() + "/checkout").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.paymentRequired").value(false))
+                .andExpect(jsonPath("$.paymentToken").doesNotExist());
+
+        // The provider was NEVER asked to open an order — a CONFIRMED repeat re-mints nothing.
+        org.mockito.Mockito.verify(paymentProvider, org.mockito.Mockito.never())
+                .createOrder(anyInt(), anyString(), anyString());
+    }
+
     // ------------------------------------------------------------------ cancel / reverse (inside window)
 
     @Test

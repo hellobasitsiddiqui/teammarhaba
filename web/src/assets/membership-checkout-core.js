@@ -220,6 +220,24 @@ export function checkoutPayload(event, state) {
   return { eventId, action: "RSVP", chargePence: 0 };
 }
 
+/**
+ * Does this checkout response represent a REAL confirmed attendance (TM-743)? The "You're confirmed for
+ * this event." copy must key on the order's actual recorded status — {@code CONFIRMED} — NOT merely on
+ * {@code paymentRequired === false}.
+ *
+ * <p>The backend returns {@code paymentRequired: false} for ANY non-PENDING existing order on an idempotent
+ * repeat, which includes the terminal, non-attending {@code FAILED} (a declined card), {@code EXPIRED}
+ * (abandoned/TTL-swept), {@code CANCELLED} and {@code REFUNDED} states — none of which is a live RSVP. So a
+ * user who, say, had their card declined and returns to the screen would be falsely told "You're confirmed"
+ * for an event they never paid for. OrderView already carries {@code status}, so the client reads it here.
+ * Pure + node-testable; the DOM view (membership-checkout.js) imports and gates its confirmation copy on it.
+ * @param {{order?: {status?: string}}} [result] an api.checkout() response.
+ * @returns {boolean} true only when the recorded order is CONFIRMED.
+ */
+export function isConfirmedCheckout(result) {
+  return Boolean(result && result.order && result.order.status === "CONFIRMED");
+}
+
 // --- Cardholder name (TM-639) ----------------------------------------------------------------------
 
 /**

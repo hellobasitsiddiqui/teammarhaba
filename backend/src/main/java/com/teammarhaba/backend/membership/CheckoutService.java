@@ -120,11 +120,59 @@ public class CheckoutService {
             throw new UpgradeRequiredException(UPGRADE_TO_ATTEND);
         }
 
-        // Idempotent per (user, event): a repeat checkout returns the existing order, never a duplicate.
-        Optional<Order> existing = orders.findByUserIdAndEventId(user.getId(), eventId);
-        if (existing.isPresent()) {
-            return CheckoutResult.existing(existing.get());
+        // Per-(user, event) uniqueness ({@code UNIQUE (user_id, event_id)}) means there is at most one order
+        // row for this pair. What a repeat checkout does depends on where that order STANDS (TM-739) — the
+        // early return used to be UNCONDITIONAL, which both (a) never re-minted a fresh, single-use provider
+        // token for a still-PENDING order (so a browser that lost its token could never resume), and (b) let
+        // a terminal FAILED/EXPIRED/CANCELLED order permanently bar the buyer from ever paying for the event,
+        // since no second row can be inserted and no path resurrected the old one.
+        Optional<Order> existingOpt = orders.findByUserIdAndEventId(user.getId(), eventId);
+        if (existingOpt.isPresent()) {
+            Order existing = existingOpt.get();
+            if (existing.getStatus() == OrderStatus.PENDING) {
+                // A still-PENDING PAY order the buyer is resuming: the provider token is single-use and not
+                // stored, so re-mint a FRESH provider order + token onto this same row so the client can
+                // mount the widget again. Same server-side flag + reliability guards as a first PAY, and the
+                // provider call is inside this locked transaction, so a provider failure rolls the re-mint
+                // back leaving the order exactly as it was (still PENDING, old-or-null provider ref).
+                if (!membershipProps.enabled()) {
+                    throw new AccessDeniedException(PAYMENTS_OFF);
+                }
+                rsvps.guardCheckoutReliabilityDowngrade(user, eventId);
+                // Best-effort void the previous provider order before minting a new one (TM-739): its old
+                // single-use widget token may still be mounted in a stale tab, and without the void a payment
+                // completed there AFTER this re-mint would capture money against an order we've superseded —
+                // the same orphan-token hazard the cancel path (TM-623) guards. Best-effort: a void failure
+                // must not block the resume, so it is logged and swallowed (mirrors cancel()).
+                if (existing.getProviderOrderId() != null) {
+                    try {
+                        payments.cancelOrder(existing.getProviderOrderId());
+                    } catch (PaymentProviderException e) {
+                        log.warn(
+                                "Could not void the previous provider order {} while re-minting a resume token "
+                                        + "for order {} — reconcile it manually if it is ever paid (TM-739).",
+                                existing.getProviderOrderId(),
+                                existing.getId(),
+                                e);
+                    }
+                }
+                PaymentOrder providerOrder = payments.createOrder(
+                        existing.getAmountPence(), payments.currency(), String.valueOf(existing.getId()));
+                existing.setPaymentReference(payments.name(), providerOrder.id());
+                existing.touch(now);
+                return CheckoutResult.paymentRequired(existing, providerOrder.token());
+            }
+            if (!existing.isTerminalNonAttending()) {
+                // CONFIRMED / REFUND_DUE / REFUNDED / REFUND_ABANDONED: a live commitment, or one whose money
+                // is still being unwound. Stay truly idempotent — never re-mint, never resurrect.
+                return CheckoutResult.existing(existing);
+            }
+            // FAILED / EXPIRED / CANCELLED: terminal, no place held, nothing owed. Re-open THIS row (the
+            // UNIQUE constraint forbids a fresh one) rather than inserting a duplicate — the PAY / FREE
+            // branches below take the existing terminal row and reopen it via reopenForCheckout /
+            // reopenConfirmed instead of saving a new Order.
         }
+        Order reopenTarget = existingOpt.filter(Order::isTerminalNonAttending).orElse(null);
 
         if (entitlement.decision() == EntitlementDecision.PAY) {
             // Server-side membership flag (TM-623): the PAY branch opens a REAL provider order, so it
@@ -140,19 +188,26 @@ public class CheckoutService {
             // straight into a GOING spot at settle, buying past the very restriction the direct RSVP/claim
             // verbs enforce. Refusing before the provider charge keeps it a clean 409 with no money to unwind.
             rsvps.guardCheckoutReliabilityDowngrade(user, eventId);
-            // PAY (TM-478): record a PENDING order, then open a REAL payment order with the provider for the
-            // amount. Persist the provider's permanent order id on our order (the webhook match key) and
-            // return its client token so the browser mounts the checkout widget. The RSVP is NOT created —
-            // the caller stays unconfirmed until the payment webhook settles the order.
+            // PAY (TM-478): record a PENDING order (or reopen a terminal one, TM-739), then open a REAL
+            // payment order with the provider for the amount. Persist the provider's permanent order id on
+            // our order (the webhook match key) and return its client token so the browser mounts the
+            // checkout widget. The RSVP is NOT created — the caller stays unconfirmed until the payment
+            // webhook settles the order.
             //
             // The provider call is inside this transaction (which holds the caller's user-row lock): if it
             // throws — provider down / rejected — the whole checkout rolls back, leaving no orphan PENDING
             // order and no consumed credit. The local order is saved first so its id is the merchant
             // reference passed to the provider for reconciliation.
-            Order order =
-                    orders.save(new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.PENDING, now));
+            Order order;
+            if (reopenTarget != null) {
+                reopenTarget.reopenForCheckout(now);
+                order = reopenTarget;
+            } else {
+                order = orders.save(
+                        new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.PENDING, now));
+            }
             PaymentOrder providerOrder = payments.createOrder(
-                    entitlement.amountPence(), payments.currency(), String.valueOf(order.getId()));
+                    order.getAmountPence(), payments.currency(), String.valueOf(order.getId()));
             order.setPaymentReference(payments.name(), providerOrder.id());
             return CheckoutResult.paymentRequired(order, providerOrder.token());
         }
@@ -169,8 +224,16 @@ public class CheckoutService {
             memberships.getOrEnrol(caller).consumeFirstEventCredit(eventId, now);
         }
 
-        Order order =
-                orders.save(new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.CONFIRMED, now));
+        // A terminal order for this (user, event) is reopened straight to CONFIRMED (TM-739); otherwise a
+        // fresh £0 CONFIRMED order is inserted. Either way the RSVP above is what actually confirms attendance.
+        Order order;
+        if (reopenTarget != null) {
+            reopenTarget.reopenConfirmed(now);
+            order = reopenTarget;
+        } else {
+            order = orders.save(
+                    new Order(user.getId(), eventId, entitlement.amountPence(), OrderStatus.CONFIRMED, now));
+        }
         return CheckoutResult.confirmed(order, rsvp);
     }
 
