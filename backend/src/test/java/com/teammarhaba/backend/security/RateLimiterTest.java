@@ -72,11 +72,15 @@ class RateLimiterTest {
     }
 
     @Test
-    void anonymousCallerIsKeyedByClientIp() {
-        // Leftmost X-Forwarded-For wins (the originating client behind Cloud Run's proxy chain).
-        MockHttpServletRequest forwarded = request("10.0.0.1");
-        forwarded.addHeader("X-Forwarded-For", "9.9.9.9, 10.0.0.1");
-        assertThat(limiter.clientKey(forwarded)).isEqualTo("ip:9.9.9.9");
+    void anonymousCallerIsKeyedByTheProxyAppendedClientIp_notTheSpoofableLeftmost() {
+        // TM-732: Cloud Run APPENDS the real client IP as the LAST X-Forwarded-For entry. A caller can
+        // prepend anything to forge an IP / mint a fresh bucket. Header "9.9.9.9, 8.8.8.8, 130.211.0.1":
+        // the client prepended "9.9.9.9", the true client is "8.8.8.8" (what the front end saw), and
+        // Cloud Run appended "130.211.0.1". With one trusted hop the key must be the true client, not the
+        // attacker-prepended leftmost "9.9.9.9" the old code used.
+        MockHttpServletRequest forwarded = request("169.254.0.1");
+        forwarded.addHeader("X-Forwarded-For", "9.9.9.9, 8.8.8.8, 130.211.0.1");
+        assertThat(limiter.clientKey(forwarded)).isEqualTo("ip:8.8.8.8");
 
         // No forwarding header -> fall back to the direct socket address.
         assertThat(limiter.clientKey(request("10.0.0.1"))).isEqualTo("ip:10.0.0.1");

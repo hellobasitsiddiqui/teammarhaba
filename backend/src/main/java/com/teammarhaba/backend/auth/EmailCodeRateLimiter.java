@@ -3,12 +3,12 @@ package com.teammarhaba.backend.auth;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
+import com.teammarhaba.backend.security.ForwardedClientIp;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Clock;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 /**
  * Coarse per-IP request limiter in front of the unauthenticated {@code POST .../email-code/request}
@@ -25,13 +25,14 @@ import org.springframework.util.StringUtils;
  * — i.e. it doesn't trade one unbounded map for another. Worst case, the oldest counters are evicted
  * and those IPs get a fresh budget; memory stays bounded.
  *
- * <p><strong>Client IP behind Cloud Run.</strong> Cloud Run terminates TLS at the edge and forwards
- * the real client IP in {@code X-Forwarded-For} as {@code client, proxy1, proxy2, ...}; the
- * <em>leftmost</em> entry is the originating client. We use it (mirroring how {@link
- * com.teammarhaba.backend.security.SecurityHeadersFilter} trusts {@code X-Forwarded-Proto} from the
- * same proxy), falling back to {@link HttpServletRequest#getRemoteAddr()} for plain local dev where
- * the header is absent. {@code X-Forwarded-For} is client-spoofable, but the {@code maximumSize} cap
- * means spoofing only buys an attacker a reset budget, not unbounded memory.
+ * <p><strong>Client IP behind Cloud Run (TM-732).</strong> Cloud Run terminates TLS at the edge and
+ * <em>appends</em> the real client IP to {@code X-Forwarded-For} as the last entry. The
+ * <em>leftmost</em> entries are whatever the caller sent and are attacker-controlled — keying on the
+ * leftmost let a single source spoof any IP and mint a fresh per-IP bucket every request, defeating
+ * this limiter entirely. Resolution is delegated to {@link
+ * com.teammarhaba.backend.security.ForwardedClientIp}, which counts trusted proxy hops in from the
+ * <em>right</em>, falling back to {@link HttpServletRequest#getRemoteAddr()} for plain local dev where
+ * the header is absent. The {@code maximumSize} cap still bounds memory under any header flood.
  *
  * <p>Process-local, like the rest of the email-code state — fine for a single Cloud Run instance; a
  * shared store (Redis) or an edge rule (Cloud Armor) is the future improvement for a global limit
@@ -39,8 +40,6 @@ import org.springframework.util.StringUtils;
  */
 @Component
 public class EmailCodeRateLimiter {
-
-    static final String FORWARDED_FOR_HEADER = "X-Forwarded-For";
 
     private final EmailCodeProperties props;
     private final Cache<String, AtomicInteger> hitsByIp;
@@ -92,20 +91,14 @@ public class EmailCodeRateLimiter {
     }
 
     /**
-     * Resolve the originating client IP: the leftmost {@code X-Forwarded-For} entry when present
-     * (Cloud Run / any reverse proxy), else the direct socket address for plain local dev.
+     * Resolve the originating client IP behind the trusted proxy chain (TM-732): the entry Cloud Run's
+     * front end appended to {@code X-Forwarded-For}, counting {@link ForwardedClientIp#TRUSTED_PROXY_HOPS}
+     * hops in from the right, else the direct socket address for plain local dev. Using the leftmost entry
+     * would be wrong — it's the attacker-controlled value a caller can prepend to mint a fresh per-IP
+     * bucket every request, defeating this limiter. Delegates to the shared {@link ForwardedClientIp} so
+     * this and the API-wide {@code RateLimiter} resolve the client identically.
      */
     static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader(FORWARDED_FOR_HEADER);
-        if (StringUtils.hasText(forwarded)) {
-            String first = forwarded.split(",", 2)[0].trim();
-            if (StringUtils.hasText(first)) {
-                return first;
-            }
-        }
-        String remote = request.getRemoteAddr();
-        // Never key on null/blank — that would lump every header-less caller into one bucket and DoS
-        // legitimate dev traffic; an empty marker is its own (still size-capped) bucket instead.
-        return StringUtils.hasText(remote) ? remote : "unknown";
+        return ForwardedClientIp.resolve(request);
     }
 }

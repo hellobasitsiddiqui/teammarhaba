@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.audit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Verifies the append-only audit log against a real Postgres (Testcontainers): a recorded event
@@ -27,6 +29,37 @@ class AuditServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    /**
+     * TM-724: append-only must hold at the DB tier, not just by application convention. V42 installs
+     * triggers that reject UPDATE/DELETE/TRUNCATE on audit_events even for the app's DB role (the schema
+     * owner, which bypasses table GRANTs) — so a recorded event cannot be silently rewritten or erased.
+     * INSERT and SELECT stay unaffected.
+     */
+    @Test
+    void auditEventsAreImmutableAtTheDbLevel() {
+        AuditEvent saved = audit.record(
+                "audit-immutable-actor", AuditAction.PROFILE_UPDATED, "User", "audit-immutable-target", Map.of());
+        Long id = saved.getId();
+
+        // UPDATE is blocked by the trigger.
+        assertThatThrownBy(() -> jdbc.update("update audit_events set action = 'TAMPERED' where id = ?", id))
+                .hasMessageContaining("append-only");
+        // DELETE is blocked by the trigger.
+        assertThatThrownBy(() -> jdbc.update("delete from audit_events where id = ?", id))
+                .hasMessageContaining("append-only");
+        // TRUNCATE is blocked by the statement-level trigger.
+        assertThatThrownBy(() -> jdbc.execute("truncate table audit_events"))
+                .hasMessageContaining("append-only");
+
+        // The row is untouched, and INSERT/SELECT still work (append-forward, read stay open).
+        Map<String, Object> row =
+                jdbc.queryForMap("select action from audit_events where id = ?", id);
+        assertThat(row).containsEntry("action", "PROFILE_UPDATED");
+    }
 
     @Test
     void recordPersistsOneImmutableEventWithMetadataAndTimestamp() {

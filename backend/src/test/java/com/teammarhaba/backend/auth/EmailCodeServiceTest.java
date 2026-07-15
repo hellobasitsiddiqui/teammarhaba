@@ -173,6 +173,65 @@ class EmailCodeServiceTest {
     }
 
     @Test
+    void concurrentWrongGuessesCannotExceedTheAttemptCap() throws Exception {
+        // TM-732 regression: the verify attempt counter was a non-atomic getIfPresent -> decide -> put.
+        // Two concurrent wrong guesses could both read the same attemptsLeft and both decrement from it,
+        // losing a decrement — so an attacker fanning out parallel requests got MORE than
+        // maxVerifyAttempts (5) tries at a short numeric code. With the atomic asMap().compute() the cap
+        // holds no matter how many threads race: at most (cap - 1) guesses ever see "wrong, budget left"
+        // (CODE_INVALID); the one that spends the last attempt burns the code (VERIFY_RATE_LIMITED); and
+        // every guess after that finds no outstanding code. The correct code must NOT work afterwards.
+        service.request(EMAIL);
+        String correct = mailer.lastCode;
+        String wrong = nudge(correct);
+
+        int threads = 64; // far more than the cap of 5 — maximise the race window
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(threads);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger codeInvalid = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger rateLimited = new java.util.concurrent.atomic.AtomicInteger();
+
+        List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();
+                    service.verify(EMAIL, wrong); // all-wrong guesses, hammered simultaneously
+                } catch (EmailCodeException e) {
+                    if (e.reason() == EmailCodeException.Reason.CODE_INVALID) {
+                        codeInvalid.incrementAndGet();
+                    } else if (e.reason() == EmailCodeException.Reason.VERIFY_RATE_LIMITED) {
+                        rateLimited.incrementAndGet();
+                    }
+                } catch (Exception ignored) {
+                    // no other checked exception is expected on the wrong-code path
+                }
+            }));
+        }
+        ready.await();
+        go.countDown(); // release all threads at once
+        for (java.util.concurrent.Future<?> f : futures) {
+            f.get();
+        }
+        pool.shutdown();
+
+        // The budget is 5. A guess returns CODE_INVALID only while budget remained (attempts 1..4), so at
+        // most 4 responses can be CODE_INVALID *with an outstanding code* — plus any that raced in after
+        // the burn and found nothing (also CODE_INVALID). The decisive, race-proof invariant is that the
+        // code is genuinely burned: the CORRECT code no longer works and no token was ever minted.
+        assertThat(rateLimited.get())
+                .as("exactly one guess spends the final attempt and burns the code")
+                .isEqualTo(1);
+        assertThatThrownBy(() -> service.verify(EMAIL, correct))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+        verify(firebaseAuth, never()).createCustomToken(anyString());
+    }
+
+    @Test
     void floodOfDistinctAddressesLeavesInMemoryStateBounded() {
         // The DoS the TM-238 review found: an attacker scripts `request` with millions of distinct,
         // validly-formed random addresses. With unbounded maps this grew the heap without limit; with
@@ -230,9 +289,10 @@ class EmailCodeServiceTest {
 
     @Test
     void allowListedDomainAddress_getsFixedCode_noSend_andVerifies() throws Exception {
-        // Allow-list the @teammarhaba.test domain with a fixed code; real send must be skipped.
+        // Allow-list the @teammarhaba.test domain with an explicit non-default fixed code (TM-725: the
+        // default 123456 is rejected for an enabled hook); real send must be skipped.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         String testEmail = "e2e@teammarhaba.test";
@@ -247,7 +307,7 @@ class EmailCodeServiceTest {
         assertThat(mailer.lastCode).isNull();
 
         // The fixed code verifies (and only the fixed code).
-        String token = svc.verify(testEmail, "123456");
+        String token = svc.verify(testEmail, "424242");
         assertThat(token).isEqualTo("token-test");
     }
 
@@ -272,7 +332,7 @@ class EmailCodeServiceTest {
     @Test
     void allowListedAddress_wrongCodeStillRejected() {
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request("e2e@teammarhaba.test");
@@ -287,17 +347,17 @@ class EmailCodeServiceTest {
     void nonAllowListedAddress_unaffectedByEnabledHook() throws Exception {
         // Hook ON for @teammarhaba.test, but a real address must keep random code + real send.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request(EMAIL); // ada@example.com — not allow-listed
 
         // A real (random) code was emailed, and it is NOT the fixed code.
         assertThat(mailer.sends).containsExactly(EMAIL);
-        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("424242");
 
         // The fixed code does NOT work for a real address; the emailed code does.
-        assertThatThrownBy(() -> svc.verify(EMAIL, "123456"))
+        assertThatThrownBy(() -> svc.verify(EMAIL, "424242"))
                 .isInstanceOf(EmailCodeException.class);
     }
 
@@ -305,13 +365,13 @@ class EmailCodeServiceTest {
     void lookalikeDomain_isNotAllowListed() {
         // "evil-teammarhaba.test" must NOT match the "@teammarhaba.test" suffix — real send path applies.
         EmailCodeProperties.TestEmail test =
-                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "123456");
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
         EmailCodeService svc = new EmailCodeService(provider(), mailer, props(50, test), clock);
 
         svc.request("attacker@evil-teammarhaba.test");
 
         assertThat(mailer.sends).containsExactly("attacker@evil-teammarhaba.test");
-        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("123456");
+        assertThat(mailer.lastCode).matches("\\d{6}").isNotEqualTo("424242");
     }
 
     @Test
@@ -324,6 +384,44 @@ class EmailCodeServiceTest {
 
         assertThat(mailer.sends).containsExactly("anyone@teammarhaba.test");
         assertThat(mailer.lastCode).matches("\\d{6}");
+    }
+
+    // --- Fail-closed test-login guard (TM-725) ---
+
+    @Test
+    void enabledHook_withDefaultCode_failsClosedAtConstruction() {
+        // An enabled hook (non-empty allow-list) MUST NOT ship the well-known default 123456.
+        assertThatThrownBy(
+                        () -> new EmailCodeProperties.TestEmail(
+                                List.of("@teammarhaba.test"), List.of(), "123456"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.auth.email-code.test");
+    }
+
+    @Test
+    void enabledHook_withBlankCode_failsClosedAtConstruction() {
+        // An enabled hook with a missing/blank code is rejected — no silent fallback to a default.
+        assertThatThrownBy(
+                        () -> new EmailCodeProperties.TestEmail(
+                                List.of(), List.of("ci-bot@teammarhaba.test"), " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.auth.email-code.test");
+    }
+
+    @Test
+    void enabledHook_withExplicitNonDefaultCode_isAccepted() {
+        EmailCodeProperties.TestEmail test =
+                new EmailCodeProperties.TestEmail(List.of("@teammarhaba.test"), List.of(), "424242");
+        assertThat(test.isEnabled()).isTrue();
+        assertThat(test.fixedCode()).isEqualTo("424242");
+    }
+
+    @Test
+    void disabledHook_toleratesDefaultOrBlankCode() {
+        // With an empty allow-list the code is inert, so the default/blank is harmless and never throws.
+        assertThat(EmailCodeProperties.TestEmail.disabled().isEnabled()).isFalse();
+        assertThat(new EmailCodeProperties.TestEmail(List.of(), List.of(), "123456").isEnabled()).isFalse();
+        assertThat(new EmailCodeProperties.TestEmail(List.of(), List.of(), "").isEnabled()).isFalse();
     }
 
     /** A fresh provider mock returning the shared firebaseAuth — for tests that build their own service. */

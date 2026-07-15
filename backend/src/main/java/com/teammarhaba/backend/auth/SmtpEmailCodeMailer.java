@@ -27,8 +27,9 @@ import org.springframework.mail.javamail.MimeMessageHelper;
  *
  * <p><strong>Credential hygiene.</strong> The code is treated as a credential — it is placed in the
  * email body only and is <em>never</em> logged. A delivery failure is rethrown so the caller surfaces
- * it (the user never learns a code was issued they can't receive); the recipient address is included
- * in the failure log but the code is not.
+ * it (the user never learns a code was issued they can't receive); the recipient email
+ * address (PII) is logged (TM-724): the log lines record only that a send was attempted or
+ * failed, not who logged in and when. The recipient email is NOT included.
  */
 public class SmtpEmailCodeMailer implements EmailCodeMailer {
 
@@ -71,12 +72,14 @@ public class SmtpEmailCodeMailer implements EmailCodeMailer {
             // Plain-text first (fallback), then HTML — order matters for multipart/alternative.
             helper.setText(plainTextBody(code), htmlBody(code));
             mailSender.send(message);
-            // The code is a credential and is intentionally omitted from this log line.
-            log.info("Login code emailed to {}.", email);
+            // Neither the code (a credential) nor the recipient email (PII) is logged (TM-724):
+            // the log records only that a send succeeded, not who logged in.
+            log.info("Login code email sent.");
         } catch (MessagingException | MailException e) {
             // Surface the failure to the caller (EmailCodeService) so the user is told delivery
-            // failed, rather than being handed a code they can never receive. No code in the log.
-            log.warn("Failed to email login code to {}.", email, e);
+            // failed, rather than being handed a code they can never receive. No code or email
+            // address in the log — only the transport failure itself (TM-724).
+            log.warn("Failed to send login code email.", e);
             throw new EmailCodeDeliveryException("Failed to send the login code email.", e);
         }
     }
