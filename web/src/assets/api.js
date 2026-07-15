@@ -781,6 +781,34 @@ export async function postConversationMessage(id, body, { replyToMessageId = nul
 }
 
 /**
+ * POST /api/v1/conversations/{id}/announcements — post an admin/host ANNOUNCEMENT to an event's group
+ * chat (TM-710). Gated server-side to {@code ROLE_ADMIN} (a non-admin is a 403 whatever the UI shows),
+ * and unlike {@link postConversationMessage} it is NOT member-gated — an admin may announce in any event
+ * chat, even one they don't attend. `body` is the announcement text (backend bounds it non-blank, ≤500;
+ * the composer validates the same rule first). Returns the created ConversationMessageResponse (201),
+ * carrying {@code kind: "ANNOUNCEMENT"} so the caller can echo it as an announcement.
+ *
+ * <p>Throws an {@link ApiError} carrying the HTTP `.status` + the backend's `detail`, so the composer
+ * can distinguish outcomes exactly like the ordinary post (403 admin gate, 409 closed thread, 404 gone,
+ * 400 validation), reusing the same {@code classifyPostError} mapping.
+ * @param {number|string} id the conversation id.
+ * @param {string} body the announcement text (≤500 chars, non-blank).
+ * @returns {Promise<Object>} the created ConversationMessageResponse (kind ANNOUNCEMENT).
+ * @throws {ApiError} on a non-2xx response, carrying `.status` + the backend's reason.
+ */
+export async function postConversationAnnouncement(id, body) {
+  const response = await apiFetch(`/api/v1/conversations/${encodeURIComponent(id)}/announcements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  if (!response.ok) {
+    throw await toApiError(response, `Could not send your announcement (${response.status}). Please try again.`);
+  }
+  return response.json();
+}
+
+/**
  * PATCH /api/v1/conversations/{id}/messages/{messageId} — edit the caller's OWN message (TM-467). `body`
  * is the replacement text (backend bounds it non-blank, ≤500; the inline editor validates the same rule
  * first). Returns the edited ConversationMessageResponse (200) — carrying the new body + a set `editedAt`
@@ -1438,6 +1466,7 @@ if (typeof window !== "undefined") {
     getConversationMembers,
     markConversationRead,
     postConversationMessage,
+    postConversationAnnouncement,
     editConversationMessage,
     deleteConversationMessage,
     reactToMessage,

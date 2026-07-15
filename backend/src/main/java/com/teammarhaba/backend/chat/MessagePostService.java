@@ -219,6 +219,59 @@ public class MessagePostService {
     }
 
     /**
+     * Post an admin/host ANNOUNCEMENT (TM-710) to event thread {@code conversationId} as the verified
+     * admin caller. The write sibling of {@link #post} for the announcement path, differing in two ways:
+     *
+     * <ul>
+     *   <li><b>No membership gate.</b> An app admin may announce in <em>any</em> event's group chat,
+     *       even one they don't attend and aren't the host of — which the ordinary {@link #post} path
+     *       (member-gated) cannot do, and which was the TM-710 admin-send bug. The authorization gate is
+     *       the controller's {@code @PreAuthorize("hasRole('ADMIN')")} (method security), enforced
+     *       server-side, not the per-thread membership row.
+     *   <li><b>Kind is ANNOUNCEMENT.</b> The persisted message carries {@link MessageKind#ANNOUNCEMENT}
+     *       so the client renders it visually distinct, attributed as an announcement.
+     * </ul>
+     *
+     * <p>The thread must exist and be an OPEN event thread: an unknown / non-event / soft-closed thread
+     * is rejected the same way the ordinary post is (a missing thread is a {@code 404}; a closed one a
+     * {@code 409}). The message is persisted (flushed for the DB-authoritative {@code createdAt}),
+     * audited as {@link AuditAction#EVENT_CHAT_ANNOUNCEMENT_POSTED}, and the same
+     * {@link MessageCreatedEvent} is published so the push + live-SSE fan-outs fire after commit — an
+     * announcement reaches the thread's members exactly like an ordinary post.
+     *
+     * @throws com.teammarhaba.backend.web.ResourceNotFoundException {@code 404} if the thread does not exist
+     * @throws ConflictException {@code 409} if the thread is closed / read-only
+     */
+    @Transactional
+    public ConversationMessageResponse postAnnouncement(VerifiedUser caller, Long conversationId, String body) {
+        Long adminId = users.provision(caller).getId();
+
+        // No membership gate (admins may announce in any event chat) — but the thread must exist. Unlike
+        // the ordinary post, existence is NOT hidden here: the caller is already an authenticated admin
+        // (hasRole('ADMIN') at the controller), so there is no attendee to probe thread ids, and a plain
+        // 404 for a missing thread is the clearer contract for the admin console.
+        Conversation conversation = conversations
+                .findById(conversationId)
+                .orElseThrow(() -> new com.teammarhaba.backend.web.ResourceNotFoundException("Thread not found."));
+
+        requireOpenThread(conversation);
+
+        Message saved = messages.saveAndFlush(Message.announcement(conversationId, adminId, body));
+
+        audit.record(
+                caller.uid(),
+                AuditAction.EVENT_CHAT_ANNOUNCEMENT_POSTED,
+                TARGET_CONVERSATION,
+                conversationId.toString(),
+                Map.of("messageId", saved.getId()));
+
+        publisher.publishEvent(new MessageCreatedEvent(saved));
+
+        return ConversationMessageResponse.from(
+                saved, List.of(), MessageReadReceipt.empty(), QuotedMessage.resolve(null, null), true);
+    }
+
+    /**
      * Validate an optional reply target (TM-466): {@code null} (a plain message) resolves to {@code
      * null}; otherwise the id must name a still-live message that belongs to {@code conversationId}.
      * A missing, moderation-removed, or foreign (other-thread) target is a uniform {@code 400} with a

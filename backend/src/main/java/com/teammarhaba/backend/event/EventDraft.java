@@ -19,6 +19,8 @@ import java.time.Instant;
  * admin omitted them on create, in which case {@link EventAdminService} leaves the entity defaults
  * (£5 / not premium) in place. {@code venueId} optionally references a reusable venue (TM-519);
  * {@code null} = a one-off free-text location — {@code locationText} stays the display line either way.
+ * {@code openingMessage} is the optional group-chat opening message (TM-710); {@code null}/blank = none,
+ * otherwise auto-posted once as an announcement when the event's chat first opens.
  */
 public record EventDraft(
         String heading,
@@ -41,4 +43,5 @@ public record EventDraft(
         Integer ageMin,
         Integer ageMax,
         Integer pricePence,
-        Boolean premium) {}
+        Boolean premium,
+        String openingMessage) {}

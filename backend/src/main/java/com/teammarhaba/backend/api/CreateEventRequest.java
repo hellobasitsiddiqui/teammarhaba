@@ -53,6 +53,8 @@ import java.time.ZoneId;
  * @param pricePence      optional ticket price in pence (minor units, GBP), ≥ 0; omitted = the £5
  *     default ({@link com.teammarhaba.backend.event.Event#DEFAULT_PRICE_PENCE}). {@code 0} = free (TM-475)
  * @param premium         optional premium-gating flag; omitted = {@code false} (TM-475)
+ * @param openingMessage  optional group-chat opening message (≤ 2000), auto-posted once as an
+ *     announcement when the event's chat first opens (TM-710); omitted/blank = none
  * @param venueId         optional id of a reusable venue this event is held at (TM-519); omitted = a
  *     one-off free-text location. {@code locationText} stays the display line either way; the id must
  *     reference an existing, active venue (validated in {@code EventAdminService}), else a 400
@@ -82,7 +84,8 @@ public record CreateEventRequest(
         @Min(13) @Max(120) Integer ageMin,
         @Min(13) @Max(120) Integer ageMax,
         @Min(0) Integer pricePence,
-        Boolean premium) {
+        Boolean premium,
+        @Size(max = 2000) String openingMessage) {
 
     /** The timezone must be a real IANA zone id — bad ids would break every client's rendering. */
     @JsonIgnore
@@ -135,6 +138,7 @@ public record CreateEventRequest(
                 ageMin,
                 ageMax,
                 pricePence,
-                premium);
+                premium,
+                openingMessage);
     }
 }

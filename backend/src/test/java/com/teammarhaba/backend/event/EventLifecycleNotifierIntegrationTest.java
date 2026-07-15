@@ -269,7 +269,8 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
                 null, // ageMin
                 null, // ageMax
                 null, // pricePence
-                null); // premium
+                null, // premium
+                null); // openingMessage (TM-710)
         return admin.create(admin(), draft);
     }
 
@@ -300,19 +301,19 @@ class EventLifecycleNotifierIntegrationTest extends AbstractIntegrationTest {
         // bookingCutoffHours (TM-523), cancellationWindowHours (TM-523), ageMin, ageMax, pricePence, premium.
         return new EventPatch(
                 null, null, null, null, null, null, null, null, startAt, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     private static EventPatch patchLocation(String locationText) {
         return new EventPatch(
                 null, null, locationText, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     private static EventPatch patchDescription(String description) {
         return new EventPatch(
                 null, description, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     private List<Delivery> pushesTitled(String titlePrefix) {

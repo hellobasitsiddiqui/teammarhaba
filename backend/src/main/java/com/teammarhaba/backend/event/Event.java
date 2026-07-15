@@ -138,6 +138,25 @@ public class Event {
     @Column(name = "chat_close_hours")
     private Integer chatCloseHours;
 
+    /**
+     * Optional opening message for the event's group chat (TM-710); {@code null}/blank = none. When set,
+     * it is auto-posted once as an ANNOUNCEMENT the first time the event's chat opens (the lazy thread
+     * creation on the first GOING landing — {@link EventChatLifecycleService}). Admin-set on
+     * create/edit. TEXT column (no fixed entity cap; the admin API bounds the length at the edge).
+     */
+    @Column(name = "opening_message")
+    private String openingMessage;
+
+    /**
+     * One-shot idempotency guard for the opening-message auto-post (TM-710); {@code null} until the
+     * event's chat has opened at least once, non-null = the opening message has already been posted at
+     * that instant. The auto-post fires only when {@link #openingMessage} is non-blank AND this stamp is
+     * {@code null}, and stamps it in the same transaction as the post — so a re-open / redeploy /
+     * replayed thread-create never duplicates the announcement. Stamped via {@link #markOpeningMessagePosted}.
+     */
+    @Column(name = "opening_message_posted_at")
+    private Instant openingMessagePostedAt;
+
     /** IANA timezone id of the event's locale; pairs with the UTC instants for client rendering. */
     @Column(name = "timezone", nullable = false)
     private String timezone;
@@ -350,6 +369,44 @@ public class Event {
 
     public void setChatCloseHours(Integer chatCloseHours) {
         this.chatCloseHours = chatCloseHours;
+    }
+
+    /** The event's optional group-chat opening message (TM-710), or {@code null} when none is set. */
+    public String getOpeningMessage() {
+        return openingMessage;
+    }
+
+    public void setOpeningMessage(String openingMessage) {
+        this.openingMessage = openingMessage;
+    }
+
+    /**
+     * When the opening message was auto-posted (TM-710), or {@code null} if it never has been — the
+     * idempotency guard for the one-shot auto-post.
+     */
+    public Instant getOpeningMessagePostedAt() {
+        return openingMessagePostedAt;
+    }
+
+    /**
+     * Whether the event has a non-blank opening message still waiting to be auto-posted (TM-710): a
+     * configured message that has not yet been stamped as posted. {@code false} when there is no opening
+     * message, it is blank, or it has already been posted once — so the auto-post never fires twice.
+     */
+    public boolean hasPendingOpeningMessage() {
+        return openingMessage != null && !openingMessage.isBlank() && openingMessagePostedAt == null;
+    }
+
+    /**
+     * Stamp the opening message as posted at {@code when} (TM-710) — the idempotency guard flip.
+     * First-moment-wins: a no-op once already stamped, so two racing thread-creates (serialised behind
+     * the RSVP tx's {@code SELECT ... FOR UPDATE} on the events row, but belt-and-braces here too) can
+     * never both post. Callers must check {@link #hasPendingOpeningMessage} first.
+     */
+    public void markOpeningMessagePosted(Instant when) {
+        if (this.openingMessagePostedAt == null) {
+            this.openingMessagePostedAt = when;
+        }
     }
 
     public String getTimezone() {

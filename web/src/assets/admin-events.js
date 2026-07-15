@@ -31,6 +31,7 @@ import {
   LOCATION_MAX,
   URL_MAX,
   CITY_MAX,
+  OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
   AGE_MIN_BOUND,
@@ -462,6 +463,7 @@ const FORM_FIELDS = [
   { key: "locationRevealHours", id: "event-reveal-hours", label: "Reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
   { key: "ageMin", id: "event-age-min", label: "Min age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
   { key: "ageMax", id: "event-age-max", label: "Max age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
+  { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
 ];
 
 /** Build one field control (label + input/select/textarea + hint + role=alert error), profile.js style. */

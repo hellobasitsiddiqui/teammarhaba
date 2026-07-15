@@ -2,6 +2,8 @@ package com.teammarhaba.backend.chat;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -115,26 +117,44 @@ public class Message {
     @Column(name = "reply_to_message_id", updatable = false)
     private Long replyToMessageId;
 
+    /**
+     * What this message <em>is</em> (TM-710): an ordinary {@link MessageKind#ATTENDEE} post, or an
+     * admin/host {@link MessageKind#ANNOUNCEMENT} (the auto-posted opening message, or an admin-sent
+     * announcement). Set once at post time, never mutated (an author edit rewrites the body but never
+     * reclassifies). Defaults to {@code ATTENDEE} so the whole pre-TM-710 back-catalogue reads as one,
+     * matching the {@code message.kind} column's {@code DEFAULT 'ATTENDEE'} (V42).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "kind", nullable = false, updatable = false)
+    private MessageKind kind = MessageKind.ATTENDEE;
+
     /** Required by JPA. */
     protected Message() {
     }
 
-    private Message(Long conversationId, Long senderId, String body, String deepLink, Long replyToMessageId) {
+    private Message(
+            Long conversationId,
+            Long senderId,
+            String body,
+            String deepLink,
+            Long replyToMessageId,
+            MessageKind kind) {
         this.conversationId = conversationId;
         this.senderId = senderId;
         this.body = body;
         this.deepLink = deepLink;
         this.replyToMessageId = replyToMessageId;
+        this.kind = kind;
     }
 
     /** A message posted by a human member ({@code senderId} is their {@code users.id}). */
     public static Message fromUser(Long conversationId, Long senderId, String body) {
-        return new Message(conversationId, senderId, body, null, null);
+        return new Message(conversationId, senderId, body, null, null, MessageKind.ATTENDEE);
     }
 
     /** As {@link #fromUser} but carrying an in-app deep link. */
     public static Message fromUser(Long conversationId, Long senderId, String body, String deepLink) {
-        return new Message(conversationId, senderId, body, deepLink, null);
+        return new Message(conversationId, senderId, body, deepLink, null, MessageKind.ATTENDEE);
     }
 
     /**
@@ -143,12 +163,24 @@ public class Message {
      * validated the target is a live, same-conversation message.
      */
     public static Message replyFromUser(Long conversationId, Long senderId, String body, Long replyToMessageId) {
-        return new Message(conversationId, senderId, body, null, replyToMessageId);
+        return new Message(conversationId, senderId, body, null, replyToMessageId, MessageKind.ATTENDEE);
+    }
+
+    /**
+     * An admin/host {@link MessageKind#ANNOUNCEMENT} (TM-710) posted to an event's group thread: an
+     * admin-sent announcement, or the auto-posted opening message. {@code senderId} is the acting
+     * admin/host's {@code users.id}, or {@code null} for a system "from TeamMarhaba" announcement (the
+     * opening message when no author is attributed). Rendered visually distinct on the client and gated
+     * server-side to {@code ROLE_ADMIN} at the post path — a normal attendee post is always
+     * {@link MessageKind#ATTENDEE}.
+     */
+    public static Message announcement(Long conversationId, Long senderId, String body) {
+        return new Message(conversationId, senderId, body, null, null, MessageKind.ANNOUNCEMENT);
     }
 
     /** A system / admin "from TeamMarhaba" message (null sender) — the admin-broadcast payload. */
     public static Message fromSystem(Long conversationId, String body, String deepLink) {
-        return new Message(conversationId, null, body, deepLink, null);
+        return new Message(conversationId, null, body, deepLink, null, MessageKind.ATTENDEE);
     }
 
     /**
@@ -215,6 +247,16 @@ public class Message {
     /** The id of the message this one replies to (TM-466), or {@code null} for a non-reply message. */
     public Long getReplyToMessageId() {
         return replyToMessageId;
+    }
+
+    /** What this message is (TM-710): an ordinary attendee post or an admin/host announcement. */
+    public MessageKind getKind() {
+        return kind;
+    }
+
+    /** {@code true} when this is an admin/host {@link MessageKind#ANNOUNCEMENT} (TM-710). */
+    public boolean isAnnouncement() {
+        return kind == MessageKind.ANNOUNCEMENT;
     }
 
     /** {@code true} for a system / admin "from TeamMarhaba" message (no human author). */
