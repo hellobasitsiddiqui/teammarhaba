@@ -30,7 +30,8 @@ public record EventPatch(
         Integer ageMin,
         Integer ageMax,
         Integer pricePence,
-        Boolean premium) {
+        Boolean premium,
+        String openingMessage) {
 
     /** {@code true} if the patch carries no fields at all (a guaranteed no-op). */
     public boolean isEmpty() {
@@ -54,6 +55,7 @@ public record EventPatch(
                 && ageMin == null
                 && ageMax == null
                 && pricePence == null
-                && premium == null;
+                && premium == null
+                && openingMessage == null;
     }
 }

@@ -11,6 +11,7 @@ import com.teammarhaba.backend.chat.ConversationRepository;
 import com.teammarhaba.backend.chat.ConversationType;
 import com.teammarhaba.backend.chat.MemberRole;
 import com.teammarhaba.backend.chat.Message;
+import com.teammarhaba.backend.chat.MessageKind;
 import com.teammarhaba.backend.chat.MessageRepository;
 import com.teammarhaba.backend.chat.MuteState;
 import com.teammarhaba.backend.user.User;
@@ -18,7 +19,13 @@ import com.teammarhaba.backend.user.UserRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -97,6 +104,139 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         // The GOING attendee joined as an active MEMBER.
         assertThat(membership(thread, attendee).getRole()).isEqualTo(MemberRole.MEMBER);
         assertThat(membership(thread, attendee).isActive()).isTrue();
+    }
+
+    // ── opening message auto-post (TM-710) ─────────────────────────────────────────────────────────
+
+    @Test
+    void openingMessageIsAutoPostedOnceAsAnAnnouncementWhenTheChatFirstOpens() {
+        long host = newUser("host");
+        Event event = seedEventWithOpeningMessage(host, "Welcome! Please read the venue rules.");
+        long attendee = newUser("attendee");
+
+        // Chat opens on the first GOING landing.
+        rsvps.rsvp(caller(attendee), event.getId());
+
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+        var posted = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId());
+        assertThat(posted).hasSize(1);
+        Message opening = posted.get(0);
+        assertThat(opening.getKind()).isEqualTo(MessageKind.ANNOUNCEMENT);
+        assertThat(opening.getBody()).isEqualTo("Welcome! Please read the venue rules.");
+        assertThat(opening.isSystem()).isTrue(); // system "from TeamMarhaba" — no acting author on the RSVP path
+
+        // The idempotency stamp was set.
+        assertThat(events.findById(event.getId()).orElseThrow().getOpeningMessagePostedAt())
+                .isNotNull();
+    }
+
+    @Test
+    void openingMessageIsNotDuplicatedOnASecondChatOpen() {
+        long host = newUser("host");
+        Event event = seedEventWithOpeningMessage(host, "See you all there!");
+        long first = newUser("first");
+        long second = newUser("second");
+
+        // First GOING landing opens the chat and auto-posts.
+        rsvps.rsvp(caller(first), event.getId());
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .hasSize(1);
+
+        // A SECOND GOING landing re-enters onGoing (a "re-open"): the idempotency guard must prevent a
+        // second auto-post. Also simulate a re-RSVP by the first attendee (leave + rejoin), another
+        // onGoing call, to be sure a redeploy/replay path can't duplicate it either.
+        rsvps.rsvp(caller(second), event.getId());
+        rsvps.cancelRsvp(caller(first), event.getId());
+        rsvps.rsvp(caller(first), event.getId());
+
+        var opening = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId())
+                .stream()
+                .filter(m -> m.getKind() == MessageKind.ANNOUNCEMENT)
+                .toList();
+        assertThat(opening).as("opening message posted exactly once across re-opens").hasSize(1);
+    }
+
+    @Test
+    void openingMessageIsNotDuplicatedWhenTwoUsersRsvpConcurrently() throws Exception {
+        // TM-710 concurrency guard: two users going GOING at the SAME time race on the first chat-open.
+        // The dedup relies on opening_message_posted_at being stamped inside the RSVP transaction that
+        // holds the pessimistic event-row lock (EventRepository.findByIdForUpdate) — the second
+        // transaction blocks on the lock, and by the time it reads the event the stamp is committed, so
+        // it must NOT auto-post again. Without the lock-scoped stamp both threads would see a pending
+        // opening message and post twice. This test (and the whole class) is deliberately NOT
+        // @Transactional: each rsvp() runs in its own committed transaction, exactly as production —
+        // a test-level transaction would serialise nothing and defeat the race.
+        long host = newUser("host");
+        Event event = seedEventWithOpeningMessage(host, "Salaam! Doors open at 7."); // capacity 5 → both land GOING
+        VerifiedUser alice = caller(newUser("alice"));
+        VerifiedUser bob = caller(newUser("bob"));
+        long eventId = event.getId();
+
+        // Two threads, released as simultaneously as possible: both await the barrier, then hit the
+        // real @Transactional RSVP entry point (own tx each, both contending for the event-row lock).
+        CyclicBarrier startTogether = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<RsvpResult>> results = pool.invokeAll(List.of(
+                    () -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return rsvps.rsvp(alice, eventId);
+                    },
+                    () -> {
+                        startTogether.await(5, TimeUnit.SECONDS);
+                        return rsvps.rsvp(bob, eventId);
+                    }));
+            for (Future<RsvpResult> result : results) {
+                // .get() surfaces any exception from either thread — both RSVPs must succeed as GOING.
+                assertThat(result.get(30, TimeUnit.SECONDS).state()).isEqualTo(AttendanceState.GOING);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // EXACTLY ONE announcement, no matter who won the race — never two.
+        Conversation thread = conversations.findByEventId(eventId).orElseThrow();
+        var announcements = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId())
+                .stream()
+                .filter(m -> m.getKind() == MessageKind.ANNOUNCEMENT)
+                .toList();
+        assertThat(announcements)
+                .as("concurrent first chat-open auto-posts the opening message exactly once")
+                .hasSize(1);
+        assertThat(announcements.get(0).getBody()).isEqualTo("Salaam! Doors open at 7.");
+        assertThat(events.findById(eventId).orElseThrow().getOpeningMessagePostedAt())
+                .as("idempotency stamp committed by the winning transaction")
+                .isNotNull();
+    }
+
+    @Test
+    void noOpeningMessageConfiguredMeansNothingIsAutoPosted() {
+        long host = newUser("host");
+        Event event = seedEvent(host, 5, false, null); // no opening message
+        long attendee = newUser("attendee");
+
+        rsvps.rsvp(caller(attendee), event.getId());
+
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .as("no opening message → nothing auto-posted")
+                .isEmpty();
+        assertThat(events.findById(event.getId()).orElseThrow().getOpeningMessagePostedAt())
+                .isNull();
+    }
+
+    @Test
+    void blankOpeningMessageIsTreatedAsNone() {
+        long host = newUser("host");
+        Event event = seedEventWithOpeningMessage(host, "   "); // blank = none
+        long attendee = newUser("attendee");
+
+        rsvps.rsvp(caller(attendee), event.getId());
+
+        Conversation thread = conversations.findByEventId(event.getId()).orElseThrow();
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .isEmpty();
     }
 
     // ── join / leave sync ────────────────────────────────────────────────────────────────────────
@@ -395,6 +535,13 @@ class EventChatLifecycleIntegrationTest extends AbstractIntegrationTest {
         event.setCapacity(capacity);
         event.setIncludeWaitlistInChat(includeWaitlistInChat);
         event.setEndAt(endAt);
+        return events.saveAndFlush(event);
+    }
+
+    /** A visible-now event (as {@link #seedEvent}) carrying an opening message (TM-710). */
+    private Event seedEventWithOpeningMessage(long hostId, String openingMessage) {
+        Event event = seedEvent(hostId, 5, false, null);
+        event.setOpeningMessage(openingMessage);
         return events.saveAndFlush(event);
     }
 

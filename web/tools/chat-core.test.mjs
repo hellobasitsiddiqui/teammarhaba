@@ -27,6 +27,7 @@ import {
   readReceiptLabel,
   toThreadMessage,
   toThreadMessages,
+  isAnnouncement,
   MAX_MESSAGE_LENGTH,
   validateDraft,
   composeAvailability,
@@ -836,4 +837,40 @@ test("threadSignature: an in-place edit (same count/last-id/last-sortAt) still c
   ];
   // Count + last id + last sortAt are identical, but the edit must be detectable so a poll repaints it.
   assert.notEqual(threadSignature(base), threadSignature(editedInPlace));
+});
+
+// ── announcement classification (TM-710) ───────────────────────────────────────────────────────────
+
+test("isAnnouncement: only the ANNOUNCEMENT kind counts", () => {
+  assert.equal(isAnnouncement({ kind: "ANNOUNCEMENT" }), true);
+  assert.equal(isAnnouncement({ kind: "ATTENDEE" }), false);
+});
+
+test("isAnnouncement: case-insensitive + whitespace-tolerant (defensive against payload casing)", () => {
+  assert.equal(isAnnouncement({ kind: "announcement" }), true);
+  assert.equal(isAnnouncement({ kind: "  Announcement  " }), true);
+});
+
+test("isAnnouncement: degrades safely with a missing / unknown / non-string kind", () => {
+  assert.equal(isAnnouncement({}), false); // every pre-TM-710 message (no kind) is a normal message
+  assert.equal(isAnnouncement(undefined), false);
+  assert.equal(isAnnouncement({ kind: null }), false);
+  assert.equal(isAnnouncement({ kind: 42 }), false);
+  assert.equal(isAnnouncement({ kind: "SOMETHING_ELSE" }), false);
+});
+
+test("toThreadMessage: carries the announcement flag from the message kind", () => {
+  const now = new Date("2026-07-14T12:00:00Z");
+  const announcement = toThreadMessage(
+    { id: 7, body: "Doors open at 7pm", kind: "ANNOUNCEMENT", createdAt: "2026-07-14T11:00:00Z" }, now);
+  assert.equal(announcement.announcement, true);
+  assert.equal(announcement.body, "Doors open at 7pm");
+
+  const ordinary = toThreadMessage(
+    { id: 8, body: "see you there", kind: "ATTENDEE", createdAt: "2026-07-14T11:01:00Z" }, now);
+  assert.equal(ordinary.announcement, false);
+
+  // A legacy message with no kind is a normal attendee message, never an announcement.
+  const legacy = toThreadMessage({ id: 9, body: "hi", createdAt: "2026-07-14T11:02:00Z" }, now);
+  assert.equal(legacy.announcement, false);
 });

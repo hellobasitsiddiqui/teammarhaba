@@ -4589,6 +4589,52 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
 .tm-chat-from-name { font-weight: 600; }
 .tm-chat-system-stamp { font-size: var(--fs-1); color: var(--muted); }
 
+/* ── Admin/host announcement (TM-710) ──────────────────────────────────────────────────────────────
+   An ANNOUNCEMENT-kind message (the auto-posted event opening message, or an admin-sent announcement)
+   in an event group chat: a centred, visually-distinct card — a warm accent border/wash + the
+   megaphone attribution — so it reads unmistakably apart from an attendee bubble. Additive selectors,
+   themes off the Paper tokens. */
+.tm-chat-announcement {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    max-width: 92%;
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) solid color-mix(in srgb, var(--accent) 55%, var(--fg));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface-card));
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.tm-chat-announcement .tm-chat-system-text {
+    padding: 0;
+    background: none;
+    color: var(--fg);
+    font-size: var(--fs-2);
+    font-weight: 500;
+    text-align: center;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* The admin "Send as announcement" toggle above the composer input (TM-710). Hidden for non-admins /
+   admin-broadcast threads (the `hidden` attribute), a compact labelled checkbox otherwise. */
+.tm-chat-announce-bar {
+    display: flex;
+    align-items: center;
+    padding: var(--space-1) var(--space-2) 0;
+}
+.tm-chat-announce-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--fs-1);
+    color: var(--muted);
+    cursor: pointer;
+}
+.tm-chat-announce-glyph { font-size: var(--fs-2); line-height: 1; }
+.tm-chat-announce-check { cursor: pointer; }
+
 /* The deep-link CTA under a message that carries one (TM-445) — a pill button that navigates in-app on
    tap (its href is a safe same-app hash route, resolved in chat-core.deepLinkCta). */
 .tm-chat-cta {

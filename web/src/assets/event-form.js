@@ -40,6 +40,8 @@ export const LOCATION_MAX = 500;
 export const URL_MAX = 2048;
 /** City cap — mirrors CreateEventRequest.city @Size(max = 120) (TM-408). */
 export const CITY_MAX = 120;
+/** Opening-message cap — mirrors Create/UpdateEventRequest.openingMessage @Size(max = 2000) (TM-710). */
+export const OPENING_MESSAGE_MAX = 2000;
 /** Minimum capacity — mirrors CreateEventRequest.capacity @Min(1); blank = unlimited. */
 export const CAPACITY_MIN = 1;
 /** Reveal-window bounds — mirror CreateEventRequest.locationRevealHours @Min(1) @Max(8760) (TM-408). */
@@ -228,6 +230,8 @@ export function validateEventDraft(draft = {}, { requireForCreate = true } = {})
   maxLen("mapUrl", URL_MAX);
   maxLen("onlineUrl", URL_MAX);
   maxLen("city", CITY_MAX);
+  // Opening message (TM-710): optional (blank = none); only the length cap applies.
+  maxLen("openingMessage", OPENING_MESSAGE_MAX);
 
   // Timezone: required + a real IANA id (mirrors @NotBlank + isTimezoneValid).
   const tz = cleanText(draft.timezone);
@@ -325,6 +329,9 @@ export function buildEventPayload(draft = {}) {
   putText("mapUrl");
   putText("onlineUrl");
   putText("city");
+  // Opening message (TM-710): optional group-chat opening message; blank = omitted (no change on PATCH,
+  // absent on create). Auto-posted once as an announcement when the event's chat first opens.
+  putText("openingMessage");
   // Venue reference (TM-519): the id of a saved venue picked from the library, or omitted for a
   // one-off free-text location. Sent as an integer id; the server validates it exists + is active.
   putInt("venueId");
@@ -360,6 +367,7 @@ export function toFormModel(event = {}) {
     mapUrl: str(event.mapUrl),
     onlineUrl: str(event.onlineUrl),
     city: str(event.city),
+    openingMessage: str(event.openingMessage),
     venueId: event.venueId == null ? "" : String(event.venueId),
     timezone: tz,
     startAt: utcIsoToZoned(event.startAt, tz),
