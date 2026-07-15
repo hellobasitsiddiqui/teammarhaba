@@ -3,6 +3,7 @@ package com.teammarhaba.backend.auth;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -27,6 +28,10 @@ import org.springframework.test.web.servlet.MockMvc;
  * a valid token reaches a protected endpoint and the caller identity is available; a
  * missing/invalid token is rejected with a JSON 401 in the RFC 7807 shape; a public endpoint
  * needs no token. Runs the full security chain on the shared Testcontainers harness.
+ *
+ * <p>TM-738 P0 (auth) characterization adds: the {@code SecurityConfig} permit-list is matched
+ * exactly (a prefix-adjacent sibling of a permit-listed route is still a uniform 401, so the entries
+ * are not accidentally prefix-wildcarded into an authz hole).
  */
 @AutoConfigureMockMvc
 class FirebaseAuthIntegrationTest extends AbstractIntegrationTest {
@@ -108,5 +113,50 @@ class FirebaseAuthIntegrationTest extends AbstractIntegrationTest {
     @Test
     void publicEndpointNeedsNoToken() throws Exception {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
+    }
+
+    /**
+     * TM-738 P0 (auth): the {@code SecurityConfig} permit-list must be matched EXACTLY, not as a prefix
+     * wildcard. The unauthenticated login/read routes are listed as literal paths
+     * ({@code /api/v1/auth/email-code/request}, {@code /api/v1/alerts/active}, …), NOT {@code .../**}. If
+     * any of them were accidentally prefix-wildcarded, a sibling route sharing the prefix would become
+     * publicly reachable — a real authz hole (e.g. an admin write hanging off {@code /api/v1/alerts/…}).
+     * This pins the exactness: a permit-listed path is reachable without a token (NOT 401), while a
+     * prefix-adjacent sibling of it falls through to {@code anyRequest().authenticated()} and gets the
+     * uniform 401. (Authorization is path-based and runs before dispatch, so a sibling with no handler is
+     * still a 401 — never a 404 — proving the deny reached it via the security chain, not the router.)
+     */
+    @Test
+    void securityConfig_permitListedRoutesAreExactNotPrefixWildcarded() throws Exception {
+        // Control: the EXACT permit-listed public read is reachable with no token (a real 200 handler),
+        // so the permit itself works — the siblings below aren't failing for some unrelated reason.
+        mockMvc.perform(get("/api/v1/alerts/active").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+
+        // Prefix-adjacent siblings of the permit-listed literals must NOT inherit the permit — each is
+        // protected, so an unauthenticated call is the uniform 401 (not 200, and not 404). If the entry
+        // were "/api/v1/alerts/**" these would leak through as public.
+        String[] siblingsThatMustRequireAuth = {
+            "/api/v1/alerts/activex", // trailing extension of "alerts/active"
+            "/api/v1/alerts", // parent of "alerts/active"
+            "/api/v1/auth/email-code/requestx", // trailing extension of "email-code/request"
+            "/api/v1/auth/email-code", // parent of the email-code login routes
+            "/api/v1/auth/email-code/peek" // the api-prefixed decoy: the real (permitted) peek is the
+            // UNprefixed /auth/email-code/peek; this /api/v1-prefixed one is NOT permit-listed
+        };
+        for (String sibling : siblingsThatMustRequireAuth) {
+            mockMvc.perform(get(sibling))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.status").value(401));
+        }
+
+        // And a POST sibling of the exact login routes is likewise protected (the permit is per exact
+        // path + covers the route, not the whole email-code subtree), so no token => 401.
+        mockMvc.perform(post("/api/v1/auth/email-code/requestx")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"probe@example.com\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401));
     }
 }
