@@ -39,9 +39,27 @@ async function peekCode(email) {
   return (await res.text()).trim();
 }
 
-/** Sign in a fresh email-code user (a never-seen address ⇒ a brand-new, un-onboarded account). */
-async function signInFreshUser(page, email) {
-  await page.goto("/#/login");
+/**
+ * Sign in a fresh email-code user (a never-seen address ⇒ a brand-new, un-onboarded account).
+ *
+ * `deepLink` reproduces the REAL "deep-linked a protected page while signed out" entry: we navigate
+ * straight to it first, and the signed-out guard (router.js: `!signedIn && isProtected`) stashes it
+ * in `tm.intendedRoute` and bounces us to the login form. That stash is what the guard restores after
+ * the first-run gates clear — so the user lands back on the page they originally wanted.
+ *
+ * NB: the intended route MUST be stashed by a signed-out deep-link like this, NOT by a `goto` AFTER
+ * sign-in. Sign-in fires a nav-first guard (TM-307) that routes the still-cached-as-onboarded user to
+ * HOME, and the follow-up background re-guard then stashes HOME before a post-sign-in goto can register
+ * — so HOME would win the stash and the user would never be returned to the deep-linked route.
+ */
+async function signInFreshUser(page, email, deepLink) {
+  if (deepLink) {
+    // Signed-out deep-link to a protected route ⇒ the guard stashes it and redirects to the login form.
+    await page.goto(`/#${deepLink.replace(/^#/, "")}`);
+    await expect(page).toHaveURL(/#\/login$/);
+  } else {
+    await page.goto("/#/login");
+  }
   await expect(page.locator("#auth-signed-out")).toBeVisible();
   await page.fill("#email", email);
   const requested = page.waitForResponse(
@@ -66,12 +84,13 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   const location = `Gateville-${run}`;
   const age = 27;
 
-  await signInFreshUser(page, email);
+  // DEEP-LINK the Profile page as a brand-new user: the signed-out guard stashes #/profile as the
+  // intended route and bounces to the login form; we then sign in. The intended-route memory is what
+  // the guard restores once BOTH first-run gates clear, so the user is returned to #/profile — not home.
+  await signInFreshUser(page, email, "#/profile");
 
-  // DEEP-LINK the Profile page. A not-yet-onboarded user must NOT reach it — the guard intercepts.
-  await page.goto("/#/profile");
-
-  // GATED: the guard bounced the profile deep-link onto the onboarding gate. The onboarding view is
+  // GATED: a signed-in but not-yet-onboarded user still can't reach the Profile page — the guard forces
+  // the onboarding gate first (the stashed #/profile is preserved for after). The onboarding view is
   // shown; neither the requested Profile view nor the signed-in home shell is visible.
   await expect(page.locator("#onboarding-view")).toBeVisible();
   await expect(page.locator("#onboarding-form")).toBeVisible();

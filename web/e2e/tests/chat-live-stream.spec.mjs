@@ -102,13 +102,17 @@ async function findConversationId(headers, eventId) {
   return row.id;
 }
 
-/** Resolve the OTHER member's numeric DB userId from the thread's roster (GET /conversations/{id}/members
- *  → ConversationMemberResponse `{ userId, displayName, role }`, TM-469). The roster EXCLUDES the caller,
- *  so calling it as member A on a two-member thread returns exactly member B. We key on "the sole other
- *  member" rather than displayName because a JIT-provisioned seed account starts with an EMPTY
+/** Resolve the OTHER ordinary MEMBER's numeric DB userId from the thread's roster
+ *  (GET /conversations/{id}/members → ConversationMemberResponse `{ userId, displayName, role }`, TM-469).
+ *  The roster EXCLUDES the caller, so calling it as member A returns everyone else in the thread. For an
+ *  EVENT_GROUP thread that is NOT just member B: the event ORGANISER is auto-added as an ADMIN member
+ *  (MemberRole: "the event organiser / the broadcaster is an ADMIN member of their thread"), so A's roster
+ *  is [ADMIN organiser, MEMBER B] — two entries, not one. We therefore filter to role MEMBER (excluding the
+ *  ADMIN organiser) and expect exactly one, which is B (A is the excluded caller). We key on role + "sole
+ *  other MEMBER" rather than displayName because a JIT-provisioned seed account starts with an EMPTY
  *  displayName (UserService: "displayName starts empty") — it's only set by the full onboarding these
  *  seeds skip — so a name match would be unreliable/ambiguous. The moderation mute endpoint is keyed on
- *  this numeric userId (a path variable). Throws if the roster isn't exactly one other member. */
+ *  this numeric userId (a path variable). Throws if there isn't exactly one other MEMBER. */
 async function findOtherMemberUserId(headers, conversationId) {
   const res = await fetch(`${API_BASE_URL}/api/v1/conversations/${conversationId}/members`, { headers });
   if (!res.ok) {
@@ -116,13 +120,17 @@ async function findOtherMemberUserId(headers, conversationId) {
   }
   const roster = await res.json();
   const members = Array.isArray(roster) ? roster : [];
-  if (members.length !== 1) {
+  // Exclude the ADMIN organiser (auto-added to every EVENT_GROUP thread) — we only want the ordinary
+  // MEMBER participant (User B). The caller (User A) is already excluded from the roster by the endpoint.
+  const ordinaryMembers = members.filter((m) => m.role === "MEMBER");
+  if (ordinaryMembers.length !== 1) {
     throw new Error(
-      `expected exactly one OTHER member in thread ${conversationId} (roster excludes the caller), ` +
-        `got ${members.length}: ${JSON.stringify(roster)} — did both A and B RSVP GOING, and only them?`,
+      `expected exactly one OTHER MEMBER in thread ${conversationId} (roster excludes the caller; ` +
+        `the ADMIN organiser is filtered out), got ${ordinaryMembers.length} of ` +
+        `${members.length} roster entries: ${JSON.stringify(roster)} — did both A and B RSVP GOING?`,
     );
   }
-  return members[0].userId;
+  return ordinaryMembers[0].userId;
 }
 
 /** Post a message to the thread via the real post path (POST /conversations/{id}/messages, TM-447) as the
@@ -298,9 +306,10 @@ test.describe("@chat-live event-chat live SSE stream journeys (TM-738)", () => {
     expect((await apiRsvp(waiterHeaders, event.id)).state).toBe("GOING");
 
     const conversationId = await findConversationId(waiterHeaders, event.id);
-    // B's numeric userId, resolved from A's roster: A and B are the ONLY two members, and the roster
-    // excludes the caller (A), so it returns exactly B. (Seed accounts have empty displayNames, so we
-    // key on "the sole other member", not a name — see findOtherMemberUserId.)
+    // B's numeric userId, resolved from A's roster: the thread has the ADMIN organiser + A + B, so A's
+    // roster (which excludes the caller A) is [ADMIN organiser, MEMBER B]. findOtherMemberUserId filters
+    // to role MEMBER — dropping the ADMIN organiser — leaving exactly B. (Seed accounts have empty
+    // displayNames, so we key on role + "the sole other MEMBER", not a name — see findOtherMemberUserId.)
     const waiterUserId = await findOtherMemberUserId(goerHeaders, conversationId);
     expect(waiterUserId).toBeTruthy();
 
