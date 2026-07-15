@@ -826,9 +826,13 @@ async function runCommand(view, detail, spec) {
     // claim race) rather than a generic error. A 401 will already have redirected via apiFetch.
     toast(core.commandErrorMessage(err), { type: "error" });
   } finally {
-    // Always re-fetch — even on error the server state may have moved (e.g. a lost claim race means
-    // the spot's gone and we're still waitlisted), so the UI must reflect the truth.
-    renderDetail(view, id);
+    // Re-fetch so the UI reflects the truth — even on error the server state may have moved (e.g. a
+    // lost claim race means the spot's gone and we're still waitlisted). BUT only if the user is still
+    // on THIS event's detail (TM-733): a command can resolve after they've navigated on — a paid RSVP
+    // hands off to the checkout screen, and any command awaiting a slow response the user has since
+    // left — and re-rendering here would paint a stale event detail over the route they moved to.
+    const hash = typeof window !== "undefined" ? window.location?.hash : "";
+    if (core.isViewingEventDetail(hash, id)) renderDetail(view, id);
   }
 }
 

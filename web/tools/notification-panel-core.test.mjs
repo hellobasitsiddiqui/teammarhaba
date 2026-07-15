@@ -172,6 +172,47 @@ test("panelUnreadTotal sums unread chat members and unread items", () => {
   assert.equal(panelUnreadTotal(null), 0);
 });
 
+/* ── TM-733: a chat/mention group keeps a valid deep link even when it isn't a #/chat/{id} thread ── */
+
+// An event-group-chat mention's deep link is the EVENT detail (`#/events/{id}`) — PushRoutes.eventDetail,
+// see MentionNotifier.deepLinkFor — not a chat-thread route. It's still classified as chat (CHAT_MENTION
+// type includes "CHAT"), so it must group AND stay tappable to the event, not navigate nowhere.
+test("buildPanel keeps a chat/mention group's tap route when the deep link is an event detail (TM-733)", () => {
+  const feed = [
+    { id: 9, type: "CHAT_MENTION", title: "Coffee & Code", body: "Ali mentioned you", deepLink: "#/events/42", createdAt: "2026-07-09T12:00:00Z", read: false },
+  ];
+  const [group] = buildPanel(feed);
+  assert.equal(group.kind, CHAT_GROUP);
+  assert.equal(group.route, "#/events/42"); // the valid deep link is preserved, NOT discarded to null
+  assert.equal(group.unread, 1);
+  assert.equal(group.icon, CHAT_ICON);
+});
+
+// The strict thread route stays the merge key: a mention (event-detail link) and a thread message for a
+// DIFFERENT event must not collapse into one group just because neither yields a chat-thread route.
+test("buildPanel groups mention-by-title but still resolves each group's own tap route (TM-733)", () => {
+  const feed = [
+    { id: 1, type: "CHAT_MENTION", title: "Coffee & Code", body: "Ali mentioned you", deepLink: "#/events/42", createdAt: "2026-07-09T10:00:00Z", read: false },
+    { id: 2, type: "CHAT_MENTION", title: "Coffee & Code", body: "Sam mentioned you", deepLink: "#/events/42", createdAt: "2026-07-09T11:00:00Z", read: false },
+    { id: 3, type: "CHAT_MENTION", title: "Dog Walk", body: "Jo mentioned you", deepLink: "#/events/8", createdAt: "2026-07-09T09:00:00Z", read: false },
+  ];
+  const groups = buildPanel(feed).filter((s) => s.kind === CHAT_GROUP);
+  assert.equal(groups.length, 2); // Coffee (2 members merged by title) + Dog Walk
+  const coffee = groups.find((g) => g.title === "Coffee & Code");
+  assert.equal(coffee.route, "#/events/42");
+  assert.equal(coffee.unread, 2);
+  assert.equal(groups.find((g) => g.title === "Dog Walk").route, "#/events/8");
+});
+
+// A genuinely link-less chat note still has no tap target (grouped by title, route stays null).
+test("buildPanel leaves a link-less chat group's route null (nothing to open) (TM-733)", () => {
+  const [group] = buildPanel([
+    { id: 1, type: "CHAT_MESSAGE", title: "Coffee & Code", body: "hi", createdAt: "2026-07-09T10:00:00Z", read: false },
+  ]);
+  assert.equal(group.kind, CHAT_GROUP);
+  assert.equal(group.route, null);
+});
+
 /* ────────────────────────── recalled (tombstoned) admin message — TM-473 ─────────────────────── */
 
 test("buildPanel carries the recalled tombstone state + time on a seen, recalled admin message", () => {

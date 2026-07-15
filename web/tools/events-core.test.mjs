@@ -47,6 +47,7 @@ import {
   browseListModel,
   ENTITLEMENT_DECISION,
   requiresPaidCheckout,
+  isViewingEventDetail,
 } from "../src/assets/events-core.js";
 
 const NOON_UTC = Date.parse("2026-07-05T12:00:00Z");
@@ -698,4 +699,36 @@ test("eventImageRef: a Firebase Storage path → resolve before rendering (the T
   // URLs, so it silently showed no image. It must now be classified as a resolvable path.
   assert.deepEqual(eventImageRef("event-images/123"), { kind: "path", value: "event-images/123" });
   assert.deepEqual(eventImageRef("  event-images/123  "), { kind: "path", value: "event-images/123" });
+});
+
+// --- isViewingEventDetail (TM-733): the RSVP command's post-action re-render guard ------------------
+test("isViewingEventDetail: matches the detail route for this exact id", () => {
+  assert.equal(isViewingEventDetail("#/events/42", "42"), true);
+  assert.equal(isViewingEventDetail("#/events/42", 42), true); // numeric id coerces
+});
+
+test("isViewingEventDetail: false once the user has navigated away (the defect path)", () => {
+  // A command (checkout hand-off, a slow request) resolves after the user left THIS detail — the
+  // finally re-render must be skipped so it can't paint a stale event over the new route.
+  assert.equal(isViewingEventDetail("#/events", "42"), false); // back on the list
+  assert.equal(isViewingEventDetail("#/events/99", "42"), false); // a different event detail
+  assert.equal(isViewingEventDetail("#/membership/subscribe/GOLD", "42"), false); // checkout screen
+  assert.equal(isViewingEventDetail("#/home", "42"), false);
+});
+
+test("isViewingEventDetail: decodes the id so an encoded hash still matches", () => {
+  assert.equal(isViewingEventDetail("#/events/a%20b", "a b"), true);
+  assert.equal(isViewingEventDetail("#/events/a b", "a b"), true);
+});
+
+test("isViewingEventDetail: blank/absent hash or id never matches", () => {
+  assert.equal(isViewingEventDetail("", "42"), false);
+  assert.equal(isViewingEventDetail(undefined, "42"), false);
+  assert.equal(isViewingEventDetail("#/events/42", ""), false);
+  assert.equal(isViewingEventDetail("#/events/42", null), false);
+  assert.equal(isViewingEventDetail("#/events/", "42"), false); // list-with-trailing-slash, no id
+});
+
+test("isViewingEventDetail: a malformed %-escape falls back to the raw segment (no throw)", () => {
+  assert.equal(isViewingEventDetail("#/events/%E0%A4%A", "%E0%A4%A"), true);
 });
