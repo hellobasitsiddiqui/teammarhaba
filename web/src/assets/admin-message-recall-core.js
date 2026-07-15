@@ -90,20 +90,22 @@ export function summariseRecall(result = {}) {
 
 /**
  * The recall control's state for a given sent message. A message is recalled iff it carries a
- * non-empty `recalledAt` (the header marker the backend sets, surfaced on AdminSentHistoryResponse) OR
- * an explicit `recalled === true` flag — so both the sent-history row shape (TM-442/TM-444) and a
- * locally-updated compose success object resolve correctly. Returns:
+ * non-empty `recalledAt` (the header marker the backend sets), an explicit `recalled === true` flag,
+ * OR a `status` of `RECALLED` (the derived delivery status the sent-history list projects, TM-473/
+ * TM-444 — the list row shape carries the status, not always a `recalledAt`) — so the compose success
+ * object AND the sent-history row shape both resolve correctly. Returns:
  *   - `recalled`  : whether it has already been recalled;
  *   - `canRecall` : whether the recall action should be offered (only a live message);
  *   - `label`     : the button/state text ({@link RECALL_LABEL} live, {@link RECALLED_LABEL} once done);
  *   - `note`      : a short status line for the recalled state ("" while live), so a row/panel can show
  *                   "Recalled" without each surface re-deriving the copy.
  *
- * @param {{recalledAt?: ?string, recalled?: boolean}} [message]
+ * @param {{recalledAt?: ?string, recalled?: boolean, status?: ?string}} [message]
  * @returns {{recalled: boolean, canRecall: boolean, label: string, note: string}}
  */
 export function recallControlModel(message = {}) {
-  const recalled = message.recalled === true || isNonEmptyString(message.recalledAt);
+  const recalledStatus = isNonEmptyString(message.status) && message.status.trim().toUpperCase() === "RECALLED";
+  const recalled = message.recalled === true || isNonEmptyString(message.recalledAt) || recalledStatus;
   return {
     recalled,
     canRecall: !recalled,

@@ -92,3 +92,19 @@ test("blank / whitespace recalledAt is treated as still-live", () => {
   assert.equal(recallControlModel({}).canRecall, true);
   assert.equal(recallControlModel().canRecall, true); // no arg
 });
+
+test("a RECALLED status row resolves to the recalled state (sent-history rows carry status, not recalledAt) (TM-734)", () => {
+  const model = recallControlModel({ status: "RECALLED" });
+  assert.equal(model.recalled, true);
+  assert.equal(model.canRecall, false);
+  assert.equal(model.label, RECALLED_LABEL);
+  assert.match(model.note, /recalled/i);
+  // Case-insensitive on the wire token.
+  assert.equal(recallControlModel({ status: "recalled" }).recalled, true);
+});
+
+test("a live sent-history row (status SENT/EMPTY) still offers recall (TM-734)", () => {
+  assert.equal(recallControlModel({ status: "SENT" }).canRecall, true);
+  assert.equal(recallControlModel({ status: "EMPTY" }).canRecall, true);
+  assert.equal(recallControlModel({ status: "" }).canRecall, true);
+});

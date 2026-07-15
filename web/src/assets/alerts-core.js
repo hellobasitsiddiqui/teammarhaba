@@ -185,3 +185,27 @@ export function recordDismissal(alert, { ackStore, sessionStore }) {
   }
   // PERSISTENT: nothing to record.
 }
+
+/**
+ * Decide whether a fetched alerts result should REPLACE the currently-rendered set, or be ignored so
+ * the last-rendered banners stand (TM-734).
+ *
+ * THE BUG THIS GUARDS. {@code getActiveAlerts()} is best-effort: historically it resolved to {@code []}
+ * on BOTH a genuinely-empty active set AND a transient network/HTTP failure — the two were
+ * indistinguishable. The poller adopted that {@code []} verbatim, so a single failed 5-min poll WIPED
+ * every banner on screen — including a PERSISTENT CRITICAL operator notice (e.g. "events cancelled") —
+ * for up to a full poll interval, exactly when an operator most needs it up. The fetch now signals
+ * failure as {@code null} (distinct from an empty array), and this decides what to do with it:
+ *   • {@code null}   → the fetch FAILED → do NOT adopt; keep the last-rendered set (a blip never clears).
+ *   • {@code []}     → a real, successful empty set → adopt it (the operator genuinely pulled the notice).
+ *   • {@code [...]}  → a real set → adopt it.
+ * A non-array, non-null value is treated defensively as failure (keep last) rather than blanking.
+ *
+ * @param {?Array} fetched the value {@code getActiveAlerts()} resolved to (an array on success, null on failure).
+ * @returns {{adopt: boolean, alerts: Array}} adopt=false means "leave the current banners untouched".
+ */
+export function adoptActiveResult(fetched) {
+  if (Array.isArray(fetched)) return { adopt: true, alerts: fetched };
+  // null (or any non-array) means the fetch didn't return a real set — keep whatever is on screen.
+  return { adopt: false, alerts: [] };
+}

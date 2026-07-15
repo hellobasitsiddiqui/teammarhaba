@@ -128,22 +128,26 @@ export async function resendVerification() {
  * {@link apiFetch} — whose 401-refresh/redirect must never fire on the anonymous banner poll. The
  * backend decides "active" server-side; this just returns the list.
  *
- * <p>Best-effort by contract: a non-2xx or a network error resolves to {@code []} (never throws), so
- * the ~5-minute poll in alerts.js can call it in the app shell without a try/catch and a transient
- * backend blip simply shows no banner.
+ * <p>Best-effort by contract: never throws, so the ~5-minute poll in alerts.js can call it in the app
+ * shell without a try/catch. A SUCCESSFUL read returns the array (possibly empty — the operator pulled
+ * every notice); a FAILURE (non-2xx or network error) returns {@code null}, DISTINCT from an empty
+ * array, so the caller can tell "genuinely no alerts" apart from "couldn't reach the server" and keep
+ * the last-rendered banners on a transient blip rather than wiping a PERSISTENT CRITICAL notice (TM-734,
+ * see alerts-core.adoptActiveResult).
  *
- * @returns {Promise<Array<{id: number, message: string, level: string, dismissal: string}>>}
+ * @returns {Promise<?Array<{id: number, message: string, level: string, dismissal: string}>>} the active
+ *   alerts on success (possibly empty), or {@code null} when the fetch failed.
  */
 export async function getActiveAlerts() {
   try {
     const response = await fetch(resolveUrl("/api/v1/alerts/active"), {
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) return [];
+    if (!response.ok) return null; // HTTP error → failure, NOT "no alerts" — keep the last banners.
     const data = await response.json();
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data : []; // a valid but non-array body is a real (empty) success.
   } catch {
-    return [];
+    return null; // network/parse error → failure — keep the last banners.
   }
 }
 

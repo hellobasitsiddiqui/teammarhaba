@@ -167,6 +167,45 @@ export function buildVenuePayload(draft = {}) {
 }
 
 /**
+ * The optional venue fields a PATCH can carry — the ones {@link buildVenuePayload} OMITS when blank.
+ * Same PATCH convention as events (UpdateVenueRequest, TM-519): a null/absent field is "leave
+ * unchanged", so a blanked optional is indistinguishable from an untouched one and clearing it back
+ * to empty silently no-ops. This list is what {@link clearedOptionalVenueFields} checks so the submit
+ * handler can WARN rather than toast a false "saved" (TM-734). `name`/`addressLine` are excluded —
+ * required, so validation blocks blanking them.
+ */
+export const CLEARABLE_OPTIONAL_VENUE_FIELDS = [
+  "city",
+  "mapUrl",
+  "notes",
+  "accessibility",
+  "parking",
+  "indoorOutdoor",
+  "capacity",
+  "latitude",
+  "longitude",
+];
+
+/**
+ * On EDIT, the optional venue fields the admin has blanked that the PATCH cannot express — the venue
+ * carried a value, the draft leaves it empty, yet {@link buildVenuePayload} omits it (so the server
+ * keeps the old value). Returns the affected field keys (empty on create, or when nothing was
+ * actually cleared) so the caller can warn instead of reporting a save that didn't happen (TM-734).
+ *
+ * @param {object} original the VenueResponse being edited (omit/empty on create).
+ * @param {object} draft the raw form values being submitted.
+ * @returns {string[]} the keys of previously-set optionals now blanked but not transmittable.
+ */
+export function clearedOptionalVenueFields(original, draft = {}) {
+  if (!original || typeof original !== "object") return [];
+  const before = toVenueFormModel(original);
+  const body = buildVenuePayload(draft);
+  return CLEARABLE_OPTIONAL_VENUE_FIELDS.filter(
+    (key) => cleanText(before[key]) !== "" && !(key in body),
+  );
+}
+
+/**
  * The inverse of the form: a VenueResponse (TM-519) → the form field values for the edit prefill.
  * Blank/absent optionals come back as "".
  *
