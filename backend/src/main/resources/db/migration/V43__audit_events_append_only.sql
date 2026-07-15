@@ -1,4 +1,4 @@
--- V42__audit_events_append_only — enforce audit-log immutability at the DB level (TM-724)
+-- V43__audit_events_append_only — enforce audit-log immutability at the DB level (TM-724)
 --
 -- Background: V4 created audit_events as an "append-only" log, but that guarantee was APPLICATION
 -- CONVENTION ONLY (the entity exposes no mutators, the repository declares no update/delete). Nothing
