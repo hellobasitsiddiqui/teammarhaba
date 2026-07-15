@@ -54,3 +54,25 @@ test("falsy err clears the banner (empty string)", () => {
 test("an error object with neither code nor message gets the generic fallback", () => {
   assert.equal(authErrorMessage({}), GENERIC_ERROR);
 });
+
+// TM-738 P2 (auth): the phone/SMS and email-code sign-in paths are the app's primary front doors, but
+// their Firebase error codes weren't asserted here — only the password/email/network ones were. Pin
+// that each of those codes resolves to a mapped, human-facing message (never the raw Firebase string
+// and never the generic fallback), so a future edit to MESSAGES can't silently regress the phone/OTP
+// error copy back to a developer-facing "Firebase: Error (auth/…)." leak on those flows.
+test("SMS/phone and email-code path codes resolve to their friendly message (TM-738)", () => {
+  const codeErrorPaths = [
+    "auth/invalid-phone-number", // phone sign-in: a bad number
+    "auth/invalid-verification-code", // phone/email OTP: a wrong code
+    "auth/code-expired", // phone/email OTP: an expired code
+  ];
+  for (const code of codeErrorPaths) {
+    const msg = authErrorMessage({ code, message: `Firebase: Error (${code}).` });
+    // Uses the mapped copy verbatim...
+    assert.equal(msg, MESSAGES[code], `${code} resolves to its mapped message`);
+    // ...which is a real, non-generic, non-Firebase-leaking string.
+    assert.notEqual(msg, GENERIC_ERROR, `${code} is mapped, not the generic fallback`);
+    assert.doesNotMatch(msg, /Firebase/, `${code} must not leak the raw Firebase string`);
+    assert.ok(msg.length > 0, `${code} has non-empty friendly copy`);
+  }
+});
