@@ -38,7 +38,8 @@ class FirebaseAuthIntegrationTest extends AbstractIntegrationTest {
         FirebaseToken token = mock(FirebaseToken.class);
         when(token.getUid()).thenReturn("uid-123");
         when(token.getEmail()).thenReturn("user@example.com");
-        when(firebaseAuth.verifyIdToken("valid-token")).thenReturn(token);
+        // The filter verifies with checkRevoked=true (TM-723), so stub the two-arg overload.
+        when(firebaseAuth.verifyIdToken("valid-token", true)).thenReturn(token);
 
         mockMvc.perform(get("/api/v1/ping").header(HttpHeaders.AUTHORIZATION, "Bearer valid-token"))
                 .andExpect(status().isOk())
@@ -57,7 +58,7 @@ class FirebaseAuthIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void invalidTokenIsRejectedWith401() throws Exception {
-        when(firebaseAuth.verifyIdToken("bad-token")).thenThrow(new RuntimeException("invalid token"));
+        when(firebaseAuth.verifyIdToken("bad-token", true)).thenThrow(new RuntimeException("invalid token"));
 
         mockMvc.perform(get("/api/v1/ping").header(HttpHeaders.AUTHORIZATION, "Bearer bad-token"))
                 .andExpect(status().isUnauthorized())

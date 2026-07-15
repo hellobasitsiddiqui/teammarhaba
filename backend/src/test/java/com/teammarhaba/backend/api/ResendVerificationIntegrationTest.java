@@ -55,7 +55,8 @@ class ResendVerificationIntegrationTest extends AbstractIntegrationTest {
         FirebaseToken token = mock(FirebaseToken.class);
         when(token.getUid()).thenReturn(uid);
         when(token.getEmail()).thenReturn(email);
-        when(firebaseAuth.verifyIdToken(tokenValue)).thenReturn(token);
+        // The filter verifies with checkRevoked=true (TM-723), so stub the two-arg overload.
+        when(firebaseAuth.verifyIdToken(tokenValue, true)).thenReturn(token);
 
         UserRecord record = mock(UserRecord.class);
         when(record.getEmail()).thenReturn(email);
