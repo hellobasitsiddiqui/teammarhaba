@@ -66,6 +66,7 @@ import { getMe } from "./api.js";
 import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
 import { updateTabbar } from "./tabbar.js";
+import { updateFooter } from "./footer.js";
 import { updateChatTabBadge } from "./chat-tab-badge.js";
 import { updateNotificationBell } from "./notification-bell.js";
 
@@ -523,6 +524,14 @@ function render() {
   // Driven from here so the bell shares router's single source of truth — this also gives the
   // "refresh on route change" AC for free, since render() runs on every hashchange + auth change.
   updateNotificationBell({ signedIn, gated });
+
+  // Footer login/marketing fragments (TM-666): scope the Service-status link + phone-privacy note to
+  // the logged-out login screen, and the "A product of 10xAI" byline to login / Home / Profile only —
+  // so they're no longer painted on every in-app screen. Router-driven for the same single-source-of-
+  // truth reason as the tab bar/bell above (render() reruns on every hashchange + auth change). Uses
+  // the RAW signedIn/route (not the `gated` flag): the byline showing on Home/Profile is a cosmetic
+  // credit, unrelated to the onboarding/terms gate, and a gated user only ever sees the gate route.
+  updateFooter({ signedIn, route });
 }
 
 /**
