@@ -67,7 +67,15 @@ public class SubscriptionCharge {
          */
         REFUND_DUE,
         /** The owed refund was issued at the provider (TM-625). Terminal — nothing further is owed. */
-        REFUNDED
+        REFUNDED,
+        /**
+         * The owed refund could not be issued automatically (TM-726): the {@code RefundSweepService}
+         * retried the provider refund up to its cap and it kept failing (a permanently-rejected refund).
+         * Terminal for the sweep — the row stops being retried and needs a human to reconcile. Distinct
+         * from {@link #REFUNDED} (money genuinely returned); before this a doomed refund sat
+         * {@link #REFUND_DUE} forever, retried indefinitely on every pass.
+         */
+        REFUND_ABANDONED
     }
 
     @Id
@@ -121,6 +129,15 @@ public class SubscriptionCharge {
     /** DB-authoritative creation timestamp ({@code DEFAULT now()}); read-only on the entity. */
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
+
+    /**
+     * How many times the {@code RefundSweepService} has retried the provider refund for a
+     * {@code REFUND_DUE} row (TM-726). Bumped on each failed sweep attempt; once it crosses the sweep's
+     * cap the row is abandoned ({@link Status#REFUND_ABANDONED}) so a permanently-rejected refund is not
+     * retried forever. Not touched by the inline best-effort refund at issue time.
+     */
+    @Column(name = "refund_attempts", nullable = false)
+    private int refundAttempts;
 
     /** App-managed: set on insert and bumped on every status change. */
     @Column(name = "updated_at", nullable = false)
@@ -226,6 +243,26 @@ public class SubscriptionCharge {
     public void markRefunded(Instant now) {
         this.status = Status.REFUNDED;
         this.updatedAt = now;
+    }
+
+    /**
+     * Record one failed sweep refund attempt (TM-726): bump {@link #refundAttempts} and, once it reaches
+     * {@code maxAttempts}, move the row to the terminal {@link Status#REFUND_ABANDONED} so the sweep stops
+     * retrying a permanently-rejected refund. Below the cap the row stays {@code REFUND_DUE} for the next
+     * pass. Returns {@code true} iff this attempt exhausted the budget (the row is now abandoned).
+     */
+    public boolean recordFailedRefundAttempt(int maxAttempts, Instant now) {
+        this.refundAttempts++;
+        this.updatedAt = now;
+        if (this.refundAttempts >= maxAttempts) {
+            this.status = Status.REFUND_ABANDONED;
+            return true;
+        }
+        return false;
+    }
+
+    public int getRefundAttempts() {
+        return refundAttempts;
     }
 
     public Long getId() {

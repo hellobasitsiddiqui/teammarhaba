@@ -197,6 +197,36 @@ class SubscriptionServiceTest {
         assertThat(abandoned.getProviderOrderId()).isEqualTo("rev-new");
     }
 
+    @Test
+    void reentrantCheckoutReusesTheCustomerStoredOnTheReusedPendingChargeInsteadOfCreatingANewOne() {
+        // The residual TM-726 closes: a re-entrant Subscribe checkout re-used its PENDING INITIAL charge
+        // (good) but still minted a BRAND-NEW Revolut customer every attempt (bad) — ignoring the customer
+        // id already stored on that charge, orphaning the previous customer and the card saved against it.
+        // The stored customer must be reused; no new customer created. (No Subscription row yet, so the
+        // only reuse source is the charge itself.)
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge abandoned =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        // A prior attempt registered the customer but never reached the provider order (providerOrderId
+        // stays null — the simple re-point path), so only the customer id carries over.
+        abandoned.setPaymentReference("revolut", null, "cust-stored", earlier);
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(
+                        42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
+                .thenReturn(Optional.of(abandoned));
+        when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-stored")))
+                .thenReturn(new PaymentOrder("rev-reentrant", "tok-reentrant"));
+
+        SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
+
+        // The stored customer was reused — NO new customer minted (the whole fix).
+        verify(payments, never()).createCustomer(any(), any(), any());
+        // …and the fresh provider order was opened against that same stored customer.
+        verify(payments).createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-stored"));
+        assertThat(result.paymentToken()).isEqualTo("tok-reentrant");
+        assertThat(abandoned.getProviderCustomerId()).isEqualTo("cust-stored");
+    }
+
     // ------------------------------------------------------------------ webhook activation
 
     @Test

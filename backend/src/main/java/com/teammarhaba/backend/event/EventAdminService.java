@@ -212,6 +212,7 @@ public class EventAdminService {
         event.setOpeningMessage(draft.openingMessage());
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);
+        requireConsistentPricing(event);
 
         Event saved = events.saveAndFlush(event);
         // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the
@@ -311,6 +312,7 @@ public class EventAdminService {
 
         requireConsistentTimes(event);
         requireConsistentAgeBand(event);
+        requireConsistentPricing(event);
 
         if (changed.isEmpty()) {
             return event; // nothing actually changed: no touch, no audit, no lifecycle signal
@@ -393,6 +395,22 @@ public class EventAdminService {
         Integer max = event.getAgeMax();
         if (min != null && max != null && min > max) {
             throw new BadRequestException("ageMin must be less than or equal to ageMax.");
+        }
+    }
+
+    /**
+     * The price/premium invariant, checked on the <em>merged</em> entity state (TM-726): a premium event
+     * must carry a price above £0. A premium event exists to be paid for by non-Diamond tiers
+     * ({@code EntitlementResolver} resolves premium → {@code PAY pricePence} for everyone below Diamond),
+     * so a premium event priced at £0 is a contradiction — it would drive a zero-amount provider order the
+     * gateway rejects. Rejected here at the admin edge, on the merged state, so a partial PATCH that sets
+     * {@code premium=true} against a persisted £0 price (or drops the price to 0 on a premium event) can't
+     * sneak past the request-level bean validation. A £0 <em>standard</em> event is fine (a genuinely free
+     * event) and the resolver treats a £0 premium defensively as FREE too — this is the input-side guard.
+     */
+    private static void requireConsistentPricing(Event event) {
+        if (event.isPremium() && event.getPricePence() <= 0) {
+            throw new BadRequestException("A premium event must have a price above £0.");
         }
     }
 

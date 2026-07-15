@@ -62,8 +62,16 @@ public final class EntitlementResolver {
         // the premium price. The first-event credit does NOT apply and is NOT consumed, and Monthly does
         // not cover premium (default assumption). Checked before the credit/coverage rules so the credit
         // can never leak onto a premium event.
+        //
+        // Guard the contradictory £0-premium combination (TM-726): a premium event priced at £0 is
+        // nonsensical — "PAY 0" would drive a zero-amount provider order the gateway rejects. Admin input
+        // validation rejects the combination up front (EventAdminService.requireConsistentPricing), but
+        // resolve it defensively here to FREE rather than PAY-0 so a legacy/backfilled £0-premium row can
+        // never produce a doomed zero-amount checkout. A premium event at a real price still PAYs it.
         if (premium) {
-            return new Entitlement(EntitlementDecision.PAY, pricePence, EntitlementReason.PAY_PREMIUM);
+            return pricePence <= 0
+                    ? new Entitlement(EntitlementDecision.FREE, 0, EntitlementReason.FREE_EVENT)
+                    : new Entitlement(EntitlementDecision.PAY, pricePence, EntitlementReason.PAY_PREMIUM);
         }
 
         // ---- standard (non-premium) events below ----

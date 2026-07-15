@@ -26,7 +26,6 @@ import * as api from "./api.js";
 import { el, clear } from "./ui.js";
 import {
   resolvePriceState,
-  checkoutPayload,
   createRevolutSdkLoader,
   formatPrice,
   isValidCardholderName,
@@ -99,8 +98,9 @@ function buildPayMount(amountPence) {
  *   • PAY     → a "Continue to payment" button that reveals the Pay mount (TM-478 placeholder);
  *   • UPGRADE → an "Upgrade to attend" link to the membership/tier screen (TM-480).
  * PAY runs the real Revolut checkout (TM-478): {@link startPayment} creates the order server-side and
- * mounts the card widget with the returned token. CONFIRM's frictionless RSVP wiring is future work (the
- * screen is not routed yet), so it exposes the payload; UPGRADE navigates.
+ * mounts the card widget with the returned token. CONFIRM runs the frictionless RSVP (TM-726):
+ * {@link startConfirm} posts the same server-side checkout, which for a FREE/INCLUDED entitlement records
+ * a CONFIRMED order and confirms the RSVP with no card step. UPGRADE navigates.
  * @param {object} state a resolvePriceState() result.
  * @param {object} event the event being checked out.
  * @returns {HTMLElement}
@@ -115,7 +115,7 @@ function buildAction(state, event) {
   }
 
   const isPay = state.checkout === CHECKOUT_MODE.PAY;
-  return el("button", {
+  const action = el("button", {
     type: "button",
     class: "tm-btn tm-checkout-action",
     text: isPay ? "Continue to payment" : "Reserve my place",
@@ -125,10 +125,13 @@ function buildAction(state, event) {
         startPayment(event, state);
         return;
       }
-      // CONFIRM's frictionless RSVP call lands in a later ticket; expose the payload for that wiring.
-      console.info("[membership-checkout] checkout intent:", checkoutPayload(event, state));
+      // Frictionless RSVP (TM-726): a FREE / INCLUDED commitment needs no card — POST the same server-side
+      // checkout, which records a CONFIRMED order and confirms the RSVP, then reflect it. Was a silent
+      // console.info no-op: the button looked live but reserved nothing.
+      startConfirm(action, event, state);
     },
   });
+  return action;
 }
 
 /** Read the client payment config (TM-478): the sandbox Revolut PUBLIC key + widget mode + SDK URL. */
@@ -246,6 +249,49 @@ function reflectPaid(mount, text) {
   if (!mount) return;
   clear(mount);
   mount.append(el("p", { class: "tm-checkout-pay-status tm-checkout-pay-paid", "aria-live": "polite", text }));
+}
+
+/**
+ * Run the CONFIRM (frictionless RSVP) flow (TM-726): a FREE / INCLUDED commitment carries no charge, so
+ * "Reserve my place" just POSTs the same server-side checkout (`api.checkout`) — which records a CONFIRMED
+ * order and confirms the RSVP with no card step — and reflects the result. Before this, the button was a
+ * silent `console.info` no-op: it looked live but reserved nothing.
+ *
+ * The button is disabled in-flight (so a double-tap can't double-post) and re-enabled on failure so the
+ * user can retry; every failure renders an inline, NON-throwing status message via the Pay mount's
+ * aria-live region — a hiccup must never white-screen the checkout screen. A response that unexpectedly
+ * demands payment (an entitlement changed under us) is handed to the PAY flow rather than dropped.
+ * @param {HTMLButtonElement} action the "Reserve my place" button (disabled in-flight, re-enabled on error).
+ * @param {object} event the event being reserved.
+ * @param {object} state the resolved price state.
+ */
+async function startConfirm(action, event, state) {
+  if (action && action.disabled) return; // in-flight guard: ignore a double-tap while a POST is running
+  const mount = typeof document !== "undefined" ? document.getElementById(PAY_MOUNT_ID) : null;
+  if (mount) {
+    mount.hidden = false;
+    setPayStatus(mount, "Reserving your place…");
+  }
+  if (action) action.disabled = true;
+
+  let result;
+  try {
+    result = await api.checkout(event?.id);
+  } catch (err) {
+    console.warn("[membership-checkout] reserve failed:", err?.status ?? "", err?.message ?? err);
+    setPayStatus(mount, "Couldn't reserve your place. Please try again.");
+    if (action) action.disabled = false;
+    return;
+  }
+
+  // A frictionless confirm settles server-side with paymentRequired:false — reflect the reservation.
+  if (!result || result.paymentRequired === false) {
+    reflectPaid(mount, "You're confirmed for this event.");
+    return; // stays disabled — the place is reserved, nothing more to do
+  }
+  // The entitlement changed under us and payment IS now required — hand off to the card flow rather than
+  // silently dropping it. startPayment re-reads the mount and drives the widget from the same result.
+  startPayment(event, state);
 }
 
 /**

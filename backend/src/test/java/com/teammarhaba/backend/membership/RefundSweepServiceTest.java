@@ -87,6 +87,28 @@ class RefundSweepServiceTest {
 
         assertThat(resolved).isFalse();
         assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_DUE); // retried next tick
+        assertThat(order.getRefundAttempts()).isEqualTo(1); // one attempt burned, still under the cap
+    }
+
+    @Test
+    void aPermanentlyRejectedOrderRefundIsAbandonedOnceTheRetryCapIsExhausted() {
+        // The residual TM-726 closes: a refund the provider will PERMANENTLY reject (already refunded out
+        // of band / too old / wrong amount) was retried FOREVER, hammering the same doomed full refund on
+        // every hourly pass. Now, after MAX_REFUND_ATTEMPTS failures the row moves to the terminal
+        // REFUND_ABANDONED so the sweep stops retrying and a human reconciles it.
+        Order order = refundDueOrder();
+        doThrow(new PaymentProviderException("order already refunded"))
+                .when(payments)
+                .refund(any(), anyInt(), any(), any());
+
+        for (int i = 1; i < RefundSweepService.MAX_REFUND_ATTEMPTS; i++) {
+            assertThat(service.processOrder(11L)).isFalse();
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_DUE); // still retried below the cap
+        }
+        // The final (cap-th) attempt exhausts the budget → terminal, no longer swept.
+        assertThat(service.processOrder(11L)).isFalse();
+        assertThat(order.getRefundAttempts()).isEqualTo(RefundSweepService.MAX_REFUND_ATTEMPTS);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.REFUND_ABANDONED);
     }
 
     @Test
@@ -145,6 +167,30 @@ class RefundSweepServiceTest {
 
         assertThat(resolved).isFalse();
         assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUND_DUE);
+        assertThat(charge.getRefundAttempts()).isEqualTo(1);
+    }
+
+    @Test
+    void aPermanentlyRejectedChargeRefundIsAbandonedOnceTheRetryCapIsExhausted() {
+        // The subscription-ledger twin of the order retry-cap (TM-726): a permanently-rejected charge
+        // refund is abandoned to the terminal REFUND_ABANDONED after MAX_REFUND_ATTEMPTS, not retried
+        // forever.
+        SubscriptionCharge charge = new SubscriptionCharge(
+                42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, Instant.now());
+        charge.setPaymentReference("revolut", "rev-sub-3", "cust-1", Instant.now());
+        charge.markRefundDue(Instant.now());
+        when(charges.findById(23L)).thenReturn(Optional.of(charge));
+        doThrow(new PaymentProviderException("order already refunded"))
+                .when(payments)
+                .refund(any(), anyInt(), any(), any());
+
+        for (int i = 1; i < RefundSweepService.MAX_REFUND_ATTEMPTS; i++) {
+            assertThat(service.processCharge(23L)).isFalse();
+            assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUND_DUE);
+        }
+        assertThat(service.processCharge(23L)).isFalse();
+        assertThat(charge.getRefundAttempts()).isEqualTo(RefundSweepService.MAX_REFUND_ATTEMPTS);
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUND_ABANDONED);
     }
 
     // ------------------------------------------------------------------ the scans feed the sweep
