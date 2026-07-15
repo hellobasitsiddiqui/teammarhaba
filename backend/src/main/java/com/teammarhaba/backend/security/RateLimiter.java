@@ -10,7 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 /**
  * Per-client token-bucket rate limiter for the API (TM-158). Each caller gets a bucket keyed by their
@@ -19,6 +18,11 @@ import org.springframework.util.StringUtils;
  * request is allowed while the bucket has a token; once empty it is refused until the budget refills
  * (see {@link RateLimitProperties} for the numbers). {@link RateLimitFilter} turns a refusal into an
  * RFC 7807 {@code 429} with {@code Retry-After}.
+ *
+ * <p><strong>Client IP behind Cloud Run (TM-732).</strong> For anonymous callers the bucket is keyed
+ * by client IP, resolved via {@link ForwardedClientIp}: the entry Cloud Run appended to
+ * {@code X-Forwarded-For} (trusted hops counted from the right), never the attacker-controlled leftmost
+ * entry a caller could prepend to forge an IP and reset its budget.
  *
  * <p><strong>Bounded by construction.</strong> Buckets live in a Caffeine cache that is
  * {@linkplain Caffeine#maximumSize size-capped} at {@link RateLimitProperties#maxTrackedClients()} and
@@ -37,8 +41,6 @@ import org.springframework.util.StringUtils;
  */
 @Component
 public class RateLimiter {
-
-    static final String FORWARDED_FOR_HEADER = "X-Forwarded-For";
 
     private final RateLimitProperties props;
     /** Monotonic clock in nanoseconds; overridable in tests to drive refill deterministically. */
@@ -120,25 +122,15 @@ public class RateLimiter {
     }
 
     /**
-     * Resolve the originating client IP: the leftmost {@code X-Forwarded-For} entry when present
-     * (Cloud Run / any reverse proxy forwards it as {@code client, proxy1, ...}), else the direct
-     * socket address for plain local dev. Mirrors {@code EmailCodeRateLimiter}'s resolution and the
-     * way {@code SecurityHeadersFilter} trusts {@code X-Forwarded-Proto} from the same proxy. The
-     * header is client-spoofable, but the {@code maximumSize} cap means spoofing only buys a reset
-     * budget, not unbounded memory.
+     * Resolve the originating client IP behind the trusted proxy chain (TM-732): the entry Cloud Run's
+     * front end appended to {@code X-Forwarded-For}, counting {@link ForwardedClientIp#TRUSTED_PROXY_HOPS}
+     * hops in from the right, else the direct socket address for plain local dev. Uses the leftmost entry
+     * would be wrong — that's the attacker-controlled value a caller can prepend to forge any IP and mint
+     * a fresh bucket per request. See {@link ForwardedClientIp} for the full reasoning; the same helper
+     * backs {@code EmailCodeRateLimiter} so the two can't drift.
      */
     static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader(FORWARDED_FOR_HEADER);
-        if (StringUtils.hasText(forwarded)) {
-            String first = forwarded.split(",", 2)[0].trim();
-            if (StringUtils.hasText(first)) {
-                return first;
-            }
-        }
-        String remote = request.getRemoteAddr();
-        // Never key on null/blank — that would lump every header-less caller into one bucket; give an
-        // empty marker its own (still size-capped) bucket instead.
-        return StringUtils.hasText(remote) ? remote : "unknown";
+        return ForwardedClientIp.resolve(request);
     }
 
     /** The outcome of a token spend: allowed, or refused with the seconds to wait before retrying. */
