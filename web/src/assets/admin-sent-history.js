@@ -23,8 +23,8 @@
 // error / body / empty — to what the detail panel paints, so the async wiring stays here while the
 // (unit-tested) "what to show" decision lives in the browser-free core.
 
-import { listSentAdminMessages, getAdminMessage, ApiError } from "./api.js";
-import { clear, el, relativeTime } from "./ui.js";
+import { listSentAdminMessages, getAdminMessage, recallAdminMessage, ApiError } from "./api.js";
+import { clear, el, relativeTime, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { adminMessageNewHash } from "./admin-message-route.js";
 import {
@@ -43,6 +43,17 @@ import {
   rangeIndicator,
   isEmptyHistory,
 } from "./admin-sent-history-core.js";
+// The RECALL control — the same shared, unit-tested recall-core the compose success panel mounts
+// (TM-473). The core doc always intended these list rows to consume recallControlModel(); wiring it
+// here is what actually mounts the affordance so a sent message stays recallable from its history row
+// after the post-send panel is gone (TM-734).
+import {
+  RECALL_LABEL,
+  RECALLED_LABEL,
+  recallControlModel,
+  recallConfirmCopy,
+  summariseRecall,
+} from "./admin-message-recall-core.js";
 
 // The admin console this view's back link + heading return to (a real, router-registered destination).
 const ADMIN_ROUTE = "#/admin";
@@ -186,8 +197,74 @@ function rowDetail(rowData) {
     ]),
     // The actual message body, fetched by id on expand (TM-562) — the "open one to see the body" AC.
     bodyBlock(rowData),
+    // The RECALL control (TM-734): "wherever a sent message is shown". A live row offers recall; an
+    // already-recalled row (status RECALLED) shows the disabled terminal state + note. Mounted here so a
+    // sent message stays recallable from its history row, not only from the transient post-send panel.
+    recallBlock(rowData),
   ]);
   return detail;
+}
+
+/**
+ * The recall affordance for an expanded history row, driven by the shared recall-core (TM-473/TM-734).
+ * A live message renders a danger "Recall message" button that confirms-then-recalls; a recalled one
+ * renders the disabled "Recalled" state and the status note. Identical copy/state to the compose
+ * success panel because both read recallControlModel().
+ */
+function recallBlock(rowData) {
+  const model = recallControlModel(rowData);
+  const btnId = `admin-sent-recall-${rowData.id}`;
+  const action = model.canRecall
+    ? el("button", {
+        class: "tm-btn tm-btn-danger",
+        id: btnId,
+        type: "button",
+        onClick: () => recall(rowData),
+      }, RECALL_LABEL)
+    : el("button", { class: "tm-btn", type: "button", disabled: true }, RECALLED_LABEL);
+
+  return el("div", { class: "tm-sent-detail-recall" }, [
+    model.note ? el("p", { class: "tm-muted tm-sent-detail-recall-note", text: model.note }) : null,
+    el("div", { class: "tm-form-actions" }, [action]),
+  ]);
+}
+
+/**
+ * Confirm-then-recall a sent-history row (TM-734), reusing the exact confirm copy + summary the compose
+ * success panel uses (recall-core). On success the row's status is flipped to RECALLED locally and the
+ * list repaints so the control shows the recalled state; on failure it toasts and re-enables the button.
+ * @param {object} rowData the expanded campaign row (carries the id recall targets).
+ */
+async function recall(rowData) {
+  const ok = await confirmDialog({
+    title: "Recall message?",
+    message: recallConfirmCopy(),
+    confirmLabel: RECALL_LABEL,
+    danger: true,
+  });
+  if (!ok) return;
+
+  const btn = document.getElementById(`admin-sent-recall-${rowData.id}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Recalling…";
+  }
+  try {
+    const result = await recallAdminMessage(rowData.id);
+    toast(summariseRecall(result), { type: "success", timeout: 8000 });
+    // Reflect the recall in the loaded page so the row (and its status pill) repaint as recalled without
+    // a full reload — the list projects RECALLED as the derived status, which recallControlModel reads.
+    const row = state.data.items.find((it) => it.id === rowData.id);
+    if (row) row.status = "RECALLED";
+    rowData.status = "RECALLED";
+    renderList();
+  } catch (err) {
+    toast(err instanceof ApiError ? err.message : "Couldn't recall the message.", { type: "error" });
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = RECALL_LABEL;
+    }
+  }
 }
 
 /** One history row: a toggle header (title + audience + reach + status + time) and its detail panel. */

@@ -8,14 +8,20 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import jakarta.mail.Address;
 import jakarta.mail.Message;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 import java.util.Properties;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
@@ -32,6 +38,8 @@ class SmtpEmailCodeMailerTest {
 
     private JavaMailSender mailSender;
     private SmtpEmailCodeProperties props;
+    private ListAppender<ILoggingEvent> logAppender;
+    private Logger mailerLogger;
 
     @BeforeEach
     void setUp() {
@@ -41,6 +49,31 @@ class SmtpEmailCodeMailerTest {
                 .thenReturn(new MimeMessage(jakarta.mail.Session.getInstance(new Properties())));
         // Defaults applied by the record's compact constructor: from = no-reply@10xai.co.uk.
         props = new SmtpEmailCodeProperties(true, null, null);
+
+        // Capture everything the mailer logs so we can assert the recipient email (PII) never leaks.
+        mailerLogger = (Logger) LoggerFactory.getLogger(SmtpEmailCodeMailer.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        mailerLogger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void detachAppender() {
+        if (mailerLogger != null && logAppender != null) {
+            mailerLogger.detachAppender(logAppender);
+        }
+    }
+
+    /** The full text of every captured log event: the formatted message plus any argument tokens. */
+    private String capturedLogText() {
+        StringBuilder sb = new StringBuilder();
+        for (ILoggingEvent event : logAppender.list) {
+            sb.append(event.getFormattedMessage()).append('\n');
+            for (Object arg : event.getArgumentArray() == null ? new Object[0] : event.getArgumentArray()) {
+                sb.append(arg).append('\n');
+            }
+        }
+        return sb.toString();
     }
 
     private SmtpEmailCodeMailer mailer() {
@@ -88,6 +121,31 @@ class SmtpEmailCodeMailerTest {
         assertThatThrownBy(() -> new SmtpEmailCodeMailer(mailSender, props, "no-reply@10xai.co.uk", ""))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("MAIL_PASSWORD");
+    }
+
+    @Test
+    void doesNotLogRecipientEmailOnSuccessfulSend() {
+        // TM-724: the recipient email is PII and must never appear in any log line on the happy path.
+        mailer().sendLoginCode(EMAIL, CODE);
+
+        assertThat(capturedLogText()).doesNotContain(EMAIL);
+        // Sanity: a send WAS logged (so this test would still fail if the log line were removed and
+        // the email quietly reintroduced elsewhere) — it just doesn't carry the address.
+        assertThat(logAppender.list).anyMatch(e -> e.getLevel() == Level.INFO);
+    }
+
+    @Test
+    void doesNotLogRecipientEmailOnDeliveryFailure() {
+        // TM-724: the failure log line must not carry the recipient email (PII) either.
+        org.mockito.Mockito.doThrow(new MailSendException("smtp down"))
+                .when(mailSender)
+                .send(any(MimeMessage.class));
+
+        assertThatThrownBy(() -> mailer().sendLoginCode(EMAIL, CODE))
+                .isInstanceOf(EmailCodeDeliveryException.class);
+
+        assertThat(capturedLogText()).doesNotContain(EMAIL);
+        assertThat(logAppender.list).anyMatch(e -> e.getLevel() == Level.WARN);
     }
 
     @Test

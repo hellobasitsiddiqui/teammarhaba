@@ -209,9 +209,17 @@ public class ChatStreamService {
      * test can register a fake/mock emitter with an owner without going through the servlet stack.
      */
     void register(long conversationId, SseEmitter emitter, String ownerUid) {
-        streamsByConversation
-                .computeIfAbsent(conversationId, key -> new CopyOnWriteArraySet<>())
-                .add(emitter);
+        // Add the emitter INSIDE the compute so the set is never observed empty between its creation
+        // and the first add: computeIfAbsent runs atomically per key, so a concurrent heartbeat prune
+        // (which only removes a set it finds empty, and only via the map's remove(key, value) guard)
+        // cannot delete the set mid-registration and orphan the just-added stream. Returning the same
+        // set instance whether it was just created or already present keeps every caller wired to the
+        // live map value.
+        streamsByConversation.compute(conversationId, (key, existing) -> {
+            Collection<SseEmitter> streams = existing != null ? existing : new CopyOnWriteArraySet<>();
+            streams.add(emitter);
+            return streams;
+        });
         if (ownerUid != null) {
             streamOwner.put(emitter, ownerUid);
         }
@@ -276,6 +284,51 @@ public class ChatStreamService {
         return delivered;
     }
 
+    /**
+     * Revoke a member's live subscription to a thread (TM-730): complete every stream this member holds
+     * open <em>on this instance</em> for {@code conversationId}, so a member removed by moderation (or who
+     * self-left) stops receiving live frames at once instead of only when their stream times out.
+     *
+     * <p><b>Why this is needed.</b> Membership is checked only at {@link #open connect} — once a stream is
+     * live it keeps receiving every {@link #broadcast} for the thread for up to {@link #STREAM_TIMEOUT}
+     * (4 min). Without this, a kicked ({@link MuteState#REMOVED}) member kept reading the live chat for
+     * the rest of that window. The moderation / leave paths call this <em>after their state change
+     * commits</em> so the stream is only cut once the removal is durable; the completed stream fires the
+     * client's normal reconnect, which then re-runs the connect-time membership gate and is denied a
+     * {@code 403} — so the reconnect can't restore access.
+     *
+     * <p><b>Single-instance, same caveat as {@link #broadcast}.</b> This registry lives in one JVM's heap,
+     * so it only reaches streams terminated on <em>this</em> instance. A stream held on another Cloud Run
+     * instance is not cut here; that instance's own {@link #broadcast} is the leak surface there, and the
+     * durable membership gate (re-checked on every reconnect) is the backstop. Cross-instance revocation
+     * rides the same deferred realtime backbone as cross-instance broadcast (TM-505).
+     *
+     * @param conversationId the thread to revoke the member from
+     * @param ownerUid       the Firebase uid whose open streams for this thread to complete; a {@code null}
+     *                       uid matches nothing (an owner-less legacy stream is never revoked here)
+     * @return how many of the member's streams were completed (0 when they hold none here — the common case)
+     */
+    public int disconnectMember(long conversationId, String ownerUid) {
+        Collection<SseEmitter> streams = streamsByConversation.get(conversationId);
+        if (streams == null || streams.isEmpty() || ownerUid == null) {
+            return 0;
+        }
+        int revoked = 0;
+        // Snapshot the matching emitters first: dropQuietly mutates `streams` (a CopyOnWriteArraySet
+        // tolerates it, but completing inside the iteration also fires onCompletion → remove concurrently,
+        // so iterate a stable copy and act on it).
+        for (SseEmitter emitter : streams) {
+            if (ownerUid.equals(streamOwner.get(emitter))) {
+                dropQuietly(streams, emitter); // complete + forget; the client reconnects and is re-gated
+                revoked++;
+            }
+        }
+        if (revoked > 0) {
+            log.debug("Revoked {} live stream(s) for member {} on conversation {}.", revoked, ownerUid, conversationId);
+        }
+        return revoked;
+    }
+
     /** How many streams are open on this instance for {@code conversationId} (0 if none) — for tests / observability. */
     public int connectionCount(long conversationId) {
         Collection<SseEmitter> streams = streamsByConversation.get(conversationId);
@@ -332,11 +385,18 @@ public class ChatStreamService {
                     dropQuietly(streams, emitter);
                 }
             }
-            // A thread nobody is connected to any more leaves no residual key.
-            streams.remove(null); // no-op guard; sets never hold null, keeps intent explicit
-            if (streams.isEmpty()) {
-                streamsByConversation.remove(conversationId, streams);
-            }
+            // A thread nobody is connected to any more leaves no residual key. Do the emptiness check
+            // and the removal atomically under compute so a stream that registers into this set between
+            // an unguarded isEmpty() and remove() is never pruned away: register() mutates the mapped
+            // set inside its own compute, so evaluating isEmpty() here (inside compute, holding the bin
+            // lock) sees register's add either fully before or fully after — never a set that looks
+            // empty now but gains a member a moment later.
+            streamsByConversation.compute(conversationId, (key, current) -> {
+                if (current != null && current.isEmpty()) {
+                    return null; // drop the key; a fresh stream re-creates it via register()
+                }
+                return current;
+            });
         });
     }
 

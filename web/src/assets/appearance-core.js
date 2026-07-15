@@ -131,3 +131,52 @@ export function clearHint(storage) {
     return false;
   }
 }
+
+/**
+ * Sequence appearance PATCHes so quick successive changes can't leave the server and the UI
+ * disagreeing (TM-720). The user can flip the accent / toggle faster than a PATCH round-trips, so
+ * two writes can be in flight at once and their responses can arrive out of order. Two failure modes
+ * this closes:
+ *   • A FAILED OLDER request must not clobber a NEWER successful change — reverting the UI to the
+ *     older request's "previous" state would undo the newer pick the user is looking at.
+ *   • The UI must end on the state of the LAST request the user made, matched by the server (last
+ *     write wins by REQUEST ORDER — the order they were dispatched, which is the order the user
+ *     intended, regardless of which network response lands first).
+ *
+ * Mechanism (a monotonic generation counter, mirroring notification-bell-core's createBadgeSync):
+ *   • Each `run()` takes the next generation and is the "latest" until another `run()` supersedes it.
+ *   • On SUCCESS: nothing to do — the optimistic UI already shows this change; a superseded success
+ *     is simply ignored (a newer run owns the UI).
+ *   • On FAILURE: revert ONLY if this run is still the latest. A stale failure (a newer change has
+ *     since been dispatched) is swallowed — its `revert` would fight the newer, still-pending or
+ *     succeeded change. This gives last-write-wins by request order without cancelling HTTP.
+ *
+ * Pure: no DOM/fetch. The caller injects the async `patch` (updateMe) and a `revert(previous)` that
+ * restores the working state + UI; failures are reported via the returned outcome + optional onError.
+ *
+ * @param {{
+ *   patch: (body: object) => Promise<any>,             // the PATCH (updateMe)
+ *   revert: (previous: object) => void,                // restore UI/state to `previous`
+ *   onError?: (err: any, superseded: boolean) => void, // best-effort; toast only when not superseded
+ * }} deps
+ * @returns {{ run: (body: object, previous: object) => Promise<{ok: boolean, superseded?: boolean}> }}
+ */
+export function createAppearancePersister({ patch, revert, onError } = {}) {
+  let generation = 0; // monotonic; the highest value is the "latest" write the user made
+
+  async function run(body, previous) {
+    const mine = ++generation; // this run is now the latest until another run() bumps it
+    try {
+      await patch(body);
+      return { ok: true };
+    } catch (err) {
+      const superseded = mine !== generation;
+      // Only the LATEST request may revert — a stale failure must not undo a newer change.
+      if (!superseded) revert(previous);
+      if (onError) onError(err, superseded);
+      return { ok: false, superseded };
+    }
+  }
+
+  return { run };
+}

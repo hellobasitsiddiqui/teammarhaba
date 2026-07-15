@@ -13,6 +13,7 @@
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
 import { listEvents, getEvent, getEventEntitlement, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
+import { onSignedOut } from "./auth-signout.js";
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
@@ -84,6 +85,18 @@ let renderToken = 0;
 // module-level latch makes runCommand re-entrant-safe across the whole detail; the clicked button is also
 // disabled immediately so the in-flight state is visible.
 let commandInFlight = false;
+
+// TM-720: the listing cache above is keyed to the signed-in user (it warms the one-active-event
+// derivation from THEIR RSVPs). On a shared device it must NOT survive a sign-out, or the next
+// user's RSVP gate could be driven by the previous user's GOING state. Reset it on any auth change
+// to signed-out, and bump renderToken so an in-flight fetch started by the previous user can't paint
+// its cards over the new session either.
+export function resetEventsCache() {
+  state.cards = [];
+  state.filter = "all";
+  renderToken++;
+}
+onSignedOut(resetEventsCache);
 
 /** Fetch /me for the age gate — fresh each call, degrading to null (age "unknown") on any failure. */
 async function loadMe() {
@@ -646,7 +659,15 @@ function actionSection(view, detail, now, me) {
 
   // The reminder / context note (enabled state) or, for a disabled button, the honest reason (+ link).
   if (model.primary?.disabled && model.primary.reason) {
-    const reason = el("p", { class: "tm-event-reason tm-muted", "data-testid": "event-action-reason", text: model.primary.reason });
+    // The disabled primary button points its aria-describedby at this id (see actionButton), so the
+    // reason must actually carry `id="event-action-reason"` — a data-testid alone left the reference
+    // dangling and screen readers with no description of WHY the button is disabled (TM-727).
+    const reason = el("p", {
+      class: "tm-event-reason tm-muted",
+      id: "event-action-reason",
+      "data-testid": "event-action-reason",
+      text: model.primary.reason,
+    });
     if (model.primary.link) {
       reason.append(" ");
       reason.append(el("a", { href: model.primary.link.href, class: "tm-event-reason-link" }, model.primary.link.label));
@@ -843,14 +864,19 @@ async function runCommand(view, detail, spec, button) {
       // claim race) rather than a generic error. A 401 will already have redirected via apiFetch.
       toast(core.commandErrorMessage(err), { type: "error" });
     } finally {
-      // Always re-fetch — even on error the server state may have moved (e.g. a lost claim race means
-      // the spot's gone and we're still waitlisted), so the UI must reflect the truth.
-      rerendered = true;
-      renderDetail(view, id);
+      // Re-fetch so the UI reflects the truth — even on error the server state may have moved (e.g. a lost
+      // claim race means the spot's gone and we're still waitlisted) — BUT only if the user is still on THIS
+      // event's detail (TM-733): a paid RSVP hands off to the checkout screen and a slow command can resolve
+      // after they've navigated on; re-rendering then would paint a stale event over the route they moved to.
+      const hash = typeof window !== "undefined" ? window.location?.hash : "";
+      if (core.isViewingEventDetail(hash, id)) {
+        rerendered = true;
+        renderDetail(view, id);
+      }
     }
   } finally {
     // TM-721: release the double-tap latch once the command settles. On an early bail (checkout/cancel)
-    // no re-render happened, so re-enable the tapped button we disabled up top.
+    // or when the user navigated away (no re-render), re-enable the tapped button we disabled up top.
     commandInFlight = false;
     if (button && !rerendered) button.disabled = false;
   }

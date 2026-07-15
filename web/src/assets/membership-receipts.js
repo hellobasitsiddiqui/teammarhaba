@@ -45,6 +45,9 @@ export const ORDER_STATUS = Object.freeze({
   CANCELLED: "CANCELLED",
   REFUND_DUE: "REFUND_DUE",
   REFUNDED: "REFUNDED", // TM-623: the owed refund was issued at the provider — terminal
+  // TM-726: the sweep retried the owed refund up to its cap and it kept failing — terminal for the sweep,
+  // the money is still owed and needs a human to reconcile (distinct from REFUNDED, where it came back).
+  REFUND_ABANDONED: "REFUND_ABANDONED",
   FAILED: "FAILED", // TM-634: the INITIAL widget payment was declined/failed — terminal, never captured
   EXPIRED: "EXPIRED", // TM-634: an abandoned PENDING order the TTL sweep retired — terminal, never captured
 });
@@ -70,6 +73,10 @@ export function statusMeta(status) {
     case ORDER_STATUS.REFUNDED:
       // The money came back (TM-623) — reads as settled-and-closed, like a cancellation.
       return { label: "Refunded", tone: "cancelled" };
+    case ORDER_STATUS.REFUND_ABANDONED:
+      // TM-726: the automatic refund could not be issued and the money is still owed — reads as an
+      // outstanding refund (attention tone), not settled, so it never looks closed to the customer.
+      return { label: "Refund pending", tone: "refund" };
     case ORDER_STATUS.FAILED:
       // TM-634: the payment was declined/failed — terminal, no money taken. Reads as closed.
       return { label: "Payment failed", tone: "cancelled" };

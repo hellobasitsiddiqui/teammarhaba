@@ -22,6 +22,7 @@
 // `event-images/{id}` AFTER the id exists, then its path is persisted with a follow-up PATCH.
 
 import { apiFetch, ApiError } from "./api.js";
+import { walkPages } from "./admin-page-walk-core.js";
 import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES } from "./storage.js";
@@ -41,6 +42,7 @@ import {
   isValidTimeZone,
   validateEventDraft,
   buildEventPayload,
+  clearedOptionalFields,
   toFormModel,
   eventLifecycle,
   capacityLabel,
@@ -89,6 +91,8 @@ const state = {
   events: [],
   totalEvents: 0,
   fetchComplete: true,
+  fetchPartial: false, // a page failed mid-walk — `events` is a prefix of the true inventory (TM-727)
+  fetchTruncated: false, // the runaway guard tripped before the last page — `events` is a prefix (TM-727)
   loading: false,
   error: null,
   search: "",
@@ -130,45 +134,38 @@ async function eventApi(path, { method = "GET", body } = {}) {
  * Load the WHOLE event inventory by walking the paged endpoint (TM-392) — small scale (an admin plans
  * tens of events), so we hold them in memory and search/filter/sort/paginate in the browser, mirroring
  * the admin users console (admin.js). Newest-scheduled first from the server; the client sort can
- * re-order. A page failing mid-walk keeps what loaded and flags the fetch partial; only a failure with
- * nothing loaded errors the table.
+ * re-order. A page failing mid-walk keeps what loaded and flags the fetch partial (TM-727); only a
+ * failure with nothing loaded errors the table. Hitting the runaway guard flags the fetch truncated.
  */
 export async function loadEvents() {
   state.loading = true;
   state.error = null;
   render();
-  try {
-    const all = [];
-    let total = 0;
-    let complete = false;
-    for (let page = 0; page < MAX_FETCH_PAGES; page += 1) {
-      const envelope = await eventApi(
-        `/api/v1/admin/events?page=${page}&size=${FETCH_SIZE}&sort=startAt,desc`,
-      );
-      const items = Array.isArray(envelope?.items) ? envelope.items : [];
-      all.push(...items);
-      const reported = Number(envelope?.totalElements);
-      if (Number.isFinite(reported)) total = Math.max(total, reported);
-      const totalPages = Number(envelope?.totalPages);
-      const lastByServer = Number.isFinite(totalPages) && page + 1 >= totalPages;
-      if (lastByServer || items.length < FETCH_SIZE) {
-        complete = true;
-        break;
-      }
-    }
-    state.events = all;
-    state.totalEvents = Math.max(total, all.length);
-    state.fetchComplete = complete;
-  } catch (err) {
-    state.error = err instanceof ApiError ? err.message : "Could not load events.";
+  // The walk is a pure, DOM-free helper (admin-page-walk-core.js) so its keep-partial / surface-
+  // truncation contract is unit-tested; here we just fetch each page and reflect the result into state.
+  const result = await walkPages(
+    (page) => eventApi(`/api/v1/admin/events?page=${page}&size=${FETCH_SIZE}&sort=startAt,desc`),
+    { pageSize: FETCH_SIZE, maxPages: MAX_FETCH_PAGES },
+  );
+  if (result.error) {
+    // Nothing loaded — surface the failure and clear the table.
+    state.error = result.error instanceof ApiError ? result.error.message : "Could not load events.";
     state.events = [];
     state.totalEvents = 0;
     state.fetchComplete = true;
-  } finally {
-    state.loading = false;
-    state.page = 0;
-    render();
+    state.fetchPartial = false;
+    state.fetchTruncated = false;
+  } else {
+    state.error = null;
+    state.events = result.items; // whatever loaded — kept even when a later page failed (partial)
+    state.totalEvents = result.total;
+    state.fetchComplete = result.complete;
+    state.fetchPartial = result.partial;
+    state.fetchTruncated = result.truncated;
   }
+  state.loading = false;
+  state.page = 0;
+  render();
 }
 
 // ---- derived view -------------------------------------------------------------------------
@@ -255,6 +252,8 @@ function renderTable() {
   const rows = [...upcoming, ...past];
   const pastStart = upcoming.length; // index in `rows` where the past section begins
   if (!rows.length) {
+    const notice = fetchIncompleteNotice();
+    if (notice) shell.table.append(notice);
     const filtered = state.events.length > 0;
     const message = filtered ? "No events match your filters." : "No events yet. Create your first one.";
     shell.table.append(
@@ -302,8 +301,34 @@ function renderTable() {
   });
   const body = el("tbody", {}, bodyRows);
 
+  const notice = fetchIncompleteNotice();
+  if (notice) shell.table.append(notice);
   shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
   renderPager(rows.length);
+}
+
+/**
+ * A non-blocking notice when the inventory walk did NOT load the whole set (TM-727) — a page failed
+ * mid-walk (partial) or the runaway guard tripped before the last page (truncated). Without this the
+ * table silently shows a prefix as if it were complete. Returns null on a full, clean load.
+ */
+function fetchIncompleteNotice() {
+  if (state.fetchTruncated) {
+    return el("div", { class: "tm-notice", "data-testid": "admin-events-truncated" }, [
+      el("p", {
+        text:
+          `Showing the first ${state.events.length} events — there are more than this console loads at once. ` +
+          "Use search to narrow down.",
+      }),
+    ]);
+  }
+  if (state.fetchPartial) {
+    return el("div", { class: "tm-notice", "data-testid": "admin-events-partial" }, [
+      el("p", { text: "Some events couldn’t be loaded, so this list may be incomplete." }),
+      el("button", { class: "tm-btn tm-btn-sm", type: "button", onClick: loadEvents }, "Retry"),
+    ]);
+  }
+  return null;
 }
 
 /** One event row. A past event (TM-518) reads as muted and read-only (see rowActions). */
@@ -470,6 +495,12 @@ const FORM_FIELDS = [
   { key: "ageMax", id: "event-age-max", label: "Max age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
   { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
 ];
+
+/** Human label for a field key (drops the trailing "(optional)"), used in the "can't clear" warning (TM-734). */
+const FIELD_LABELS = new Map(FORM_FIELDS.map((f) => [f.key, f.label.replace(/\s*\(optional\)\s*$/i, "")]));
+function fieldLabel(key) {
+  return FIELD_LABELS.get(key) || (key === "venueId" ? "Venue" : key);
+}
 
 /** Build one field control (label + input/select/textarea + hint + role=alert error), profile.js style. */
 function buildField(field, fields) {
@@ -885,8 +916,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     setBusy(true, mode === "create" ? "Creating…" : "Saving…");
     image.setError("");
     try {
-      const body = buildEventPayload(readDraft());
+      const draft = readDraft();
+      const body = buildEventPayload(draft);
       const pending = image.getFile();
+
+      // On edit, an optional field the admin blanked can't be transmitted (the PATCH omits blanks and
+      // the server reads absent as "leave unchanged"), so clearing it silently no-ops. Surface it
+      // rather than toast a false "saved" (TM-734).
+      const stuckCleared = mode === "create" ? [] : clearedOptionalFields(event, draft);
 
       if (mode === "create") {
         const createdEvent = await eventApi("/api/v1/admin/events", { method: "POST", body });
@@ -911,7 +948,17 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
         await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
       }
 
-      toast(mode === "create" ? "Event created." : "Event saved.", { type: "success" });
+      if (stuckCleared.length) {
+        // The rest of the edit saved, but the blanked optional(s) couldn't be cleared through the API —
+        // tell the admin plainly rather than claim a clean save (TM-734).
+        const names = stuckCleared.map(fieldLabel).join(", ");
+        toast(
+          `Saved, but ${names} can't be cleared here yet — ${stuckCleared.length > 1 ? "those fields keep" : "that field keeps"} their previous value.`,
+          { type: "error" },
+        );
+      } else {
+        toast(mode === "create" ? "Event created." : "Event saved.", { type: "success" });
+      }
       // Navigate back to the list, which reloads it (router → enterAdminEvents → loadEvents), so the
       // just-created / edited event shows immediately (TM-426).
       onDone?.();

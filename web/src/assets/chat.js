@@ -56,6 +56,9 @@ import {
   unreactFromMessage,
   getLinkPreview,
 } from "./api.js";
+// TM-736: the admin-flag cache resets on every auth change (see viewerAdminFlag below), so a flag
+// resolved before the ADMIN claim was live — or for a previous user — can't stick for the session.
+import { onAuthChanged } from "./auth.js";
 import * as core from "./chat-core.js";
 // TM-470 link previews: pure URL-detection + response-normalisation core (see the delimited
 // `=== TM-470 link preview ===` hook further down, which mounts the card and calls the endpoint).
@@ -130,23 +133,18 @@ const thread = { id: null, messages: [], pending: [], mineIds: new Set(), sendin
   announceMode: false };
 let pushWired = false; // the foreground-push → poll listener is attached exactly once
 
-// The viewer's admin flag (TM-710), cached once — drives whether the event-chat composer offers the
-// "Send as announcement" affordance. null = not yet resolved; resolved best-effort from GET /me so a
-// failed lookup simply hides the affordance (a non-admin can't post an announcement anyway — the server
-// gate is authoritative). It's the caller's own role, stable for the session.
-let viewerIsAdmin = null;
+// The viewer's admin flag (TM-710), cached per signed-in user — drives whether the event-chat composer
+// offers the "Send as announcement" affordance. Resolved best-effort from GET /me so a failed lookup
+// simply hides the affordance (a non-admin can't post an announcement anyway — the server gate is
+// authoritative). TM-736: the cache is INVALIDATED on every auth change (mirroring appearance-sync.js /
+// nav-avatar.js) — a flag resolved before the ADMIN claim was live (a boot/auth race), or under a
+// previous user on the same session, must not stick as a stale `false` and suppress the toggle. The
+// pure cache logic lives in chat-core.createAdminFlagCache (node-tested); this is just the wiring.
+const viewerAdminFlag = core.createAdminFlagCache(getMe);
+onAuthChanged(() => viewerAdminFlag.invalidate());
 
-/** Resolve (once) whether the viewer is an admin, best-effort — a failure leaves the affordance hidden. */
-async function resolveViewerIsAdmin() {
-  if (viewerIsAdmin !== null) return viewerIsAdmin;
-  try {
-    const me = await getMe();
-    viewerIsAdmin = String(me?.role ?? "").toUpperCase() === "ADMIN";
-  } catch {
-    viewerIsAdmin = false; // can't tell → treat as non-admin (server still gates the endpoint)
-  }
-  return viewerIsAdmin;
-}
+/** Resolve whether the viewer is an admin, best-effort — a failure leaves the affordance hidden. */
+const resolveViewerIsAdmin = viewerAdminFlag.resolve;
 
 // The live chat stream (TM-464) for the OPEN thread, or null. A thread view opens one so new messages
 // appear instantly without waiting for the poll; navigating away (or into another thread) closes it.
@@ -658,9 +656,11 @@ function openLiveThread(id, token) {
       if (token !== renderToken || thread.id !== String(id)) return;
       const m = core.toThreadMessage(raw);
       if (!m.id) return; // a frame without an id can't be de-duped safely — skip it
-      // De-dupe by id: upsertMessage replaces any existing copy, so an own-echo, a replay, or a
-      // poll-fetched duplicate never renders twice. Then repaint from the one source of truth.
-      thread.messages = core.upsertMessage(thread.messages, m);
+      // De-dupe by id AND preserve the rich fields the fan-out frame can't carry: mergeLiveMessage
+      // inserts a new message, but for one we already hold (the own-send case — the POST response already
+      // gave us the resolved reply quote + our read receipt) it PATCHes rather than whole-row replacing,
+      // so a lean broadcast echo can't drop the reply quote / receipt or double-render the bubble (TM-731).
+      thread.messages = core.mergeLiveMessage(thread.messages, m);
       thread.rev++; // TM-721: mark a live change so an in-flight poll can't clobber this newer message
       repaintBody();
     },
@@ -1148,10 +1148,20 @@ async function send(id, form, input, sendBtn) {
   }
 }
 
-/** Replace the live composer with the disabled reason state, in place — the caller is muted/removed/closed. */
+/**
+ * Replace the live composer with the disabled reason state, in place — the caller is muted/removed/closed.
+ *
+ * Also flips `thread.canCompose` false and drops any in-progress reply (TM-727): the per-message reply +
+ * react affordances gate on `canCompose` (see messageRow), so without clearing it they keep rendering
+ * after the composer is gone — a "Reply" tap would call beginReply → paintReplyPreview against a detached
+ * composer, a silent dead-end. Turning the flag off makes the very next repaint drop those affordances so
+ * the thread reads as read-only, matching the disabled composer the caller now sees.
+ */
 function lockComposer(form, reason) {
   const off = disabledComposer(reason);
   if (form && form.parentNode) form.replaceWith(off);
+  thread.canCompose = false; // stop the reply/react affordances that target the now-locked composer
+  thread.replyTo = null; // abandon any reply-in-progress — its target composer is gone
 }
 
 /* ─────────────────────────────── Near-live refresh (poll — TM-448) ────────────────────────────── */
@@ -1772,6 +1782,14 @@ function linkPreviewCard(preview) {
       src: preview.imageUrl,
       alt: "",
       loading: "lazy",
+      // Privacy hardening (TM-731): this image is hot-linked to a THIRD-PARTY origin, so every reader's
+      // browser fetches it directly. Strip the referrer at the element (defence-in-depth over the app-wide
+      // Referrer-Policy: no-referrer header) so the previewed site never learns which thread/page the
+      // reader is on, and fetch it anonymously (no cookies/credentials) so it can't be a per-user beacon.
+      // NOTE: this removes the referrer + credential leak; it does NOT hide the reader's IP/presence from
+      // the third party — fully closing that needs a same-origin image proxy (see TM-731 PR notes).
+      referrerpolicy: "no-referrer",
+      crossorigin: "anonymous",
       // If the image 404s / is blocked, hide it rather than showing a broken-image glyph.
       onError: (e) => { e.target.style.display = "none"; },
     }));

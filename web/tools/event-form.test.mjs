@@ -30,6 +30,8 @@ import {
   utcIsoToZoned,
   validateEventDraft,
   buildEventPayload,
+  clearedOptionalFields,
+  CLEARABLE_OPTIONAL_FIELDS,
   toFormModel,
   eventLifecycle,
   capacityLabel,
@@ -264,6 +266,55 @@ test("buildEventPayload carries the venueId reference and omits it when unset (T
   assert.equal("venueId" in noVenue, false); // a one-off location omits it (back-compat)
 });
 
+// --- clearedOptionalFields: the silent-no-op guard on edit (TM-734) ---------------------------
+
+test("clearedOptionalFields flags an optional the admin blanked that the PATCH can't clear (TM-734)", () => {
+  // The event carried a mapUrl + a capacity; the admin blanked both in the edit draft. buildEventPayload
+  // OMITS blanks, and the server reads absent as "leave unchanged", so those clears silently no-op.
+  const original = {
+    heading: "Coffee & Code",
+    description: "Bring a laptop.",
+    locationText: "Marhaba Cafe",
+    timezone: "Europe/London",
+    startAt: "2026-07-10T17:00:00.000Z",
+    visibilityStart: "2026-07-01T08:00:00.000Z",
+    visibilityEnd: "2026-07-10T17:00:00.000Z",
+    mapUrl: "https://maps.example/abc",
+    capacity: 20,
+    city: "London",
+  };
+  const draft = validDraft({ mapUrl: "", capacity: "", city: "London" });
+  const cleared = clearedOptionalFields(original, draft);
+  assert.deepEqual(new Set(cleared), new Set(["mapUrl", "capacity"]));
+  // A field left unchanged (city stayed "London") is NOT reported.
+  assert.equal(cleared.includes("city"), false);
+});
+
+test("clearedOptionalFields returns [] when nothing was actually cleared (TM-734)", () => {
+  const original = { mapUrl: "https://maps.example/abc", capacity: 20, timezone: "Europe/London" };
+  // Draft keeps the same values → the payload carries them → nothing silently dropped.
+  const draft = validDraft({ mapUrl: "https://maps.example/abc", capacity: "20" });
+  assert.deepEqual(clearedOptionalFields(original, draft), []);
+});
+
+test("clearedOptionalFields returns [] on create (no original to compare) (TM-734)", () => {
+  assert.deepEqual(clearedOptionalFields(null, validDraft({ mapUrl: "" })), []);
+  assert.deepEqual(clearedOptionalFields(undefined, validDraft({ capacity: "" })), []);
+});
+
+test("clearedOptionalFields ignores blanking an already-empty optional (TM-734)", () => {
+  // The event never had a mapUrl; blanking a blank isn't a lost clear.
+  const original = { timezone: "Europe/London", capacity: 20 };
+  const cleared = clearedOptionalFields(original, validDraft({ mapUrl: "", capacity: "20" }));
+  assert.equal(cleared.includes("mapUrl"), false);
+});
+
+test("CLEARABLE_OPTIONAL_FIELDS excludes required fields that validation blocks blanking (TM-734)", () => {
+  for (const req of ["heading", "description", "locationText", "timezone", "startAt", "visibilityStart"]) {
+    assert.equal(CLEARABLE_OPTIONAL_FIELDS.includes(req), false, `${req} must not be treated as clearable`);
+  }
+});
+
 test("toFormModel reads venueId back for the edit prefill (TM-519)", () => {
   assert.equal(toFormModel({ venueId: 7 }).venueId, "7");
   assert.equal(toFormModel({}).venueId, ""); // no reference → blank
@@ -350,6 +401,25 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
       "2026-07-05T00:00:00Z",
     ).label,
     "Unlisted",
+  );
+
+  // TM-727: an OPEN-ENDED event (no endAt) that has STARTED must NOT be "Finished" the instant it
+  // begins — the server runs it for an assumed default duration and the member UI never client-side-
+  // finishes it. With the authoritative `past` flag it follows the server verdict; without it, the
+  // endAt-only fallback keeps it live (Visible) rather than mislabelling it Finished at start.
+  const openEndedStarted = {
+    ...base,
+    endAt: null,
+    startAt: "2026-07-10T18:00:00.000Z",
+    visibilityEnd: "2026-07-31T00:00:00.000Z", // still within its listing window
+  };
+  const justStarted = "2026-07-10T18:30:00Z"; // 30 min after start, no endAt
+  assert.equal(eventLifecycle(openEndedStarted, justStarted).label, "Visible", "open-ended not finished at start");
+  // The server's authoritative `past` flag still wins when it says the open-ended event has ended.
+  assert.equal(
+    eventLifecycle({ ...openEndedStarted, past: true }, justStarted).label,
+    "Finished",
+    "server past flag finishes it",
   );
 });
 

@@ -139,6 +139,13 @@ async function startSubscribePayment(section, tier, generation) {
     setStatus(section, text);
     if (startBtn) startBtn.disabled = false;
   };
+  // Stale-mount guard (TM-728): this flow has several awaits, and the router only HIDES the section on
+  // navigation — it never cancels our async work. If the user hops to the OTHER tier's subscribe route
+  // mid-flight, enterMembershipSubscribe() bumps mountGeneration and re-renders the section for the NEW
+  // tier; a stale continuation resuming here would otherwise mount the OLD tier's card widget + pay
+  // button into that freshly-rendered screen. So after every await we bail the moment our generation is
+  // no longer current (mirroring pollActivation's isStale check).
+  const isStale = () => generation !== mountGeneration;
   setStatus(section, "Starting secure card payment…");
 
   let checkout;
@@ -146,9 +153,11 @@ async function startSubscribePayment(section, tier, generation) {
     checkout = await api.subscriptionCheckout(tier);
   } catch (err) {
     console.warn("[membership] subscription checkout start failed:", err?.status ?? "", err?.message ?? err);
+    if (isStale()) return; // re-mounted while the checkout POST was in flight — don't touch the screen
     failStart("Couldn't start checkout. Please try again.");
     return;
   }
+  if (isStale()) return; // navigated away / re-mounted for another tier — abandon this stale checkout
   const token = checkout && checkout.paymentToken;
   if (!token) {
     failStart("Checkout could not be initialised. Please try again.");
@@ -161,9 +170,11 @@ async function startSubscribePayment(section, tier, generation) {
     RevolutCheckout = await loadRevolutSdk();
     instance = await RevolutCheckout(token, paymentsConfig().revolutMode || "sandbox");
   } catch (err) {
+    if (isStale()) return;
     failStart(`Payment is unavailable right now: ${err?.message ?? err}`);
     return;
   }
+  if (isStale()) return; // the SDK load / instance init outlived this mount — don't mount into a stale screen
 
   const host = section.querySelector(".tm-subscribe-widget");
   if (host) clear(host);
@@ -179,6 +190,7 @@ async function startSubscribePayment(section, tier, generation) {
   } catch {
     // No profile read — the field just starts empty and the user types their name.
   }
+  if (isStale()) return; // re-mounted while reading the profile — don't build the widget for a dead mount
   const { field: nameField, input: nameInput, error: nameError } = buildCardholderNameField(displayName);
   const pay = section.querySelector(".tm-subscribe-pay");
   // Render the name field ABOVE the card-number widget host so the box reads top-to-bottom: name → card

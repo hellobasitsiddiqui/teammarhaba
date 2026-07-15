@@ -93,8 +93,15 @@ jobs:
             exit 0
           fi
 
-          # Stale: HEAD's image exists but isn't what's serving → a stranded/skipped deploy.
-          # Don't pile up: if a Deploy is already running, let it finish rather than re-dispatch.
+          # Serving isn't main HEAD's image. That alone is NOT a strand: Deploy is a DELIBERATE
+          # action (TM-153/TM-156) — an unlabelled merge, or a docs-only HEAD whose deploy resolved
+          # to an older ancestor image (deploy.yml "Resolve backend image SHA"), leaves serving
+          # legitimately behind HEAD forever. Force-deploying HEAD here would auto-ship every merged
+          # commit within 30 min, defeating the deploy-label gate (TM-735). So only HEAL A STRAND —
+          # a Deploy that was actually initiated but never landed its revision — never roll a commit
+          # forward that was deliberately left undeployed.
+          #
+          # Don't pile up: if a Deploy is already running/queued, let it converge.
           RUNNING="$(gh run list --workflow=deploy.yml --status=in_progress --json databaseId --jq 'length' 2>/dev/null || echo 0)"
           QUEUED="$(gh run list --workflow=deploy.yml --status=queued --json databaseId --jq 'length' 2>/dev/null || echo 0)"
           if [ "${RUNNING}" != "0" ] || [ "${QUEUED}" != "0" ]; then
@@ -102,9 +109,25 @@ jobs:
             exit 0
           fi
 
-          echo "::warning::Stranded deploy — serving '${SERVING_REV}' is not main HEAD. Re-dispatching Deploy to roll forward."
+          # Strand test: look at the LATEST completed Deploy run for main. A Deploy run only concludes
+          # `success` after its Promote + TM-131 "Verify rollout" steps pass — i.e. its revision IS
+          # serving. So a successful latest run ⇒ whatever serves is what was deliberately deployed;
+          # the HEAD mismatch is an intentionally-undeployed commit ⇒ DO NOTHING (gate respected).
+          # A strand only exists when the latest Deploy run FAILED / was cancelled / timed out (it
+          # started but didn't land) — that is the only case we re-dispatch to roll forward.
+          LAST_CONCLUSION="$(gh run list --workflow=deploy.yml --branch=main --status=completed \
+            --limit 1 --json conclusion --jq '.[0].conclusion // empty' 2>/dev/null || echo '')"
+          echo "latest completed Deploy conclusion: ${LAST_CONCLUSION:-<none>}"
+          if [ "${LAST_CONCLUSION}" = "success" ]; then
+            echo "Latest Deploy succeeded (its revision was promoted + verified). Serving is behind main HEAD only because HEAD was deliberately not deployed (no \`deploy\` label / docs-only) — the deploy-label gate is working. Nothing to heal."
+            { echo "## ✅ Deploy reconcile — gate respected"; echo "Serving \`${SERVING_REV}\` is behind main HEAD (\`${HEAD_SHA}\`) by design: the latest Deploy succeeded and no newer deploy was requested (TM-735)."; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # No successful latest Deploy run and none in flight → a Deploy was initiated but stranded.
+          echo "::warning::Stranded deploy — latest Deploy concluded '${LAST_CONCLUSION:-<none>}' and serving '${SERVING_REV}' isn't its revision. Re-dispatching Deploy to roll forward."
           gh workflow run deploy.yml --ref main
           {
             echo "## 🔧 Deploy reconcile — healed a stranded deploy"
-            echo "Serving \`${SERVING_REV}\` did not match main HEAD (\`${HEAD_SHA}\`); re-dispatched **Deploy** to roll forward."
+            echo "Latest Deploy concluded \`${LAST_CONCLUSION:-<none>}\` (not success) and serving \`${SERVING_REV}\` isn't main HEAD (\`${HEAD_SHA}\`); re-dispatched **Deploy** to roll forward."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -42,6 +42,7 @@ import { enterNotifications } from "./notifications.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
+import { shouldBounceNonAdmin } from "./admin-route-guard-core.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
 // Membership tier screen (TM-480 built the screen; TM-606 wires it live through this router). The screen
@@ -228,6 +229,12 @@ function isProtected(route) {
 // Cached from the verified ID-token `role` claim (TM-110), refreshed on every auth change so the
 // guard + nav can decide synchronously. Fails safe to false (non-admin) until resolved.
 let isAdmin = false;
+// Whether the role lookup has actually resolved for the current auth state (TM-733). Starts false so a
+// deep-link / reload straight to an admin route is HELD rather than bounced with a spurious "Admins
+// only." toast while `isAdmin` is still its fail-safe default; set true once resolveRoleThenGuard
+// settles the role (or on sign-out, where the non-admin verdict is definitive). The admin bounce
+// (shouldBounceNonAdmin) fires ONLY once the role is resolved and confirmed non-admin.
+let roleResolved = false;
 // Whether the signed-in caller has completed first-login onboarding (TM-250). Resolved from
 // GET /api/v1/me alongside the role on each auth change, so the gate decision is synchronous in the
 // guard. Fails OPEN (true = not gated) on a lookup error: a backend hiccup must never trap a user
@@ -581,7 +588,7 @@ function guard() {
   }
   // Admin console is ADMIN-only (TM-133). A signed-in non-admin who reaches #/admin is sent home;
   // the backend (TM-111) is the real gate, this just avoids showing an unusable page.
-  if (route === ADMIN && !isAdmin) {
+  if (route === ADMIN && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminActive = false;
     go(HOME);
@@ -589,14 +596,14 @@ function guard() {
   }
   // Admin events console is ADMIN-only too (TM-395), same rule as #/admin — the backend (TM-392) is
   // the real gate; this just avoids showing an unusable page to a non-admin.
-  if (route === ADMIN_EVENTS && !isAdmin) {
+  if (route === ADMIN_EVENTS && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminEventsActive = false;
     go(HOME);
     return;
   }
   // The full-page event create/edit form (TM-426) is ADMIN-only too — same rule as the events console.
-  if (isAdminEventFormRoute(route) && !isAdmin) {
+  if (isAdminEventFormRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminEventFormEntered = null;
     go(HOME);
@@ -604,21 +611,21 @@ function guard() {
   }
   // Admin venues console (TM-519) is ADMIN-only too — same rule as #/admin/events; the backend is the
   // real gate, this just avoids showing an unusable page to a non-admin.
-  if (route === ADMIN_VENUES && !isAdmin) {
+  if (route === ADMIN_VENUES && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminVenuesActive = false;
     go(HOME);
     return;
   }
   // The full-page venue create/edit form (TM-519) is ADMIN-only too — same rule as the venues console.
-  if (isAdminVenueFormRoute(route) && !isAdmin) {
+  if (isAdminVenueFormRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminVenueFormEntered = null;
     go(HOME);
     return;
   }
   // The full-page message compose form (TM-443) is ADMIN-only too — same rule as the consoles above.
-  if (isAdminMessageComposeRoute(route) && !isAdmin) {
+  if (isAdminMessageComposeRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminMessageComposeEntered = false;
     go(HOME);
@@ -626,7 +633,7 @@ function guard() {
   }
   // The sent-history list (TM-444) is ADMIN-only too — same rule as #/admin; the backend (TM-442) is
   // the real gate, this just avoids showing an unusable page to a non-admin.
-  if (route === ADMIN_MESSAGES && !isAdmin) {
+  if (route === ADMIN_MESSAGES && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
     adminMessagesActive = false;
     go(HOME);
@@ -889,11 +896,13 @@ const ROLE_RESOLVE_TIMEOUT_MS = 8000;
 async function resolveRoleThenGuard() {
   const user = currentUser();
   const signedIn = Boolean(user);
-  // Signed-out: reset to safe defaults (no gate, non-admin) and skip the network calls entirely.
+  // Signed-out: reset to safe defaults (no gate, non-admin) and skip the network calls entirely. The
+  // non-admin verdict is definitive here (no session → no role to resolve), so mark it resolved (TM-733).
   if (!signedIn) {
     isAdmin = false;
     isOnboarded = true;
     needsTerms = false;
+    roleResolved = true;
     guard();
     return;
   }
@@ -902,6 +911,11 @@ async function resolveRoleThenGuard() {
   // wrong role/gate. Checking only "is someone signed in?" below missed this — B *is* signed in, just not
   // the same user — so we compare uids, not mere presence.
   const uid = user.uid;
+
+  // Signed-in but the role for THIS session isn't known yet: hold the admin gate (don't bounce with a
+  // spurious "Admins only." toast) until the background lookup below resolves it. A fresh sign-in or a
+  // reload starts here (TM-733).
+  roleResolved = false;
 
   // 1) NAVIGATE FIRST. Don't wait on the network — a confirmed signed-in user must leave `#/login`
   //    now, using whatever cached role/onboarding values we have (fail-safe: non-admin, not gated).
@@ -924,6 +938,9 @@ async function resolveRoleThenGuard() {
   if (!now || now.uid !== uid) return;
 
   isAdmin = adminOutcome.value === "ADMIN";
+  // The role is now resolved for this session (even a timeout resolves to the fail-safe non-admin
+  // value): the admin gate may make its real decision from here on (TM-733).
+  roleResolved = true;
   isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;
   // Terms gate (TM-170): the SAME /me result tells us whether the user still needs to accept the
   // current terms version. The pure rule (terms-gate.js) fails open (false) on a null/degraded /me,

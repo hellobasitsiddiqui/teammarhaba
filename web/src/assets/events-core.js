@@ -288,6 +288,34 @@ export function listingBuckets(cards, nowMs = Date.now()) {
   };
 }
 
+// ------------------------------------------------------------------ external-URL scheme guard (TM-722)
+
+/**
+ * Return `url` only if it is a safe external link to render as a raw `href` — i.e. an absolute
+ * `http:`/`https:` URL — otherwise `null`.
+ *
+ * SECURITY (TM-722, TM-655 LOW web-security cluster). Admin-supplied venue links (`onlineUrl`, curated
+ * `mapUrl`) are rendered straight into an anchor's `href`. Without a scheme check a value like
+ * `javascript:alert(1)` or `data:text/html,…` would execute / navigate when clicked — a stored-XSS /
+ * open-navigation vector via the admin console. We allow ONLY http(s): a `javascript:`/`data:`/`file:`
+ * scheme, a scheme-relative `//host`, or anything unparseable is neutralised to `null` so the caller
+ * renders no link rather than a dangerous one. Pure (uses the URL parser, no DOM) so it's unit-tested.
+ *
+ * @param {string|null|undefined} url the raw, possibly admin-supplied URL.
+ * @returns {string|null} the trimmed URL when it is an http(s) absolute URL, else null.
+ */
+export function safeExternalUrl(url) {
+  const raw = typeof url === "string" ? url.trim() : "";
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null; // relative / scheme-relative / malformed — not a rendered external link.
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:" ? raw : null;
+}
+
 // ------------------------------------------------------------------ location reveal (TM-408)
 
 /**
@@ -306,8 +334,9 @@ export function listingBuckets(cards, nowMs = Date.now()) {
 export function locationView(detail, nowMs = Date.now()) {
   const city = (detail?.city || "").trim();
   const locationText = (detail?.locationText || "").trim();
-  const mapUrl = detail?.mapUrl || null;
-  const onlineUrl = detail?.onlineUrl || null;
+  // Admin-supplied links are rendered as raw hrefs — accept only http(s), neutralise the rest (TM-722).
+  const mapUrl = safeExternalUrl(detail?.mapUrl);
+  const onlineUrl = safeExternalUrl(detail?.onlineUrl);
   const revealsAtMs = toMs(detail?.locationRevealsAt);
   const hasRevealsAt = !Number.isNaN(revealsAtMs);
   const PLACEHOLDER = "Location shared ~24h before the event";
@@ -393,7 +422,9 @@ export function eventImageRef(imagePath) {
  * @returns {string|null}
  */
 export function directionsUrl({ mapUrl, query } = {}, platform = MAPS_PLATFORM.WEB) {
-  const curated = typeof mapUrl === "string" ? mapUrl.trim() : "";
+  // The curated venue link is admin-supplied — accept it only if it's a safe http(s) URL (TM-722),
+  // else fall through to building a query deep-link rather than rendering a dangerous scheme verbatim.
+  const curated = safeExternalUrl(mapUrl);
   if (curated) return curated; // the venue's own link — used as-is, on every platform.
   const q = typeof query === "string" ? query.trim() : "";
   if (!q) return null; // nothing to search for → no link (caller hides the button).
@@ -952,4 +983,31 @@ export const ENTITLEMENT_DECISION = Object.freeze({
  */
 export function requiresPaidCheckout(entitlement) {
   return entitlement?.decision === ENTITLEMENT_DECISION.PAY;
+}
+
+/**
+ * Is the current location hash still the detail route for this exact event id? Used by the RSVP
+ * command's post-action re-render guard (TM-733): a command (checkout, a leave that navigates on, a
+ * slow request the user has since left) can resolve after the user has navigated away, and the
+ * command's `finally` re-fetch must NOT paint this event's detail back over the route they moved to.
+ * The detail route is `#/events/{encodeURIComponent(id)}`; compares decoded ids so `%20`/space and
+ * other encodings match regardless of how the current hash spells the id. A blank/undefined hash or
+ * id is never a match.
+ * @param {string} hash the current `window.location.hash`
+ * @param {string|number} id the event id the command acted on
+ * @returns {boolean}
+ */
+export function isViewingEventDetail(hash, id) {
+  if (!hash || id == null || id === "") return false;
+  const prefix = "#/events/";
+  if (!hash.startsWith(prefix)) return false;
+  const rest = hash.slice(prefix.length);
+  if (!rest) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rest);
+  } catch {
+    decoded = rest; // malformed %-escape: fall back to the raw segment
+  }
+  return decoded === String(id);
 }

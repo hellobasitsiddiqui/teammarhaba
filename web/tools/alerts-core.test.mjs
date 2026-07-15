@@ -22,6 +22,7 @@ import {
   visibleAlerts,
   alertsSignature,
   recordDismissal,
+  adoptActiveResult,
 } from "../src/assets/alerts-core.js";
 
 /** A minimal in-memory Storage (getItem/setItem) — a fresh instance models a fresh browser session. */
@@ -157,7 +158,25 @@ test("alertsSignature keys by id AND content — distinct alerts never collide i
   assert.equal(alertsSignature(null), "");
 });
 
-// --- Level → colour class + a11y role mapping ---------------------------------------------------
+test("alertsSignature separates fields + records with control chars (TM-727)", () => {
+  const FIELD = "\u001f"; // ASCII Unit Separator — between an alert's id and its contentHash
+  const RECORD = "\u001e"; // ASCII Record Separator — between alerts
+
+  // The doc promises control-char field/record separators; the old form concatenated with none, leaving
+  // the id/hash and alert boundaries ambiguous. Prove they're now explicit in the emitted signature and
+  // that the signature is exactly the separated form.
+  const sig = alertsSignature([critPersistent, warnAck]);
+  assert.ok(sig.includes(FIELD), "a Unit Separator sits between each id and its contentHash");
+  assert.ok(sig.includes(RECORD), "a Record Separator sits between the two alerts");
+  const expected = [critPersistent, warnAck].map((a) => `${a.id}${FIELD}${contentHash(a)}`).join(RECORD);
+  assert.equal(sig, expected);
+
+  // A two-alert boundary the missing record separator blurred: [{id:1},{id:23}] vs [{id:12},{id:3}]
+  // trend toward the same flattened string without a separator; with one they stay distinct.
+  const left = [{ ...warnAck, id: "1" }, { ...warnAck, id: "23" }];
+  const right = [{ ...warnAck, id: "12" }, { ...warnAck, id: "3" }];
+  assert.notEqual(alertsSignature(left), alertsSignature(right), "distinct id splits never collide");
+});
 
 test("levelClass maps each level to its Paper modifier class (unknown → info)", () => {
   assert.equal(levelClass(Level.INFO), "tm-alert--info");
@@ -196,4 +215,23 @@ test("styles.css defines the level modifier classes + accent tokens the core ref
   for (const token of ["--alert-info", "--alert-warning", "--alert-critical"]) {
     assert.ok(css.includes(`${token}:`), `styles.css must define ${token}`);
   }
+});
+
+// --- adoptActiveResult: a failed poll must NOT wipe live banners (TM-734) -----------------------
+
+test("adoptActiveResult adopts a real fetched set (including a genuinely-empty one)", () => {
+  const set = [{ id: 1, message: "Heatwave", level: "CRITICAL", dismissal: "PERSISTENT" }];
+  assert.deepEqual(adoptActiveResult(set), { adopt: true, alerts: set });
+  // An operator who pulled every notice → a real empty success → adopt it (banners clear legitimately).
+  assert.deepEqual(adoptActiveResult([]), { adopt: true, alerts: [] });
+});
+
+test("adoptActiveResult IGNORES a failed fetch (null) so the last banners stand (TM-734)", () => {
+  // getActiveAlerts() now returns null on a network/HTTP failure — must NOT be adopted as "no alerts",
+  // otherwise a transient blip would wipe a PERSISTENT CRITICAL operator notice.
+  const r = adoptActiveResult(null);
+  assert.equal(r.adopt, false);
+  // Defensive: any non-array (undefined, a stray object) is treated as failure, never as an empty set.
+  assert.equal(adoptActiveResult(undefined).adopt, false);
+  assert.equal(adoptActiveResult({}).adopt, false);
 });

@@ -134,4 +134,33 @@ class EntitlementResolverTest {
         assertThat(result.amountPence()).isZero();
         assertThat(result.reason()).isEqualTo(EntitlementReason.FREE_EVENT);
     }
+
+    // ------------------------------------------------------------------ £0-premium guard (TM-726)
+
+    /**
+     * The residual TM-726 closes: a premium event priced at £0 is a contradiction that used to resolve to
+     * {@code PAY 0}, driving a zero-amount provider order the gateway rejects. It must now resolve
+     * defensively to {@code FREE} (no charge, no doomed order) — a premium event at a real price still PAYs.
+     * Admin input validation rejects the combination up front; this is the resolver's defensive backstop.
+     */
+    @Test
+    void premiumEventPricedAtZeroResolvesToFreeNotPayZero() {
+        Entitlement result = EntitlementResolver.resolve(MembershipTier.PAY_PER_EVENT, false, true, 0);
+
+        assertThat(result.decision())
+                .as("a £0 premium event must not drive a zero-amount PAY order")
+                .isEqualTo(EntitlementDecision.FREE);
+        assertThat(result.amountPence()).isZero();
+        assertThat(result.reason()).isEqualTo(EntitlementReason.FREE_EVENT);
+    }
+
+    @Test
+    void monthlyOnZeroPricedPremiumEventIsFreeNotPayZero() {
+        // Same guard for a Monthly member: a £0 premium is FREE, never PAY 0.
+        Entitlement result = EntitlementResolver.resolve(MembershipTier.MONTHLY, false, true, 0);
+
+        assertThat(result.decision()).isEqualTo(EntitlementDecision.FREE);
+        assertThat(result.amountPence()).isZero();
+        assertThat(result.reason()).isEqualTo(EntitlementReason.FREE_EVENT);
+    }
 }

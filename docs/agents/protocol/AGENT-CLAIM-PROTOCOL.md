@@ -121,6 +121,14 @@ The status flip is what enforces mutual exclusion (the candidate query is `statu
 ### 4. work() → In Review → Done
 Execute the task's **pinned Agent execution prompt** on a branch named **`<type>/TM-XX-short-kebab-desc`** (`feature` = app code, `chore` = infra/CI/cloud/docs/config, `fix` = bug; e.g. `feature/TM-49-walking-skeleton`, `chore/TM-63-cloud-sql`).
 
+**Build test-first — the test is committed BEFORE the implementation.** For any behaviour change
+(`feature`/`fix`): write the test for the behaviour at the right layer (unit / integration / e2e —
+see `CONTRIBUTING.md` → *Testing*), run it and watch it **fail** on the current code (red), commit
+it, then write the implementation that makes it pass (green) — all before the PR. A `feat`/`fix`
+PR that touches production source with no test fails the `test-first-guard` CI check and is not
+Done. `refactor` tasks are the exception: no new tests — the existing suite must stay **green and
+unchanged**, and the refactor goes in its own PR.
+
 **First-sub-task dedup checkpoint — yield early instead of double-building.** The claim-time re-verify (§3) can't catch an agent that *selected* this task while it was still `To Do` (before your claim landed) and is now building in its own worktree, blind to your claim. The pre-PR check below catches that — but only *after* both agents have built the whole ticket (the wasted double-builds: TM-151 #145/#146, TM-167 #162/#164). So **the moment you finish your Task's first sub-task** (the first checkpoint on its sub-task progress checklist — see GENESIS "break each non-trivial Task into sub-tasks as a mid-flight progress checklist"), **re-read the ticket's claims and yield if you're not the owner**:
 
 ```

@@ -133,6 +133,13 @@ public class CheckoutService {
             if (!membershipProps.enabled()) {
                 throw new AccessDeniedException(PAYMENTS_OFF);
             }
+            // Reliability downgrade (TM-729): enforce the "downgraded → waitlist-only for capacity-limited
+            // events" rule HERE, before any money is captured. The settle path (rsvpForConfirmedOrder) is
+            // deliberately exempt from the downgrade guard because the charge has already been captured by
+            // webhook time; without this pre-payment check a downgraded account could pay and be landed
+            // straight into a GOING spot at settle, buying past the very restriction the direct RSVP/claim
+            // verbs enforce. Refusing before the provider charge keeps it a clean 409 with no money to unwind.
+            rsvps.guardCheckoutReliabilityDowngrade(user, eventId);
             // PAY (TM-478): record a PENDING order, then open a REAL payment order with the provider for the
             // amount. Persist the provider's permanent order id on our order (the webhook match key) and
             // return its client token so the browser mounts the checkout widget. The RSVP is NOT created —
@@ -344,7 +351,9 @@ public class CheckoutService {
 
         // Drop the attendance and get the window verdict in one place (TM-414): lateCancel == true means
         // we are PAST the refundable cut-off (inside the final window before start) -> forfeit; false
-        // means an early cancel -> reversible. Also 409s if the event has already started.
+        // means an early cancel -> reversible. Also 409s if the event has already started. The direct
+        // un-RSVP verb (DELETE /rsvp) deliberately never returns the credit (TM-728) — this checkout
+        // path is the single owner of the genuine paid-commitment reversal.
         CancelResult cancel = rsvps.cancelRsvp(caller, eventId, false);
 
         Order order = orders.findByUserIdAndEventId(user.getId(), eventId).orElse(null);

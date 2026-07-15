@@ -140,6 +140,25 @@ jobs:
           sed -i "s#opsJiraBoardUrl: \"[^\"]*\"#opsJiraBoardUrl: \"${OPS_JIRA_BOARD_URL}\"#" web/dist/assets/config.js
           grep -E "opsProject|opsRegion|opsService|opsRepo|opsJiraBoardUrl" web/dist/assets/config.js
 
+      # Inject the web membership feature flag into the built config.js — the SAME deploy-time seam as the
+      # values above (TM-725). config.js ships with `membership: false` (inert dead code; see the gate
+      # comment there), so a plain build stays OFF. The flag flips to ON only when the repo VARIABLE
+      # WEB_MEMBERSHIP_FLAG is explicitly "true" — an opt-in toggle, never an accidental default, and the
+      # UI twin of the server-side MEMBERSHIP_ENABLED declared on the deploy step below. Any other value
+      # (unset/false) leaves it OFF. Runs before fingerprinting so the content hash reflects the final flag.
+      - name: Inject web membership flag into config.js
+        env:
+          WEB_MEMBERSHIP_FLAG: ${{ vars.WEB_MEMBERSHIP_FLAG }}
+        run: |
+          set -euo pipefail
+          if [ "${WEB_MEMBERSHIP_FLAG}" = "true" ]; then
+            sed -i "s#membership: false#membership: true#" web/dist/assets/config.js
+            echo "- Web membership flag: ON (WEB_MEMBERSHIP_FLAG=true)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Web membership flag: OFF (ships inert; set repo var WEB_MEMBERSHIP_FLAG=true to enable)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          grep -E "membership: (true|false)" web/dist/assets/config.js
+
       # Content-hash the built assets so each deploy changes their URLs — an automatic cache-bust
       # (TM-144). Runs AFTER the config.js injections above so the hash reflects the final content;
       # it rewrites index.html + the ES-module import specifiers. firebase.json then serves
@@ -380,7 +399,22 @@ jobs:
           set -euo pipefail
           REVOLUT_SECRETS=""
           # Always point the app at the sandbox base (non-sensitive). Go-live swaps this to merchant.revolut.com.
-          REVOLUT_ENV="REVOLUT_API_BASE=https://sandbox-merchant.revolut.com"
+          REVOLUT_API_BASE_URL="https://sandbox-merchant.revolut.com"
+          REVOLUT_ENV="REVOLUT_API_BASE=${REVOLUT_API_BASE_URL}"
+          # Money-safety interlock (TM-728): the SERVER-SIDE membership flag ships true in prod
+          # (MEMBERSHIP_ENABLED=true in the deploy step below), so the paid endpoints are reachable — while
+          # this API base is pinned to SANDBOX. That means a caller could obtain paid entitlements against
+          # sandbox test cards with no real money collected. This is EXPECTED pre-go-live (the web
+          # `membership` UI flag is still OFF, and go-live is the deliberate human swap to merchant.revolut.com
+          # + live keys, TM-599). We surface it LOUDLY here — non-fatal, so it never reds a green deploy or
+          # hacks around the intentional pin — so the mismatch is a conscious decision at go-live, not a
+          # silent accident. When REVOLUT_API_BASE moves to the live host this warning stops firing.
+          case "${REVOLUT_API_BASE_URL}" in
+            *sandbox*)
+              echo "::warning::MONEY-SAFETY (TM-728): membership is server-enabled (MEMBERSHIP_ENABLED=true) while REVOLUT_API_BASE is SANDBOX (${REVOLUT_API_BASE_URL}) — paid entitlements are obtainable with test cards and NO real money is collected. Expected pre-go-live (web membership UI flag still OFF); at go-live swap the base to merchant.revolut.com + live keys (TM-599)."
+              echo "- ⚠️ **Payments point at SANDBOX** while membership is server-enabled — no real money is collected (expected pre-go-live; resolve at go-live per TM-599)." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
           if gcloud secrets describe teammarhaba-revolut-sandbox-secret --project="${PROJECT}" >/dev/null 2>&1; then
             echo "Secret teammarhaba-revolut-sandbox-secret found — wiring Revolut create-order (TM-478)."
             REVOLUT_SECRETS="REVOLUT_SECRET_KEY=teammarhaba-revolut-sandbox-secret:latest"
@@ -475,11 +509,22 @@ jobs:
           # wired, prod unaffected). Kept in a repo variable, NOT source, so the address isn't in the
           # public repo. Real addresses always get a random code + real send; this fixed-code path is
           # scoped to that one powerless test account (sandbox payments only).
+          #
+          # TM-725: the fixed CODE is NEVER a shipped default. The backend now fails startup if the hook
+          # is enabled without an explicit, non-default code (the well-known 123456 is rejected). So when
+          # we enable the hook here we ALSO inject EMAIL_CODE_TEST_FIXED_CODE from Secret Manager
+          # (teammarhaba-e2e-test-login-code:latest) via --set-secrets — the code value never touches CI,
+          # the repo, or the logs (we pass the secret *name*, not the value). Both the address and the
+          # code go together: enabling the allow-list without the secret would (correctly) fail the boot.
           E2E_ENV=""
+          E2E_SECRETS=""
           if [ -n "${E2E_TEST_LOGIN_ADDRESS}" ]; then
             E2E_ENV="EMAIL_CODE_TEST_ALLOWED_ADDRESSES=${E2E_TEST_LOGIN_ADDRESS}"
-            echo "- Test-login (e2e): ON for the allow-listed test address (TM-312)." >> "$GITHUB_STEP_SUMMARY"
+            E2E_SECRETS="EMAIL_CODE_TEST_FIXED_CODE=teammarhaba-e2e-test-login-code:latest"
+            echo "- Test-login (e2e): ON for the allow-listed test address; fixed code from Secret Manager (TM-312/TM-725)." >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Fold the e2e fixed-code secret into the secret join (empty -> no stray comma).
+          SECRETS="${SECRETS}${E2E_SECRETS:+,${E2E_SECRETS}}"
           ENV_VARS="SPRING_PROFILES_ACTIVE=prod,DB_NAME=teammarhaba,DB_USER=app,INSTANCE_CONNECTION_NAME=${CLOUDSQL},FIREBASE_PROJECT_ID=${PROJECT},ADMIN_BOOTSTRAP_EMAIL=${{ vars.ADMIN_BOOTSTRAP_EMAIL }},MEMBERSHIP_ENABLED=true,SUBSCRIPTIONS_ENABLED=false${MAIL_ENV:+,${MAIL_ENV}}${REVOLUT_ENV:+,${REVOLUT_ENV}}${E2E_ENV:+,${E2E_ENV}}"
 
           # --no-traffic is only meaningful when a previous revision holds traffic; on the
@@ -491,10 +536,27 @@ jobs:
             TRAFFIC_FLAGS=()
           fi
 
+          # Name THIS run's revision deterministically with --revision-suffix (TM-735). The old code
+          # read status.latestCreatedRevisionName back AFTER the deploy to learn NEW_REV — but that
+          # field is SERVICE-GLOBAL: preview.yml deploys revisions to this SAME service (no traffic,
+          # its own concurrency group, so it can run concurrently with this Deploy). A preview deploy
+          # landing in the window between our `gcloud run deploy` and the describe would make
+          # latestCreatedRevisionName point at the PREVIEW revision — the health gate would then probe
+          # and the Promote step would route 100% PROD traffic to a preview revision. Pinning the name
+          # up front makes NEW_REV depend only on THIS run: the promote can only ever land on the
+          # revision we just built and gated, whatever else touches the service meanwhile.
+          # Suffix is unique per run (run id + attempt) and short SHA; the resulting revision name is
+          # `${SERVICE}-${SUFFIX}` — kept well under Cloud Run's 63-char limit.
+          SHORT_SHA="$(printf '%s' "${EFFECTIVE_SHA}" | cut -c1-7)"
+          REV_SUFFIX="$(printf '%s-%s-%s' "${SHORT_SHA}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}")"
+          NEW_REV="${SERVICE}-${REV_SUFFIX}"
+          echo "Deploying candidate revision (pinned name): ${NEW_REV}"
+
           # TM-270: no --[no-]allow-unauthenticated — this command must NEVER touch IAM.
           gcloud run deploy "${SERVICE}" \
             --project="${PROJECT}" --region="${REGION}" --platform=managed \
             --image="${IMAGE}:${EFFECTIVE_SHA}" \
+            --revision-suffix="${REV_SUFFIX}" \
             --service-account="teammarhaba-run@${PROJECT}.iam.gserviceaccount.com" \
             --port=8080 \
             "${TRAFFIC_FLAGS[@]}" \
@@ -507,10 +569,14 @@ jobs:
             --startup-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=10,timeoutSeconds=3,periodSeconds=10,failureThreshold=6 \
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,timeoutSeconds=3,periodSeconds=30,failureThreshold=3 \
             --quiet
-          # Record the revision THIS deploy created: the health gate probes it, the promote
-          # step routes to it BY NAME, and the TM-131 verify asserts it ends up serving.
-          NEW_REV=$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
-            --format='value(status.latestCreatedRevisionName)')
+          # NEW_REV is the name we pinned above, NOT a re-read of latestCreatedRevisionName — so a
+          # concurrent preview deploy can't hijack the promote. Cross-check that our revision now
+          # exists (fail loudly if the suffix didn't take), then hand it to the health gate + promote.
+          if ! gcloud run revisions describe "${NEW_REV}" --project="${PROJECT}" --region="${REGION}" \
+               --format='value(metadata.name)' >/dev/null 2>&1; then
+            echo "::error::Expected candidate revision ${NEW_REV} was not created — refusing to guess which revision to promote."
+            exit 1
+          fi
           echo "Deploy created candidate revision: ${NEW_REV}"
           echo "NEW_REV=${NEW_REV}" >> "$GITHUB_ENV"
 

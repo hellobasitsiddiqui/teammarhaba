@@ -71,6 +71,8 @@ class ConversationStreamIntegrationTest extends AbstractIntegrationTest {
     @Autowired private EventRepository events;
     @Autowired private MessagePostService messagePostService;
     @Autowired private ChatStreamService chatStreamService;
+    @Autowired private com.teammarhaba.backend.chat.ChatModerationService chatModerationService;
+    @Autowired private com.teammarhaba.backend.chat.ConversationMembershipService conversationMembershipService;
 
     @BeforeEach
     void cleanSlate() {
@@ -164,6 +166,59 @@ class ConversationStreamIntegrationTest extends AbstractIntegrationTest {
         String streamed = stream.getResponse().getContentAsString();
         assertThat(streamed).contains("event:" + ChatStreamService.EVENT_MESSAGE);
         assertThat(streamed).contains("live hello everyone");
+    }
+
+    // ── moderation / self-leave revokes the live stream (TM-730) ────────────────────────────────────
+
+    @Test
+    void moderationRemovalRevokesTheMembersLiveStream() throws Exception {
+        // TM-730: membership is only checked at connect, so a member kicked by moderation kept receiving
+        // live frames until their stream timed out (up to 4 min). Removal must cut the stream at once.
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("stream-revoke-mod")));
+        long targetId = activeMember(thread, "kick-target");
+        activeMember(thread, "stays"); // a second member whose stream must NOT be revoked
+
+        // Both connect and register on the hub.
+        mockMvc.perform(get("/api/v1/conversations/{id}/stream", thread.getId())
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .with(user("kick-target")))
+                .andExpect(request().asyncStarted());
+        mockMvc.perform(get("/api/v1/conversations/{id}/stream", thread.getId())
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .with(user("stays")))
+                .andExpect(request().asyncStarted());
+        assertThat(chatStreamService.connectionCount(thread.getId())).isEqualTo(2);
+
+        // Admin removes the target. The AFTER_COMMIT revocation fires when this moderation tx commits.
+        chatModerationService.muteMember(
+                new VerifiedUser("mod", "mod@example.com"), thread.getId(), targetId, MuteState.REMOVED);
+
+        // Only the removed member's stream was cut; the other member stays connected.
+        assertThat(chatStreamService.connectionCount(thread.getId())).isEqualTo(1);
+    }
+
+    @Test
+    void selfLeaveRevokesTheMembersOwnLiveStream() throws Exception {
+        // TM-730: leaving hides the thread but, like a kick, left the caller's live stream delivering
+        // frames until timeout. Self-leave must revoke their own stream at once (and no one else's).
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("stream-revoke-leave")));
+        activeMember(thread, "leaver");
+        activeMember(thread, "remains");
+
+        mockMvc.perform(get("/api/v1/conversations/{id}/stream", thread.getId())
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .with(user("leaver")))
+                .andExpect(request().asyncStarted());
+        mockMvc.perform(get("/api/v1/conversations/{id}/stream", thread.getId())
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .with(user("remains")))
+                .andExpect(request().asyncStarted());
+        assertThat(chatStreamService.connectionCount(thread.getId())).isEqualTo(2);
+
+        conversationMembershipService.leave(
+                new VerifiedUser("leaver", "leaver@example.com"), thread.getId());
+
+        assertThat(chatStreamService.connectionCount(thread.getId())).isEqualTo(1);
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────────────────────────

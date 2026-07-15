@@ -51,6 +51,14 @@ public class RefundSweepService {
     /** Upper bound on rows handled per pass per ledger (oldest first; the next tick takes the rest). */
     private static final int SCAN_LIMIT = 100;
 
+    /**
+     * Retry budget for one {@code REFUND_DUE} row (TM-726). After this many FAILED sweep attempts the row
+     * is moved to the terminal {@code REFUND_ABANDONED} state instead of being retried forever — a refund
+     * still failing after this many hourly passes is permanently rejected (already refunded out of band,
+     * too old, wrong amount) and needs a human, not another identical retry.
+     */
+    static final int MAX_REFUND_ATTEMPTS = 24;
+
     private final OrderRepository orders;
     private final SubscriptionChargeRepository charges;
     private final UserService users;
@@ -91,7 +99,9 @@ public class RefundSweepService {
     /**
      * Retry the refund one {@code REFUND_DUE} order owes, in its own transaction under the buyer's
      * user-row lock. Success is terminal ({@code REFUNDED}); failure leaves the row {@code REFUND_DUE}
-     * for the next pass — the debt is never lost, only deferred.
+     * for the next pass — the debt is never lost, only deferred — UNTIL the {@link #MAX_REFUND_ATTEMPTS}
+     * retry budget is exhausted, when the row moves to the terminal {@code REFUND_ABANDONED} for manual
+     * reconciliation so a permanently-rejected refund is not retried forever (TM-726).
      *
      * @return {@code true} when the row was resolved (refunded, or defensively closed), {@code false}
      *         for a no-longer-due no-op or a still-failing refund (retried next tick)
@@ -133,12 +143,25 @@ public class RefundSweepService {
                     order.getProviderOrderId());
             return true;
         } catch (PaymentProviderException e) {
-            log.warn(
-                    "Refund sweep attempt for order {} (provider order {}) failed — stays REFUND_DUE "
-                            + "for the next pass.",
-                    order.getId(),
-                    order.getProviderOrderId(),
-                    e);
+            boolean abandoned = order.recordFailedRefundAttempt(MAX_REFUND_ATTEMPTS, now);
+            if (abandoned) {
+                log.error(
+                        "Refund sweep gave up on order {} (provider order {}) after {} attempts — moved to "
+                                + "REFUND_ABANDONED; a permanently-rejected refund needs manual reconciliation "
+                                + "(TM-726).",
+                        order.getId(),
+                        order.getProviderOrderId(),
+                        order.getRefundAttempts(),
+                        e);
+            } else {
+                log.warn(
+                        "Refund sweep attempt {} for order {} (provider order {}) failed — stays REFUND_DUE "
+                                + "for the next pass.",
+                        order.getRefundAttempts(),
+                        order.getId(),
+                        order.getProviderOrderId(),
+                        e);
+            }
             return false;
         }
     }
@@ -183,12 +206,25 @@ public class RefundSweepService {
                     charge.getProviderOrderId());
             return true;
         } catch (PaymentProviderException e) {
-            log.warn(
-                    "Refund sweep attempt for subscription charge {} (provider order {}) failed — "
-                            + "stays REFUND_DUE for the next pass.",
-                    charge.getId(),
-                    charge.getProviderOrderId(),
-                    e);
+            boolean abandoned = charge.recordFailedRefundAttempt(MAX_REFUND_ATTEMPTS, now);
+            if (abandoned) {
+                log.error(
+                        "Refund sweep gave up on subscription charge {} (provider order {}) after {} "
+                                + "attempts — moved to REFUND_ABANDONED; a permanently-rejected refund needs "
+                                + "manual reconciliation (TM-726).",
+                        charge.getId(),
+                        charge.getProviderOrderId(),
+                        charge.getRefundAttempts(),
+                        e);
+            } else {
+                log.warn(
+                        "Refund sweep attempt {} for subscription charge {} (provider order {}) failed — "
+                                + "stays REFUND_DUE for the next pass.",
+                        charge.getRefundAttempts(),
+                        charge.getId(),
+                        charge.getProviderOrderId(),
+                        e);
+            }
             return false;
         }
     }

@@ -135,6 +135,56 @@ class UserAdminServiceTest {
     }
 
     @Test
+    void demotionRevokesTheUsersRefreshTokens() throws Exception {
+        // TM-723: demoting an admin must promptly cut existing elevated sessions. The role change writes
+        // the claim + row, then revokes refresh tokens so the old ADMIN token stops verifying (the filter
+        // checks revocation) rather than lingering until the next hourly refresh.
+        User target = account("target");
+        target.setRole(Role.ADMIN);
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+
+        service.update(1L, null, Role.USER, "admin-uid"); // ADMIN -> USER
+
+        verify(roleService).assignRole("target", Role.USER);
+        verify(auth).revokeRefreshTokens("target");
+        assertThat(target.getRole()).isEqualTo(Role.USER);
+    }
+
+    @Test
+    void promotionDoesNotRevokeTokens() throws Exception {
+        // Only a demotion (dropping ADMIN) is a privilege-escalation window. A promotion needn't force a
+        // re-auth, so it must not revoke sessions (avoids logging out a freshly-promoted admin).
+        User target = account("target"); // USER by default
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+
+        service.update(1L, null, Role.ADMIN, "admin-uid"); // USER -> ADMIN
+
+        verify(roleService).assignRole("target", Role.ADMIN);
+        // No FirebaseAuth resolution/revoke on a promotion.
+        verifyNoInteractions(firebaseAuthProvider);
+    }
+
+    @Test
+    void demotionStillSucceedsWhenSessionRevokeFails() throws Exception {
+        // Best-effort: a revoke failure (or no Admin SDK in dev/test) must not roll back the role change,
+        // which is the source of truth (claim + row already written).
+        User target = account("target");
+        target.setRole(Role.ADMIN);
+        when(users.findById(1L)).thenReturn(Optional.of(target));
+        FirebaseAuth auth = mock(FirebaseAuth.class);
+        when(firebaseAuthProvider.getIfAvailable()).thenReturn(auth);
+        org.mockito.Mockito.doThrow(mock(com.google.firebase.auth.FirebaseAuthException.class))
+                .when(auth)
+                .revokeRefreshTokens("target");
+
+        service.update(1L, null, Role.USER, "admin-uid"); // must not throw
+
+        assertThat(target.getRole()).isEqualTo(Role.USER);
+    }
+
+    @Test
     void roleChangeToSameRoleIsANoOp() throws Exception {
         User target = account("target"); // already USER
         when(users.findById(1L)).thenReturn(Optional.of(target));

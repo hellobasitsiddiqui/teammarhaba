@@ -349,6 +349,51 @@ export function buildEventPayload(draft = {}) {
 }
 
 /**
+ * The optional fields a PATCH can carry — the ones {@link buildEventPayload} OMITS when blank. The
+ * backend's PATCH convention (UpdateEventRequest, TM-392) reads a null/absent field as "leave
+ * unchanged", so an omitted-because-blank optional is indistinguishable from "untouched": clearing
+ * it back to empty is silently a no-op on the wire. This list is what {@link clearedOptionalFields}
+ * checks so the submit handler can WARN the admin instead of toasting a false "saved" (TM-734).
+ *
+ * `timezone`, the required datetimes, and the required text (heading/description/locationText) are
+ * deliberately excluded — none is ever cleared to blank (validation blocks it), so they can't
+ * silently no-op.
+ */
+export const CLEARABLE_OPTIONAL_FIELDS = [
+  "mapUrl",
+  "onlineUrl",
+  "city",
+  "openingMessage",
+  "venueId",
+  "endAt",
+  "visibilityEnd",
+  "capacity",
+  "locationRevealHours",
+  "ageMin",
+  "ageMax",
+];
+
+/**
+ * On EDIT, the optional fields the admin has blanked that the PATCH cannot express — i.e. the event
+ * carried a value, the draft now leaves it empty, yet {@link buildEventPayload} omits it (so the
+ * server keeps the old value). Returns the list of affected field keys (empty on create, or when
+ * nothing was actually cleared). The caller uses a non-empty result to warn the admin rather than
+ * report a success that didn't happen (TM-734).
+ *
+ * @param {object} original the EventResponse being edited (omit/empty on create).
+ * @param {object} draft the raw form values being submitted.
+ * @returns {string[]} the keys of previously-set optionals now blanked but not transmittable.
+ */
+export function clearedOptionalFields(original, draft = {}) {
+  if (!original || typeof original !== "object") return [];
+  const before = toFormModel(original);
+  const body = buildEventPayload(draft);
+  return CLEARABLE_OPTIONAL_FIELDS.filter(
+    (key) => cleanText(before[key]) !== "" && !(key in body),
+  );
+}
+
+/**
  * The inverse of the form: an EventResponse (TM-392) → the form field values for the edit prefill,
  * rendering each UTC instant back into the event's LOCAL wall-clock (in its own timezone) for the
  * datetime-local inputs. Blank/absent optionals come back as "". Age band is read defensively
@@ -391,10 +436,18 @@ export function toFormModel(event = {}) {
  * window + now. `tone` maps to a badge variant (ok/off/muted/info) in admin-events.js.
  *
  *   CANCELLED                          → Cancelled (off)
- *   over (now ≥ endAt, else ≥ startAt) → Finished  (muted)
+ *   finished (see below)               → Finished  (muted)
  *   now < visibilityStart              → Hidden    (info)   — scheduled, not yet public
  *   now > visibilityEnd                → Unlisted  (muted)  — past its listing window, not yet started
  *   otherwise                          → Visible   (ok)     — publicly listed right now
+ *
+ * The "finished" verdict prefers the admin projection's authoritative {@code past} boolean (the
+ * server's {@code EventPhasePolicy.isFinished}); only when it's absent (a legacy response) does it
+ * fall back to the instants. Crucially, that fallback finishes an event only once {@code now ≥ endAt}
+ * — an OPEN-ENDED event (no {@code endAt}) is NOT client-side-finished at its start (TM-727): the
+ * server runs such an event for an assumed default duration, and the member UI
+ * ({@code events-core.isFinished}) likewise never client-side-finishes an open-ended event, so this
+ * keeps the admin pill in lock-step with both rather than flipping to "Finished" the instant it begins.
  *
  * @param {object} event an EventResponse.
  * @param {Date|number|string} [now]
@@ -403,11 +456,15 @@ export function toFormModel(event = {}) {
 export function eventLifecycle(event = {}, now = Date.now()) {
   if (String(event.status).toUpperCase() === "CANCELLED") return { label: "Cancelled", tone: "off" };
   const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
-  const startMs = new Date(event.startAt).getTime();
-  const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs;
   const visStart = new Date(event.visibilityStart).getTime();
   const visEnd = new Date(event.visibilityEnd).getTime();
-  if (Number.isFinite(endMs) && t >= endMs) return { label: "Finished", tone: "muted" };
+  // Finished: trust the server's `past` flag when present; else fall back to endAt ONLY (a null endAt =
+  // open-ended = not client-side finished, matching the member UI + server assumed-duration rule).
+  const finished =
+    typeof event.past === "boolean"
+      ? event.past
+      : event.endAt != null && Number.isFinite(new Date(event.endAt).getTime()) && t >= new Date(event.endAt).getTime();
+  if (finished) return { label: "Finished", tone: "muted" };
   if (Number.isFinite(visStart) && t < visStart) return { label: "Hidden", tone: "info" };
   if (Number.isFinite(visEnd) && t > visEnd) return { label: "Unlisted", tone: "muted" };
   return { label: "Visible", tone: "ok" };

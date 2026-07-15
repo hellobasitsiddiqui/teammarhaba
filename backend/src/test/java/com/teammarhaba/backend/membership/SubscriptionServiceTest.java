@@ -197,6 +197,36 @@ class SubscriptionServiceTest {
         assertThat(abandoned.getProviderOrderId()).isEqualTo("rev-new");
     }
 
+    @Test
+    void reentrantCheckoutReusesTheCustomerStoredOnTheReusedPendingChargeInsteadOfCreatingANewOne() {
+        // The residual TM-726 closes: a re-entrant Subscribe checkout re-used its PENDING INITIAL charge
+        // (good) but still minted a BRAND-NEW Revolut customer every attempt (bad) — ignoring the customer
+        // id already stored on that charge, orphaning the previous customer and the card saved against it.
+        // The stored customer must be reused; no new customer created. (No Subscription row yet, so the
+        // only reuse source is the charge itself.)
+        Instant earlier = Instant.now().minus(Duration.ofHours(1));
+        SubscriptionCharge abandoned =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, earlier);
+        // A prior attempt registered the customer but never reached the provider order (providerOrderId
+        // stays null — the simple re-point path), so only the customer id carries over.
+        abandoned.setPaymentReference("revolut", null, "cust-stored", earlier);
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.empty());
+        when(charges.findFirstByUserIdAndKindAndStatus(
+                        42L, SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING))
+                .thenReturn(Optional.of(abandoned));
+        when(payments.createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-stored")))
+                .thenReturn(new PaymentOrder("rev-reentrant", "tok-reentrant"));
+
+        SubscriptionCheckout result = service.checkout(CALLER, MembershipTier.MONTHLY);
+
+        // The stored customer was reused — NO new customer minted (the whole fix).
+        verify(payments, never()).createCustomer(any(), any(), any());
+        // …and the fresh provider order was opened against that same stored customer.
+        verify(payments).createOrderForCustomer(eq(999), eq("GBP"), anyString(), eq("cust-stored"));
+        assertThat(result.paymentToken()).isEqualTo("tok-reentrant");
+        assertThat(abandoned.getProviderCustomerId()).isEqualTo("cust-stored");
+    }
+
     // ------------------------------------------------------------------ webhook activation
 
     @Test
@@ -259,6 +289,64 @@ class SubscriptionServiceTest {
 
         verify(users, never()).lockForUpdate(anyLong());
         verify(subscriptions, never()).save(any());
+    }
+
+    @Test
+    void confirmChargeRefundsAnInitialSettleForASoftDeletedBuyerInsteadOf500Looping() {
+        // TM-728 (finding 1): a soft-deleted buyer's PENDING INITIAL charge settles. activate()'s
+        // restricted getById would throw for a tombstoned account, 500-looping the webhook forever with
+        // the money captured but never activated and never refunded. The captured money must instead be
+        // flagged REFUND_DUE and refunded — never a crash, never a silent drop.
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-del", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-del")).thenReturn(Optional.of(charge));
+        User deleted = mock(User.class);
+        when(deleted.isDeleted()).thenReturn(true);
+        when(users.findAnyById(42L)).thenReturn(Optional.of(deleted));
+
+        boolean matched = service.confirmCharge("rev-ord-del");
+
+        assertThat(matched).isTrue(); // resolved to our ledger — the webhook is acked, not redelivered
+        // The captured money is owed back, not swallowed: REFUND_DUE + provider refund → REFUNDED.
+        verify(payments).refund(eq("rev-ord-del"), eq(999), eq("GBP"), anyString());
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUNDED);
+        // Never activated for a tombstoned account: no subscription row, no tier grant, no notification.
+        verify(subscriptions, never()).save(any());
+        verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
+        verify(notifier, never()).subscriptionStarted(anyLong(), any(), anyString());
+    }
+
+    @Test
+    void confirmChargeRefundsASecondInitialSettleWhenTheSubscriptionIsAlreadyActive() {
+        // TM-728 (finding 2): a second INITIAL charge settles while the account is ALREADY actively
+        // subscribed — duplicate money (the mirror of the handled SUPERSEDED refund case). activate()
+        // would silently reset the live period, swallowing this paid month. It must instead be flagged
+        // REFUND_DUE and the provider refund attempted; a failing refund keeps the debt visible.
+        Subscription active = new Subscription(42L, MembershipTier.MONTHLY, "revolut", "cust-1", Instant.now());
+        when(subscriptions.findByUserId(42L)).thenReturn(Optional.of(active));
+
+        Instant chargeTime = Instant.now();
+        SubscriptionCharge charge =
+                new SubscriptionCharge(42L, SubscriptionCharge.Kind.INITIAL, MembershipTier.MONTHLY, 999, chargeTime);
+        charge.setPaymentReference("revolut", "rev-ord-dup", "cust-1", chargeTime);
+        when(charges.findByProviderOrderId("rev-ord-dup")).thenReturn(Optional.of(charge));
+        doThrow(new PaymentProviderException("gateway down"))
+                .when(payments)
+                .refund(any(), anyInt(), any(), any());
+
+        boolean matched = service.confirmCharge("rev-ord-dup");
+
+        assertThat(matched).isTrue();
+        // The refund was ATTEMPTED against the captured order; the failed attempt keeps the debt as
+        // REFUND_DUE (the sweeper's queue) rather than swallowing the paid month.
+        verify(payments).refund(eq("rev-ord-dup"), eq(999), eq("GBP"), anyString());
+        assertThat(charge.getStatus()).isEqualTo(SubscriptionCharge.Status.REFUND_DUE);
+        // The live subscription is untouched — its period is NOT reset by the duplicate settle.
+        assertThat(active.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        verify(memberships, never()).applyTierForSubscription(anyLong(), any(), anyString());
+        verify(notifier, never()).subscriptionStarted(anyLong(), any(), anyString());
     }
 
     // ------------------------------------------------------------------ decline/fail webhook (TM-634)
