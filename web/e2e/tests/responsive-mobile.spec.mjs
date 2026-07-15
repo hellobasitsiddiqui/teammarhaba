@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN, TARGET } from "../fixtures.mjs";
+import { ADMIN, TARGET, API_BASE_URL } from "../fixtures.mjs";
+import { authHeadersFor, createEvent, apiRsvp, resetAttendanceFor } from "../events-api.mjs";
 
 // Responsive mobile-web polish (TM-229) — proves the app is usable at a phone viewport. This spec
 // runs ONLY under the `mobile-chromium` Playwright project (Pixel 5 ≈ 393px wide; see
@@ -64,6 +65,43 @@ async function signInAsAdmin(page) {
   // resolved and the session is un-gated + role-resolved — exactly the "app-ready" point a real
   // (slower) phone user reaches before they can open the admin console. Covers BOTH gates at once.
   await expect(page.locator("#nav-admin")).not.toHaveAttribute("hidden", /.*/);
+}
+
+/**
+ * Seed a REAL admin/system notification into `recipient`'s live feed via the admin path — the same
+ * technique notifications.spec.mjs uses (there is no user-facing "create a notification" flow, so we
+ * write a durable feed row through the real admin seam, exactly like events.spec.mjs seeds events).
+ * Creates a throwaway event, RSVPs the recipient GOING (so they're a resolvable member of the event
+ * audience), then — as the ADMIN — sends an admin message to that event's attendees
+ * (POST /api/v1/admin/messages, eventIds audience), delivering one ADMIN_MESSAGE inbox row to the
+ * recipient. The stamped title/body make the later feed assertion match only THIS run's notification,
+ * never a lookalike from another spec sharing the CI database. Returns the stamped { title, body }.
+ *
+ * This replaces the pre-TM-745 assertion of the removed FAKE feed strings ("Sunday Morning Dog Walk",
+ * "A spot opened up …"): the #/notifications screen now renders the caller's REAL feed (GET
+ * /me/notifications → notifications-core.js mapFeed), so we seed a real row and assert THAT.
+ */
+async function seedAdminNotification(recipient, { title, body }) {
+  const adminHeaders = await authHeadersFor(ADMIN);
+  // Clear any lingering GOING from an earlier run so the one-active-event guard (TM-413) can't reject
+  // this RSVP — same guard-clearing the events specs do.
+  const recipientHeaders = await resetAttendanceFor(recipient);
+  // A throwaway event whose only job is to make `recipient` a resolvable member of an eventIds
+  // audience; ample capacity so the RSVP always lands GOING (never WAITLISTED).
+  const event = await createEvent(adminHeaders, { heading: title, capacity: 20 });
+  const rsvp = await apiRsvp(recipientHeaders, event.id);
+  expect(rsvp.state).toBe("GOING");
+  // Send the admin message to the event's GOING attendees — one ADMIN_MESSAGE inbox row for the
+  // recipient (push-pref-independent), so it surfaces on their notifications feed.
+  const res = await fetch(`${API_BASE_URL}/api/v1/admin/messages`, {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({ title, body, eventIds: [event.id] }),
+  });
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`seed admin message failed: ${res.status} ${await res.text()}`);
+  }
+  return { title, body };
 }
 
 // Suppress the first-run product tour (its dimmed overlay would cover the controls under test).
@@ -236,21 +274,41 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     await expectNoHorizontalPageScroll(page);
   });
 
-  test("the notifications feed renders and Mark all read clears the unread rows (TM-515)", async ({
+  test("the notifications feed renders a seeded row and Mark all read clears the unread rows (TM-515, TM-745)", async ({
     page,
   }) => {
+    // TM-745 replaced the hardcoded fake feed (buildFeed) with the REAL feed (mapFeed from GET
+    // /me/notifications), so the old fabricated strings ("Sunday Morning Dog Walk", "A spot opened
+    // up …") no longer render — this asserts the real feed instead. Seed a durable admin/system
+    // notification into the ADMIN's own feed via the admin path (mirrors notifications.spec.mjs),
+    // then assert the app paints THAT seeded row and Mark all read clears the unread state.
+    const stamp = Date.now();
+    const title = `Responsive feed check ${stamp}`;
+    const body = `A seeded notification for the mobile notifications-feed e2e (${stamp}).`;
+    await seedAdminNotification(ADMIN, { title, body });
+
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
     await page.evaluate(() => (window.location.hash = "#/notifications"));
     await expect(page.locator("#notifications-view")).toBeVisible();
+
+    // The real feed renders the seeded row (mapFeed maps the notification's title into the note text).
     const feed = page.locator('[data-testid="notifications"]');
-    await expect(feed).toContainText("Sunday Morning Dog Walk");
-    await expect(feed).toContainText("A spot opened up — claim it before it's gone");
-    // Three unread rows to start; Mark all read clears them.
-    await expect(page.locator('[data-testid="notification"][data-read="false"]')).toHaveCount(3);
+    await expect(feed).toBeVisible();
+    const seededRow = page.locator('[data-testid="notification"]', { hasText: title });
+    await expect(seededRow).toBeVisible();
+    // It starts unread (server read flag is false for a freshly-seeded row).
+    await expect(seededRow).toHaveAttribute("data-read", "false");
+
+    // At least our seeded row is unread; Mark all read clears every unread row (client-side transform).
+    await expect
+      .poll(async () => page.locator('[data-testid="notification"][data-read="false"]').count())
+      .toBeGreaterThanOrEqual(1);
     await page.locator('[data-testid="notifs-mark-all"]').click();
     await expect(page.locator('[data-testid="notification"][data-read="false"]')).toHaveCount(0);
+    // The seeded row is still present, now rendered read.
+    await expect(seededRow).toHaveAttribute("data-read", "true");
   });
 
   test("the tab bar is hidden on the signed-out auth gate", async ({ page }) => {
