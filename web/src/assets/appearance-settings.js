@@ -27,6 +27,7 @@ import {
   accentIdFromHex,
   applyAppearance,
   writeHint,
+  createAppearancePersister,
 } from "./appearance-core.js";
 
 function safeStorage() {
@@ -134,21 +135,37 @@ export function buildAppearanceSettings() {
   }
 
   /**
-   * Persist a single changed field server-side. On failure, revert the working state + UI to
-   * `previous` and warn, so the control never shows a choice that didn't actually save.
+   * Restore the working state + UI to `previous` (used by the persister when a save fails and this is
+   * still the latest change — see createAppearancePersister). Kept separate so the sequencer decides
+   * WHETHER to revert; this only knows HOW.
    */
-  async function persist(patch, previous) {
-    try {
-      await updateMe(patch);
-    } catch (err) {
-      state.accentId = previous.accentId;
-      state.sketchy = previous.sketchy;
-      applyLive();
-      reflectAccent();
-      toggle.checked = state.sketchy;
+  function revertTo(previous) {
+    state.accentId = previous.accentId;
+    state.sketchy = previous.sketchy;
+    applyLive();
+    reflectAccent();
+    toggle.checked = state.sketchy;
+  }
+
+  // Sequenced persistence (TM-720): the user can flip accent/toggle faster than a PATCH round-trips,
+  // so two writes can be in flight at once and resolve out of order. The persister guards against a
+  // stale FAILED request reverting a newer successful change — only the latest change may revert on
+  // failure — so the UI always settles on the last thing the user picked (last-write-wins by request
+  // order), never on a half-applied mix of server and UI state.
+  const persister = createAppearancePersister({
+    patch: updateMe,
+    revert: revertTo,
+    onError: (err, superseded) => {
+      // A superseded (stale) failure is swallowed — a newer change owns the UI; don't nag/undo it.
+      if (superseded) return;
       const msg = err instanceof ApiError ? err.message : "Couldn't save your appearance. Try again.";
       toast(msg, { type: "error" });
-    }
+    },
+  });
+
+  /** Persist a single changed field server-side, sequenced so out-of-order responses can't disagree. */
+  function persist(patch, previous) {
+    persister.run(patch, previous);
   }
 
   function selectAccent(id) {

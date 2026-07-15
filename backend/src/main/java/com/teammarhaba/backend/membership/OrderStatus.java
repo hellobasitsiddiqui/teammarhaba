@@ -42,6 +42,16 @@ public enum OrderStatus {
     REFUNDED,
 
     /**
+     * The owed refund could not be issued automatically (TM-726): the {@code RefundSweepService} retried
+     * the provider refund up to its cap and it kept failing (a permanently-rejected refund — the payment
+     * was already refunded out of band, the order is too old to refund, or the amount no longer matches).
+     * Terminal for the sweep: the row stops being retried on every pass and needs a human to reconcile.
+     * Distinct from {@link #REFUNDED} (money genuinely returned) so an operator can tell a resolved debt
+     * from an abandoned one; before this, such a row sat {@link #REFUND_DUE} forever, retried indefinitely.
+     */
+    REFUND_ABANDONED,
+
+    /**
      * A PAY order whose INITIAL widget payment was declined/failed (TM-634): the provider sent
      * {@code ORDER_PAYMENT_DECLINED}/{@code ORDER_PAYMENT_FAILED}, so the charge never captured. Terminal
      * and non-settling — the RSVP is never performed and no money is owed back. Before TM-634 such an order

@@ -141,21 +141,35 @@ public class SubscriptionService {
 
         int amountPence = SubscriptionPricing.monthlyPricePence(tier);
 
-        // Reuse the provider customer a previous subscription registered (same gateway), else create one —
-        // the container the widget saves the card into and renewals charge through. The phone number
-        // rides along (TM-623) so a phone-only account (no email, often no name) still registers a
-        // customer with a real identifying field.
-        String customerId = existing != null
-                        && existing.getProviderCustomerId() != null
-                        && payments.name().equals(existing.getProvider())
-                ? existing.getProviderCustomerId()
-                : payments.createCustomer(user.getEmail(), user.getPhone(), user.getDisplayName());
-
         // One PENDING INITIAL charge per account: re-use (re-point) an abandoned attempt rather than
-        // accumulating a dead row per click. Saved first so its id is the merchant reference.
+        // accumulating a dead row per click. Looked up FIRST so its already-stored provider customer id can
+        // be reused below (TM-726). Saved first so its id is the merchant reference.
         SubscriptionCharge charge = charges.findFirstByUserIdAndKindAndStatus(
                         user.getId(), SubscriptionCharge.Kind.INITIAL, SubscriptionCharge.Status.PENDING)
                 .orElse(null);
+
+        // Reuse the provider customer a previous attempt already registered, else create one — the
+        // container the widget saves the card into and renewals charge through. Prefer, in order: the
+        // customer already stored on the re-used PENDING charge from a prior checkout attempt (TM-726 —
+        // a re-entrant Subscribe used to ignore it and mint a brand-new customer every click, orphaning
+        // the previous one and its saved card), then the one an existing subscription registered (same
+        // gateway), else create a fresh one. Captured BEFORE any re-point below nulls the charge's refs.
+        // The phone number rides along (TM-623) so a phone-only account (no email, often no name) still
+        // registers a customer with a real identifying field.
+        String reusableCustomerId = null;
+        if (charge != null
+                && charge.getProviderCustomerId() != null
+                && payments.name().equals(charge.getProvider())) {
+            reusableCustomerId = charge.getProviderCustomerId();
+        } else if (existing != null
+                && existing.getProviderCustomerId() != null
+                && payments.name().equals(existing.getProvider())) {
+            reusableCustomerId = existing.getProviderCustomerId();
+        }
+        String customerId = reusableCustomerId != null
+                ? reusableCustomerId
+                : payments.createCustomer(user.getEmail(), user.getPhone(), user.getDisplayName());
+
         if (charge == null) {
             charge = charges.save(new SubscriptionCharge(
                     user.getId(), SubscriptionCharge.Kind.INITIAL, tier, amountPence, now));
@@ -245,7 +259,7 @@ public class SubscriptionService {
         }
         Instant now = Instant.now();
         switch (charge.getStatus()) {
-            case PAID, REFUND_DUE, REFUNDED -> {
+            case PAID, REFUND_DUE, REFUNDED, REFUND_ABANDONED -> {
                 return true; // a repeat webhook — already settled/flagged, idempotent no-op
             }
             case SUPERSEDED -> {
@@ -254,7 +268,7 @@ public class SubscriptionService {
             }
             case PENDING, FAILED -> {
                 if (charge.getKind() == SubscriptionCharge.Kind.INITIAL) {
-                    activate(charge, now);
+                    settleInitialCharge(charge, now);
                 } else {
                     healRenewal(charge, now);
                 }
@@ -369,6 +383,54 @@ public class SubscriptionService {
         if (!membershipProps.enabled()) {
             throw new ResourceNotFoundException(MEMBERSHIP_OFF);
         }
+    }
+
+    /**
+     * A settled INITIAL charge on the plain (non-superseded) path (TM-728): decide, under the user
+     * lock, whether the captured money buys an activation or must be refunded — mirroring the two
+     * guards {@link #settleSupersededCharge} already applies to a late superseded settle, which the
+     * direct INITIAL path was missing:
+     *
+     * <ul>
+     *   <li><b>Soft-deleted / vanished buyer</b> — {@link #activate}'s restricted
+     *       {@link UserService#getById} throws for a tombstoned (or missing) account, 500-looping the
+     *       webhook forever with the money captured but never activated and never refunded. The money
+     *       is still owed back: flag {@code REFUND_DUE} + refund, never a crash or a silent drop.</li>
+     *   <li><b>Already-ACTIVE subscription</b> — a second INITIAL settle against an account that is
+     *       already actively subscribed is duplicate money (the mirror of the handled SUPERSEDED
+     *       refund case). {@link #activate} would silently reset the live period, swallowing this paid
+     *       month; instead flag {@code REFUND_DUE} + refund. A CANCELED / PAST_DUE subscription is NOT
+     *       active — that is the legitimate re-subscribe path (which credits any residual paid time),
+     *       so it still activates.</li>
+     * </ul>
+     *
+     * Runs under the user-row lock taken by {@link #confirmCharge}.
+     */
+    private void settleInitialCharge(SubscriptionCharge charge, Instant now) {
+        User account = users.findAnyById(charge.getUserId()).orElse(null);
+        if (account == null || account.isDeleted()) {
+            log.warn(
+                    "INITIAL provider order {} settled for deleted/missing account {} — flagging "
+                            + "REFUND_DUE and refunding (TM-728).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            charge.markRefundDue(now);
+            tryRefundCharge(charge, now);
+            return;
+        }
+        Subscription subscription =
+                subscriptions.findByUserId(charge.getUserId()).orElse(null);
+        if (subscription != null && subscription.getStatus() == SubscriptionStatus.ACTIVE) {
+            log.warn(
+                    "INITIAL provider order {} settled for user {} who is already actively subscribed "
+                            + "— duplicate capture; flagging REFUND_DUE and refunding (TM-728).",
+                    charge.getProviderOrderId(),
+                    charge.getUserId());
+            charge.markRefundDue(now);
+            tryRefundCharge(charge, now);
+            return;
+        }
+        activate(charge, now);
     }
 
     /**

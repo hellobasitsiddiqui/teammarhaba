@@ -8,7 +8,7 @@
 // token-only styling live in index.html + styles.css.
 //
 // It builds the Home view-model the DOM shell renders verbatim:
-//   • the section context line ("<city> · this week");
+//   • the section context line ("Upcoming meetups near <city>" — honest about the unfiltered feed, TM-734);
 //   • each feed card (tag / title / when / where / going-count + the RSVP-state affordance);
 //   • the empty-vs-populated decision.
 //
@@ -35,14 +35,25 @@ function clean(value) {
 }
 
 /**
- * The section context line under the "Events near you" title — the wireframe's "Milton Keynes · this
- * week". Uses the viewer's city when we know it (best-effort from /me), else a neutral "Near you".
+ * The section context line under the "Events near you" title.
+ *
+ * HONESTY (TM-734): the feed this sits over is the FULL upcoming listing — {@link homeFeed} applies no
+ * city filter and no date window (it renders every happening-now + upcoming event, soonest-first). The
+ * old wireframe copy "<city> · this week" asserted BOTH a city filter and a one-week bound that the
+ * listing does not apply — a line that reads as a promise the feed silently breaks (a global event in
+ * three months shows under "Milton Keynes · this week"). So the line describes what is ACTUALLY shown:
+ * "Upcoming meetups". The viewer's city is still surfaced, but only as an honest location HINT ("near
+ * <city>"), never as a filter claim; unknown city degrades to plain "Upcoming meetups near you".
+ *
+ * When a real city filter and/or a date window land on the listing, this line should regain the
+ * corresponding wording (and a matching test) — until then it must not claim scoping the feed lacks.
+ *
  * @param {?string} city the viewer's city, or null/blank when unknown.
  * @returns {string}
  */
 export function homeContextLine(city) {
   const c = clean(city);
-  return `${c || "Near you"} · this week`;
+  return c ? `Upcoming meetups near ${c}` : "Upcoming meetups near you";
 }
 
 /**

@@ -33,6 +33,9 @@ test("statusMeta: each order state maps to a label + tone; unknown is defensive"
   assert.deepEqual(statusMeta(ORDER_STATUS.CANCELLED), { label: "Cancelled", tone: "cancelled" });
   assert.deepEqual(statusMeta(ORDER_STATUS.REFUND_DUE), { label: "Refund due", tone: "refund" });
   assert.deepEqual(statusMeta(ORDER_STATUS.REFUNDED), { label: "Refunded", tone: "cancelled" });
+  // TM-726: the sweep gave up on the owed refund — the money is still owed, so it reads as an
+  // outstanding refund (attention tone), never as closed.
+  assert.deepEqual(statusMeta(ORDER_STATUS.REFUND_ABANDONED), { label: "Refund pending", tone: "refund" });
   // TM-634: the declined/failed and TTL-expired terminal states read as closed (no money taken).
   assert.deepEqual(statusMeta(ORDER_STATUS.FAILED), { label: "Payment failed", tone: "cancelled" });
   assert.deepEqual(statusMeta(ORDER_STATUS.EXPIRED), { label: "Expired", tone: "cancelled" });

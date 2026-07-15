@@ -42,6 +42,7 @@ import {
   isValidTimeZone,
   validateEventDraft,
   buildEventPayload,
+  clearedOptionalFields,
   toFormModel,
   eventLifecycle,
   capacityLabel,
@@ -490,6 +491,12 @@ const FORM_FIELDS = [
   { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
 ];
 
+/** Human label for a field key (drops the trailing "(optional)"), used in the "can't clear" warning (TM-734). */
+const FIELD_LABELS = new Map(FORM_FIELDS.map((f) => [f.key, f.label.replace(/\s*\(optional\)\s*$/i, "")]));
+function fieldLabel(key) {
+  return FIELD_LABELS.get(key) || (key === "venueId" ? "Venue" : key);
+}
+
 /** Build one field control (label + input/select/textarea + hint + role=alert error), profile.js style. */
 function buildField(field, fields) {
   const errorId = `${field.id}-error`;
@@ -904,8 +911,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     setBusy(true, mode === "create" ? "Creating…" : "Saving…");
     image.setError("");
     try {
-      const body = buildEventPayload(readDraft());
+      const draft = readDraft();
+      const body = buildEventPayload(draft);
       const pending = image.getFile();
+
+      // On edit, an optional field the admin blanked can't be transmitted (the PATCH omits blanks and
+      // the server reads absent as "leave unchanged"), so clearing it silently no-ops. Surface it
+      // rather than toast a false "saved" (TM-734).
+      const stuckCleared = mode === "create" ? [] : clearedOptionalFields(event, draft);
 
       if (mode === "create") {
         const createdEvent = await eventApi("/api/v1/admin/events", { method: "POST", body });
@@ -930,7 +943,17 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
         await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
       }
 
-      toast(mode === "create" ? "Event created." : "Event saved.", { type: "success" });
+      if (stuckCleared.length) {
+        // The rest of the edit saved, but the blanked optional(s) couldn't be cleared through the API —
+        // tell the admin plainly rather than claim a clean save (TM-734).
+        const names = stuckCleared.map(fieldLabel).join(", ");
+        toast(
+          `Saved, but ${names} can't be cleared here yet — ${stuckCleared.length > 1 ? "those fields keep" : "that field keeps"} their previous value.`,
+          { type: "error" },
+        );
+      } else {
+        toast(mode === "create" ? "Event created." : "Event saved.", { type: "success" });
+      }
       // Navigate back to the list, which reloads it (router → enterAdminEvents → loadEvents), so the
       // just-created / edited event shows immediately (TM-426).
       onDone?.();

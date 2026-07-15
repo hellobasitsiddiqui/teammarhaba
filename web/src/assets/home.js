@@ -102,8 +102,8 @@ export async function enterHome() {
   setContext(homeContextLine(null)); // neutral until /me resolves
   clear(feed).append(el("p", { class: "tm-muted tm-home-loading", "data-testid": "home-loading", text: "Finding meetups near you…" }));
 
-  // Fetch the listing and /me together. /me is BEST-EFFORT (only powers the "<city> · this week"
-  // context line); its failure must never blank the feed, so it degrades to null.
+  // Fetch the listing and /me together. /me is BEST-EFFORT (only powers the "near <city>" location hint
+  // in the context line); its failure must never blank the feed, so it degrades to null.
   let data;
   let me = null;
   try {
@@ -141,7 +141,7 @@ async function loadMe() {
   }
 }
 
-/** Set the section context subtitle text (the "<city> · this week" line). */
+/** Set the section context subtitle text (the "Upcoming meetups near <city>" line, TM-734). */
 function setContext(text) {
   const node = $(CONTEXT_ID);
   if (node) node.textContent = text;

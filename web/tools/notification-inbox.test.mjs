@@ -23,6 +23,7 @@ import {
   bannerMessage,
   loadEntries,
   saveEntries,
+  clearEntries,
 } from "../src/assets/notification-inbox.js";
 
 /** A Storage-like fake over a Map — what the DOM half passes localStorage for. */
@@ -271,4 +272,36 @@ test("saveEntries: quota/private-mode failures are contained", () => {
   const throwing = { setItem: () => { throw new Error("QuotaExceededError"); } };
   assert.equal(saveEntries([entryFromNotification(flashEvent(), T0)], throwing), false);
   assert.equal(saveEntries([], null), false, "no storage → false, never throws");
+});
+
+// ---------------------------------------------------------------------------------------------
+// clearEntries — sign-out wipe (TM-720)
+// ---------------------------------------------------------------------------------------------
+//
+// The foreground-push inbox is per-user recovery state in localStorage; a sign-out on a shared
+// device must wipe it or the previous user's pushes (and unread badge) re-surface for the next user.
+
+test("clearEntries: removeItem path empties the store, and reload reads back empty", () => {
+  const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify([{ id: "x", title: "Hi", receivedAt: T0, read: false }]) });
+  storage.removeItem = (key) => storage.raw.delete(key);
+
+  assert.equal(loadEntries(storage).length, 1, "seeded with one entry");
+  assert.equal(clearEntries(storage), true);
+  assert.equal(storage.getItem(STORAGE_KEY), null, "key removed");
+  assert.deepEqual(loadEntries(storage), [], "reload sees an empty inbox");
+});
+
+test("clearEntries: falls back to writing [] when there's no removeItem", () => {
+  const storage = fakeStorage({ [STORAGE_KEY]: JSON.stringify([{ id: "x", title: "Hi", receivedAt: T0, read: false }]) });
+  // no removeItem on this fake → the setItem fallback must be used
+  assert.equal(clearEntries(storage), true);
+  assert.equal(storage.getItem(STORAGE_KEY), "[]");
+  assert.deepEqual(loadEntries(storage), []);
+});
+
+test("clearEntries: null / unusable storage is a safe no-op (never throws)", () => {
+  assert.equal(clearEntries(null), false);
+  assert.equal(clearEntries({}), false, "no removeItem/setItem → false, no throw");
+  const throwing = { removeItem: () => { throw new Error("quota"); } };
+  assert.equal(clearEntries(throwing), false, "a throwing store is swallowed");
 });

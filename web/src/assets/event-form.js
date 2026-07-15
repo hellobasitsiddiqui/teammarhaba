@@ -349,6 +349,51 @@ export function buildEventPayload(draft = {}) {
 }
 
 /**
+ * The optional fields a PATCH can carry — the ones {@link buildEventPayload} OMITS when blank. The
+ * backend's PATCH convention (UpdateEventRequest, TM-392) reads a null/absent field as "leave
+ * unchanged", so an omitted-because-blank optional is indistinguishable from "untouched": clearing
+ * it back to empty is silently a no-op on the wire. This list is what {@link clearedOptionalFields}
+ * checks so the submit handler can WARN the admin instead of toasting a false "saved" (TM-734).
+ *
+ * `timezone`, the required datetimes, and the required text (heading/description/locationText) are
+ * deliberately excluded — none is ever cleared to blank (validation blocks it), so they can't
+ * silently no-op.
+ */
+export const CLEARABLE_OPTIONAL_FIELDS = [
+  "mapUrl",
+  "onlineUrl",
+  "city",
+  "openingMessage",
+  "venueId",
+  "endAt",
+  "visibilityEnd",
+  "capacity",
+  "locationRevealHours",
+  "ageMin",
+  "ageMax",
+];
+
+/**
+ * On EDIT, the optional fields the admin has blanked that the PATCH cannot express — i.e. the event
+ * carried a value, the draft now leaves it empty, yet {@link buildEventPayload} omits it (so the
+ * server keeps the old value). Returns the list of affected field keys (empty on create, or when
+ * nothing was actually cleared). The caller uses a non-empty result to warn the admin rather than
+ * report a success that didn't happen (TM-734).
+ *
+ * @param {object} original the EventResponse being edited (omit/empty on create).
+ * @param {object} draft the raw form values being submitted.
+ * @returns {string[]} the keys of previously-set optionals now blanked but not transmittable.
+ */
+export function clearedOptionalFields(original, draft = {}) {
+  if (!original || typeof original !== "object") return [];
+  const before = toFormModel(original);
+  const body = buildEventPayload(draft);
+  return CLEARABLE_OPTIONAL_FIELDS.filter(
+    (key) => cleanText(before[key]) !== "" && !(key in body),
+  );
+}
+
+/**
  * The inverse of the form: an EventResponse (TM-392) → the form field values for the edit prefill,
  * rendering each UTC instant back into the event's LOCAL wall-clock (in its own timezone) for the
  * datetime-local inputs. Blank/absent optionals come back as "". Age band is read defensively

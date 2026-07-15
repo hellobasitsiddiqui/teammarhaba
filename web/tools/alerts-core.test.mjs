@@ -22,6 +22,7 @@ import {
   visibleAlerts,
   alertsSignature,
   recordDismissal,
+  adoptActiveResult,
 } from "../src/assets/alerts-core.js";
 
 /** A minimal in-memory Storage (getItem/setItem) — a fresh instance models a fresh browser session. */
@@ -214,4 +215,23 @@ test("styles.css defines the level modifier classes + accent tokens the core ref
   for (const token of ["--alert-info", "--alert-warning", "--alert-critical"]) {
     assert.ok(css.includes(`${token}:`), `styles.css must define ${token}`);
   }
+});
+
+// --- adoptActiveResult: a failed poll must NOT wipe live banners (TM-734) -----------------------
+
+test("adoptActiveResult adopts a real fetched set (including a genuinely-empty one)", () => {
+  const set = [{ id: 1, message: "Heatwave", level: "CRITICAL", dismissal: "PERSISTENT" }];
+  assert.deepEqual(adoptActiveResult(set), { adopt: true, alerts: set });
+  // An operator who pulled every notice → a real empty success → adopt it (banners clear legitimately).
+  assert.deepEqual(adoptActiveResult([]), { adopt: true, alerts: [] });
+});
+
+test("adoptActiveResult IGNORES a failed fetch (null) so the last banners stand (TM-734)", () => {
+  // getActiveAlerts() now returns null on a network/HTTP failure — must NOT be adopted as "no alerts",
+  // otherwise a transient blip would wipe a PERSISTENT CRITICAL operator notice.
+  const r = adoptActiveResult(null);
+  assert.equal(r.adopt, false);
+  // Defensive: any non-array (undefined, a stray object) is treated as failure, never as an empty set.
+  assert.equal(adoptActiveResult(undefined).adopt, false);
+  assert.equal(adoptActiveResult({}).adopt, false);
 });

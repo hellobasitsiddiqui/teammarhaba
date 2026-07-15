@@ -21,16 +21,24 @@ import {
 const NOW = Date.parse("2026-07-10T12:00:00Z");
 const CTX = { tz: "Europe/London", locale: "en-GB", now: NOW };
 
-test("homeContextLine: '<city> · this week' when we know the city", () => {
-  assert.equal(homeContextLine("Milton Keynes"), "Milton Keynes · this week");
-  assert.equal(homeContextLine("  Bletchley  "), "Bletchley · this week"); // trims
+// TM-734: the line must not claim a city filter or a "this week" bound the feed does not apply — it
+// describes the actual unfiltered upcoming listing, with the city as an honest location hint only.
+test("homeContextLine: honest 'Upcoming meetups near <city>' when we know the city (TM-734)", () => {
+  assert.equal(homeContextLine("Milton Keynes"), "Upcoming meetups near Milton Keynes");
+  assert.equal(homeContextLine("  Bletchley  "), "Upcoming meetups near Bletchley"); // trims
 });
 
-test("homeContextLine: neutral 'Near you · this week' when the city is unknown", () => {
-  assert.equal(homeContextLine(null), "Near you · this week");
-  assert.equal(homeContextLine(""), "Near you · this week");
-  assert.equal(homeContextLine("   "), "Near you · this week");
-  assert.equal(homeContextLine(undefined), "Near you · this week");
+test("homeContextLine: neutral 'Upcoming meetups near you' when the city is unknown (TM-734)", () => {
+  assert.equal(homeContextLine(null), "Upcoming meetups near you");
+  assert.equal(homeContextLine(""), "Upcoming meetups near you");
+  assert.equal(homeContextLine("   "), "Upcoming meetups near you");
+  assert.equal(homeContextLine(undefined), "Upcoming meetups near you");
+});
+
+test("homeContextLine: never asserts an unbacked 'this week' date bound (TM-734)", () => {
+  // The feed applies no date window, so the line must not promise one.
+  assert.doesNotMatch(homeContextLine("Milton Keynes"), /this week/i);
+  assert.doesNotMatch(homeContextLine(null), /this week/i);
 });
 
 test("homeCardTag: reads a category from any of the plausible field shapes, else null", () => {

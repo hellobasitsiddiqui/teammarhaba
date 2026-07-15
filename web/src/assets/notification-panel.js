@@ -22,6 +22,7 @@
 // (notifications.js) and the native foreground-push inbox (notification-center.js).
 
 import { clear, el, relativeTime } from "./ui.js";
+import { onSignedOut } from "./auth-signout.js";
 import { unreadDot } from "./components.js";
 import { lineIcon } from "./icons.js";
 import { listNotifications, markNotificationRead } from "./api.js";
@@ -331,6 +332,12 @@ export function open() {
   panel.focus?.();
   load();
 }
+
+// TM-720: close the panel on sign-out. The panel is an overlay listing the CURRENT user's feed; if it
+// is left open when the user signs out, the previous user's notifications stay overlaid on the login
+// screen. `close()` is idempotent (a no-op when already closed) and also invalidates any in-flight
+// load, so a /me/notifications response that resolves after sign-out can't paint into a reopened panel.
+onSignedOut(close);
 
 // Register on the TM-455 seam so the bell opens THIS panel instead of falling back to #/notifications.
 // A plain global keeps the bell/router decoupled from this module (they never import it).

@@ -39,9 +39,11 @@
 // session-only, it never breaks push handling.
 
 import { el, modal, relativeTime, toast } from "./ui.js";
+import { onSignedOut } from "./auth-signout.js";
 import {
   addEntry,
   bannerMessage,
+  clearEntries,
   entryFromNotification,
   loadEntries,
   markAllRead,
@@ -268,11 +270,26 @@ export function initNotificationCenter() {
   return true;
 }
 
+/**
+ * Wipe the foreground-push inbox on sign-out (TM-720). The inbox is per-user recovery state persisted
+ * in localStorage; on a shared device it must NOT survive a sign-out or the previous user's pushes
+ * (and their unread badge) re-surface for the next user. Clears the in-memory list, the store, and
+ * repaints the (now empty) bell/badge.
+ */
+export function clearNotificationInbox() {
+  entries = [];
+  clearEntries(storage());
+  paintBadge();
+}
+
 initNotificationCenter();
+
+// React to sign-out: the write-only inbox must be cleared so it can't leak to the next user.
+onSignedOut(clearNotificationInbox);
 
 // Debug/QA seam (mirrors window.tmVerifyBanner): lets emulator QA drive the flow without a real
 // FCM send — e.g. `tmNotifications.record({ title: "Test", data: { route: "#/home" } })` — and
 // TM-380 screenshot runs open the inbox directly.
 if (typeof window !== "undefined") {
-  window.tmNotifications = { record: notifyForegroundPush, open: openInbox, refresh: initNotificationCenter };
+  window.tmNotifications = { record: notifyForegroundPush, open: openInbox, refresh: initNotificationCenter, clear: clearNotificationInbox };
 }

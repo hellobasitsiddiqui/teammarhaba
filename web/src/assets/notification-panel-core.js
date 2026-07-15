@@ -234,18 +234,24 @@ export function buildPanel(items) {
 
   for (const n of list) {
     if (isChatNotification(n)) {
-      const route = chatThreadRoute(n.deepLink);
+      const threadRoute = chatThreadRoute(n.deepLink);
+      // The tap target: prefer the canonical chat thread route, but fall back to ANY valid in-app safe
+      // route the deep-link resolves to (TM-733). A mention/chat notification can carry a valid deep
+      // link that isn't the exact `#/chat/{id}` thread shape (or that chatThreadRoute rejects); the
+      // group must still be tappable rather than discarding the link and navigating nowhere. Only the
+      // GROUPING key stays keyed on the strict thread route (the per-event merge identity).
+      const tapRoute = threadRoute || safeRoute(n.deepLink);
       const title = asText(n.title);
       // Key by the thread route when we have one (the canonical per-event identity); otherwise by the
       // title so same-titled chat notes without a link still collapse into one group.
-      const key = route || `title:${title}`;
+      const key = threadRoute || `title:${title}`;
       let group = groups.get(key);
       if (!group) {
         group = {
           kind: CHAT_GROUP,
           key,
           title: title || "Chat",
-          route,
+          route: tapRoute,
           icon: CHAT_ICON,
           ids: [],
           unreadIds: [],
@@ -265,12 +271,15 @@ export function buildPanel(items) {
         group.unreadIds.push(n.id);
       }
       group.maxId = Math.max(group.maxId, idValue(n.id));
-      // The newest member sets the group's shown title/preview/timestamp.
+      // The newest member sets the group's shown title/preview/timestamp — and its tap route, so a
+      // later member that carries a (fallback) deep link isn't ignored. Never downgrade a real route
+      // to null: only overwrite when this newer member actually resolves one (TM-733).
       if (at >= group.at) {
         group.at = at;
         group.title = title || group.title;
         group.preview = asText(n.body) || title || group.title;
         group.createdAt = n.createdAt ?? group.createdAt;
+        if (tapRoute) group.route = tapRoute;
       }
     } else {
       // A recalled (tombstoned) admin message: kept in the feed but the panel renders it struck-through

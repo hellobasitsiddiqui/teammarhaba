@@ -3,6 +3,7 @@ package com.teammarhaba.backend.event;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +14,7 @@ import com.teammarhaba.backend.config.CancellationWindowProperties;
 import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.config.ReliabilityProperties;
 import com.teammarhaba.backend.membership.EntitlementService;
+import com.teammarhaba.backend.membership.Membership;
 import com.teammarhaba.backend.membership.MembershipService;
 import com.teammarhaba.backend.membership.OrderRepository;
 import com.teammarhaba.backend.user.User;
@@ -24,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -190,6 +193,30 @@ class EventRsvpServiceCancellationTest {
         verify(attendance, never()).deleteByEventIdAndUserId(anyLong(), anyLong());
     }
 
+    // ------------------------------------------------------------------ first-event credit (TM-728)
+
+    @Test
+    void inWindowLeaveViaDirectUnRsvpDoesNotReturnTheFirstEventCredit() {
+        // TM-728 / TM-625a: the direct un-RSVP verb (DELETE /rsvp) must NOT hand the first-event credit
+        // back, even inside the refund window. If it did, a pay-per-event caller could RSVP a priced
+        // event free on their credit, leave, and RSVP the next priced event free again — looping the
+        // freebie forever. Only a genuine paid-commitment reversal via /checkout/cancel returns the
+        // credit (CheckoutService.cancel, the single money-safety owner). cancelRsvp never touches it.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(48)), AttendanceState.GOING); // 48h > 24h → in-window
+        Membership membership = new Membership(USER_ID, Instant.now());
+        membership.consumeFirstEventCredit(EVENT_ID, Instant.now()); // spent by the direct RSVP on THIS event
+
+        CancelResult result = service().cancelRsvp(caller, EVENT_ID);
+
+        assertThat(result.lateCancel()).isFalse();
+        assertThat(membership.isFirstEventCreditUsed()).as("credit stays spent on a direct leave").isTrue();
+        assertThat(membership.getFirstEventCreditEventId()).isEqualTo(EVENT_ID);
+        verify(attendance).deleteByEventIdAndUserId(EVENT_ID, USER_ID);
+        // cancelRsvp is not the credit owner — it never resolves the membership.
+        verify(memberships, never()).getOrEnrol(caller);
+    }
+
     // ------------------------------------------------------------------ change window
 
     @Test
@@ -204,6 +231,45 @@ class EventRsvpServiceCancellationTest {
 
         assertThat(user.getLateCancelCount()).isZero();
         verify(attendance, never()).deleteByEventIdAndUserId(anyLong(), anyLong());
+    }
+
+    // ------------------------------------------------------------------ lock order (TM-729, ABBA deadlock)
+
+    @Test
+    void cancelTakesTheUserLockBeforeTheEventLock() {
+        // TM-729: a committed late cancel writes the caller's users row (the strike counter + ledger),
+        // so leaving is NOT lock-free. It must take the user lock BEFORE the event lock — the same
+        // user-then-event order rsvp()/claim() follow — or a concurrent GOING-landing on the same user
+        // and event deadlocks (ABBA). Assert the ordering directly.
+        User user = user(0);
+        stub(user, startingIn(Duration.ofHours(12)), AttendanceState.GOING); // late cancel → writes users row
+
+        service().cancelRsvp(caller, EVENT_ID);
+
+        InOrder inOrder = inOrder(users, events);
+        inOrder.verify(users).lockForUpdate(USER_ID); // user row first
+        inOrder.verify(events).findByIdForUpdate(EVENT_ID); // event row second
+    }
+
+    // ------------------------------------------------------------------ attendee lock-in (TM-729)
+
+    @Test
+    void canLeaveAStillRunningEventThatHasSlippedPastItsVisibilityWindow() {
+        // TM-729: a PUBLISHED event that is still running (now < startAt/endAt) but whose visibility
+        // window has closed (now > visibilityEnd) is hidden from the read side yet still blocks the
+        // caller's OTHER joins (findActiveGoingForUser keys off endAt, not visibility). Gating the leave
+        // on visibility trapped the attendee — neither able to leave nor un-blocked. Leaving must work.
+        User user = user(0);
+        Event invisible = runningButNoLongerVisible();
+        when(users.provision(caller)).thenReturn(user);
+        when(events.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(invisible));
+        when(attendance.findByEventIdAndUserId(EVENT_ID, USER_ID))
+                .thenReturn(Optional.of(new EventAttendance(EVENT_ID, USER_ID, AttendanceState.GOING)));
+
+        CancelResult result = service().cancelRsvp(caller, EVENT_ID); // must NOT 404
+
+        assertThat(result.preview()).isFalse();
+        verify(attendance).deleteByEventIdAndUserId(EVENT_ID, USER_ID); // the attendee actually left
     }
 
     // ------------------------------------------------------------------ fixtures
@@ -234,6 +300,25 @@ class EventRsvpServiceCancellationTest {
                 now.plus(untilStart),
                 now.minus(Duration.ofDays(1)),
                 now.plus(Duration.ofDays(30)),
+                CREATOR,
+                now);
+    }
+
+    /**
+     * A PUBLISHED event that has NOT started ({@code startAt} in the future) but whose visibility window
+     * has already closed ({@code visibilityEnd} in the past) — so {@code isVisibleAt(now)} is false while
+     * {@code hasStartedBy(now)} is false. The exact TM-729 lock-in shape: hidden but still blocking.
+     */
+    private Event runningButNoLongerVisible() {
+        Instant now = Instant.now();
+        return new Event(
+                "Heading",
+                "Body",
+                "Marhaba Cafe",
+                "Europe/London",
+                now.plus(Duration.ofHours(2)), // startAt in the future → not started, cancel not 409'd
+                now.minus(Duration.ofDays(2)), // visibilityStart in the past
+                now.minus(Duration.ofHours(1)), // visibilityEnd in the PAST → invisible now
                 CREATOR,
                 now);
     }

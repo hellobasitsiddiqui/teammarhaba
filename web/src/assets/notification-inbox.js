@@ -213,6 +213,31 @@ export function loadEntries(storage) {
 }
 
 /**
+ * Clear the persisted inbox (TM-720). The foreground-push inbox is per-user recovery state, so a
+ * sign-out on a shared device must wipe it — otherwise the previous user's pushes stay in localStorage
+ * and re-surface (with their unread badge) for the next user. Best-effort + never throws: a
+ * removeItem failure just leaves the (already-in-memory-cleared) store as-is until it's overwritten.
+ * @param {?{removeItem?: Function, setItem?: Function}} storage a Storage-like object, or null.
+ * @returns {boolean} whether the clear succeeded.
+ */
+export function clearEntries(storage) {
+  if (!storage) return false;
+  try {
+    if (typeof storage.removeItem === "function") {
+      storage.removeItem(STORAGE_KEY);
+      return true;
+    }
+    if (typeof storage.setItem === "function") {
+      storage.setItem(STORAGE_KEY, "[]");
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Persist the inbox (capped at MAX_ENTRIES). Best-effort: a full/unavailable storage (private
  * mode, quota) returns false and the inbox simply lives for the session only — never throws, so a
  * storage problem can never break push handling.

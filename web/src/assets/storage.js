@@ -33,6 +33,14 @@ import { avatarPath, legacyAvatarPathToDelete } from "./avatar-cleanup.js";
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB — must match storage.rules.
 const ACCEPTED_PREFIX = "image/"; // image content-type only — must match storage.rules.
 
+// SVG is disallowed for these publicly-readable uploads (TM-722): an SVG is an active document (can
+// carry inline <script>/onload), so a public-read SVG is a stored-XSS vector. The Storage rules are the
+// real authority (they accept only raster types); this client mirror rejects it early with a friendly
+// message instead of round-tripping a doomed upload.
+function isDisallowedImageType(type) {
+  return (type || "").toLowerCase() === "image/svg+xml";
+}
+
 let storage = null;
 let storageInitFailed = false;
 
@@ -77,6 +85,7 @@ function getStorageOrNull() {
 export function validateAvatarFile(file) {
   if (!file) return "Choose an image to upload.";
   if (!file.type || !file.type.startsWith(ACCEPTED_PREFIX)) return "That file isn't an image.";
+  if (isDisallowedImageType(file.type)) return "SVG images aren't supported. Use a PNG or JPEG.";
   if (file.size > MAX_AVATAR_BYTES) return "Image must be 5 MB or smaller.";
   return "";
 }
@@ -189,6 +198,7 @@ export const MAX_EVENT_IMAGE_BYTES = 5 * 1024 * 1024;
 export function validateEventImageFile(file) {
   if (!file) return "Choose an image to upload.";
   if (!file.type || !file.type.startsWith("image/")) return "That file isn't an image.";
+  if (isDisallowedImageType(file.type)) return "SVG images aren't supported. Use a PNG or JPEG.";
   if (file.size > MAX_EVENT_IMAGE_BYTES) return "Image must be 5 MB or smaller.";
   return "";
 }
@@ -286,6 +296,7 @@ export const MAX_VENUE_IMAGE_BYTES = 5 * 1024 * 1024;
 export function validateVenueImageFile(file) {
   if (!file) return "Choose an image to upload.";
   if (!file.type || !file.type.startsWith("image/")) return "That file isn't an image.";
+  if (isDisallowedImageType(file.type)) return "SVG images aren't supported. Use a PNG or JPEG.";
   if (file.size > MAX_VENUE_IMAGE_BYTES) return "Image must be 5 MB or smaller.";
   return "";
 }

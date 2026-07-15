@@ -483,7 +483,7 @@
             "type" : "string"
           },
           "status" : {
-            "enum" : [ "PENDING", "PAID", "FAILED", "SUPERSEDED", "REFUND_DUE", "REFUNDED" ],
+            "enum" : [ "PENDING", "PAID", "FAILED", "SUPERSEDED", "REFUND_DUE", "REFUNDED", "REFUND_ABANDONED" ],
             "type" : "string"
           },
           "tier" : {
@@ -1560,7 +1560,7 @@
             "type" : "integer"
           },
           "status" : {
-            "enum" : [ "PENDING", "CONFIRMED", "CANCELLED", "REFUND_DUE", "REFUNDED", "FAILED", "EXPIRED" ],
+            "enum" : [ "PENDING", "CONFIRMED", "CANCELLED", "REFUND_DUE", "REFUNDED", "REFUND_ABANDONED", "FAILED", "EXPIRED" ],
             "type" : "string"
           }
         },

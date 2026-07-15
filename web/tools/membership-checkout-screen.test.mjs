@@ -97,3 +97,52 @@ test("the per-event Pay flow wires best-effort card-field validation feedback (T
   assert.match(SRC, /onValidation:\s*\(payload\)\s*=>/, "wires the card field's onValidation callback");
   assert.match(SRC, /summarizeCardValidation\(payload\)/, "…interpreting it defensively");
 });
+
+// --- CONFIRM ("Reserve my place") is a live frictionless RSVP, not a no-op (TM-726) ----------------
+//
+// REGRESSION (TM-726): the CONFIRM (FREE / INCLUDED) button "Reserve my place" was a silent no-op — its
+// onClick only `console.info`ed the intended payload, so on the live checkout screen the button looked
+// live but reserved nothing. It must now POST the same server-side checkout (api.checkout), which for a
+// FREE / INCLUDED entitlement records a CONFIRMED order and confirms the RSVP with no card step, then
+// reflect the confirmation. The module statically imports the Firebase CDN via api.js so it can't be
+// loaded under `node --test`; these source-level guards pin the wiring (same approach as the TM-639/642
+// guards above).
+
+test("the CONFIRM button POSTs the frictionless RSVP via api.checkout, no longer a console.info no-op (TM-726)", () => {
+  // The old silent no-op must be gone: no console.info of a checkout intent / payload on click.
+  assert.doesNotMatch(
+    SRC,
+    /console\.info\(\s*["'`]\[membership-checkout\][^"'`]*intent/,
+    "the old silent console.info('checkout intent') CONFIRM no-op must be gone",
+  );
+  // CONFIRM now routes to a real frictionless-RSVP handler…
+  assert.match(SRC, /startConfirm\s*\(/, "CONFIRM click must invoke the frictionless RSVP handler");
+  assert.match(
+    SRC,
+    /async\s+function\s+startConfirm\b[\s\S]{0,700}api\.checkout\(/,
+    "…and startConfirm must POST the server-side checkout via api.checkout",
+  );
+});
+
+test("the CONFIRM flow reflects the confirmed RSVP and stays non-throwing on failure (TM-726)", () => {
+  const confirmFn = SRC.slice(SRC.indexOf("async function startConfirm"));
+  // A frictionless settle (paymentRequired === false, or no card needed) reflects the reservation.
+  assert.match(
+    confirmFn,
+    /paymentRequired\s*===\s*false[\s\S]{0,160}reflectPaid\(/,
+    "a paymentRequired:false response must reflect the confirmed reservation",
+  );
+  // Failure is caught and surfaced inline (never thrown), and the button is re-enabled to retry.
+  assert.match(confirmFn, /catch\s*\([\s\S]{0,400}setPayStatus\(/, "a failed reserve must surface inline, not throw");
+  assert.match(
+    confirmFn,
+    /catch\s*\([\s\S]{0,500}action\.disabled\s*=\s*false/,
+    "a failed reserve must re-enable the button so the user can retry",
+  );
+  // An in-flight guard stops a double-tap double-posting the RSVP.
+  assert.match(
+    confirmFn,
+    /if\s*\(action\s*&&\s*action\.disabled\)\s*return;/,
+    "an in-flight guard must ignore a double-tap while the POST is running",
+  );
+});

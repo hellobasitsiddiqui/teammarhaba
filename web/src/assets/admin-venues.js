@@ -36,6 +36,7 @@ import {
   CAPACITY_MIN,
   validateVenueDraft,
   buildVenuePayload,
+  clearedOptionalVenueFields,
   toVenueFormModel,
   venueImageRef,
 } from "./admin-venues-core.js";
@@ -480,6 +481,12 @@ const FORM_FIELDS = [
   { key: "notes", id: "venue-notes", label: "Notes / directions (optional)", type: "textarea", maxLength: NOTES_MAX },
 ];
 
+/** Human label for a field key (drops the trailing "(optional)"), used in the "can't clear" warning (TM-734). */
+const FIELD_LABELS = new Map(FORM_FIELDS.map((f) => [f.key, f.label.replace(/\s*\(optional\)\s*$/i, "")]));
+function venueFieldLabel(key) {
+  return FIELD_LABELS.get(key) || key;
+}
+
 /** Build one field control (label + input/textarea/select + hint + role=alert error), profile.js style. */
 function buildField(field, fields) {
   const errorId = `${field.id}-error`;
@@ -729,8 +736,13 @@ function buildVenueForm({ mode, venue = null, onDone, onCancel }) {
     setBusy(true, mode === "create" ? "Creating…" : "Saving…");
     photo.setError("");
     try {
-      const body = buildVenuePayload(readDraft());
+      const draft = readDraft();
+      const body = buildVenuePayload(draft);
       const pending = photo.getFile();
+
+      // On edit, a blanked optional can't be transmitted (PATCH omits blanks; server reads absent as
+      // "leave unchanged"), so clearing it silently no-ops — surface it instead of a false "saved" (TM-734).
+      const stuckCleared = mode === "create" ? [] : clearedOptionalVenueFields(venue, draft);
 
       if (mode === "create") {
         const created = await venueApi("/api/v1/admin/venues", { method: "POST", body });
@@ -755,7 +767,15 @@ function buildVenueForm({ mode, venue = null, onDone, onCancel }) {
         await venueApi(`/api/v1/admin/venues/${venue.id}`, { method: "PATCH", body });
       }
 
-      toast(mode === "create" ? "Venue created." : "Venue saved.", { type: "success" });
+      if (stuckCleared.length) {
+        const names = stuckCleared.map(venueFieldLabel).join(", ");
+        toast(
+          `Saved, but ${names} can't be cleared here yet — ${stuckCleared.length > 1 ? "those fields keep" : "that field keeps"} their previous value.`,
+          { type: "error" },
+        );
+      } else {
+        toast(mode === "create" ? "Venue created." : "Venue saved.", { type: "success" });
+      }
       onDone?.();
     } catch (err) {
       photo.resetProgress();

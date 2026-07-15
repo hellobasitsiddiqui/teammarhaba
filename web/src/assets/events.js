@@ -13,6 +13,7 @@
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
 import { listEvents, getEvent, getEventEntitlement, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
+import { onSignedOut } from "./auth-signout.js";
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
@@ -78,6 +79,18 @@ const state = { cards: [], filter: "all" };
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
+
+// TM-720: the listing cache above is keyed to the signed-in user (it warms the one-active-event
+// derivation from THEIR RSVPs). On a shared device it must NOT survive a sign-out, or the next
+// user's RSVP gate could be driven by the previous user's GOING state. Reset it on any auth change
+// to signed-out, and bump renderToken so an in-flight fetch started by the previous user can't paint
+// its cards over the new session either.
+export function resetEventsCache() {
+  state.cards = [];
+  state.filter = "all";
+  renderToken++;
+}
+onSignedOut(resetEventsCache);
 
 /** Fetch /me for the age gate — fresh each call, degrading to null (age "unknown") on any failure. */
 async function loadMe() {
@@ -834,9 +847,13 @@ async function runCommand(view, detail, spec) {
     // claim race) rather than a generic error. A 401 will already have redirected via apiFetch.
     toast(core.commandErrorMessage(err), { type: "error" });
   } finally {
-    // Always re-fetch — even on error the server state may have moved (e.g. a lost claim race means
-    // the spot's gone and we're still waitlisted), so the UI must reflect the truth.
-    renderDetail(view, id);
+    // Re-fetch so the UI reflects the truth — even on error the server state may have moved (e.g. a
+    // lost claim race means the spot's gone and we're still waitlisted). BUT only if the user is still
+    // on THIS event's detail (TM-733): a command can resolve after they've navigated on — a paid RSVP
+    // hands off to the checkout screen, and any command awaiting a slow response the user has since
+    // left — and re-rendering here would paint a stale event detail over the route they moved to.
+    const hash = typeof window !== "undefined" ? window.location?.hash : "";
+    if (core.isViewingEventDetail(hash, id)) renderDetail(view, id);
   }
 }
 

@@ -15,6 +15,7 @@
 
 import { getIdToken } from "./auth.js";
 import { createSseParser } from "./chat-core.js";
+import { shouldAttachToken } from "./api-token-target-core.js";
 
 // Where to send the user when authentication can't be established. The login view is the
 // `#/login` hash route owned by the guard/router (TM-109); this is the single seam. Kept as
@@ -27,6 +28,11 @@ const INTENDED_KEY = "tm.intendedRoute";
 function apiBaseUrl() {
   const cfg = (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG) || {};
   return (cfg.apiBaseUrl || "").replace(/\/+$/, "");
+}
+
+/** The app's own origin (for same-origin token scoping, TM-722), or null outside a browser. */
+function currentOrigin() {
+  return typeof window !== "undefined" && window.location ? window.location.origin : null;
 }
 
 /** Resolve a request target: pass an absolute URL through, otherwise prefix the API base. */
@@ -68,11 +74,17 @@ export function redirectToLogin() {
  */
 export async function apiFetch(path, options = {}) {
   const url = resolveUrl(path);
+  // Only ever attach the ID token to OUR backend (configured API base or same-origin). An absolute URL
+  // to any other origin — or a non-http pseudo-URL — is sent unauthenticated so no bearer token can be
+  // exfiltrated off-origin (TM-722 token-target scoping).
+  const attachToken = shouldAttachToken(url, apiBaseUrl(), currentOrigin());
 
   const send = async (forceRefresh) => {
-    const token = await getIdToken(forceRefresh);
     const headers = new Headers(options.headers || {});
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (attachToken) {
+      const token = await getIdToken(forceRefresh);
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
     return fetch(url, { ...options, headers });
   };
 
@@ -128,22 +140,26 @@ export async function resendVerification() {
  * {@link apiFetch} — whose 401-refresh/redirect must never fire on the anonymous banner poll. The
  * backend decides "active" server-side; this just returns the list.
  *
- * <p>Best-effort by contract: a non-2xx or a network error resolves to {@code []} (never throws), so
- * the ~5-minute poll in alerts.js can call it in the app shell without a try/catch and a transient
- * backend blip simply shows no banner.
+ * <p>Best-effort by contract: never throws, so the ~5-minute poll in alerts.js can call it in the app
+ * shell without a try/catch. A SUCCESSFUL read returns the array (possibly empty — the operator pulled
+ * every notice); a FAILURE (non-2xx or network error) returns {@code null}, DISTINCT from an empty
+ * array, so the caller can tell "genuinely no alerts" apart from "couldn't reach the server" and keep
+ * the last-rendered banners on a transient blip rather than wiping a PERSISTENT CRITICAL notice (TM-734,
+ * see alerts-core.adoptActiveResult).
  *
- * @returns {Promise<Array<{id: number, message: string, level: string, dismissal: string}>>}
+ * @returns {Promise<?Array<{id: number, message: string, level: string, dismissal: string}>>} the active
+ *   alerts on success (possibly empty), or {@code null} when the fetch failed.
  */
 export async function getActiveAlerts() {
   try {
     const response = await fetch(resolveUrl("/api/v1/alerts/active"), {
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) return [];
+    if (!response.ok) return null; // HTTP error → failure, NOT "no alerts" — keep the last banners.
     const data = await response.json();
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data : []; // a valid but non-array body is a real (empty) success.
   } catch {
-    return [];
+    return null; // network/parse error → failure — keep the last banners.
   }
 }
 
