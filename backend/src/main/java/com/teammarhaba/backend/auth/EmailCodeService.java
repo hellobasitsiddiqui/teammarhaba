@@ -239,8 +239,11 @@ public class EmailCodeService {
     }
 
     private String generateCode() {
-        int bound = (int) Math.pow(10, props.length());
-        int value = random.nextInt(bound);
+        // Full-entropy uniform pick in [0, 10^length). Use long maths: 10^length overflows an int at
+        // length >= 10 (a supported length — @Min(4), no max), which would collapse the bound to a
+        // negative/tiny value and gut the code's entropy. long holds up to 10^18 (length 18).
+        long bound = (long) Math.pow(10, props.length());
+        long value = random.nextLong(bound);
         return String.format("%0" + props.length() + "d", value);
     }
 

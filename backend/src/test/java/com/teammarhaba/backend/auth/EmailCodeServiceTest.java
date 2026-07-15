@@ -71,8 +71,13 @@ class EmailCodeServiceTest {
 
     /** As {@link #props(long)} but with an explicit test-email hook config (TM-312). */
     private static EmailCodeProperties props(long maxOutstanding, EmailCodeProperties.TestEmail test) {
+        return propsOfLength(6, maxOutstanding, test);
+    }
+
+    /** Properties with an explicit code {@code length} — for the entropy/overflow test (TM-723). */
+    private static EmailCodeProperties propsOfLength(int length, long maxOutstanding, EmailCodeProperties.TestEmail test) {
         return new EmailCodeProperties(
-                6,
+                length,
                 Duration.ofMinutes(10),
                 Duration.ofSeconds(60),
                 5,
@@ -188,6 +193,27 @@ class EmailCodeServiceTest {
         assertThat(tracked).isLessThan(flood); // the whole point: not N
         // Caffeine's maximumSize is approximate; allow generous slack but well below the flood size.
         assertThat(tracked).isLessThanOrEqualTo(50L * 3);
+    }
+
+    @Test
+    void tenDigitCodeKeepsFullEntropy_noIntegerOverflow() {
+        // TM-723: length 10 is supported (@Min(4), no max). The old `(int) Math.pow(10, 10)` overflowed
+        // int to a negative bound, so `request` threw IllegalArgumentException from nextInt(negative) and
+        // the whole 10-digit code path was broken. long maths fixes it. Generate many codes across
+        // distinct addresses and assert: every code is exactly 10 digits, AND the full range is used —
+        // leading digits vary (not stuck at 0), which a collapsed/overflowed bound could never produce.
+        EmailCodeService svc =
+                new EmailCodeService(provider(), mailer, propsOfLength(10, 100_000, EmailCodeProperties.TestEmail.disabled()), clock);
+
+        java.util.Set<Character> leadingDigits = new java.util.HashSet<>();
+        for (int i = 0; i < 200; i++) {
+            svc.request("entropy-" + i + "@example.com");
+            assertThat(mailer.lastCode).matches("\\d{10}");
+            leadingDigits.add(mailer.lastCode.charAt(0));
+        }
+        // Uniform over [0, 10^10) => leading digit is ~uniform over 0-9; 200 draws makes all-but-a-few
+        // near-certain. A collapsed bound would peg it to one value. Require broad spread, not exact 10.
+        assertThat(leadingDigits).hasSizeGreaterThanOrEqualTo(8);
     }
 
     @Test
