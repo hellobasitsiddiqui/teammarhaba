@@ -14,8 +14,9 @@
 //     loader auto-detects ESM syntax and only *warns* (exit 0) on a duplicate `export`, so a
 //     CommonJS check would SILENTLY PASS the exact bug this gate must catch. Module goal reports it
 //     as `SyntaxError: Identifier '…' has already been declared` and exits non-zero. Verified.
-//   • The handful of classic <script> files (config.js, appearance.js, build-info.js, app.js,
-//     nav-toggle.js) contain no module-incompatible syntax and parse cleanly in module goal, which
+//   • The handful of classic <script> files (config.js, appearance.js, app.js, nav-toggle.js —
+//     build-info.js became a module in TM-666) contain no module-incompatible syntax and parse
+//     cleanly in module goal, which
 //     is strictly stronger (it also enforces strict mode). So checking everything as a module is
 //     both the correct check for the real modules and a safe, stricter check for the classic ones.
 //

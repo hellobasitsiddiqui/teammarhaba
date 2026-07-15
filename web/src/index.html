@@ -586,8 +586,10 @@
             <span id="build-info" class="build-info" aria-label="Build version"></span>
             <!-- Public status page link (TM-182): a quiet pointer to the standalone /status
                  outage/uptime page, sitting next to the TM-142 build stamp. Its own footer line so it
-                 never disturbs the build/privacy/byline lines; a plain link (no auth, static page). -->
-            <p class="status-link"><a href="/status">Service status</a></p>
+                 never disturbs the build/privacy/byline lines; a plain link (no auth, static page).
+                 TM-666: scoped to the login / logged-out screen only — footer.js (router-driven) hides
+                 it once signed in, so it's no longer painted on every in-app screen. -->
+            <p id="footer-status-link" class="status-link"><a href="/status">Service status</a></p>
             <!-- TM-242: privacy disclosure. No standalone privacy-policy page exists yet, so the
                  required Firebase phone-auth line lives in this footer (the app's legal/chrome
                  surface) until a full policy page is built. Phone sign-in is a Firebase requirement:
@@ -600,8 +602,10 @@
                  styled via theme tokens (see .app-byline in styles.css). Cosmetic only — its own
                  footer line, kept separate from the build-stamp/privacy lines above so it never
                  disturbs them. Opens 10xai.co.uk in a new tab with rel=noopener. The Android
-                 WebView inherits this footer automatically (same index.html). -->
-            <p class="app-byline">
+                 WebView inherits this footer automatically (same index.html).
+                 TM-666: scoped to login + Profile + the bottom of Home — footer.js (router-driven)
+                 hides it on every other in-app screen so it's not repeated everywhere. -->
+            <p id="footer-byline" class="app-byline">
                 A product of
                 <a href="https://10xai.co.uk" target="_blank" rel="noopener">10xAI</a>
             </p>
@@ -677,8 +681,10 @@
          of truth, applied by appearance-sync.js once auth resolves. The dark/light axis (TM-133)
          still follows the OS. Paper is the single theme — there is no theme-family switch any more. -->
     <script src="/assets/appearance.js"></script>
-    <!-- Build/version stamp (TM-142). Classic script: reads config.js + fetches the backend /version. -->
-    <script src="/assets/build-info.js"></script>
+    <!-- Build/version stamp (TM-142). ES module (TM-666: imports the labelled formatBuildStamp from
+         footer-core.js): reads config.js + fetches the backend /version. Deferred like every module,
+         but #build-info is already in the DOM by then and config.js (classic, above) has already run. -->
+    <script type="module" src="/assets/build-info.js"></script>
     <!-- Web boot screen (TM-381). ES module: writes the random launch tagline into #boot-tagline and
          lifts the #boot-screen overlay at first app paint. Placed first among the module scripts so the
          tagline is filled before the heavier app modules run; import-safe/no-op where there's no overlay. -->
