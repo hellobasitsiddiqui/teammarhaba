@@ -35,7 +35,9 @@ import org.springframework.transaction.annotation.Transactional;
  * single user's GOING-landings so the "one active event" guard below can't be bypassed by concurrent
  * landings on two <em>different</em> events (each locks only its own event row, so without this they
  * never mutually exclude). User-then-event lock order is consistent across every command, so there is
- * no deadlock; {@code cancelRsvp} (leaving is never gated) takes no user lock.
+ * no deadlock — including {@code cancelRsvp}, which also takes the user lock first (TM-729): a committed
+ * late cancel writes the caller's {@code users} row (the strike counter + reliability ledger), so leaving
+ * is not lock-free after all, and taking the event lock first would invert the order and deadlock.
  *
  * <p><b>Offer-cascade policy (owner decision 2026-07-03, supersedes auto-promotion)</b> — when a
  * {@code GOING} spot frees, nobody is promoted automatically. The freed spot is <em>recorded</em>
@@ -98,7 +100,9 @@ public class EventRsvpService {
             "Booking has closed for this event — you can no longer join this close to when it starts.";
     static final String PAYMENT_REQUIRED =
             "This event requires payment — complete checkout to book your spot.";
-    static final String RELIABILITY_DOWNGRADED =
+    // Public (TM-729): the paid checkout precheck (CheckoutService, another package) throws this exact
+    // copy so checkout and the direct RSVP/claim verbs speak with one voice on the downgrade refusal.
+    public static final String RELIABILITY_DOWNGRADED =
             "Your account is temporarily limited to the waitlist for capacity-limited events after "
                     + "repeated late cancellations — you can still join events without a capacity limit.";
 
@@ -184,6 +188,28 @@ public class EventRsvpService {
     public RsvpResult rsvpForConfirmedOrder(User user, Long eventId) {
         // No direct caller: this join is backed by a settled order, so the TM-625 gate never re-fires.
         return rsvpProvisioned(user, eventId, null);
+    }
+
+    /**
+     * Reliability-downgrade precheck for the paid checkout PAY branch (TM-729). The settle path
+     * ({@link #rsvpForConfirmedOrder}) is deliberately exempt from the downgrade guard — the money is
+     * already captured by webhook time, so a refusal there would have to strand/refund captured money.
+     * The correct place to enforce the "downgraded → waitlist-only for capacity-limited events" rule on
+     * the paid path is therefore <em>before</em> the payment order is opened: without this, a downgraded
+     * account could pay and be landed straight into a GOING spot at settle, buying past the very
+     * restriction that the direct RSVP/claim verbs enforce. Called by {@code CheckoutService} inside the
+     * checkout transaction (which already holds the caller's user lock), before any provider charge.
+     *
+     * <p>Mirrors {@link #guardReliabilityDowngrade} exactly: only a capacity-limited event has a scarce
+     * GOING spot to protect, and a below-threshold / feature-off account is untouched. Reuses the locked
+     * event load and the same {@link ConflictException}/copy, so checkout and the direct verbs speak with
+     * one voice. A {@code 404} is raised for a missing/hidden event, exactly as the entitlement resolve does.
+     */
+    @Transactional
+    public void guardCheckoutReliabilityDowngrade(User user, Long eventId) {
+        Instant now = Instant.now();
+        Event event = lockedVisibleEvent(eventId, now);
+        guardReliabilityDowngrade(user, event);
     }
 
     /**
@@ -284,8 +310,20 @@ public class EventRsvpService {
     @Transactional
     public CancelResult cancelRsvp(VerifiedUser caller, Long eventId, boolean preview) {
         User user = users.provision(caller);
+        // TM-729: take the user-row lock BEFORE the event lock. A committed late cancel writes the
+        // caller's `users` row (recordLateCancel → late_cancel_count + ledger), so leaving is NOT
+        // lock-free after all — without this the leave path took the event lock first and then wrote
+        // the user row, inverting the documented user-then-event order that rsvp()/claim() follow and
+        // opening an ABBA deadlock against a concurrent GOING-landing on the same user + event. Taking
+        // the user lock first restores the single, consistent lock order across every command.
+        users.lockForUpdate(user.getId());
         Instant now = Instant.now();
-        Event event = lockedVisibleEvent(eventId, now);
+        // TM-729: leaving must load the event even when it is outside its visibility window. A still
+        // running (now < endAt) but no-longer-visible PUBLISHED event still blocks the caller's other
+        // joins via findActiveGoingForUser (which keys off endAt, not visibility), so gating leave on
+        // visibility trapped the attendee: they could neither leave nor be un-blocked. Leaving is never
+        // a public read, so the visibility 404 does not apply here (soft-deleted rows still never load).
+        Event event = lockedLeavableEvent(eventId);
         if (event.hasStartedBy(now)) {
             throw new ConflictException(EVENT_STARTED);
         }
@@ -484,8 +522,23 @@ public class EventRsvpService {
      * </ul>
      */
     private void guardReliabilityDowngrade(VerifiedUser directCaller, User user, Event event) {
-        if (directCaller == null || !event.hasCapacityLimit()) {
-            return; // settled-order path, or no scarce spot to protect — no reliability gate
+        if (directCaller == null) {
+            return; // settled-order path — the money settled, the landing must complete (never re-gated)
+        }
+        guardReliabilityDowngrade(user, event);
+    }
+
+    /**
+     * The core reliability-downgrade check, independent of who is calling (TM-729): a downgraded account
+     * ({@link ReliabilityService#isDowngraded}) may not take a {@code GOING} spot on a
+     * <em>capacity-limited</em> event. An unlimited event has no scarce spot to protect, and a
+     * below-threshold / feature-off account is never gated. Shared by the direct RSVP/claim verbs (via
+     * {@link #guardReliabilityDowngrade(VerifiedUser, User, Event)}) and the paid checkout precheck
+     * ({@link #guardCheckoutReliabilityDowngrade}), so both enforce the identical rule.
+     */
+    private void guardReliabilityDowngrade(User user, Event event) {
+        if (!event.hasCapacityLimit()) {
+            return; // no scarce GOING spot to protect — a downgraded account joins normally
         }
         if (reliability.isDowngraded(user.getLateCancelCount())) {
             throw new ConflictException(RELIABILITY_DOWNGRADED);
@@ -529,5 +582,19 @@ public class EventRsvpService {
             throw new ResourceNotFoundException(EVENT_NOT_FOUND);
         }
         return event;
+    }
+
+    /**
+     * Load the event under the {@code FOR UPDATE} lock for the <em>leave</em> path (TM-729) — like
+     * {@link #lockedVisibleEvent} but <b>without</b> the visibility gate. Leaving is never a public read,
+     * and an attendee must always be able to drop out: a still-running PUBLISHED event that has slipped
+     * past its visibility window (cancelled, or {@code now > visibilityEnd}) is hidden from the read side
+     * but still blocks the caller's other joins ({@link EventRepository#findActiveGoingForUser} keys off
+     * {@code endAt}, not visibility), so 404ing the leave would trap the attendee. Soft-deleted rows still
+     * never load (the {@code @SQLRestriction}), so this remains a plain not-found for a truly absent event.
+     */
+    private Event lockedLeavableEvent(Long eventId) {
+        return events.findByIdForUpdate(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException(EVENT_NOT_FOUND));
     }
 }

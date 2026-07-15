@@ -133,6 +133,13 @@ public class CheckoutService {
             if (!membershipProps.enabled()) {
                 throw new AccessDeniedException(PAYMENTS_OFF);
             }
+            // Reliability downgrade (TM-729): enforce the "downgraded → waitlist-only for capacity-limited
+            // events" rule HERE, before any money is captured. The settle path (rsvpForConfirmedOrder) is
+            // deliberately exempt from the downgrade guard because the charge has already been captured by
+            // webhook time; without this pre-payment check a downgraded account could pay and be landed
+            // straight into a GOING spot at settle, buying past the very restriction the direct RSVP/claim
+            // verbs enforce. Refusing before the provider charge keeps it a clean 409 with no money to unwind.
+            rsvps.guardCheckoutReliabilityDowngrade(user, eventId);
             // PAY (TM-478): record a PENDING order, then open a REAL payment order with the provider for the
             // amount. Persist the provider's permanent order id on our order (the webhook match key) and
             // return its client token so the browser mounts the checkout widget. The RSVP is NOT created —
