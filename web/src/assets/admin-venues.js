@@ -135,6 +135,10 @@ export async function fetchActiveVenues() {
  * loaded errors the table. Hitting the runaway guard flags the fetch truncated.
  */
 export async function loadVenues() {
+  // TM-751 re-entry guard: a second Refresh while a load is already running would start a whole second
+  // concurrent page walk (walkPages walks EVERY page), doubling request volume and racing two result
+  // sets into state.venues. Bail if one's in flight — mirrors the guarded loadUsers() in admin.js.
+  if (state.loading) return;
   state.loading = true;
   state.error = null;
   render();
