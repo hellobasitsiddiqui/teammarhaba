@@ -129,6 +129,47 @@ class CheckoutServiceTest {
         verify(orders, never()).save(any());
     }
 
+    // ------------------------------------------------------------------ reliability downgrade at checkout (TM-729)
+
+    @Test
+    void payBranchRefusesADowngradedAccountBeforeAnyMoneyIsCaptured() {
+        // TM-729: a downgraded account must not buy its way into a GOING spot on a capacity-limited
+        // event. The settle path is exempt from the downgrade guard (the money is already captured),
+        // so the enforcement point is the checkout PAY branch — BEFORE the provider order. Here the
+        // pre-payment precheck throws the reliability 409, which must propagate and leave the money
+        // path untouched: no local order, no provider create-order.
+        when(entitlements.resolve(any(), anyLong()))
+                .thenReturn(new Entitlement(EntitlementDecision.PAY, 500, EntitlementReason.PAY_PREMIUM));
+        when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
+        doThrow(new ConflictException(EventRsvpService.RELIABILITY_DOWNGRADED))
+                .when(rsvps)
+                .guardCheckoutReliabilityDowngrade(user, 7L);
+
+        assertThatThrownBy(() -> service(true).checkout(CALLER, 7L))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventRsvpService.RELIABILITY_DOWNGRADED);
+
+        verify(orders, never()).save(any());
+        verifyNoInteractions(payments);
+    }
+
+    @Test
+    void payBranchOpensThePaymentOrderWhenTheReliabilityPrecheckPasses() {
+        // The mirror case: a healthy (non-downgraded) account's precheck is a no-op, so the PAY branch
+        // proceeds to open the provider order exactly as before. Proves the TM-729 gate is inserted
+        // before the charge without blocking the normal paid path.
+        when(entitlements.resolve(any(), anyLong()))
+                .thenReturn(new Entitlement(EntitlementDecision.PAY, 500, EntitlementReason.PAY_PREMIUM));
+        when(orders.findByUserIdAndEventId(42L, 7L)).thenReturn(Optional.empty());
+        when(payments.createOrder(eq(500), eq("GBP"), anyString()))
+                .thenReturn(new PaymentOrder("rev-ok", "tok-ok"));
+
+        service(true).checkout(CALLER, 7L);
+
+        verify(rsvps).guardCheckoutReliabilityDowngrade(user, 7L); // the gate ran, before the charge
+        verify(payments).createOrder(eq(500), eq("GBP"), anyString());
+    }
+
     // ------------------------------------------------------------------ settle-time guard failure (TM-623)
 
     @Test
