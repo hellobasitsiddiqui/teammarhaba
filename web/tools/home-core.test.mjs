@@ -21,14 +21,14 @@ import {
 const NOW = Date.parse("2026-07-10T12:00:00Z");
 const CTX = { tz: "Europe/London", locale: "en-GB", now: NOW };
 
-// TM-734: the line must not claim a city filter or a "this week" bound the feed does not apply — it
-// describes the actual unfiltered upcoming listing, with the city as an honest location hint only.
-test("homeContextLine: honest 'Upcoming meetups near <city>' when we know the city (TM-734)", () => {
-  assert.equal(homeContextLine("Milton Keynes"), "Upcoming meetups near Milton Keynes");
-  assert.equal(homeContextLine("  Bletchley  "), "Upcoming meetups near Bletchley"); // trims
+// TM-662: the feed is now scoped to the viewer's city, so the line honestly names that city as the
+// scope. When the city is unknown the feed is unfiltered, so the line makes no city claim.
+test("homeContextLine: names the viewer's city as the scope when we know it (TM-662)", () => {
+  assert.equal(homeContextLine("Milton Keynes"), "Meetups near Milton Keynes");
+  assert.equal(homeContextLine("  Bletchley  "), "Meetups near Bletchley"); // trims
 });
 
-test("homeContextLine: neutral 'Upcoming meetups near you' when the city is unknown (TM-734)", () => {
+test("homeContextLine: neutral 'Upcoming meetups near you' when the city is unknown", () => {
   assert.equal(homeContextLine(null), "Upcoming meetups near you");
   assert.equal(homeContextLine(""), "Upcoming meetups near you");
   assert.equal(homeContextLine("   "), "Upcoming meetups near you");
@@ -133,4 +133,57 @@ test("homeFeed: drops finished events and orders live-now before upcoming", () =
   assert.deepEqual(feed.cards.map((c) => c.id), [1, 2]);
   assert.equal(feed.cards[0].live, true);
   assert.equal(feed.cards[1].live, false);
+});
+
+// TM-662: the "near you" feed must be scoped to the viewer's city — the recorded bug was a London
+// event surfacing under a "Mk" header. This is the fail-before / pass-after regression.
+test("homeFeed: scoped to the viewer's city — same-city events shown, other-city EXCLUDED (TM-662)", () => {
+  const localMk = { id: 1, heading: "Coffee & Code", city: "Mk", startAt: "2026-07-14T18:00:00Z" };
+  const otherLondon = { id: 2, heading: "London thing", city: "London", startAt: "2026-07-15T18:00:00Z" };
+
+  const feed = homeFeed([localMk, otherLondon], { ...CTX, city: "MK" }); // case-insensitive match
+  assert.equal(feed.isEmpty, false);
+  // The London event never appears under an "MK" viewer — the whole point of the bug.
+  assert.deepEqual(feed.cards.map((c) => c.id), [1]);
+});
+
+test("homeFeed: city match ignores case and inner whitespace (TM-662)", () => {
+  const a = { id: 1, heading: "A", city: "Milton  Keynes", startAt: "2026-07-14T18:00:00Z" };
+  const b = { id: 2, heading: "B", city: "milton keynes", startAt: "2026-07-15T18:00:00Z" };
+  const feed = homeFeed([a, b], { ...CTX, city: " Milton Keynes " });
+  assert.deepEqual(feed.cards.map((c) => c.id), [1, 2]); // both normalise to the same city
+});
+
+test("homeFeed: falls back to an event's locationText when it carries no city (TM-662)", () => {
+  const byLocationText = { id: 1, heading: "A", locationText: "Bletchley", startAt: "2026-07-14T18:00:00Z" };
+  assert.deepEqual(homeFeed([byLocationText], { ...CTX, city: "Bletchley" }).cards.map((c) => c.id), [1]);
+  assert.deepEqual(homeFeed([byLocationText], { ...CTX, city: "Oxford" }).cards.map((c) => c.id), []);
+});
+
+test("homeFeed: a viewer whose only local matches are gone yields the honest empty state (TM-662)", () => {
+  const london = { id: 2, heading: "London thing", city: "London", startAt: "2026-07-15T18:00:00Z" };
+  const feed = homeFeed([london], { ...CTX, city: "Mk" });
+  assert.equal(feed.isEmpty, true); // no local events → empty state, not a false "near you" list
+  assert.equal(feed.cards.length, 0);
+});
+
+test("homeFeed: unknown viewer city degrades to the FULL unfiltered listing (TM-662)", () => {
+  const mk = { id: 1, heading: "A", city: "Mk", startAt: "2026-07-14T18:00:00Z" };
+  const london = { id: 2, heading: "B", city: "London", startAt: "2026-07-15T18:00:00Z" };
+  // No city (null/blank) → cannot scope honestly → show everything (paired with the neutral label).
+  assert.deepEqual(homeFeed([mk, london], { ...CTX, city: null }).cards.map((c) => c.id), [1, 2]);
+  assert.deepEqual(homeFeed([mk, london], { ...CTX, city: "   " }).cards.map((c) => c.id), [1, 2]);
+  assert.deepEqual(homeFeed([mk, london], CTX).cards.map((c) => c.id), [1, 2]); // no city key at all
+});
+
+test("homeFeed: bounds the digest (the finding notes the old feed was unbounded) (TM-662)", () => {
+  // 20 same-city upcoming events → capped at the digest max (NEAR_YOU_MAX = 12).
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    id: i,
+    heading: `E${i}`,
+    city: "Mk",
+    startAt: `2026-07-${String(14 + (i % 10)).padStart(2, "0")}T18:00:00Z`,
+  }));
+  const feed = homeFeed(many, { ...CTX, city: "Mk" });
+  assert.equal(feed.cards.length, 12);
 });
