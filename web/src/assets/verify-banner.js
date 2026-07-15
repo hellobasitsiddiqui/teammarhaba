@@ -13,9 +13,10 @@
 // Theme-safe: built from ui.js's el() + theme tokens only (no hard-coded colours), so it renders
 // correctly under clean / doodle / sketch. XSS-safe: only textContent, never innerHTML.
 
-import { onAuthChanged } from "./auth.js";
+import { onAuthChanged, currentUser } from "./auth.js";
 import { getMe, resendVerification } from "./api.js";
 import { el } from "./ui.js";
+import { sessionKey, isResponseCurrent } from "./session-guard-core.js";
 import {
   shouldShowBanner,
   resendOutcome,
@@ -124,15 +125,21 @@ async function onResend() {
  */
 export async function refresh() {
   if (typeof document === "undefined") return;
+  // TM-720: capture who this /me is FOR. If the user signs out (or switches) while it's in flight, a
+  // late response must be dropped — applying it would re-show the previous user's email banner over
+  // the login screen.
+  const startedFor = sessionKey(currentUser());
   let me = null;
   try {
     me = await getMe();
   } catch (err) {
     // 401 already redirected (api.js); any other failure — don't nag on an unknown state.
     console.warn("[verify-banner] GET /me failed:", err?.message ?? err);
-    hide();
+    if (isResponseCurrent(startedFor, sessionKey(currentUser()))) hide();
     return;
   }
+  // Signed out / switched user since we asked → this response is for someone else; drop it silently.
+  if (!isResponseCurrent(startedFor, sessionKey(currentUser()))) return;
   lastEmail = me?.email ?? null;
   if (shouldShowBanner(me) && !dismissed) {
     show(ResendState.IDLE);

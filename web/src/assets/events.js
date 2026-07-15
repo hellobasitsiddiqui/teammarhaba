@@ -13,6 +13,7 @@
 // descriptions, locations and attendee names are all untrusted and can never inject markup.
 
 import { listEvents, getEvent, getEventEntitlement, rsvpToEvent, cancelEventRsvp, claimEventSpot, getMe, listMyConversations, ApiError } from "./api.js";
+import { onSignedOut } from "./auth-signout.js";
 import { el, clear, toast, confirmDialog } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isWebViewEnv } from "./auth-env.js";
@@ -78,6 +79,18 @@ const state = { cards: [], filter: "all" };
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
+
+// TM-720: the listing cache above is keyed to the signed-in user (it warms the one-active-event
+// derivation from THEIR RSVPs). On a shared device it must NOT survive a sign-out, or the next
+// user's RSVP gate could be driven by the previous user's GOING state. Reset it on any auth change
+// to signed-out, and bump renderToken so an in-flight fetch started by the previous user can't paint
+// its cards over the new session either.
+export function resetEventsCache() {
+  state.cards = [];
+  state.filter = "all";
+  renderToken++;
+}
+onSignedOut(resetEventsCache);
 
 /** Fetch /me for the age gate — fresh each call, degrading to null (age "unknown") on any failure. */
 async function loadMe() {
