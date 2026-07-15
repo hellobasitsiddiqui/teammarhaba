@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -202,6 +203,37 @@ class LinkPreviewServiceTest {
         LinkPreview preview = loopbackService().preview(base + "/big");
 
         assertThat(preview.title()).isEqualTo("Capped");
+    }
+
+    @Test
+    void pinsHttpConnectionToTheValidatedIpNotAReResolvedName() {
+        // TM-724 (DNS-rebinding TOCTOU): a request to a HOSTNAME ("localhost") must connect to the exact
+        // IP the guard resolved+validated, NOT re-resolve the name at connect time. We prove the pin by
+        // capturing the inbound Host header: because the URI is rewritten to the validated IP literal,
+        // the server sees "127.0.0.1:PORT" (an IP), not "localhost:PORT" — i.e. no second resolution.
+        AtomicReference<String> seenHost = new AtomicReference<>();
+        routes.put("/pinned", new Route(200, "text/html", null, "<meta property=\"og:title\" content=\"Pinned\">"));
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            hits.computeIfAbsent(exchange.getRequestURI().getPath(), k -> new AtomicInteger()).incrementAndGet();
+            seenHost.set(exchange.getRequestHeaders().getFirst("Host"));
+            Route route = routes.get(exchange.getRequestURI().getPath());
+            if (route == null) {
+                exchange.sendResponseHeaders(404, -1);
+                exchange.close();
+                return;
+            }
+            respond(exchange, route);
+        });
+
+        int port = server.getAddress().getPort();
+        LinkPreview preview = loopbackService().preview("http://localhost:" + port + "/pinned");
+
+        assertThat(preview.title()).isEqualTo("Pinned");
+        // The Host carries the pinned IP literal — proof the connection targeted the validated address
+        // rather than re-resolving "localhost".
+        assertThat(seenHost.get()).doesNotContain("localhost");
+        assertThat(seenHost.get()).matches("(127\\.0\\.0\\.1|\\[?::1]?):" + port);
     }
 
     @Test
