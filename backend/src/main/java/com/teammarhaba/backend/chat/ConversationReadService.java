@@ -163,17 +163,31 @@ public class ConversationReadService {
      * <p>Deliberately far cheaper than {@code list}: it needs neither the thread rows, the event headings,
      * the last-message previews, nor the activity sort — only each membership's own unread. So it fetches
      * the same non-removed memberships (a {@link MuteState#REMOVED} / kicked membership contributes nothing,
-     * mirroring the list + access gates) and folds each one's {@link MessageRepository#countUnread} — the
-     * identical per-member count {@link #summary} computes — against that member's {@code lastReadAt}
-     * cursor (a {@code null} cursor = never opened = every live message unread). Per-caller, so the same
-     * threads yield a different total for two people; {@code 0} for a brand-new account with no memberships.
+     * mirroring the list + access gates) and sums the same batched, conversation-id-keyed grouped unread
+     * counts {@link #list} uses ({@link MessageRepository#unreadCountsForUser} — one query for every thread,
+     * with the identical cursor + own-message rules {@link MessageRepository#countUnread} applies), rather
+     * than firing one {@code countUnread} per membership (TM-727: the badge endpoint was an N+1 in the
+     * caller's thread count). Per-caller, so the same threads yield a different total for two people;
+     * {@code 0} for a brand-new account with no memberships.
      */
     @Transactional(readOnly = true)
     public long unreadTotal(VerifiedUser caller) {
         Long userId = users.provision(caller).getId();
-        return members.findByUserIdOrderByJoinedAtDesc(userId).stream()
+        // The threads that actually count toward the badge: everything the caller is still a member of
+        // (a REMOVED/kicked membership contributes nothing), mirroring the list + access gates.
+        Set<Long> conversationIds = members.findByUserIdOrderByJoinedAtDesc(userId).stream()
                 .filter(m -> m.getMute() != MuteState.REMOVED)
-                .mapToLong(m -> messages.countUnread(m.getConversationId(), userId, m.getLastReadAt()))
+                .map(ConversationMember::getConversationId)
+                .collect(Collectors.toSet());
+        if (conversationIds.isEmpty()) {
+            return 0L;
+        }
+        // One batched grouped query for every thread's unread, then sum only the non-removed threads.
+        // unreadCountsForUser spans all the caller's memberships (removed included), so intersect with
+        // the non-removed set above so a kicked thread never adds to the badge.
+        return unreadCounts(userId, conversationIds).entrySet().stream()
+                .filter(e -> conversationIds.contains(e.getKey()))
+                .mapToLong(Map.Entry::getValue)
                 .sum();
     }
 

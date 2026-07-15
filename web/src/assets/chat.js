@@ -1140,10 +1140,20 @@ async function send(id, form, input, sendBtn) {
   }
 }
 
-/** Replace the live composer with the disabled reason state, in place — the caller is muted/removed/closed. */
+/**
+ * Replace the live composer with the disabled reason state, in place — the caller is muted/removed/closed.
+ *
+ * Also flips `thread.canCompose` false and drops any in-progress reply (TM-727): the per-message reply +
+ * react affordances gate on `canCompose` (see messageRow), so without clearing it they keep rendering
+ * after the composer is gone — a "Reply" tap would call beginReply → paintReplyPreview against a detached
+ * composer, a silent dead-end. Turning the flag off makes the very next repaint drop those affordances so
+ * the thread reads as read-only, matching the disabled composer the caller now sees.
+ */
 function lockComposer(form, reason) {
   const off = disabledComposer(reason);
   if (form && form.parentNode) form.replaceWith(off);
+  thread.canCompose = false; // stop the reply/react affordances that target the now-locked composer
+  thread.replyTo = null; // abandon any reply-in-progress — its target composer is gone
 }
 
 /* ─────────────────────────────── Near-live refresh (poll — TM-448) ────────────────────────────── */

@@ -8,6 +8,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.io.IOException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder;
@@ -129,5 +134,69 @@ class ChatStreamServiceTest {
 
         assertThat(service.connectionCount(CONVERSATION_A)).isZero();
         verify(dead).complete();
+    }
+
+    @Test
+    void heartbeatNeverPrunesAConversationThatStillHasAnOpenStream() throws IOException {
+        // TM-727 (the visible half of the race): the heartbeat prunes an EMPTY conversation set, but it
+        // must never drop a set that still holds a live stream — doing so would silently detach that
+        // member from every future broadcast. A healthy stream keeps its conversation registered across
+        // any number of heartbeats.
+        SseEmitter live = mock(SseEmitter.class);
+        service.register(CONVERSATION_A, live);
+
+        service.heartbeat();
+        service.heartbeat();
+
+        // Still registered and reachable — the prune left the non-empty set alone. (A delivered count of
+        // 1 proves the broadcast found the stream; the emitter also saw the two keep-alive writes.)
+        assertThat(service.connectionCount(CONVERSATION_A)).isEqualTo(1);
+        assertThat(service.broadcast(CONVERSATION_A, ChatStreamService.EVENT_MESSAGE, "payload")).isEqualTo(1);
+    }
+
+    @Test
+    void aStreamRegisteringConcurrentlyWithHeartbeatPrunesIsNeverLost() throws InterruptedException {
+        // TM-727 (the racy half): register() creates the per-conversation set and adds the emitter, while
+        // heartbeat() drops any set it finds empty. Under the old computeIfAbsent-then-add, a heartbeat
+        // could remove the just-created (still-empty-looking) set between those two steps and orphan the
+        // stream. Both paths now mutate the mapped set under the map's per-key compute lock, so they are
+        // mutually exclusive. Hammer register against a continuous heartbeat storm on the SAME churning
+        // key; every stream that reports itself registered must remain reachable (never silently pruned).
+        int rounds = 5_000;
+        ExecutorService registrars = Executors.newFixedThreadPool(4);
+        ExecutorService pruner = Executors.newSingleThreadExecutor();
+        AtomicInteger lost = new AtomicInteger();
+        var pruning = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try {
+            pruner.execute(() -> {
+                while (pruning.get()) {
+                    service.heartbeat();
+                }
+            });
+            CountDownLatch done = new CountDownLatch(rounds);
+            for (int i = 0; i < rounds; i++) {
+                long conversationId = 1_000L + (i % 8); // few keys → constant create/prune churn
+                registrars.execute(() -> {
+                    try {
+                        SseEmitter emitter = mock(SseEmitter.class);
+                        service.register(conversationId, emitter);
+                        // The set we registered into must still be the live map value: a prune that raced
+                        // us must not have detached our emitter. connectionCount reads the live map, so a
+                        // 0 here means our just-added stream was orphaned.
+                        if (service.connectionCount(conversationId) == 0) {
+                            lost.incrementAndGet();
+                        }
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+            assertThat(done.await(30, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            pruning.set(false);
+            registrars.shutdownNow();
+            pruner.shutdownNow();
+        }
+        assertThat(lost.get()).as("streams orphaned by a heartbeat prune racing registration").isZero();
     }
 }

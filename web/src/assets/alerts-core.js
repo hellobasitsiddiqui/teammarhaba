@@ -166,7 +166,14 @@ export function visibleAlerts(alerts, stores) {
  */
 export function alertsSignature(visible) {
   if (!Array.isArray(visible)) return "";
-  return visible.map((alert) => `${alert?.id}${contentHash(alert)}`).join("");
+  // Field + record separators: ASCII Unit Separator (0x1f) between an alert id and its contentHash,
+  // Record Separator (0x1e) between alerts. Both are control chars that can't occur in a numeric/
+  // string id or a base36 hash, so the boundaries are unambiguous and distinct sets can never
+  // collide into the same signature (TM-727 — the old concatenated form had NO separators, e.g. id
+  // `12`+hash `abc` and id `1`+hash `2abc` both flattened to `12abc`).
+  const FIELD = "\u001f";
+  const RECORD = "\u001e";
+  return visible.map((alert) => `${alert?.id}${FIELD}${contentHash(alert)}`).join(RECORD);
 }
 
 /**

@@ -157,7 +157,25 @@ test("alertsSignature keys by id AND content — distinct alerts never collide i
   assert.equal(alertsSignature(null), "");
 });
 
-// --- Level → colour class + a11y role mapping ---------------------------------------------------
+test("alertsSignature separates fields + records with control chars (TM-727)", () => {
+  const FIELD = "\u001f"; // ASCII Unit Separator — between an alert's id and its contentHash
+  const RECORD = "\u001e"; // ASCII Record Separator — between alerts
+
+  // The doc promises control-char field/record separators; the old form concatenated with none, leaving
+  // the id/hash and alert boundaries ambiguous. Prove they're now explicit in the emitted signature and
+  // that the signature is exactly the separated form.
+  const sig = alertsSignature([critPersistent, warnAck]);
+  assert.ok(sig.includes(FIELD), "a Unit Separator sits between each id and its contentHash");
+  assert.ok(sig.includes(RECORD), "a Record Separator sits between the two alerts");
+  const expected = [critPersistent, warnAck].map((a) => `${a.id}${FIELD}${contentHash(a)}`).join(RECORD);
+  assert.equal(sig, expected);
+
+  // A two-alert boundary the missing record separator blurred: [{id:1},{id:23}] vs [{id:12},{id:3}]
+  // trend toward the same flattened string without a separator; with one they stay distinct.
+  const left = [{ ...warnAck, id: "1" }, { ...warnAck, id: "23" }];
+  const right = [{ ...warnAck, id: "12" }, { ...warnAck, id: "3" }];
+  assert.notEqual(alertsSignature(left), alertsSignature(right), "distinct id splits never collide");
+});
 
 test("levelClass maps each level to its Paper modifier class (unknown → info)", () => {
   assert.equal(levelClass(Level.INFO), "tm-alert--info");

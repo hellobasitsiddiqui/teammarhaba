@@ -351,6 +351,25 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
     ).label,
     "Unlisted",
   );
+
+  // TM-727: an OPEN-ENDED event (no endAt) that has STARTED must NOT be "Finished" the instant it
+  // begins — the server runs it for an assumed default duration and the member UI never client-side-
+  // finishes it. With the authoritative `past` flag it follows the server verdict; without it, the
+  // endAt-only fallback keeps it live (Visible) rather than mislabelling it Finished at start.
+  const openEndedStarted = {
+    ...base,
+    endAt: null,
+    startAt: "2026-07-10T18:00:00.000Z",
+    visibilityEnd: "2026-07-31T00:00:00.000Z", // still within its listing window
+  };
+  const justStarted = "2026-07-10T18:30:00Z"; // 30 min after start, no endAt
+  assert.equal(eventLifecycle(openEndedStarted, justStarted).label, "Visible", "open-ended not finished at start");
+  // The server's authoritative `past` flag still wins when it says the open-ended event has ended.
+  assert.equal(
+    eventLifecycle({ ...openEndedStarted, past: true }, justStarted).label,
+    "Finished",
+    "server past flag finishes it",
+  );
 });
 
 test("isPastEvent prefers the server `past` flag, falls back to the instants (TM-518)", () => {

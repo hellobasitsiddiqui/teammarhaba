@@ -22,6 +22,7 @@
 // `venue-images/{id}` AFTER the id exists, then its path is persisted with a follow-up PATCH.
 
 import { apiFetch, ApiError } from "./api.js";
+import { walkPages } from "./admin-page-walk-core.js";
 import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadVenueImage, validateVenueImageFile, MAX_VENUE_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
@@ -71,6 +72,8 @@ const state = {
   venues: [],
   totalVenues: 0,
   fetchComplete: true,
+  fetchPartial: false, // a page failed mid-walk — `venues` is a prefix of the true inventory (TM-727)
+  fetchTruncated: false, // the runaway guard tripped before the last page — `venues` is a prefix (TM-727)
   loading: false,
   error: null,
   search: "",
@@ -126,43 +129,37 @@ export async function fetchActiveVenues() {
 /**
  * Load the WHOLE venue inventory by walking the paged endpoint (TM-519) — small scale, so we hold
  * them in memory and search/filter/sort/paginate in the browser, mirroring admin-events.js. A page
- * failing mid-walk keeps what loaded and flags the fetch partial; only a failure with nothing loaded
- * errors the table.
+ * failing mid-walk keeps what loaded and flags the fetch partial (TM-727); only a failure with nothing
+ * loaded errors the table. Hitting the runaway guard flags the fetch truncated.
  */
 export async function loadVenues() {
   state.loading = true;
   state.error = null;
   render();
-  try {
-    const all = [];
-    let total = 0;
-    let complete = false;
-    for (let page = 0; page < MAX_FETCH_PAGES; page += 1) {
-      const envelope = await venueApi(`/api/v1/admin/venues?page=${page}&size=${FETCH_SIZE}&sort=name,asc`);
-      const items = Array.isArray(envelope?.items) ? envelope.items : [];
-      all.push(...items);
-      const reported = Number(envelope?.totalElements);
-      if (Number.isFinite(reported)) total = Math.max(total, reported);
-      const totalPages = Number(envelope?.totalPages);
-      const lastByServer = Number.isFinite(totalPages) && page + 1 >= totalPages;
-      if (lastByServer || items.length < FETCH_SIZE) {
-        complete = true;
-        break;
-      }
-    }
-    state.venues = all;
-    state.totalVenues = Math.max(total, all.length);
-    state.fetchComplete = complete;
-  } catch (err) {
-    state.error = err instanceof ApiError ? err.message : "Could not load venues.";
+  // Same pure, DOM-free page-walk as admin-events.js (admin-page-walk-core.js): keeps partial pages and
+  // surfaces truncation rather than silently discarding either.
+  const result = await walkPages(
+    (page) => venueApi(`/api/v1/admin/venues?page=${page}&size=${FETCH_SIZE}&sort=name,asc`),
+    { pageSize: FETCH_SIZE, maxPages: MAX_FETCH_PAGES },
+  );
+  if (result.error) {
+    state.error = result.error instanceof ApiError ? result.error.message : "Could not load venues.";
     state.venues = [];
     state.totalVenues = 0;
     state.fetchComplete = true;
-  } finally {
-    state.loading = false;
-    state.page = 0;
-    render();
+    state.fetchPartial = false;
+    state.fetchTruncated = false;
+  } else {
+    state.error = null;
+    state.venues = result.items; // kept even when a later page failed (partial)
+    state.totalVenues = result.total;
+    state.fetchComplete = result.complete;
+    state.fetchPartial = result.partial;
+    state.fetchTruncated = result.truncated;
   }
+  state.loading = false;
+  state.page = 0;
+  render();
 }
 
 // ---- derived view -------------------------------------------------------------------------
@@ -267,6 +264,8 @@ function renderTable() {
 
   const rows = sortVenues(filteredVenues());
   if (!rows.length) {
+    const notice = fetchIncompleteNotice();
+    if (notice) shell.table.append(notice);
     const filtered = state.venues.length > 0;
     const message = filtered ? "No venues match your filters." : "No venues yet. Add your first one.";
     shell.table.append(
@@ -322,8 +321,34 @@ function renderTable() {
     ),
   );
 
+  const notice = fetchIncompleteNotice();
+  if (notice) shell.table.append(notice);
   shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
   renderPager(rows.length);
+}
+
+/**
+ * A non-blocking notice when the inventory walk did NOT load the whole set (TM-727) — a page failed
+ * mid-walk (partial) or the runaway guard tripped before the last page (truncated). Without this the
+ * table silently shows a prefix as if it were complete. Returns null on a full, clean load.
+ */
+function fetchIncompleteNotice() {
+  if (state.fetchTruncated) {
+    return el("div", { class: "tm-notice", "data-testid": "admin-venues-truncated" }, [
+      el("p", {
+        text:
+          `Showing the first ${state.venues.length} venues — there are more than this console loads at once. ` +
+          "Use search to narrow down.",
+      }),
+    ]);
+  }
+  if (state.fetchPartial) {
+    return el("div", { class: "tm-notice", "data-testid": "admin-venues-partial" }, [
+      el("p", { text: "Some venues couldn’t be loaded, so this list may be incomplete." }),
+      el("button", { class: "tm-btn tm-btn-sm", type: "button", onClick: loadVenues }, "Retry"),
+    ]);
+  }
+  return null;
 }
 
 function rowActions(venue) {

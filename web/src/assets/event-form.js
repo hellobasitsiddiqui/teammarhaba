@@ -391,10 +391,18 @@ export function toFormModel(event = {}) {
  * window + now. `tone` maps to a badge variant (ok/off/muted/info) in admin-events.js.
  *
  *   CANCELLED                          → Cancelled (off)
- *   over (now ≥ endAt, else ≥ startAt) → Finished  (muted)
+ *   finished (see below)               → Finished  (muted)
  *   now < visibilityStart              → Hidden    (info)   — scheduled, not yet public
  *   now > visibilityEnd                → Unlisted  (muted)  — past its listing window, not yet started
  *   otherwise                          → Visible   (ok)     — publicly listed right now
+ *
+ * The "finished" verdict prefers the admin projection's authoritative {@code past} boolean (the
+ * server's {@code EventPhasePolicy.isFinished}); only when it's absent (a legacy response) does it
+ * fall back to the instants. Crucially, that fallback finishes an event only once {@code now ≥ endAt}
+ * — an OPEN-ENDED event (no {@code endAt}) is NOT client-side-finished at its start (TM-727): the
+ * server runs such an event for an assumed default duration, and the member UI
+ * ({@code events-core.isFinished}) likewise never client-side-finishes an open-ended event, so this
+ * keeps the admin pill in lock-step with both rather than flipping to "Finished" the instant it begins.
  *
  * @param {object} event an EventResponse.
  * @param {Date|number|string} [now]
@@ -403,11 +411,15 @@ export function toFormModel(event = {}) {
 export function eventLifecycle(event = {}, now = Date.now()) {
   if (String(event.status).toUpperCase() === "CANCELLED") return { label: "Cancelled", tone: "off" };
   const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
-  const startMs = new Date(event.startAt).getTime();
-  const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs;
   const visStart = new Date(event.visibilityStart).getTime();
   const visEnd = new Date(event.visibilityEnd).getTime();
-  if (Number.isFinite(endMs) && t >= endMs) return { label: "Finished", tone: "muted" };
+  // Finished: trust the server's `past` flag when present; else fall back to endAt ONLY (a null endAt =
+  // open-ended = not client-side finished, matching the member UI + server assumed-duration rule).
+  const finished =
+    typeof event.past === "boolean"
+      ? event.past
+      : event.endAt != null && Number.isFinite(new Date(event.endAt).getTime()) && t >= new Date(event.endAt).getTime();
+  if (finished) return { label: "Finished", tone: "muted" };
   if (Number.isFinite(visStart) && t < visStart) return { label: "Hidden", tone: "info" };
   if (Number.isFinite(visEnd) && t > visEnd) return { label: "Unlisted", tone: "muted" };
   return { label: "Visible", tone: "ok" };
