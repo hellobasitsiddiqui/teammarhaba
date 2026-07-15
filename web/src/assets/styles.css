@@ -5517,11 +5517,57 @@ button.tm-c-reaction {
  */
 .tm-pf {
     width: min(30rem, 100%);
+    /* Never wider than the column's own box — a long, unbreakable word/URL in a name or nudge must
+       wrap, not push the screen sideways and clip on the right in the narrow Android WebView (TM-665). */
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
     margin: 0 auto;
     text-align: left;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+}
+
+/* Loading skeleton (TM-663) — while the Profile hub waits for GET /me, the identity name/meta and the
+ * strength percentage render as shimmer bars rather than the misleading concrete "Your profile / 0%
+ * complete" placeholder. profile.js mounts the screen with `.tm-pf-loading` and removes it on the first
+ * real paint (paintHub) or on a load error (renderStatus). TOKEN-ONLY — the skeleton inks with the
+ * Paper surface tokens so it works across every accent + both toggle states. */
+.tm-pf-loading .tm-pf-name,
+.tm-pf-loading .tm-pf-id .tm-pf-sub,
+.tm-pf-loading .tm-pf-barlbl > span {
+    /* Give the (blank) text nodes a shimmer block so they read as "loading", not empty. */
+    color: transparent;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+    background-size: 200% 100%;
+    animation: tm-pf-shimmer 1.2s ease-in-out infinite;
+    min-width: 6rem;
+    min-height: 1em;
+}
+.tm-pf-loading .tm-pf-barlbl > span {
+    min-width: 4rem;
+}
+/* The avatar glyph is a real fallback, not a wrong value — but during load show it as a plain shimmer
+ * disc so nothing concrete flashes before the real initial/photo lands. */
+.tm-pf-loading .tm-pf-id .tm-pf-avatar {
+    color: transparent;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+    background-size: 200% 100%;
+    animation: tm-pf-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes tm-pf-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tm-pf-loading .tm-pf-name,
+    .tm-pf-loading .tm-pf-id .tm-pf-sub,
+    .tm-pf-loading .tm-pf-barlbl > span,
+    .tm-pf-loading .tm-pf-id .tm-pf-avatar {
+        animation: none;
+    }
 }
 
 /* Top bar — page title + a settings gear (paper-profile). */
@@ -5627,11 +5673,17 @@ button.tm-c-reaction {
     margin-top: var(--space-2);
     color: var(--muted);
     font-size: var(--fs-1);
+    /* Let the label + nudge wrap on a narrow phone rather than forcing the row wider than the card and
+       clipping the nudge on the right edge (TM-665). */
+    flex-wrap: wrap;
 }
 .tm-pf-barnudge {
     color: var(--accent);
     font-weight: 600;
     text-align: right;
+    /* Shrinkable so a long nudge ("Add your city + your age →") wraps instead of overflowing right. */
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* Interest chips (paper-profile / paper-edit-profile). reconcile with TM-511 component library. */
@@ -5668,6 +5720,12 @@ button.tm-c-reaction {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
+}
+/* The tier-name block must be shrinkable so a long tier sub-line wraps within the card instead of
+   pushing the nowrap "Manage →" past the right edge on a narrow phone (TM-665). */
+.tm-pf-memb-main {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 .tm-pf-memb-main .tm-pf-ctitle {
     margin: 0 0 0.15rem;
@@ -5729,6 +5787,10 @@ a.tm-pf-go:focus-visible {
     justify-content: space-between;
     gap: var(--space-3);
     width: 100%;
+    /* A row must never be wider than the card — its label wraps rather than pushing the chevron off the
+       right edge on the narrow Android WebView (TM-665). */
+    min-width: 0;
+    max-width: 100%;
     padding: var(--space-3) 0;
     font: inherit;
     font-size: var(--fs-3);
@@ -5739,6 +5801,10 @@ a.tm-pf-go:focus-visible {
     border: 0;
     border-bottom: var(--border-width) solid var(--border);
     cursor: pointer;
+}
+.tm-pf-menu-row > span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 .tm-pf-menu-row:last-child {
     border-bottom: 0;
@@ -5753,6 +5819,8 @@ a.tm-pf-go:focus-visible {
 .tm-pf-chev {
     color: var(--muted);
     font-size: 1.1rem;
+    /* Fixed-size trailing chevron — never shrinks, so the label wraps beside it (TM-665). */
+    flex: 0 0 auto;
 }
 
 /* Settings block the "Privacy & my data" / gear affordances scroll to. */

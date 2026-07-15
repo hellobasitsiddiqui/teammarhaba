@@ -219,6 +219,9 @@ function fillForm(profile) {
 function paintHub(profile) {
   const hub = shell?.hub;
   if (!hub) return;
+  // Real /me data is landing — drop the loading skeleton so the concrete identity + strength paint
+  // in (TM-663). Until this runs the hub shows a skeleton, never a misleading "0% / Your profile".
+  shell?.root?.classList.remove("tm-pf-loading");
   const id = identitySummary(profile);
   hub.name.textContent = id.short;
   hub.meta.textContent = id.metaLine || "Add your city and age";
@@ -673,8 +676,12 @@ function buildShell(view) {
   const status = el("div", { id: "profile-status" });
 
   // ── Identity header (paper-profile) ── avatar glyph + name + "City · age". Painted by paintHub().
+  // The name/meta start BLANK (not the "Your profile" placeholder) so the pre-load render never shows
+  // a concrete, misleading empty-profile identity for an established user (TM-663) — the CSS skeleton
+  // (.tm-pf-loading) fills the gap until paintHub() lands the real values from /me. The 🙂 glyph is the
+  // genuine no-avatar fallback (not a wrong value), and it's hidden behind the skeleton while loading.
   const hubInitial = el("span", { class: "tm-pf-avatar", "aria-hidden": "true", text: "🙂" });
-  const hubName = el("div", { class: "tm-pf-name", text: "Your profile" });
+  const hubName = el("div", { class: "tm-pf-name", text: "" });
   const hubMeta = el("div", { class: "tm-pf-sub", text: "" });
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
     hubInitial,
@@ -682,8 +689,11 @@ function buildShell(view) {
   ]);
 
   // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
+  // The percentage starts BLANK (not "0% complete") so a loaded user never sees a misleading concrete
+  // 0% for a heartbeat before /me resolves (TM-663) — the skeleton bar shows until paintHub() lands the
+  // real strength; the bar fill starts at 0 width and the skeleton class overlays it while loading.
   const bar = el("i");
-  const barPct = el("span", { text: "0% complete" });
+  const barPct = el("span", { text: "" });
   const barNudge = el("span", { class: "tm-pf-barnudge", text: "" });
   const strengthCard = pfCard("Profile strength", [
     el("div", { class: "tm-pf-bar" }, [bar]),
@@ -758,24 +768,26 @@ function buildShell(view) {
     "tm-pf-menu-card",
   );
 
-  clear(view).append(
-    el("div", { class: "tm-pf" }, [
-      el("header", { class: "tm-pf-topbar" }, [
-        // A host-badge doodle beside the heading (TM-215) — decorative; CSS shows it only when the sketchy toggle is on.
-        el("h2", { class: "tm-pf-title" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
-        el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
-      ]),
-      idHeader,
-      badges,
-      strengthCard,
-      interestsCard,
-      membershipCard,
-      status,
-      editCard,
-      menuCard,
-      settingsBlock,
+  // The screen mounts with `tm-pf-loading` so the identity + strength area renders as a skeleton
+  // (CSS shimmer, no concrete text) until the first /me paint. paintHub() removes the class when real
+  // data lands; renderStatus() also removes it on a load error so the skeleton never hangs (TM-663).
+  const root = el("div", { class: "tm-pf tm-pf-loading" }, [
+    el("header", { class: "tm-pf-topbar" }, [
+      // A host-badge doodle beside the heading (TM-215) — decorative; CSS shows it only when the sketchy toggle is on.
+      el("h2", { class: "tm-pf-title" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
+      el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
     ]),
-  );
+    idHeader,
+    badges,
+    strengthCard,
+    interestsCard,
+    membershipCard,
+    status,
+    editCard,
+    menuCard,
+    settingsBlock,
+  ]);
+  clear(view).append(root);
 
   shell = {
     form,
@@ -785,6 +797,7 @@ function buildShell(view) {
     badges,
     status,
     avatar,
+    root,
     hub: { name: hubName, meta: hubMeta, initial: hubInitial, bar, barPct, barNudge },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
@@ -801,6 +814,9 @@ function renderStatus() {
     return;
   }
   if (state.error) {
+    // Clear the hub skeleton so it never hangs when /me fails — the error card below carries the
+    // retry, and the (blank) identity/strength placeholders are hidden rather than shimmering forever.
+    shell.root?.classList.remove("tm-pf-loading");
     shell.form.hidden = true;
     shell.status.append(el("div", { class: "tm-error tm-empty" }, [
       // An empty-state doodle (TM-215) so a load failure still reads warmly; CSS shows it only under sketchy Paper.
