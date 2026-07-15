@@ -119,6 +119,48 @@ class ChatStreamServiceTest {
     }
 
     @Test
+    void disconnectMemberCompletesTheRemovedMembersOwnStreamsAndLeavesOthers() throws IOException {
+        // TM-730: a member removed by moderation (or who self-left) must stop receiving live frames at
+        // once, not only when their stream times out. disconnectMember completes THAT member's streams
+        // (both tabs) for the thread, and leaves every other member's stream open.
+        SseEmitter removedTabA = mock(SseEmitter.class);
+        SseEmitter removedTabB = mock(SseEmitter.class);
+        SseEmitter otherMember = mock(SseEmitter.class);
+        service.register(CONVERSATION_A, removedTabA, "uid-removed");
+        service.register(CONVERSATION_A, removedTabB, "uid-removed");
+        service.register(CONVERSATION_A, otherMember, "uid-other");
+
+        int revoked = service.disconnectMember(CONVERSATION_A, "uid-removed");
+
+        assertThat(revoked).isEqualTo(2); // both of the removed member's tabs
+        verify(removedTabA).complete();
+        verify(removedTabB).complete();
+        verify(otherMember, never()).complete(); // an unrelated member keeps their stream
+
+        // The removed member's streams are gone from the registry, so a later broadcast reaches only the
+        // remaining member — the live leak (a kicked member still reading new messages) is closed.
+        assertThat(service.connectionCount(CONVERSATION_A)).isEqualTo(1);
+        int delivered = service.broadcast(CONVERSATION_A, ChatStreamService.EVENT_MESSAGE, "payload");
+        assertThat(delivered).isEqualTo(1);
+        verify(otherMember).send(any(SseEventBuilder.class));
+        verify(removedTabA, never()).send(any(SseEventBuilder.class));
+        verify(removedTabB, never()).send(any(SseEventBuilder.class));
+    }
+
+    @Test
+    void disconnectMemberIsANoOpForAnUnknownOrNullUidAndAnEmptyThread() {
+        SseEmitter member = mock(SseEmitter.class);
+        service.register(CONVERSATION_A, member, "uid-present");
+
+        // A uid that holds no stream here, a null uid (unresolvable account), and a thread with no streams
+        // all revoke nothing and leave the present member's stream untouched.
+        assertThat(service.disconnectMember(CONVERSATION_A, "uid-absent")).isZero();
+        assertThat(service.disconnectMember(CONVERSATION_A, null)).isZero();
+        assertThat(service.disconnectMember(CONVERSATION_B, "uid-present")).isZero();
+        assertThat(service.connectionCount(CONVERSATION_A)).isEqualTo(1);
+    }
+
+    @Test
     void heartbeatDropsAStreamThatHasDiedSinceItConnected() throws IOException {
         SseEmitter dead = mock(SseEmitter.class);
         doThrow(new IOException("pipe closed")).when(dead).send(any(SseEventBuilder.class));

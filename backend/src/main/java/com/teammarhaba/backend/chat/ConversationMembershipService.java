@@ -68,18 +68,21 @@ public class ConversationMembershipService {
     private final ConversationMemberRepository members;
     private final EventRepository events;
     private final EventAttendanceRepository attendance;
+    private final org.springframework.context.ApplicationEventPublisher publisher;
 
     public ConversationMembershipService(
             UserService users,
             ConversationRepository conversations,
             ConversationMemberRepository members,
             EventRepository events,
-            EventAttendanceRepository attendance) {
+            EventAttendanceRepository attendance,
+            org.springframework.context.ApplicationEventPublisher publisher) {
         this.users = users;
         this.conversations = conversations;
         this.members = members;
         this.events = events;
         this.attendance = attendance;
+        this.publisher = publisher;
     }
 
     /**
@@ -132,6 +135,11 @@ public class ConversationMembershipService {
         if (!member.hasLeft()) {
             member.leave();
             members.save(member);
+            // TM-730: leaving hides the thread, but the caller's live SSE stream would keep delivering
+            // frames until it times out (membership is only checked at connect). Revoke it after this
+            // leave commits (AFTER_COMMIT, so a rollback leaves the stream). Only on the actual state
+            // change — an idempotent re-leave of an already-LEFT thread publishes nothing.
+            publisher.publishEvent(new ConversationMemberRevokedEvent(conversationId, caller.uid()));
         }
         return ConversationMembershipResponse.of(member);
     }

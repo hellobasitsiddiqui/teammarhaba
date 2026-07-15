@@ -172,9 +172,28 @@ public class ConversationReadService {
     public long unreadTotal(VerifiedUser caller) {
         Long userId = users.provision(caller).getId();
         return members.findByUserIdOrderByJoinedAtDesc(userId).stream()
-                .filter(m -> m.getMute() != MuteState.REMOVED)
+                // The badge only counts threads the caller can still open. A REMOVED (kicked) member is
+                // excluded, but so must a LEFT (self-left, TM-471) one: a LEFT member has hidden the thread
+                // and — like a kicked one — is denied by the read/mark-read gate (requireMember accepts only
+                // NONE/READ_ONLY), so they can NEVER mark it read to clear its unread. Counting a LEFT
+                // thread here permanently inflated the Chat-tab badge with unread the member had no way to
+                // discharge (TM-730). Gate on the same "visible/readable" rule the access gate uses.
+                .filter(ConversationReadService::countsTowardUnread)
                 .mapToLong(m -> messages.countUnread(m.getConversationId(), userId, m.getLastReadAt()))
                 .sum();
+    }
+
+    /**
+     * Whether a membership contributes to the caller's unread badge (TM-730): only a thread the caller can
+     * still <em>open</em>. This is exactly the {@link #requireMember} readability rule — {@link
+     * MuteState#NONE} (incl. self-muted, whose mute only silences push) or {@link MuteState#READ_ONLY} — so
+     * a {@link MuteState#REMOVED} (kicked) OR {@link MuteState#LEFT} (self-left) membership counts nothing:
+     * both hide the thread and both are denied by the read/mark-read gate, so their unread could never be
+     * cleared and must not swell the badge.
+     */
+    private static boolean countsTowardUnread(ConversationMember member) {
+        MuteState mute = member.getMute();
+        return mute == MuteState.NONE || mute == MuteState.READ_ONLY;
     }
 
     /**
