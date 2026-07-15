@@ -28,11 +28,14 @@ import { injectSettleWebhook, readOrderForEvent, resetOrdersFor } from "../membe
 // confirmed ONLY by the injected settle webhook, whose signature the REAL RevolutPaymentProvider verifies
 // end to end. So this proves the honest server-side settle → confirm → RSVP, not a client-side illusion.
 //
-// HARNESS: needs the membership money paths turned on + a loopback Revolut stub on the backend (see the
-// header of membership-webhook.mjs for the exact e2e.yml backend env). The WEB membership flag is turned
-// on via serve.mjs's injected config (config.flags.membership) — the same config seam that already sets
-// the emulator hosts. `screenshot: "on"` is global; we ALSO take a named shot per major step so the run
-// yields a step-by-step visual trail for the evidence ticket.
+// HARNESS (TM-759 wired): the membership money paths are turned on + a loopback Revolut stub answers the
+// provider's create-order calls on the backend — .github/workflows/e2e.yml sets MEMBERSHIP_ENABLED=true,
+// SUBSCRIPTIONS_ENABLED=false, REVOLUT_API_BASE at the stub (web/e2e/revolut-stub.mjs), a non-blank
+// REVOLUT_SECRET_KEY, and REVOLUT_WEBHOOK_SIGNING_SECRET matching the value this spec signs with (see the
+// header of membership-webhook.mjs for the contract). The WEB membership flag is turned on via serve.mjs's
+// injected config (config.flags.membership) AND re-forced client-side below (defence in depth) — the same
+// config seam that already sets the emulator hosts. `screenshot: "on"` is global; we ALSO take a named shot
+// per major step so the run yields a step-by-step visual trail for the evidence ticket.
 
 // Turn the WEB membership flag ON for this spec (serve.mjs ships it OFF, matching prod), and STUB the
 // Revolut widget, BEFORE any app script runs. addInitScript runs in the page before module evaluation, so
@@ -174,6 +177,7 @@ async function assertNoAttendance(eventId, email) {
   }
 }
 
+// TM-759 wired: MEMBERSHIP_ENABLED + the loopback Revolut stub are now set in e2e.yml, so this runs live.
 test("@membership @payments per-event PAY: checkout PENDING → settle webhook → CONFIRMED + GOING + receipt", async ({
   page,
 }, testInfo) => {

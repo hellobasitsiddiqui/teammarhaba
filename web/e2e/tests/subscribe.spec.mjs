@@ -26,11 +26,13 @@ import {
 // webhook, whose signature the REAL RevolutPaymentProvider verifies end to end. A client can never talk
 // itself into a paid tier — this proves the honest server-side settle → activate, not a client illusion.
 //
-// HARNESS: needs the membership money paths turned on + a loopback Revolut stub on the backend (see the
-// header of membership-webhook.mjs for the exact e2e.yml backend env — note SUBSCRIPTIONS_ENABLED stays
-// false so the renewal scheduler bean never fires a background charge mid-suite; we drive the INITIAL
-// charge by webhook). The WEB membership flag is turned on via serve.mjs's injected config. `screenshot:
-// "on"` is global; we ALSO take a named shot per major step for the evidence ticket.
+// HARNESS (TM-759 wired): the membership money paths are turned on + a loopback Revolut stub answers the
+// provider's create-order / create-customer calls — .github/workflows/e2e.yml sets MEMBERSHIP_ENABLED=true,
+// SUBSCRIPTIONS_ENABLED=false (the renewal scheduler bean never fires a background charge mid-suite; we
+// drive the INITIAL charge by webhook), REVOLUT_API_BASE at the stub (web/e2e/revolut-stub.mjs), a
+// non-blank REVOLUT_SECRET_KEY, and REVOLUT_WEBHOOK_SIGNING_SECRET matching this spec's signing value. The
+// WEB membership flag is turned on via serve.mjs's injected config AND re-forced client-side below.
+// `screenshot: "on"` is global; we ALSO take a named shot per major step for the evidence ticket.
 
 // Turn the WEB membership flag ON + STUB the Revolut widget before any app script runs (identical seam to
 // paid-rsvp.spec.mjs; the subscribe screen shares the same loadRevolutSdk()).
@@ -115,6 +117,7 @@ async function getSubscriptionApi(account) {
   return res.json();
 }
 
+// TM-759 wired: MEMBERSHIP_ENABLED + the loopback Revolut stub are now set in e2e.yml, so this runs live.
 test("@membership @subscription subscribe MONTHLY: checkout → settle webhook → tier flips to MONTHLY", async ({
   page,
 }, testInfo) => {

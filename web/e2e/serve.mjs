@@ -39,6 +39,22 @@ const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
     // intercepts clicks (e.g. the admin disable-confirm dialog). Off in prod (flag absent) — tours.js
     // honours this; replaying a tour from the Help menu is unaffected.
     suppressAutoTours: true,
+    // TM-759: the WEB membership flag, ON for the harness so the checkout/subscribe screens mount for the
+    // payment specs (paid-rsvp / subscribe, TM-738). The committed web/src/assets/config.js ships this OFF
+    // (matching prod, flipped at deploy time), and the injected config OVERWRITES the whole object — so the
+    // flag (and payments block) must be ADDED here, not flipped. The payment specs ALSO force the flag on
+    // client-side via addInitScript (defence in depth); this makes the served app itself consistent, and
+    // the non-payment specs are unaffected (they never open a checkout screen).
+    flags: Object.freeze({ membership: true }),
+    // The Revolut widget config the checkout screens read. revolutMode "sandbox" keeps the widget in test
+    // mode; revolutScriptUrl points at about:blank because each payment spec pre-seeds window.RevolutCheckout
+    // so loadRevolutSdk() short-circuits and NEVER fetches an external script (the strict-CSP hermetic env
+    // blocks the real sandbox CDN anyway). The public key mirrors web/src/assets/config.js (public by design).
+    payments: Object.freeze({
+        revolutPublicKey: "pk_oAVwQr53jX37c6UacDoUr88gGXNLZB2CYLoa9neTXHfDUU0Z",
+        revolutMode: "sandbox",
+        revolutScriptUrl: "about:blank",
+    }),
 });
 `;
 
