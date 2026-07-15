@@ -206,4 +206,4 @@ Known and intentional for v1 — captured so future work builds on accurate assu
 - [`AGENTIC-LESSONS.md`](conventions/AGENTIC-LESSONS.md) — the fleet lessons this feature contributed
   ("first send path to honour `notificationPref`"; "compose panel must live outside the re-rendered table").
 - [`webview-auth-contract.md`](webview-auth-contract.md) — the WebView side of the mobile push surface.
-- [ADR-0005](decisions/ADR-0005-mobile-capacitor-hybrid.md) — mobile Capacitor-hybrid strategy + the iOS-Simulator ceiling.
+- [ADR-0005](../decisions/ADR-0005-mobile-capacitor-hybrid.md) — mobile Capacitor-hybrid strategy + the iOS-Simulator ceiling.

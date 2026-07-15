@@ -230,6 +230,42 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(afterDelete.get("totalElements").asLong()).isEqualTo(2);
     }
 
+    /**
+     * TM-709 regression guard: a member who joins AFTER messages were posted (e.g. RSVPs two hours
+     * after an event's chat opened) still reads the FULL history — the timeline is scoped to the
+     * thread, never to the member's {@code joinedAt}. Verified working-as-intended: the read path
+     * ({@code ConversationReadService#messages} → {@code findByConversationIdAndDeletedAtIsNull})
+     * carries no join-time predicate; this pins that so a future "since joined" filter can't slip in.
+     */
+    @Test
+    void tm709LateJoinerSeesMessagesPostedBeforeTheyJoined() throws Exception {
+        // An event chat where people are already talking (chat opened, messages flowing)...
+        Long eventId = newEvent("Sunset hike");
+        Long thread = newEventThread(eventId);
+        Long organiser = newUser("conv-late-join-org-" + UUID.randomUUID());
+        addMember(thread, organiser, MemberRole.ADMIN, MuteState.NONE);
+        Long m1 = messages.save(Message.fromUser(thread, organiser, "chat is open")).getId();
+        Long m2 = messages.save(Message.fromUser(thread, organiser, "who's coming?")).getId();
+
+        // ...then a NEW member joins. Saves run in separate transactions, so their DB-authoritative
+        // joinedAt is strictly after both messages' created_at — a genuine late joiner.
+        String lateUid = "conv-late-join-" + UUID.randomUUID();
+        Long lateJoiner = newUser(lateUid);
+        addMember(thread, lateJoiner, MemberRole.MEMBER, MuteState.NONE);
+        Instant joinedAt = members.findByConversationIdAndUserId(thread, lateJoiner)
+                .orElseThrow()
+                .getJoinedAt();
+        assertThat(joinedAt).isAfter(messages.findById(m2).orElseThrow().getCreatedAt());
+
+        // One more message after the join, so the page spans both sides of the join instant.
+        Long m3 = messages.save(Message.fromUser(thread, organiser, "welcome!")).getId();
+
+        // The late joiner's history is the WHOLE thread, chronological — pre-join messages included.
+        JsonNode page = getJson("/api/v1/conversations/" + thread + "/messages", caller(lateUid));
+        assertThat(ids(page)).containsExactly(m1, m2, m3);
+        assertThat(page.get("totalElements").asLong()).isEqualTo(3);
+    }
+
     @Test
     void threadIsMembersOnly() throws Exception {
         String memberUid = "conv-403-member-" + UUID.randomUUID();
