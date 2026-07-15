@@ -8,6 +8,7 @@ import {
   writeRuleCondition,
   requiresAdminClaim,
   requiresImageContentType,
+  sizeCapBytes,
 } from "./venue-storage-rules.mjs";
 
 // TM-738 P0 (venues) — pin the two venue-images/ write security-negatives that today live only in
@@ -63,4 +64,24 @@ test("venueImageRules_denyNonAdminWrite", () => {
   // Negative control: a rule that only checked auth != null (any signed-in user) would NOT satisfy
   // requiresAdminClaim — proves the assertion is really pinning the ADMIN gate, not just presence.
   assert.equal(requiresAdminClaim("request.auth != null"), false);
+});
+
+test("venueImageRules_denyOversizeUpload", () => {
+  // TM-738 P1 (venues): the venue-images write rule caps the object size at 5 MB
+  // (`request.resource.size < 5 * 1024 * 1024`), matching MAX_VENUE_IMAGE_BYTES in storage.js. An
+  // over-cap upload must be refused at the rules boundary — the client mirror is only a fast
+  // pre-check, so the rule is the real authority. Pin the EXACT cap, not just its presence, so a
+  // future edit that loosens it (bigger number, or drops the guard entirely) fails this test.
+  const cap = sizeCapBytes(venueWriteCondition);
+  assert.equal(
+    cap,
+    5 * 1024 * 1024,
+    `venue-images write must cap object size at 5 MB, got ${cap} bytes from: ${venueWriteCondition}`,
+  );
+
+  // Negative control: a condition with no `request.resource.size <` guard yields null — proves the
+  // assertion is really reading the size cap out of the rule, not matching incidentally.
+  assert.equal(sizeCapBytes("request.auth != null && isPublicRasterImage()"), null);
+  // And the arithmetic fold really evaluates the product form (5 * 1024 * 1024), not just the first factor.
+  assert.equal(sizeCapBytes("request.resource.size < 5 * 1024 * 1024"), 5242880);
 });
