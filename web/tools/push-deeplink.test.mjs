@@ -18,6 +18,7 @@ import {
   routeFromNotification,
   KNOWN_ROUTES,
   DEFAULT_ROUTE,
+  EVENT_DETAIL_ROUTE,
 } from "../src/assets/push-deeplink.js";
 
 test("rawRouteFromNotification reads data.route, then data.url", () => {
@@ -59,6 +60,46 @@ test("normaliseRoute is case-insensitive and tolerates a trailing slash", () => 
 test("normaliseRoute rejects unknown routes (caller falls back)", () => {
   assert.equal(normaliseRoute("#/not-a-real-view"), null);
   assert.equal(normaliseRoute("settings"), null);
+});
+
+test("normaliseRoute accepts server-built event-detail routes and rejects invalid ids (TM-747)", () => {
+  // A valid #/events/{id} (what the backend PushRoutes.EVENT_DETAIL emits) normalises to ITSELF —
+  // before the fix this returned null and every event push fell back to DEFAULT_ROUTE (#/home).
+  assert.equal(normaliseRoute("#/events/42"), "#/events/42");
+  assert.equal(normaliseRoute("/events/42"), "#/events/42"); // path shape coerces then matches
+  assert.equal(normaliseRoute("#/events/1"), "#/events/1");
+  assert.equal(normaliseRoute("#/events/9223372036854775807"), "#/events/9223372036854775807"); // 19-digit max
+  // Invalid ids and anything but a bare event-detail route are still rejected (mirrors the backend
+  // regex: positive, no leading zero, no sign, id-only path segment).
+  assert.equal(normaliseRoute("#/events/0"), null); // leading-zero / zero id rejected
+  assert.equal(normaliseRoute("#/events/007"), null); // leading zero rejected
+  assert.equal(normaliseRoute("#/events/-1"), null); // sign rejected
+  assert.equal(normaliseRoute("#/events/x"), null); // non-numeric rejected
+  assert.equal(normaliseRoute("#/events"), null); // bare list route is not a push target
+  assert.equal(normaliseRoute("#/events/"), null); // trailing slash / missing id
+  assert.equal(normaliseRoute("#/events/42/edit"), null); // deeper path rejected
+  // An existing known exact route still passes unchanged.
+  assert.equal(normaliseRoute("#/profile"), "#/profile");
+});
+
+test("EVENT_DETAIL_ROUTE mirrors the backend PushRoutes.EVENT_DETAIL regex (TM-747)", () => {
+  // The client pattern must match the backend's `#/events/[1-9][0-9]{0,18}` whole-string form so a
+  // route the backend emits is exactly one the client resolves. Parse the backend regex from source
+  // (no JVM) and assert the two agree on a spread of ids — the same source-of-truth cross-check the
+  // KNOWN_ROUTES symmetry test uses below.
+  const src = readFileSync(PUSH_ROUTES_JAVA, "utf8");
+  const m = src.match(/EVENT_DETAIL\s*=\s*Pattern\.compile\(\s*"([^"]+)"\s*\)/);
+  assert.ok(m, `Could not find 'EVENT_DETAIL = Pattern.compile("...")' in ${PUSH_ROUTES_JAVA}`);
+  const backendRe = new RegExp("^(?:" + m[1] + ")$");
+  for (const id of ["1", "42", "9223372036854775807"]) {
+    const route = "#/events/" + id;
+    assert.ok(backendRe.test(route), `backend regex should match ${route}`);
+    assert.ok(EVENT_DETAIL_ROUTE.test(route), `client EVENT_DETAIL_ROUTE should match ${route}`);
+  }
+  for (const bad of ["#/events/0", "#/events/007", "#/events/x", "#/events", "#/events/42/edit"]) {
+    assert.equal(backendRe.test(bad), false, `backend regex should reject ${bad}`);
+    assert.equal(EVENT_DETAIL_ROUTE.test(bad), false, `client EVENT_DETAIL_ROUTE should reject ${bad}`);
+  }
 });
 
 test("normaliseRoute rejects absolute / scheme-relative / scheme'd targets (trust boundary)", () => {

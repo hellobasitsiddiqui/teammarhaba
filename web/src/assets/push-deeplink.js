@@ -36,6 +36,18 @@ export const KNOWN_ROUTES = Object.freeze([
 export const DEFAULT_ROUTE = "#/home";
 
 /**
+ * The one allow-listed route *pattern* (TM-747): the event-detail deep link `#/events/{id}`, where
+ * `{id}` is a positive decimal database id (no sign, no leading zero, bounded to a positive Long's
+ * 19 digits). This mirrors the backend's PushRoutes.EVENT_DETAIL regex EXACTLY — the anchored
+ * whole-string form of `#/events/[1-9][0-9]{0,18}` — so a valid `#/events/{id}` the backend emits
+ * normalises to itself instead of falling back to DEFAULT_ROUTE. Kept separate from the exact
+ * KNOWN_ROUTES allow-list (which stays the admin-facing picker/validation contract, byte-identical
+ * to PushRoutes.KNOWN) so only server-built event routes match — anything else is still rejected.
+ * If the backend pattern changes, mirror it here (and vice versa).
+ */
+export const EVENT_DETAIL_ROUTE = /^#\/events\/[1-9][0-9]{0,18}$/;
+
+/**
  * Pull the raw route string out of a notification payload, checking the documented carriers in order:
  * `data.route` then `data.url`, and tolerating the destination sitting at the notification's top
  * level (some senders flatten it). Returns the raw string (untrusted, un-normalised) or null.
@@ -53,12 +65,14 @@ export function rawRouteFromNotification(notification) {
 /**
  * Normalise an untrusted route string to a SAFE in-app hash route, or null if it can't be.
  *
- * Security contract (this is the trust boundary): the result is always one of our KNOWN_ROUTES, i.e.
- * a relative same-app hash. We deliberately reject anything that could escape the app:
+ * Security contract (this is the trust boundary): the result is always one of our KNOWN_ROUTES OR an
+ * event-detail route matching EVENT_DETAIL_ROUTE — i.e. a relative same-app hash. We deliberately
+ * reject anything that could escape the app:
  *   - absolute URLs / scheme-relative (`http://…`, `https://…`, `//evil`, `javascript:…`),
- *   - anything that doesn't resolve to a known route.
- * `#/profile`, `/profile`, `profile` all map to `#/profile`; an unknown but otherwise-safe relative
- * route is rejected (caller falls back to DEFAULT_ROUTE) rather than navigated blindly.
+ *   - anything that doesn't resolve to a known route or the event-detail pattern.
+ * `#/profile`, `/profile`, `profile` all map to `#/profile`; `#/events/42` (a server-built event
+ * deep link) maps to itself; an unknown but otherwise-safe relative route is rejected (caller falls
+ * back to DEFAULT_ROUTE) rather than navigated blindly.
  * @param {string|null|undefined} raw
  * @returns {string|null} a known hash route, or null when nothing safe can be derived.
  */
@@ -81,7 +95,11 @@ export function normaliseRoute(raw) {
   }
   // Lower-case the route key (routes are lower-case); drop any trailing slash beyond the root.
   s = s.replace(/\/+$/, (m, off) => (off <= 2 ? m : "")).toLowerCase();
-  return KNOWN_ROUTES.includes(s) ? s : null;
+  // Accept an exact known route, or a server-built event-detail route (`#/events/{id}`) that mirrors
+  // the backend PushRoutes.EVENT_DETAIL pattern. Anything else is rejected (caller → DEFAULT_ROUTE).
+  if (KNOWN_ROUTES.includes(s)) return s;
+  if (EVENT_DETAIL_ROUTE.test(s)) return s;
+  return null;
 }
 
 /**
