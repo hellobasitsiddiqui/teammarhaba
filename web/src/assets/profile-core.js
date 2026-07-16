@@ -74,6 +74,27 @@ export function identitySummary(me) {
   };
 }
 
+/**
+ * The account-contact block shown on the Profile hub (TM-783): the email and phone number the account
+ * is registered with, read from the same `/me` payload the hub already loads. Email is the account's
+ * identity and is effectively always present; phone is optional, so `phoneDisplay` falls back to a
+ * friendly prompt when it's blank so the line is never silently omitted.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object
+ * @returns {{ email: string, phone: string, hasPhone: boolean, phoneDisplay: string }}
+ */
+export function accountContact(me) {
+  const m = me || {};
+  const email = (m.email || "").trim();
+  const phone = (m.phone || "").trim();
+  return {
+    email,
+    phone,
+    hasPhone: Boolean(phone),
+    phoneDisplay: phone || "No phone number added",
+  };
+}
+
 // The fields that count toward "profile strength" (the paper-profile completeness bar) and the
 // friendly label each contributes to the "what's missing" nudge. Photo is tracked separately (it's a
 // Firebase photoURL, not a /me field) but counts the same. Kept declarative so the bar, the percentage

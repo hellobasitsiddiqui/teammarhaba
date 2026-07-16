@@ -73,6 +73,12 @@ function fakeEl(tag = "div") {
       contains(c) {
         return this._s.has(c);
       },
+      toggle(c, force) {
+        const on = force === undefined ? !this._s.has(c) : force;
+        if (on) this._s.add(c);
+        else this._s.delete(c);
+        return on;
+      },
     },
     _children: [],
     setAttribute(k, v) {
@@ -146,7 +152,7 @@ function loadProfileModule(deps) {
     "  onAvatarChanged, isNativeCameraAvailable, captureAvatarImage,\n" +
     "  clear, el, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, profileStrength, publicSummary,\n" +
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
     "  validateProfileField,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
@@ -205,6 +211,7 @@ const deps = {
   PROFILE_PUBLIC_ROUTE: core.PROFILE_PUBLIC_ROUTE,
   profileMode: core.profileMode,
   identitySummary: core.identitySummary,
+  accountContact: core.accountContact,
   profileStrength: core.profileStrength,
   publicSummary: core.publicSummary,
   // profile.js's validateField delegates to the pure validateProfileField in profile-core.js (TM-763):
@@ -244,6 +251,8 @@ function makeShell(values = {}) {
     name: wireClassList(fakeEl("div")),
     meta: wireClassList(fakeEl("div")),
     initial: wireClassList(fakeEl("span")),
+    email: wireClassList(fakeEl("div")),
+    phone: wireClassList(fakeEl("div")),
     bar: wireClassList(fakeEl("i")),
     barPct: wireClassList(fakeEl("span")),
     barNudge: wireClassList(fakeEl("span")),
