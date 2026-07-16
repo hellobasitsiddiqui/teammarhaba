@@ -23,6 +23,7 @@ import {
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import {
+  POPULAR_LABEL,
   groupCatalogue,
   selectionBounds,
   validateSelection,
@@ -83,7 +84,7 @@ const state = {
 };
 
 let shell = null; // { form, fields: Map<field,{input,error}>, submit } once built
-let interestsShell = null; // { finishBtn, countLine, error, chips: Map<label,button> } once built
+let interestsShell = null; // { finishBtn, error, chips, pill, pillLabel, pillEmpty, pillFilled } once built
 
 const $ = (id) => document.getElementById(id);
 
@@ -279,11 +280,30 @@ function repaintAllChips() {
   }
 }
 
-/** Update the live "N of max M selected" count line + the Finish CTA enabled state. */
+/**
+ * Repaint the selection pill (paper "Pick interests"): below the minimum it's a grey outline reading
+ * "Pick at least N to continue" with a hollow ring; at/above the minimum it flips to the accent-light
+ * fill reading "N selected" with a ✓. Driven off the live selection + effective min so it always
+ * agrees with the Continue button's enabled state.
+ */
+function refreshSelectionPill() {
+  if (!interestsShell?.pill) return;
+  const { pill, pillLabel, pillEmpty, pillFilled } = interestsShell;
+  const n = state.selected.size;
+  const satisfied = n >= state.bounds.min;
+  pill.classList.toggle("tm-interests-pill-on", satisfied);
+  // Swap the leading icon (hollow ring below the min → ✓ once satisfied) without innerHTML.
+  pillEmpty.hidden = satisfied;
+  pillFilled.hidden = !satisfied;
+  pillLabel.textContent = satisfied
+    ? `${n} selected`
+    : `Pick at least ${state.bounds.min} to continue`;
+}
+
+/** Update the selection pill + the "Continue" CTA enabled state from the live selection. */
 function refreshInterestsControls() {
   if (!interestsShell) return;
-  const n = state.selected.size;
-  interestsShell.countLine.textContent = `${n} of max ${state.bounds.max} selected`;
+  refreshSelectionPill();
   interestsShell.finishBtn.disabled = !canFinish(state.selected, state.bounds);
   // Clear any stale inline error once the selection is valid again.
   if (canFinish(state.selected, state.bounds)) setInterestsError("");
@@ -308,22 +328,46 @@ function setInterestsError(message) {
   interestsShell.error.hidden = !message;
 }
 
-/** One toggle chip for a catalogue row — a real <button> so keyboard + aria-pressed work. */
+/** The small ✓ check that appears at the right end of a SELECTED chip (paper "Pick interests").
+ * Always in the DOM (a trailing span) but hidden by CSS until the chip carries .tm-pf-chip-on, so a
+ * toggle is a pure class change — no add/remove-child churn, and the tick inks with --on-accent. */
+function chipCheck() {
+  return el("span", { class: "tm-interests-chip-check", "aria-hidden": "true" }, [
+    svg(
+      "svg",
+      { viewBox: "0 0 24 24", width: 15, height: 15, fill: "none", stroke: "currentColor",
+        "stroke-width": 3, "stroke-linecap": "round", "stroke-linejoin": "round", focusable: "false" },
+      [svg("path", { d: "M5 13l4 4L19 7" })],
+    ),
+  ]);
+}
+
+/** One toggle chip for a catalogue row — a real <button> so keyboard + aria-pressed work. The chip
+ * carries its label text plus a trailing ✓ (revealed only when selected, paper "Pick interests"). */
 function buildChip(row) {
   const button = el("button", {
     type: "button",
-    class: "tm-pf-chip",
+    class: "tm-pf-chip tm-interests-chip",
     "aria-pressed": "false",
     "data-label": row.label,
-    text: row.label,
     onClick: () => toggleInterest(row.label),
-  });
+  }, [
+    el("span", { class: "tm-interests-chip-label", text: row.label }),
+    chipCheck(),
+  ]);
   return button;
 }
 
-/** Build one group section: a muted category heading + a wrap of toggle chips. */
+// The synthetic Popular group is rendered under the design's "POPULAR NEAR YOU" section label
+// (the core keys the group as POPULAR_LABEL="Popular"; we only relabel it here for display).
+const POPULAR_SECTION_LABEL = "Popular near you";
+
+/** Build one group section: an uppercase muted section label + a wrap of toggle chips. */
 function buildGroupSection(group, chips) {
-  const heading = el("h3", { class: "tm-interests-group-head", text: group.category });
+  const heading = el("h3", {
+    class: "tm-interests-group-head",
+    text: group.category === POPULAR_LABEL ? POPULAR_SECTION_LABEL : group.category,
+  });
   const chipWrap = el("div", { class: "tm-pf-chips tm-interests-chips" });
   for (const row of group.items) {
     // A highlighted row appears in Popular AND its home category. Selection is keyed by LABEL, so the
@@ -344,11 +388,36 @@ function buildGroupSection(group, chips) {
   return el("section", { class: "tm-interests-group" }, [heading, chipWrap]);
 }
 
+/** The selection pill (paper "Pick interests") — a rounded, 2px-bordered pill under the subtitle that
+ * reflects progress toward the minimum. Returns the pill node plus handles for {@link refreshSelectionPill}
+ * to repaint it (the two leading icons + the label). Starts in the empty (below-min) state. */
+function buildSelectionPill() {
+  // Hollow ring (shown below the min) + a ✓ (shown once the min is satisfied). Only one is visible at a
+  // time — swapped via `hidden` so it's a class/attr change, never innerHTML.
+  const pillEmpty = svg(
+    "svg",
+    { class: "tm-interests-pill-icon", viewBox: "0 0 24 24", width: 15, height: 15, fill: "none",
+      stroke: "currentColor", "stroke-width": 2.4, "aria-hidden": "true", focusable: "false" },
+    [svg("circle", { cx: 12, cy: 12, r: 8 })],
+  );
+  const pillFilled = svg(
+    "svg",
+    { class: "tm-interests-pill-icon", viewBox: "0 0 24 24", width: 15, height: 15, fill: "none",
+      stroke: "currentColor", "stroke-width": 3, "stroke-linecap": "round", "stroke-linejoin": "round",
+      "aria-hidden": "true", focusable: "false", hidden: true },
+    [svg("path", { d: "M5 13l4 4L19 7" })],
+  );
+  const pillLabel = el("span", { class: "tm-interests-pill-label" });
+  const pill = el("div", { class: "tm-interests-pill", "aria-live": "polite" }, [pillEmpty, pillFilled, pillLabel]);
+  return { pill, pillLabel, pillEmpty, pillFilled };
+}
+
 /**
- * Render the interests picker into the card body: bump the step pill to "Step 2 of 3", swap the
- * heading + doodle, then a group section per {@link groupCatalogue} (Popular first), a live count line,
- * an inline error slot, and a primary "Finish" CTA disabled until {@link canFinish}. A "Skip for now"
- * link is rendered ONLY when the effective min is 0 (the seed default is 1 → hard-min-1 → no skip).
+ * Render the interests picker into the card body (paper "Pick interests", screens 9/10). Header
+ * "What are you into?" + accent squiggle, the subtitle, a live selection pill, then a group section per
+ * {@link groupCatalogue} ("POPULAR NEAR YOU" first, then the real categories), an inline error slot, and
+ * a full-width "Continue →" CTA disabled until {@link canFinish}. NO skip — the step is a hard gate
+ * (product-owner decision on TM-804); even a min-0 config just leaves Continue disabled at 0 selected.
  */
 function buildInterestsStep(view) {
   const groups = groupCatalogue(state.catalogue);
@@ -358,11 +427,13 @@ function buildInterestsStep(view) {
   const chips = new Map();
   const groupSections = groups.map((group) => buildGroupSection(group, chips));
 
-  const countLine = el("p", { class: "tm-interests-count tm-muted", "aria-live": "polite" });
+  const { pill, pillLabel, pillEmpty, pillFilled } = buildSelectionPill();
   const error = el("p", { class: "tm-field-error", role: "alert", hidden: true });
 
-  const finishBtn = el("button", { class: "tm-btn tm-btn-primary tm-cta", type: "button", onClick: submitInterests }, [
-    el("span", { text: "Finish" }),
+  // Full-width primary "Continue →" CTA. The accent fill + 2px offset ink shadow (enabled) vs grey/no-shadow
+  // (disabled, below the min) is carried by the .tm-cta CSS reacting to :disabled — no JS class toggling.
+  const finishBtn = el("button", { class: "tm-btn tm-btn-primary tm-cta tm-interests-continue", type: "button", onClick: submitInterests }, [
+    el("span", { text: "Continue" }),
     svg(
       "svg",
       { class: "tm-btn-icon", viewBox: "0 0 24 24", width: 18, height: 18, fill: "none",
@@ -372,15 +443,6 @@ function buildInterestsStep(view) {
     ),
   ]);
 
-  const actions = [finishBtn];
-  // Skip is only offered when a user is genuinely allowed to pick nothing (min 0). With the seed default
-  // min 1 the CTA simply stays disabled until at least one is chosen — no Skip link.
-  if (state.bounds.min === 0) {
-    actions.push(
-      el("button", { class: "tm-btn tm-interests-skip", type: "button", text: "Skip for now", onClick: () => onComplete() }),
-    );
-  }
-
   const body = el("div", { class: "tm-interests-groups" }, groupSections.length
     ? groupSections
     // Defensive empty state: the catalogue fetch succeeded but returned nothing. Don't trap — let them finish.
@@ -389,8 +451,8 @@ function buildInterestsStep(view) {
   clear(view).append(
     el("div", { class: "tm-onboarding-card" }, [
       el("div", { class: "tm-admin-head tm-onboarding-head" }, [
-        el("span", { class: "tm-step-pill", "aria-hidden": "true", text: "Step 2 of 3" }),
-        el("h2", {}, [doodle("crowd", { class: "tm-doodle-header", title: "Pick your interests" }), "Pick your interests"]),
+        el("h2", {}, [doodle("crowd", { class: "tm-doodle-header", title: "What are you into?" }), "What are you into?"]),
+        // Accent hand-drawn squiggle directly under the heading (paper "Pick interests").
         svg(
           "svg",
           { class: "tm-onboarding-squiggle", viewBox: "0 0 180 11", preserveAspectRatio: "none", fill: "none",
@@ -398,15 +460,15 @@ function buildInterestsStep(view) {
           [svg("path", { d: "M3 7C34 2.5 56 2.5 82 6s54 4.5 68-.5 30-2 36 1.5", stroke: "currentColor", "stroke-width": 3.2, "stroke-linecap": "round" })],
         ),
       ]),
-      el("p", { class: "tm-muted", text: "Choose a few things you're into so we can suggest better meetups." }),
+      el("p", { class: "tm-muted", text: "Pick a few — we'll line up meetups that fit." }),
+      pill,
       body,
-      countLine,
       error,
-      el("div", { class: "tm-form-actions" }, actions),
+      el("div", { class: "tm-form-actions" }, [finishBtn]),
     ]),
   );
 
-  interestsShell = { finishBtn, countLine, error, chips };
+  interestsShell = { finishBtn, error, chips, pill, pillLabel, pillEmpty, pillFilled };
   repaintAllChips();
   refreshInterestsControls();
 }
