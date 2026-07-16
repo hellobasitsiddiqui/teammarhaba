@@ -82,6 +82,22 @@ class InterestCatalogueSeedIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void seedBackfilledAnEmojiForEveryInterestAndCoffeeGotItsCup() {
+        // V46 adds the emoji column and back-fills all 101 seed rows. Assert a known label carries the
+        // exact glyph, and that no LIVE seed row was left without an emoji (the back-fill covered them all).
+        String coffeeEmoji =
+                jdbc.queryForObject(
+                        "select emoji from interest_catalogue where label = 'Coffee & cafés'", String.class);
+        assertThat(coffeeEmoji).isEqualTo("☕");
+
+        Integer missingEmoji =
+                jdbc.queryForObject(
+                        "select count(*) from interest_catalogue where deleted_at is null and emoji is null",
+                        Integer.class);
+        assertThat(missingEmoji).isZero();
+    }
+
+    @Test
     void listingFloatsHighlightsToTheTop() {
         List<InterestCatalogue> ordered = repo.findAllByOrderBySortWeightDescLabelAsc();
 
