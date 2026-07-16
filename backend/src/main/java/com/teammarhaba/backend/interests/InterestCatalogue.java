@@ -52,6 +52,14 @@ public class InterestCatalogue {
     @Column(name = "category", nullable = false)
     private String category;
 
+    /**
+     * A small emoji glyph shown beside the label in the picker (TM-804), e.g. "☕" for Coffee &amp; cafés.
+     * NULLABLE by design — an interest without an emoji is valid; the client falls back to a category
+     * default or no glyph. Back-filled for all 101 V45 seed rows by {@code V46__interest_catalogue_emoji}.
+     */
+    @Column(name = "emoji")
+    private String emoji;
+
     /** Whether the interest is featured; the six seed highlights carry a higher {@link #sortWeight}. */
     @Column(name = "highlighted", nullable = false)
     private boolean highlighted;
@@ -118,6 +126,16 @@ public class InterestCatalogue {
     /** Change the grouping bucket (TM-774 admin edit). Does not bump {@code updatedAt} (see {@link #setLabel}). */
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    /** The emoji glyph shown beside the label in the picker, or {@code null} if none (TM-804). */
+    public String getEmoji() {
+        return emoji;
+    }
+
+    /** Set/clear the picker emoji (TM-804 admin edit). Does not bump {@code updatedAt} (see {@link #setLabel}). */
+    public void setEmoji(String emoji) {
+        this.emoji = emoji;
     }
 
     public boolean isHighlighted() {
