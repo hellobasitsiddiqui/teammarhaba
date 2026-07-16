@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeamMarhaba — Test Personas & Verification Stories</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fbf6ec; --ink:#2b2b2b; --muted:#6b6257; --line:#e3d8c4;
+    --ui:#0EA5E9; --server:#10B981; --side:#F59E0B; --target:#8b8577;
+    --card:#fffdf8;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:Nunito,system-ui,sans-serif; line-height:1.55;
+    background-image:radial-gradient(var(--line) 1px, transparent 1px);
+    background-size:22px 22px;
+  }
+  .wrap{max-width:1040px; margin:0 auto; padding:32px 20px 80px}
+  h1{font-family:'Patrick Hand',cursive; font-size:44px; margin:0 0 4px; letter-spacing:.5px}
+  h2.section{font-family:'Patrick Hand',cursive; font-size:30px; margin:44px 0 14px; border-bottom:3px dashed var(--line); padding-bottom:6px}
+  .lede{color:var(--muted); font-size:17px; max-width:70ch; margin:0 0 16px}
+  .legend{display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px}
+  .pill{display:inline-block; padding:3px 11px; border-radius:999px; font-size:13px; font-weight:700; color:#fff}
+  .pill.ui{background:var(--ui)} .pill.server{background:var(--server)} .pill.side{background:var(--side)} .pill.target{background:var(--target)}
+  /* cast */
+  .cast{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:18px}
+  .persona{background:var(--card); border:2px solid var(--line); border-radius:18px; padding:16px; display:flex; gap:14px; box-shadow:3px 4px 0 rgba(0,0,0,.05)}
+  .persona img{width:88px; height:88px; flex:0 0 88px}
+  .persona .name{font-family:'Patrick Hand',cursive; font-size:22px; line-height:1.1}
+  .persona .meta{font-size:13px; color:var(--muted); margin:2px 0 6px}
+  .persona .bio{font-size:14px}
+  .badge{display:inline-block; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:#fff; padding:2px 8px; border-radius:6px; margin-right:6px}
+  /* stories */
+  .toc{display:flex; gap:10px; flex-wrap:wrap; margin:8px 0 6px}
+  .toc a{text-decoration:none; background:var(--card); border:2px solid var(--line); border-radius:12px; padding:8px 14px; color:var(--ink); font-weight:700; font-size:14px}
+  .toc a:hover{border-color:var(--ui)}
+  details.story{background:var(--card); border:2px solid var(--line); border-radius:16px; margin:14px 0; padding:0 20px; box-shadow:3px 4px 0 rgba(0,0,0,.05)}
+  details.story>summary{font-family:'Patrick Hand',cursive; font-size:24px; cursor:pointer; padding:16px 0; list-style:none}
+  details.story>summary::-webkit-details-marker{display:none}
+  details.story>summary::before{content:'▸ '; color:var(--ui)}
+  details.story[open]>summary::before{content:'▾ '}
+  .md{padding:0 2px 18px; font-size:15px}
+  .md h1{font-family:'Patrick Hand',cursive; font-size:26px; margin:6px 0 2px}
+  .md h2{font-size:19px; margin:20px 0 6px; color:#3a352c}
+  .md h3{font-size:16px; margin:14px 0 4px}
+  .md code{background:#f1e9d8; padding:1px 5px; border-radius:5px; font-size:13px}
+  .md pre{background:#2b2b2b; color:#f5efe1; padding:12px 14px; border-radius:10px; overflow:auto; font-size:12.5px}
+  .md pre code{background:none; color:inherit}
+  .md blockquote{border-left:4px solid var(--side); margin:10px 0; padding:2px 14px; background:#fdf3df; border-radius:0 8px 8px 0; color:#5c5344}
+  .md table{border-collapse:collapse; width:100%; margin:10px 0; font-size:13.5px}
+  .md th,.md td{border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top}
+  .md th{background:#f4ecda}
+  .md ol,.md ul{padding-left:22px}
+  .md li{margin:4px 0}
+  footer{margin-top:50px; color:var(--muted); font-size:13px; border-top:3px dashed var(--line); padding-top:14px}
+  .foot-note{background:#fdf3df; border:1px dashed var(--side); border-radius:10px; padding:8px 12px; display:inline-block; margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TeamMarhaba — Test Personas &amp; Verification Stories</h1>
+  <p class="lede">A reusable cast of characters for role-based journey / agent-based simulation testing (<strong>TM-628</strong>). Every story verifies each step at three layers — a step passes only when all three agree.</p>
+  <div class="legend">
+    <span class="pill ui">UI — what the actor sees</span>
+    <span class="pill server">Server — API + DB row/state</span>
+    <span class="pill side">Side-effects — notification / push / chat / audit</span>
+    <span class="pill target">⏳ Target — depends on unbuilt features</span>
+  </div>
+
+  <h2 class="section">The cast</h2>
+  <div class="cast">
+    <div class="persona" style="border-color:#F59E0B">
+      <img src="avatars/joe.svg" alt="Joe Okafor">
+      <div><div class="name">Joe Okafor</div>
+        <div class="meta">18 · User · <span class="badge" style="background:#9ca3af">Free</span></div>
+        <div class="bio">Keen fresher who's at everything — first to RSVP, but flaky. Drives the <strong>cancel → waitlist cascade → re-RSVP</strong> path and the age boundary.</div></div>
+    </div>
+    <div class="persona" style="border-color:#10B981">
+      <img src="avatars/sarah.svg" alt="Sarah Bennett">
+      <div><div class="name">Sarah Bennett</div>
+        <div class="meta">32 · User · <span class="badge" style="background:#10B981">Monthly member</span></div>
+        <div class="bio">Reliable, ~monthly. Her membership makes paid events <strong>INCLUDED</strong> — the "member gets in free, £0 order" oracle.</div></div>
+    </div>
+    <div class="persona" style="border-color:#6366F1">
+      <img src="avatars/marcus.svg" alt="Marcus Reid">
+      <div><div class="name">Marcus Reid</div>
+        <div class="meta">45 · User · <span class="badge" style="background:#9ca3af">Free</span></div>
+        <div class="bio">Always a beat too late → lands on the <strong>waitlist</strong>. The actor who should be auto-promoted when someone drops (offer-cascade fairness).</div></div>
+    </div>
+    <div class="persona" style="border-color:#EC4899">
+      <img src="avatars/priya.svg" alt="Priya Sharma">
+      <div><div class="name">Priya Sharma</div>
+        <div class="meta">25 · User · <span class="badge" style="background:#EC4899">Premium</span></div>
+        <div class="bio">Premium tier — sees the attendee-photo strip and late-cancels a non-premium event freely (<strong>TM-602</strong>). Oracle for premium-gated perks + server-side withholding.</div></div>
+    </div>
+    <div class="persona" style="border-color:#0EA5E9">
+      <img src="avatars/aisha.svg" alt="Aisha Khan">
+      <div><div class="name">Aisha Khan</div>
+        <div class="meta">38 · Admin / Host · <span class="badge" style="background:#0EA5E9">Staff</span></div>
+        <div class="bio">The organiser. Creates events (free/paid, age-gated/open) and eyeballs roster, attendance, notifications. <em>(No dedicated host role yet — TM-628.)</em></div></div>
+    </div>
+  </div>
+
+  <h2 class="section">The stories</h2>
+  <div class="toc">
+    <a href="#s1">01 · Willen Lake Walk</a>
+    <a href="#s2">02 · Sarah's Membership Month</a>
+    <a href="#s3">03 · Priya's Premium Perks</a>
+    <a href="#s4">04 · The Sold-Out Scramble</a>
+  </div>
+
+  <details class="story" id="s1" open><summary>Story 01 — The Willen Lake Walk <small>(free · capacity 2 · waitlist cascade)</small></summary><div class="md" data-src="story-01"></div></details>
+  <details class="story" id="s2"><summary>Story 02 — Sarah's Membership Month <small>(paid · INCLUDED vs PAY · webhook)</small></summary><div class="md" data-src="story-02"></div></details>
+  <details class="story" id="s3"><summary>Story 03 — Priya's Premium Perks <small>(TM-602 ⏳ · attendee gate · late cancel)</small></summary><div class="md" data-src="story-03"></div></details>
+  <details class="story" id="s4"><summary>Story 04 — The Sold-Out Scramble <small>(concurrency · locks · offer cascade)</small></summary><div class="md" data-src="story-04"></div></details>
+
+  <footer>
+    Generated for <strong>TM-636</strong> (seed for the journey-sim harness, <strong>TM-628</strong>). Source markdown in <code>cast.md</code> + <code>stories/</code>; avatars in <code>avatars/</code>; the Story-1 spec seed in <code>web/e2e/tests/persona-story-01-willen-lake.spec.mjs</code>.
+    <div class="foot-note">⏳ steps depend on unbuilt features — vouchers (TM-604 / TM-457) and premium perks (TM-602).</div>
+  </footer>
+</div>
+
+<!-- Story markdown embedded verbatim so the page works when double-clicked (no local fetch). -->
+<script type="text/markdown" id="story-01">
+# Story 01 — The Willen Lake Walk (free, capacity 2, age-open)
+
+Personas: **Joe** (free), **Sarah** (member — attends as a normal user here), **Marcus** (free), **Aisha** (admin).
+
+The flagship contended-correctness story: create → confirm → capacity full → waitlist → cancel → **offer-cascade promotion** → re-RSVP → per-event chat → attendance → voucher reconciliation.
+
+## Setup
+
+**Aisha creates the event** — "Willen Lake Walk", free (price 0), capacity 2, age-open, starts in 2h. **UI:** listed as Free. **Server:** events row (price_pence 0, capacity 2). **Side-effects:** audit_events "event created".
+
+## Steps
+
+1. **Joe RSVPs (1/2).** UI: "You're going", 1/2. Server: event_attendance(joe, CONFIRMED). Side-effects: "RSVP confirmed" notification + push. ⏳ voucher −1.
+2. **Sarah RSVPs (2/2 → FULL).** UI: "You're going", Full. Server: event_attendance(sarah, CONFIRMED). Side-effects: confirmation + push.
+3. **Marcus RSVPs late → WAITLISTED.** UI: "waitlist #1". Server: event_attendance(marcus, WAITLISTED) pos 1. Side-effects: waitlist notification (not a confirmation).
+4. **Joe drops → cascade promotes Marcus.** UI: Joe "cancelled", Marcus flips to "going". Server: Joe CANCELLED; under the FOR UPDATE capacity lock the cascade promotes Marcus → CONFIRMED; roster back to 2/2. Side-effects: two notifications (Joe cancelled + Marcus "a spot opened"), push each, audit records the cascade.
+5. **Joe rejoins → FULL → Joe WAITLISTED.** UI: Joe "waitlist #1". Server: event_attendance(joe, WAITLISTED), no ghost rows. Side-effects: waitlist notification.
+6. **Chat — confirmed attendees message.** Sarah + Marcus chat. UI: both see both in order (Joe sees it only if include_waitlist_in_chat). Server: two message rows on the event conversation. Side-effects: live SSE delivery + unread badge + push to offline; mark-read clears it.
+7. **Attendance check-in.** Sarah + Marcus check in (GPS). UI: "Checked in ✓". Server: attended = true both. Side-effects: admin count updates + audit.
+8. **Aisha eyeballs.** UI: roster = Sarah+Marcus confirmed+attended, Joe waitlisted, full timeline. Server: rows match. Side-effects: sent-history matches exactly what fired.
+9. **⏳ Voucher reconciliation (TM-604/TM-457).** Joe's voucher refunded on cancel; Marcus's consumed on promotion.
+</script>
+<script type="text/markdown" id="story-02">
+# Story 02 — Sarah's Membership Month
+
+Personas: **Sarah** (MONTHLY member), **Joe** (free / PAY_PER_EVENT, first-event credit already spent in story-01), **Aisha** (admin).
+
+Exercises the paid-event checkout split (TM-476/477/478): a member gets the event **INCLUDED** with no charge, a free user gets a **PAY £8** decision, a server-priced **PENDING** order, a mock Revolut settle via webhook, and both land on the admin roster.
+
+> Pricing rule under test (`EntitlementResolver`): MONTHLY on a standard event → `INCLUDED` (£0, `INCLUDED_MONTHLY`); PAY_PER_EVENT with credit spent → `PAY` at `events.price_pence` (`PAY_STANDARD`). The amount is always **server-computed from the event row — never taken from the client**.
+
+## Preconditions
+
+- Sarah's membership tier is `MONTHLY`. Joe's is `PAY_PER_EVENT` with `first_event_credit_used = true` (his freebie went on story-01). Payments run against the Revolut **sandbox/mock** (membership flag ON).
+
+## Steps
+
+1. **Aisha creates a paid event.** `POST /api/v1/admin/events` — "Members' Supper Club", `pricePence: 800`, `capacity: 5`, `isPremium: false`. Expect `201`, event shows £8.
+2. **Sarah checks entitlement.** `GET /events/{id}/entitlement` → `decision: INCLUDED`, `amountPence: 0`, `reason: INCLUDED_MONTHLY`.
+3. **Sarah books — frictionless.** `POST /events/{id}/checkout` → `paymentRequired: false`, a **CONFIRMED £0 order**, `rsvp` state `GOING`, an `RSVP_CONFIRMED` notification.
+4. **Joe checks entitlement.** → `decision: PAY`, `amountPence: 800` (server-derived), `reason: PAY_STANDARD`.
+5. **Joe checks out — payment required.** → `paymentRequired: true`, order **PENDING** `amountPence: 800`, `rsvp: null` (not confirmed until settled), a `paymentToken`. Repeat = idempotent, same order.
+6. **Joe pays; webhook settles.** Signed `ORDER_COMPLETED` webhook → `confirmPayment` moves the order **PENDING → CONFIRMED** + confirms the RSVP. Replay = idempotent no-op.
+7. **Joe sees the outcome.** `/me/orders` → CONFIRMED £8; `/me/notifications` → `RSVP_CONFIRMED`.
+8. **Aisha checks the roster.** going = 2 (Sarah + Joe), 3 spots remain.
+
+## Verification (3 layers)
+
+**API:** entitlement decisions (2/4), checkout results (3/5), order + notification reads (7), admin counts (8).
+
+**Database:**
+
+```sql
+SELECT user_id, state FROM event_attendance WHERE event_id = :id;   -- Sarah + Joe = 'GOING'
+SELECT user_id, amount_pence, status FROM orders WHERE event_id = :id; -- Sarah 0 CONFIRMED; Joe 800 CONFIRMED
+-- amount is server-computed: o.amount_pence == e.price_pence (800==800); CHECK(amount>=0) + UNIQUE(user,event) held
+SELECT user_id, type FROM notifications WHERE type='RSVP_CONFIRMED' AND user_id IN (:sarah,:joe); -- one each
+```
+Capture Joe's order **before** the webhook too (`PENDING`) — the transition is the assertion, not just the end state.
+
+**UI/admin:** Aisha's roster shows going = 2; Sarah's app = booked, no charge; Joe's = booked with an £8.00 receipt.
+
+## Failure modes guarded
+Client-priced orders · RSVP confirming before payment settles · duplicate orders on retry/replay · a member charged for an included event.
+</script>
+<script type="text/markdown" id="story-03">
+# Story 03 — Priya's Premium Perks
+
+**Personas:** Priya (premium member), Joe (free member), Aisha (admin)
+**Depends on:** **TM-602** (premium perks: attendee-photo gate + premium-only late cancel) — **NOT BUILT** (spike). All oracles that depend on it are **TARGET ⏳**.
+**Also exercises (built today):** attendee strip (TM-393), cancellation window + strike count (TM-414), waitlist offer cascade (TM-430), `Event.premium` flag (TM-475), membership paid path (TM-633).
+
+## Oracle legend
+
+| Marker | Meaning |
+|---|---|
+| **BUILT ✅** | Exists in `main` today — asserted now; a failure is a regression. |
+| **TARGET ⏳** | Expected **once TM-602 ships** — record current behaviour as baseline; do not fail the run today. |
+
+## Preconditions / seed
+Non-prod, `MEMBERSHIP_ENABLED=true`. **Priya** premium; **Joe** free, `lateCancelCount = 0`; **Aisha** admin; **W** one pool user to occupy the waitlist. Run inside the late-cancel window using the test clock (TM-622), not real waiting.
+
+## Steps
+Verify oracles **server-side via the API (raw JSON)**, not the UI — the point of Rule 1 is that client-hiding is not enforcement.
+
+1. **Aisha creates the stage.** A **NON-premium** event (`premium=false`, £5, **capacity 2**), inside the late-cancel window. **BUILT ✅:** `GET /events/{id}` shows `premium:false`, `capacity:2`.
+2. **Priya + Joe RSVP GOING; W joins the waitlist.** **BUILT ✅:** Priya + Joe `GOING`; W `WAITLISTED`; `goingCount=2`, `waitlistCount=1`.
+3. **Priya (premium) sees the attendee strip.** **BUILT ✅:** the `AttendeeAvatar` list (id + displayName) is present in her event-detail. **TARGET ⏳ (Rule 1):** re-assert post-TM-602 that *premium status* grants it. Note: "photos" are initials/placeholders today — assert the payload, not pixels.
+4. **Joe (free) — server must not even send him the list.** Inspect Joe's **raw JSON**. **TARGET ⏳ (Rule 1, server-side):** no `AttendeeAvatar` entries / ids / names anywhere in the body; only a gated projection (count-only / upsell). Enforcement in `EventQueryService`/DTO, **not** client hiding — grep the body, not the DOM. **Baseline today:** Joe gets the full strip; record, don't fail.
+5. **Priya late-cancels freely.** `DELETE /events/{id}/rsvp` inside the window. **BUILT ✅:** succeeds, `CancelResult.lateCancel=true`, slot freed. **TARGET ⏳ (Rule 2):** premium is **not blocked/penalised** on a non-premium event; whether her strike still increments is an open TM-602 decision.
+6. **Waitlist advances off Priya's freed slot.** **BUILT ✅:** W gets a **`WAITLIST_OFFER`** and the cascade offers W the slot. **TARGET ⏳:** a premium late cancel must still free the slot post-TM-602 (waitlist fairness).
+7. **Joe's late cancel is blocked/penalised.** `DELETE /events/{id}/rsvp` inside the window. **TARGET ⏳ (Rule 2):** rejected or penalised with a clear `problem+json` — not a silent 200; if blocked his RSVP stays `GOING`, no offer fires, and he must not silently lose the £5. **Baseline today (BUILT ✅):** *allowed but counted* — `lateCancel=true`, `lateCancelCount` increments (TM-414).
+8. **Aisha always sees attendees.** **TARGET ⏳:** admin/organiser is exempt from the gate.
+9. **Notifications sweep.** **BUILT ✅:** W has the `WAITLIST_OFFER`; nobody got `EVENT_CANCELLED` (only RSVPs, not the event). **TARGET ⏳:** Joe's blocked cancel produced no waitlist movement.
+10. **Audit trail (post-TM-602).** **TARGET ⏳:** gating decisions audited (TM-102); attendee-DTO changes went through OpenAPI.
+</script>
+<script type="text/markdown" id="story-04">
+# Story 04 — The Sold-Out Scramble
+
+**Personas:** Joe, Sarah, Marcus, Priya (members) · Aisha (admin/host)
+**Theme:** a FREE, popular event with a tiny capacity. Everyone races to RSVP **at the same time** — to prove **contended correctness**: the `SELECT ... FOR UPDATE` capacity lock, the waitlist, and the offer cascade under genuine concurrency. **No step may assume serial arrival order.**
+
+## Why this story is different
+Stories 01–03 can pass on a serial system. This one cannot. The oracle asserts **invariants under contention**, never identities:
+- Assert **counts** (exactly `capacity` GOING, `N − capacity` WAITLISTED), **never** which persona wins.
+- The RSVPs fire **concurrently** (a barrier / `Promise.all` start). A serialised run is INVALID, not a pass.
+- Overbooking, a lost RSVP, or a double-promotion after the cancel are each an immediate FAIL.
+- Freed spots go to the **offer cascade** (offer → head of waitlist → explicit claim), never to whoever RSVPs next.
+
+## Setup
+"Rooftop Iftar Social" — **FREE**, capacity **3**. Racers: Joe, Sarah, Marcus, Priya (4 concurrent RSVPs for 3 spots). Winners = W1/W2/W3, loser = L1 (bound at runtime, asserted by count only). Anchors: `EventRsvpService` (FOR UPDATE lock), `WaitlistOfferCascadeService`, `EventChatLifecycleService`, `NotificationType.{WAITLIST_OFFER,RSVP_CONFIRMED}`.
+
+## Steps
+
+| # | Actor | Action | Oracle | Status |
+|---|---|---|---|---|
+| 1 | Aisha | Create + publish free event, capacity 3 | 3 spots open, 0 waitlisted | LIVE ✅ |
+| 2 | Joe/Sarah/Marcus/Priya | **Concurrently** RSVP (released together) | All 2xx; the lock serialises landings: **exactly 3 GOING, 1 WAITLISTED** — never 4 GOING, no lost request; identity not asserted | LIVE ✅ |
+| 3 | oracle | Re-read state | spots remaining 0; waitlist 1; each racer's own view correct | LIVE ✅ |
+| 4 | W1–W3 | Free-event **voucher consumed** on each confirm | each winner −1 exactly once; L1 untouched | TARGET ⏳ (TM-604/457) |
+| 5 | W1–W3, L1 | Group chat — 3 GOING auto-joined; messages while some offline | delivered live in order; offline get **push**; unread badges per member clear on read; L1 (waitlisted) receives **nothing** | LIVE ✅ |
+| 6 | W2 | **Cancels** GOING | GOING → 2; freed spot **recorded for the cascade** (not given away); a fresh RSVP now lands WAITLISTED behind L1 | LIVE ✅ |
+| 7 | cascade | Fires for the freed spot | **head of waitlist (L1)** gets `WAITLIST_OFFER` (in-app + push); exactly one live offer; nobody auto-promoted | LIVE ✅ |
+| 8 | L1 | **Claims** the offer | promotes L1 → GOING under the lock; GOING back to 3; other offers voided; L1 gets `RSVP_CONFIRMED` + auto-joins chat; **both** W2 + L1 notified | LIVE ✅ |
+| 9 | W2, L1 | Voucher ledger settles | W2 refunded on cancel; L1 consumed on claim; net spend = 3, once per final GOING | TARGET ⏳ (TM-604/457) |
+| 10 | oracle | Race the cancel (concurrent RSVP + non-offered claim mid-flight) | invariant holds: GOING never > 3; non-offered cannot claim; fresh RSVP → WAITLISTED | LIVE ✅ |
+| 11 | Aisha | Attendance check-ins for who shows (W1, W3, L1) | each recorded once against final GOING; W2 (cancelled) cannot check in; 3/3 | LIVE ✅ |
+| 12 | oracle | Post-event sweep | 3 GOING all checked in, 0 live offers, 0 orphan offers, chat = final GOING + admin, voucher balanced (⏳) | LIVE ✅ |
+
+## Contention rules for the harness (non-negotiable)
+1. **Barrier start** — steps 2 & 10 release simultaneously; a serialised run is INVALID.
+2. **Assert invariants, not winners** — bind W1–W3/L1 *after* the race.
+3. **Repeat to expose flakes** — run the race steps N iterations (fresh event each); one overbooked iteration fails.
+4. **No sleeps as sync** — wait on observable state (counts, notification rows), never fixed delays.
+
+## Dependencies
+**TM-604 / TM-457** — voucher consume/refund: steps 4, 9 & the voucher line of 12 are **TARGET ⏳**; run as SKIPPED placeholders. Offer-cascade: freed spots are *offered*, never auto-promoted (owner decision 2026-07-03).
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script>
+  // Stories 02–04 markdown is injected below at build time (kept out of the inline <script> above to
+  // avoid escaping issues); each is assigned as textContent then rendered with marked.
+  const RAW = window.__STORIES__ || {};
+  function render(){
+    document.querySelectorAll('.md[data-src]').forEach(el=>{
+      const id = el.getAttribute('data-src');
+      const src = document.getElementById(id);
+      const md = (src && src.textContent.trim()) || (RAW[id]||'');
+      try{ el.innerHTML = window.marked ? marked.parse(md) : '<pre>'+md.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre>'; }
+      catch(e){ el.innerHTML = '<pre>'+md.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</pre>'; }
+    });
+  }
+  if(document.readyState!=='loading') render(); else document.addEventListener('DOMContentLoaded', render);
+  // marked loads async; re-render once it's in.
+  window.addEventListener('load', render);
+</script>
+<script id="stories-data"></script>
+</body>
+</html>
