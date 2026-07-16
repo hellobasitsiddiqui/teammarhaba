@@ -1977,6 +1977,24 @@
         "required" : [ "body" ],
         "type" : "object"
       },
+      "PublicInterestResponse" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "highlighted" : {
+            "type" : "boolean"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "sortWeight" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PushFanoutResponse" : {
         "properties" : {
           "delivered" : {
@@ -4469,6 +4487,45 @@
           }
         },
         "tags" : [ "event-controller" ]
+      }
+    },
+    "/api/v1/interests/catalogue" : {
+      "get" : {
+        "operationId" : "catalogue",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/PublicInterestResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "interest-catalogue-controller" ]
+      }
+    },
+    "/api/v1/interests/config" : {
+      "get" : {
+        "operationId" : "config",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InterestConfigResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "interest-catalogue-controller" ]
       }
     },
     "/api/v1/link-preview" : {
