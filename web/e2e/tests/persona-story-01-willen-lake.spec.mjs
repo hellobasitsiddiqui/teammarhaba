@@ -24,6 +24,9 @@ import { ADMIN, EVENT_GOER, EVENT_WAITER, EVENT_FILLER, dbConfig } from "../fixt
 async function signIn(page, acct) {
   await page.goto("/#/login");
   await page.fill("#email", acct.email);
+  // Email-code is the default front door (TM-234): the email+password form (#password / #signin-btn)
+  // is hidden until "Try another way" reveals it — same as every other password-based spec (TM-782).
+  await page.click("#try-another-btn");
   await page.fill("#password", acct.password);
   await page.click("#signin-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();
