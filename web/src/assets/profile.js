@@ -49,6 +49,9 @@ import {
   defaultCountryFor,
   phonePartsError,
   PHONE_PICK_COUNTRY_MESSAGE,
+  // TM-777 (I5): the pure next-day completeness-nudge decision (picked==1 + not-shown-today → CTA).
+  // The max it targets is injected by the renderer from state.interestConfig (TM-778's shared config).
+  nextDayInterestsNudge,
 } from "./profile-core.js";
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
 // CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
@@ -158,7 +161,9 @@ const state = {
   // Interests card (TM-778): the min/max bounds (from GET /api/v1/interests/config, else defaults) and
   // the offered catalogue (from GET /api/v1/interests/catalogue) for the ADD picker. Both come from the
   // PUBLIC picker read endpoints (TM-776; any signed-in user) and are fetched best-effort on profile
-  // load; the saved interests themselves live on state.profile.interests (from /me).
+  // load; the saved interests themselves live on state.profile.interests (from /me). TM-777 (I5) reuses
+  // state.interestConfig.max (this SAME best-effort config) as the max the next-day nudge copy targets —
+  // one fetch, one source of truth — falling back to the seeded default when the config read failed.
   interestConfig: normaliseInterestConfig(null),
   interestCatalogue: null, // null = not yet loaded / read failed — the picker degrades honestly
   interestsSaving: false, // guards against concurrent PATCHes while a chip add/remove is in flight
@@ -304,6 +309,37 @@ function fillPhoneField(entry, value, profile) {
   }
 }
 
+// ── Next-day interests nudge persistence (TM-777 / I5) ──────────────────────────────────────────
+// The "last time we showed the add-more-interests CTA" is stored client-side in localStorage, keyed
+// per-uid exactly like tour.js's `stateKey` (`tm.<feature>.v1.<uid>`) — NO backend field, NO API call.
+// The pure decision (profile-core.nextDayInterestsNudge) compares this stored day against today; these
+// three helpers are the thin read/write around it, try/catch-wrapped so private-mode storage failures
+// degrade to "no persistence" (the CTA may simply re-show on the next paint) but never break paintHub.
+
+/** Per-uid localStorage key for the last time the interests nudge was shown (tour.js keying convention). */
+function interestsNudgeKey() {
+  const uid = currentUser()?.uid || "anon";
+  return `tm.i5.interestsNudge.v1.${uid}`;
+}
+
+/** The stored "last shown" ISO timestamp, or null when never shown / storage is unavailable. */
+function readLastInterestsPrompt() {
+  try {
+    return localStorage.getItem(interestsNudgeKey());
+  } catch {
+    return null; // storage unavailable (private mode) — treat as never shown; non-fatal.
+  }
+}
+
+/** Stamp "the interests nudge was shown at `nowISO`" so the same-day suppression fires next paint. */
+function recordInterestsPromptShown(nowISO) {
+  try {
+    localStorage.setItem(interestsNudgeKey(), nowISO);
+  } catch {
+    /* storage unavailable (private mode) — the nudge just won't persist; non-fatal. */
+  }
+}
+
 /**
  * Paint the Profile hub summary (paper-profile): the identity header (avatar glyph + name + "City ·
  * age") and the "Profile strength" completeness bar + nudge — the restyled continuation of the
@@ -340,6 +376,24 @@ function paintHub(profile) {
 
   // Interests card (TM-778) — repaint the saved-interest chips from the same /me payload.
   paintInterests(profile);
+
+  // TM-777 (I5): the next-day completeness nudge — a quiet, once-a-day CTA to add more interests when
+  // the user has picked exactly one. Pure decision (clock, stored last-prompt day, and the real
+  // interests max injected); the CTA button is hidden by default and only revealed when it's due.
+  const i5 = nextDayInterestsNudge(profile, {
+    now: new Date(),
+    lastPromptISO: readLastInterestsPrompt(),
+    // The real interests max — reuse the SAME best-effort config the interests card fetched
+    // (state.interestConfig, from GET /api/v1/interests/config via loadInterestsMeta; defaults to the
+    // seeded max when that read failed) so "add N more" names the true bound, tracking an admin change.
+    max: state.interestConfig.max,
+  });
+  hub.barInterestsCta.hidden = !i5.show;
+  if (i5.show) {
+    hub.barInterestsCta.textContent = i5.message;
+    // Stamp "shown today" so the same-day suppression fires on the next paint (don't nag twice a day).
+    recordInterestsPromptShown(new Date().toISOString());
+  }
 }
 
 // ---- interests card (TM-778) -----------------------------------------------------------------
@@ -399,17 +453,24 @@ function paintInterests(profile) {
  * Repaints the card once the config lands so the bounds (hence the chip removability + hint) reflect the
  * server config.
  */
-async function loadInterestsMeta() {
+async function loadInterestsMeta({ repaint = true } = {}) {
   try {
     const [config, catalogue] = await Promise.all([getInterestConfig(), getInterestCatalogue()]);
     state.interestConfig = normaliseInterestConfig(config);
     state.interestCatalogue = catalogue; // the public catalogue array (active rows, highlights-first)
   } catch (err) {
-    // A failed read leaves the defaults / an unavailable picker rather than breaking the card.
+    // A failed read degrades to the defaults / an unavailable picker rather than breaking the card.
+    // Reset to the default bounds (not a stale earlier value) so a FAILED refresh across a load()
+    // re-entry can't leave the card — or the TM-777 nudge copy — pinned to an out-of-date max.
+    state.interestConfig = normaliseInterestConfig(null);
+    state.interestCatalogue = null;
     console.warn("[profile] GET /api/v1/interests catalogue/config failed:", err?.message ?? err);
   }
-  // Repaint with the real bounds now they're known (they affect removability + the hint copy).
-  if (state.profile) paintInterests(state.profile);
+  // Repaint with the real bounds now they're known (they affect removability + the hint copy). Skipped
+  // (repaint:false) when load() fetched this BEFORE the first paint — fillForm→paintHub then paints the
+  // card + the TM-777 nudge with the bounds already in place, avoiding a redundant (and nudge-hiding,
+  // once same-day-stamped) second paintHub.
+  if (repaint && state.profile) paintInterests(state.profile);
 }
 
 /** Persist a new interests set via PATCH /me, then repaint from the returned MeResponse. */
@@ -546,7 +607,13 @@ async function load() {
   state.error = null;
   renderStatus();
   try {
-    const profile = await getMe();
+    // Fetch /me AND the interests metadata (TM-778 config + catalogue) in parallel, so the FIRST hub
+    // paint already has the real min/max bounds. This matters for the TM-777 (I5) next-day nudge: its
+    // copy names `state.interestConfig.max`, and paintHub stamps "shown today" the once it fires — so
+    // the max must be known BEFORE that single paint (a later repaint would be suppressed same-day and
+    // hide the just-shown CTA). loadInterestsMeta is best-effort (swallows its own errors), so a config
+    // failure just leaves the default bounds; getMe's own failure still lands in the catch below.
+    const [profile] = await Promise.all([getMe(), loadInterestsMeta({ repaint: false })]);
     state.profile = profile;
     state.loaded = true;
     fillForm(profile);
@@ -562,10 +629,6 @@ async function load() {
   // fetched fresh (apiFetch uses cache:"no-store") on every profile entry so the row shows the caller's
   // CURRENT tier, e.g. "Monthly member" right after subscribing, not a stale "Pay as you go".
   await loadMembership();
-  // Interests metadata (TM-778) — the min/max config + the ADD-picker catalogue, best-effort and
-  // non-blocking (a failure just leaves default bounds / an unavailable picker; VIEW + REMOVE work off
-  // /me regardless). Fired after the profile paints so the card is never gated on it.
-  await loadInterestsMeta();
 }
 
 /**
@@ -1041,9 +1104,21 @@ function buildShell(view) {
   const bar = el("i");
   const barPct = el("span", { text: "" });
   const barNudge = el("span", { class: "tm-pf-barnudge", text: "" });
+  // ── Next-day interests CTA (TM-777 / I5) ── a quiet, link-styled button under the strength label
+  // (reuses the muted tm-pf-barnudge/tm-pf-go idiom — NOT a loud primary button). A real <button> so it's
+  // keyboard-focusable; `hidden` by default and revealed by paintHub() only when the once-a-day nudge is
+  // due. Clicking it smooth-scrolls to the interests card (focusOnPage), the same affordance the menu rows
+  // use. Lives INSIDE the strength card so it reads as part of the completeness prompt, not a new section.
+  const barInterestsCta = el("button", {
+    class: "tm-pf-nudge-interests tm-pf-go",
+    type: "button",
+    hidden: true,
+    onClick: () => focusOnPage("profile-interests"),
+  });
   const strengthCard = pfCard("Profile strength", [
     el("div", { class: "tm-pf-bar" }, [bar]),
     el("div", { class: "tm-pf-barlbl" }, [barPct, barNudge]),
+    barInterestsCta,
   ]);
 
   // ── Interests (paper-profile) ── the REAL card (TM-778, I6): it VIEWs the caller's saved interests
@@ -1051,6 +1126,8 @@ function buildShell(view) {
   // PATCH /api/v1/me (the TM-775 user-selection API). The card body is an empty container that
   // paintInterests() fills once /me (and the best-effort config/catalogue) have loaded; until then the
   // hub skeleton (.tm-pf-loading) covers it. reconcile with TM-511 component library (chip component).
+  // The body carries id="profile-interests" — the TM-777 (I5) deep-link target the strength-card nudge
+  // CTA scrolls to via focusOnPage("profile-interests"), so that shared contract keeps working.
   const interestsBody = el("div", { class: "tm-pf-interests", id: "profile-interests" });
   const interestsCard = pfCard("Interests", [interestsBody]);
 
@@ -1141,7 +1218,7 @@ function buildShell(view) {
     status,
     avatar,
     root,
-    hub: { name: hubName, meta: hubMeta, initial: hubInitial, email: hubEmail, phone: hubPhone, bar, barPct, barNudge },
+    hub: { name: hubName, meta: hubMeta, initial: hubInitial, email: hubEmail, phone: hubPhone, bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.

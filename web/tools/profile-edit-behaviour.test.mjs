@@ -172,6 +172,7 @@ function loadProfileModule(deps) {
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
+    "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
@@ -209,16 +210,20 @@ const interestsCore = await import(interestsCoreUrl);
 let getMeImpl = async () => ({});
 let updateMeImpl = async () => ({});
 let getMembershipImpl = async () => ({});
+// Interests-card api helpers (TM-778): best-effort, so returning null (the "catalogue/config not
+// readable" degrade path) is a valid default the card + loadInterestsMeta handle — VIEW + REMOVE work
+// off /me alone. TM-777 (I5) reuses the SAME config fetch: a test can override getInterestConfigImpl to
+// return `{ maxSelections }` and prove the config-driven max reaches the next-day CTA copy.
+let getInterestCatalogueImpl = async () => null;
+let getInterestConfigImpl = async () => null;
 let currentUserImpl = () => null;
 
 const deps = {
   getMe: (...a) => getMeImpl(...a),
   updateMe: (...a) => updateMeImpl(...a),
   getMembership: (...a) => getMembershipImpl(...a),
-  // Interests-card api helpers (TM-778): best-effort, so returning null (the "catalogue/config not
-  // readable" degrade path) is a valid response the card handles — VIEW + REMOVE work off /me alone.
-  getInterestCatalogue: async () => null,
-  getInterestConfig: async () => null,
+  getInterestCatalogue: (...a) => getInterestCatalogueImpl(...a),
+  getInterestConfig: (...a) => getInterestConfigImpl(...a),
   ApiError,
   currentUser: (...a) => currentUserImpl(...a),
   signOut: async () => {},
@@ -264,6 +269,10 @@ const deps = {
   // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
   // input) is the control at fault — the real constant, so the comparison is the shipped one.
   PHONE_PICK_COUNTRY_MESSAGE: core.PHONE_PICK_COUNTRY_MESSAGE,
+  // TM-777 (I5): paintHub calls this to decide the next-day interests CTA — the REAL pure decision,
+  // so the renderer's hidden/message wiring runs through the shipped logic. The max it targets is
+  // injected by paintHub from state.interestConfig.max (TM-778's shared config), not a separate fetch.
+  nextDayInterestsNudge: core.nextDayInterestsNudge,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
   // TM-778 interests-core: the REAL pure functions the card maps over, so paintInterests/openInterestPicker
@@ -323,6 +332,8 @@ function makeShell(values = {}) {
     bar: wireClassList(fakeEl("i")),
     barPct: wireClassList(fakeEl("span")),
     barNudge: wireClassList(fakeEl("span")),
+    // TM-777 (I5): the next-day interests CTA button paintHub toggles hidden + sets text on.
+    barInterestsCta: wireClassList(fakeEl("button")),
   };
   return { fields, save: saveBtn, status, root, hub, badges: null, membership: null, form: wireClassList(fakeEl("form")) };
 }
@@ -423,6 +434,141 @@ test("paintHub paints a backend name as inert TEXT (textContent), never parsed H
     assert.equal(shell.hub.name.innerHTML, undefined, "paintHub must not write innerHTML");
     // The children list stays empty (no parsed element was inserted) — textContent doesn't append nodes.
     assert.equal(shell.hub.name._children.length, 0);
+  });
+});
+
+// ---- nextDayInterestsCtaRenderWiring (TM-777 / I5) --------------------------------------------
+// paintHub is the ONLY place the pure nextDayInterestsNudge decision reaches the DOM: it toggles the
+// CTA button's `hidden` and paints its message, then stamps "shown today" in localStorage so the
+// same-day suppression fires next paint. These pin that render/persist path (previously the harness
+// only wired the fake node so the pre-existing XSS test kept passing — no assertion on the CTA itself).
+
+/** Build a fake `localStorage` (Map-backed); returns the install/restore/store handle. */
+function makeFakeLocalStorage() {
+  const store = new Map();
+  return {
+    store,
+    impl: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    },
+  };
+}
+
+/** Install a fake `localStorage` (Map-backed) for a SYNC callback, capturing writes; restore after. */
+function withFakeLocalStorage(run) {
+  const prior = globalThis.localStorage;
+  const { store, impl } = makeFakeLocalStorage();
+  globalThis.localStorage = impl;
+  try {
+    return run(store);
+  } finally {
+    globalThis.localStorage = prior;
+  }
+}
+
+/** Async twin of withFakeLocalStorage — awaits `run` so the restore doesn't fire mid-promise. */
+async function withFakeLocalStorageAsync(run) {
+  const prior = globalThis.localStorage;
+  const { store, impl } = makeFakeLocalStorage();
+  globalThis.localStorage = impl;
+  try {
+    return await run(store);
+  } finally {
+    globalThis.localStorage = prior;
+  }
+}
+
+test("paintHub reveals the interests CTA + paints its message when the user has exactly 1 interest", () => {
+  withFakeDocument(() => {
+    withFakeLocalStorage((store) => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+      // A REAL /me shape (interests array, NO interestsMax) with exactly one pick, never prompted
+      // (empty localStorage) → the nudge is due.
+      profile.paintHub({ firstName: "Ada", interests: [{ label: "hiking", category: "outdoors" }] });
+
+      assert.equal(shell.hub.barInterestsCta.hidden, false, "the CTA is revealed when the nudge is due");
+      // The message names the honest max (3): 1 picked → "add 2 more" — NOT sourced from a phantom config field.
+      assert.match(shell.hub.barInterestsCta.textContent, /add 2 more/i);
+      assert.match(shell.hub.barInterestsCta.textContent, /so people find you/i);
+      // The "shown today" stamp was written per-uid so the same-day suppression fires next paint.
+      const stamped = store.get("tm.i5.interestsNudge.v1.u1");
+      assert.ok(stamped, "paintHub stamps the last-shown timestamp in localStorage");
+      assert.ok(!Number.isNaN(Date.parse(stamped)), "the stamp is a parseable ISO timestamp");
+    });
+  });
+});
+
+test("paintHub keeps the interests CTA hidden + writes no stamp when the nudge is NOT due", () => {
+  withFakeDocument(() => {
+    withFakeLocalStorage((store) => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+      // 2 picks (already engaged) → silent: the CTA stays hidden and nothing is persisted.
+      profile.paintHub({
+        firstName: "Ada",
+        interests: [
+          { label: "hiking", category: "outdoors" },
+          { label: "chess", category: "games" },
+        ],
+      });
+
+      assert.equal(shell.hub.barInterestsCta.hidden, true, "the CTA stays hidden when not due");
+      assert.equal(store.size, 0, "no last-shown stamp is written when the nudge is suppressed");
+    });
+  });
+});
+
+test("load fetches the public interests config and the CTA copy names the REAL max (5 → 'add 4 more')", async () => {
+  await withFakeDocumentAsync(async () => {
+    await withFakeLocalStorageAsync(async () => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+      // A 1-pick /me + a config that raised the max to 5 (an admin change). load() fetches /me and the
+      // interests config (via loadInterestsMeta) in parallel BEFORE the first paint, so paintHub injects
+      // the real max (state.interestConfig.max) into the nudge — the SAME config the TM-778 card uses.
+      getMeImpl = async () => ({ firstName: "Ada", interests: [{ label: "hiking", category: "outdoors" }] });
+      getMembershipImpl = async () => ({});
+      getInterestCatalogueImpl = async () => [{ label: "hiking", category: "outdoors" }];
+      getInterestConfigImpl = async () => ({ minSelections: 1, maxSelections: 5 });
+
+      await profile.load();
+
+      assert.equal(profile.__getState().interestConfig.max, 5, "the config max is stashed in state");
+      assert.equal(shell.hub.barInterestsCta.hidden, false, "the CTA is revealed (1 pick, never prompted)");
+      // The copy names the config-driven remaining count (5 − 1 = 4), NOT the fallback (3 → 2).
+      assert.match(shell.hub.barInterestsCta.textContent, /add 4 more/i);
+    });
+  });
+});
+
+test("load with a failing interests config falls back to the seeded max (CTA reads 'add 2 more')", async () => {
+  await withFakeDocumentAsync(async () => {
+    await withFakeLocalStorageAsync(async () => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+      getMeImpl = async () => ({ firstName: "Ada", interests: [{ label: "hiking", category: "outdoors" }] });
+      getMembershipImpl = async () => ({});
+      // The config fetch rejects (offline / non-2xx) — loadInterestsMeta swallows it and state.interestConfig
+      // keeps the normaliseInterestConfig(null) default (max 3), so the nudge copy degrades sensibly.
+      getInterestConfigImpl = async () => {
+        throw new Error("config unreachable");
+      };
+
+      await profile.load();
+
+      assert.equal(profile.__getState().interestConfig.max, 3, "state keeps the seeded fallback when the fetch fails");
+      assert.equal(shell.hub.barInterestsCta.hidden, false, "the CTA still shows — a failed config never breaks it");
+      assert.match(shell.hub.barInterestsCta.textContent, /add 2 more/i);
+    });
   });
 });
 

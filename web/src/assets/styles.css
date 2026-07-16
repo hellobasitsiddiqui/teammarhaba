@@ -6019,6 +6019,31 @@ a.tm-pf-go:focus-visible {
     border-radius: 4px;
 }
 
+/* Next-day interests CTA (TM-777 / I5) — a <button> styled as the same muted accent link as
+ * a.tm-pf-go (there's no global button reset, so a bare button.tm-pf-go would render as default browser
+ * button chrome — grey box + border). Strip that chrome so it reads as the quiet link the copy promises,
+ * and mirror a.tm-pf-go's accent ink / hover-underline / focus-visible ring so it matches its sibling
+ * links (and keeps the visible focus outline for keyboard a11y). Block-level under the strength label. */
+.tm-pf-nudge-interests {
+    display: block;
+    margin-top: var(--space-2);
+    padding: 0;
+    border: none;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--accent);
+    text-decoration: none;
+}
+.tm-pf-nudge-interests:hover {
+    text-decoration: underline;
+}
+.tm-pf-nudge-interests:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
 /* Edit-profile card (paper-edit-profile) — the shipped form dropped into a kit card. A small camera
  * badge over the avatar mirrors the wireframe's "change photo" affordance (decorative; the real
  * control is the file input / native camera button inside .tm-avatar-meta). */
