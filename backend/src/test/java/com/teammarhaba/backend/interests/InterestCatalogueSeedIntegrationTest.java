@@ -31,7 +31,14 @@ class InterestCatalogueSeedIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void seedLoadedExactly101Rows() {
-        Integer dbCount = jdbc.queryForObject("select count(*) from interest_catalogue", Integer.class);
+        // Count only LIVE rows (deleted_at is null) — the shared Testcontainer is reused across the whole
+        // suite with no per-test rollback, so a soft-deleted throwaway row from another test (e.g.
+        // UserInterestSnapshotIntegrationTest's tombstone) can physically remain in the table. A raw
+        // count(*) would include it and read 102; scoping to live rows mirrors @SQLRestriction and is
+        // order-independent, so it agrees with repo.findAll() below regardless of test execution order.
+        Integer dbCount =
+                jdbc.queryForObject(
+                        "select count(*) from interest_catalogue where deleted_at is null", Integer.class);
         assertThat(dbCount).isEqualTo(101);
         // @SQLRestriction shows every seed row (none are tombstoned), so the repo agrees with the DB.
         assertThat(repo.findAll()).hasSize(101);

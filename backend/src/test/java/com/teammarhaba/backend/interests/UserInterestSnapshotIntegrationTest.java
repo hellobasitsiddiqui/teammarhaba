@@ -7,6 +7,7 @@ import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,9 +19,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * provenance {@code sourceInterestId} unchanged — because {@code source_interest_id} is a plain column
  * with no cascading foreign key.
  *
- * <p>Each test uses a freshly-inserted throwaway catalogue row (not a seeded one) so mutating/deleting
- * it can never disturb the seed-count assertions in {@link InterestCatalogueSeedIntegrationTest},
- * regardless of test execution order in the shared integration context. Fail-before/pass-after.
+ * <p>Each test uses a freshly-inserted throwaway catalogue row (not a seeded one). The soft-delete
+ * test only tombstones its row (stamps {@code deleted_at}, physically keeping it), so on the shared,
+ * never-rolled-back Testcontainer that row would otherwise linger and inflate a raw {@code count(*)}
+ * in {@link InterestCatalogueSeedIntegrationTest}. The {@link #cleanUpThrowawayRows() @AfterEach}
+ * below hard-deletes every throwaway catalogue + user_interest row this class creates, so nothing
+ * leaks into the seed-count assertions regardless of test execution order. Fail-before/pass-after.
  */
 class UserInterestSnapshotIntegrationTest extends AbstractIntegrationTest {
 
@@ -38,6 +42,25 @@ class UserInterestSnapshotIntegrationTest extends AbstractIntegrationTest {
 
     private Long newUser(String uid) {
         return users.save(new User(uid, uid + "@example.com", uid)).getId();
+    }
+
+    /**
+     * Hard-delete every throwaway row this class creates. The shared Testcontainer is reused across the
+     * whole suite with no @Transactional rollback, so the soft-deleted catalogue row from the soft-delete
+     * test would physically survive (tombstoned, but still counted by a raw count(*)) and pollute other
+     * tests. Deleting via native SQL bypasses @SQLRestriction so it also removes the tombstoned row.
+     * user_interest rows are removed first (they carry the source_interest_id provenance pointer).
+     */
+    @AfterEach
+    void cleanUpThrowawayRows() {
+        // user_interest rows are removed by owning test user (the hard-delete test already removed its
+        // catalogue row, so a source-id subquery would miss its orphaned snapshot).
+        jdbc.update(
+                "delete from user_interest where user_id in"
+                        + " (select id from users where firebase_uid like 'interest-snapshot-%')");
+        // Then the throwaway catalogue rows — native delete bypasses @SQLRestriction so the tombstoned
+        // soft-deleted row is removed too, which is the row that would otherwise inflate the seed count.
+        jdbc.update("delete from interest_catalogue where category = 'Test Category'");
     }
 
     @Test
