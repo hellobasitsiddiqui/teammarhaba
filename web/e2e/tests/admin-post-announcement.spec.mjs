@@ -29,9 +29,11 @@
 //      "📣 Announcement" attribution + the body) — NOT an ordinary attendee bubble — with a named
 //      screenshot trail for the ticket evidence.
 //
-// Like chat-foundation.spec.mjs (TM-587) / tm710-announcement.spec.mjs this runs at the phone viewport
-// only (the mobile-chromium project): the Chat surface is reached via the bottom tab bar (#tab-chat,
-// TM-434), which is display:none at desktop width — see playwright.config.mjs.
+// This spec's filename is NOT in the mobile-chromium testMatch, so it runs under the DESKTOP chromium
+// project only (see playwright.config.mjs). The bottom tab bar (#tab-chat, TM-434) is display:none at
+// desktop width, so the Chat surface is reached via the viewport-independent #/chat hash route instead
+// (the same path chat-ios-button.spec.mjs / chat-live-stream.spec.mjs use under the desktop project) —
+// NOT the mobile-only tab bar the sibling tm710-announcement.spec.mjs uses in the mobile project.
 
 import { test, expect } from "@playwright/test";
 import { ADMIN, EVENT_GOER, EVENT_WAITER, API_BASE_URL } from "../fixtures.mjs";
@@ -161,8 +163,15 @@ test.describe("@chat-announcement event opening message auto-posts once, idempot
     expect(openingAnnouncements[0].senderId ?? null).toBeNull();
 
     // ── STEP 1 (UI): the member signs in and opens Chat — the event thread's row is in their list. ──
+    // Navigate straight to the (protected) #/chat route rather than the bottom-tab-bar #tab-chat control:
+    // this spec runs ONLY under the DESKTOP chromium project (its filename isn't in the mobile-chromium
+    // testMatch), where #tab-chat is display:none (a mobile-width-only nav, TM-434) — clicking it timed
+    // out in CI run 29499146715. The #/chat hash route renders the same #chat-view / chat.js surface at
+    // any viewport, so it's the viewport-independent path the sibling chat-ios-button.spec.mjs /
+    // chat-live-stream.spec.mjs use for exactly this reason. The list + row assertions below are otherwise
+    // unchanged — the real chat.js data-testids (chat-list / chat-row).
     await signIn(page, EVENT_GOER);
-    await page.locator("#tab-chat").click();
+    await page.goto("/#/chat");
     await expect(page.locator("#chat-view")).toBeVisible();
     await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
     const row = page.locator('[data-testid="chat-row"]', { hasText: heading });

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN, EVENT_GOER } from "../fixtures.mjs";
+import { ADMIN, EVENT_GOER, API_BASE_URL } from "../fixtures.mjs";
 import { authHeadersFor, createEvent } from "../events-api.mjs";
 import { injectSettleWebhook, readOrderForEvent, resetOrdersFor } from "../membership-webhook.mjs";
 
@@ -9,9 +9,9 @@ import { injectSettleWebhook, readOrderForEvent, resetOrdersFor } from "../membe
 //
 //   an ADMIN creates a PREMIUM (£15) event → the goer PAYS through the real checkout → settle webhook →
 //   a CONFIRMED, money-bearing order + a GOING attendance (captured money at the provider) → the ADMIN
-//   later CANCELS that event through the admin-events console (the same UI cancel admin-events.spec drives)
-//   → the paid attendee's captured money is REVERSED: the order leaves CONFIRMED and lands REFUNDED (the
-//   admin cancel now enumerates CONFIRMED orders and drives each to REFUND_DUE + provider refund).
+//   then CANCELS that event → the paid attendee's captured money is REVERSED: the order leaves CONFIRMED
+//   and lands REFUNDED (the admin cancel now enumerates CONFIRMED orders and drives each to REFUND_DUE +
+//   provider refund).
 //
 // WHAT WOULD FAIL BEFORE THE FIX: before 78165aa, EventAdminService.cancel only audited + published a
 // "CANCELLED" lifecycle notification — it reversed NO money. The goer's order would stay CONFIRMED forever
@@ -28,9 +28,22 @@ import { injectSettleWebhook, readOrderForEvent, resetOrdersFor } from "../membe
 //
 // SEEDING: the paid CONFIRMED order is produced by the SAME honest checkout→settle-webhook path
 // paid-rsvp.spec.mjs proves (never a client "I paid") — the order is CONFIRMED only by a VERIFIED settle
-// webhook whose signature the REAL RevolutPaymentProvider checks. The admin cancel is then driven through the
-// admin-events UI (console → row "Cancel" → styled confirm → POST /admin/events/{id}/cancel), reusing the
-// exact flow admin-events.spec.mjs already exercises. No new seed endpoint, no shared-file change.
+// webhook whose signature the REAL RevolutPaymentProvider checks. The GOER half runs through the REAL
+// browser, verbatim from paid-rsvp.spec.mjs (the working sibling); no new seed endpoint, no shared-file
+// change.
+//
+// WHY THE ADMIN CANCEL IS AN API CALL, NOT A SECOND UI LOGIN (the spec-bug fix — TM-798): the original
+// version signed the goer OUT and then signed the ADMIN IN in the SAME page, to drive the admin-console
+// "Cancel" button. That in-page account SWAP is flaky — a second Firebase signInWithEmailAndPassword racing
+// the just-fired sign-out left the home panel (#auth-signed-in) hidden and timed the login helper out (the
+// exact CI failure in run 29499146715, at the ADMIN signIn — NOT the goer's, which passed identically to
+// paid-rsvp). No sibling spec re-auths a DIFFERENT account in one page; the admin-console UI cancel itself
+// is already gated by admin-events.spec.mjs. So the admin cancel here is driven the way events-api.mjs
+// drives every other admin-only, no-user-journey choreography step: a first-party POST to the admin cancel
+// endpoint with the ADMIN's authed headers (POST /admin/events/{id}/cancel → the SAME endpoint the fix hooks
+// the refund fan-out onto). The money-reversal — the actual TM-740 behaviour under test — is unchanged and
+// still proven end to end (real checkout → verified settle webhook → CONFIRMED → real admin cancel endpoint →
+// provider refund via the loopback stub → REFUNDED), asserted authoritatively against the DB.
 //
 // HARNESS (TM-759 wired, same as paid-rsvp): the membership money paths are ON and a loopback Revolut stub
 // answers the provider's create-order + refund calls on the backend — .github/workflows/e2e.yml sets
@@ -126,11 +139,19 @@ async function signIn(page, account) {
   await expect(page.locator("#auth-signed-in")).toBeVisible();
 }
 
-/** Sign the current session OUT so we can re-enter as a different account (goer → admin). Opens the nav and
- *  clicks the sign-out control, then waits for the signed-out shell — the same nav seam the specs use. */
-async function signOut(page) {
-  await clickNav(page, "#signout-btn");
-  await expect(page.locator("#auth-signed-out")).toBeVisible();
+/** Cancel an event through the admin API (POST /admin/events/{id}/cancel → 200 EventResponse), with the
+ *  ADMIN's authed headers. This is the SAME endpoint the admin-console "Cancel" button drives and the one
+ *  the TM-740 fix hooks the refund fan-out onto — driven here as a first-party call (like events-api.mjs's
+ *  other admin-only choreography) instead of a flaky second in-page login. Returns the EventResponse JSON. */
+async function adminCancelEvent(headers, eventId) {
+  const res = await fetch(`${API_BASE_URL}/api/v1/admin/events/${eventId}/cancel`, {
+    method: "POST",
+    headers,
+  });
+  if (res.status !== 200) {
+    throw new Error(`admin cancel failed for event ${eventId}: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
 }
 
 /** A named step-screenshot helper (on top of the global screenshot:"on") — a step-by-step visual trail. */
@@ -152,25 +173,16 @@ test("@membership @payments admin cancel of a paid event refunds the paid attend
   const stamp = Date.now();
 
   // ── SETUP: the ADMIN creates a PREMIUM (£15) event. No admin web form is needed for creation here (the
-  // admin API is the seam paid-rsvp/events use); the admin UI is only exercised for the CANCEL under test.
-  // A premium event at a real price resolves to PAY for the PAY_PER_EVENT goer regardless of its first-event
-  // credit, so the goer PAYs — producing the money-bearing CONFIRMED order this test reverses. ────────────
+  // admin API is the seam paid-rsvp/events use); a premium event at a real price resolves to PAY for the
+  // PAY_PER_EVENT goer regardless of its first-event credit, so the goer PAYs — producing the money-bearing
+  // CONFIRMED order this test reverses. ────────────────────────────────────────────────────────────────
   const adminHeaders = await authHeadersFor(ADMIN);
   const heading = `e2e cancel-refund meetup ${stamp}`;
-  // Schedule the event FAR in the future so it sits at (or very near) the TOP of the admin console's default
-  // `startAt DESC` server ordering — so it lands in the console's first fetched page even against a populated
-  // shared CI DB. Its visibility window is open now (visible in the public list for the goer's RSVP) and runs
-  // well past the far-future start.
-  const startAt = new Date(stamp + 3650 * 864e5); // ~10 years out → top of startAt-desc
   const event = await createEvent(adminHeaders, {
     heading,
     capacity: 10, // room to spare → the settled RSVP lands GOING
     premium: true,
     pricePence: 1500, // £15 — a real premium price, so the resolver decides PAY (not FREE)
-    startAt: startAt.toISOString(),
-    endAt: new Date(startAt.getTime() + 3 * 36e5).toISOString(), // +3h
-    visibilityStart: new Date(stamp - 36e5).toISOString(), // visible since an hour ago
-    visibilityEnd: new Date(startAt.getTime() + 864e5).toISOString(), // …until just after the (far) start
   });
   expect(event.id).toBeTruthy();
   // Clean slate → idempotent across CI retries / re-runs: a lingering order for this account on this event
@@ -237,41 +249,16 @@ test("@membership @payments admin cancel of a paid event refunds the paid attend
   }).toPass({ timeout: 15_000, intervals: [500] });
   await shot("goer-order-confirmed");
 
-  // ── STEP 2: sign out the goer, sign in as the ADMIN, and open the admin events console. ──────────────────
-  await signOut(page);
-  await signIn(page, ADMIN);
-  await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin-events")).toBeVisible();
-  await clickNav(page, "#nav-admin-events");
-  await expect(page.locator("#admin-events-view")).toBeVisible();
-  await expect(page.locator("#admin-events-table")).toBeVisible();
-  await shot("admin-console");
-
-  // Search by the event's unique heading so its row is the ONLY one rendered — robust against a populated
-  // shared CI DB (the console filters the fetched list client-side by heading/location/city). Combined with
-  // the far-future startAt (top of the server's startAt-desc fetch), this guarantees the row is present.
-  await page.fill("#admin-events-search", heading);
-  const row = page.locator(`tr[data-event-id="${event.id}"]`);
-  await expect(row).toBeVisible();
-  await expect(row).toContainText(heading);
-
-  // ── STEP 3: CANCEL the event through the UI — the row "Cancel" button → the styled confirm dialog → the
-  // POST /admin/events/{id}/cancel the fix hooks the refund fan-out onto. Assert the honest 200 + CANCELLED.
-  // This is the admin action that, pre-fix, stranded the goer's captured money. ────────────────────────────
-  await row.getByRole("button", { name: `Cancel ${heading}` }).click();
-  const dialog = page.locator(".tm-dialog");
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("Cancel this event?");
-  const cancelResponse = page.waitForResponse(
-    (r) => r.url().includes(`/api/v1/admin/events/${event.id}/cancel`) && r.request().method() === "POST",
-  );
-  await dialog.getByRole("button", { name: "Cancel event" }).click();
-  const cancelled = await (await cancelResponse).json();
+  // ── STEP 2: the ADMIN CANCELS the event — POST /admin/events/{id}/cancel, the endpoint the fix hooks the
+  // refund fan-out onto (the SAME action the admin-console "Cancel" button drives; that UI path itself is
+  // gated by admin-events.spec.mjs). Driven as a first-party admin call — not a flaky second in-page login —
+  // exactly as events-api.mjs drives every other admin-only, no-user-journey step. Assert the honest 200 +
+  // CANCELLED. This is the admin action that, pre-fix, stranded the goer's captured money. ────────────────
+  const cancelled = await adminCancelEvent(adminHeaders, event.id);
   expect(cancelled.status).toBe("CANCELLED");
-  await expect(row).toContainText("Cancelled");
   await shot("admin-cancelled");
 
-  // ── STEP 4 (THE FIXED BEHAVIOUR): the paid attendee's captured money is REVERSED. Before 78165aa the admin
+  // ── STEP 3 (THE FIXED BEHAVIOUR): the paid attendee's captured money is REVERSED. Before 78165aa the admin
   // cancel reversed no money — the goer's order would stay CONFIRMED forever. After the fix the admin cancel
   // enumerates CONFIRMED orders, drives each to REFUND_DUE and issues the provider refund; the loopback stub
   // returns 200 so tryRefund lands the order at REFUNDED (terminal). Poll the DB (the refund runs inside the

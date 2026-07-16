@@ -7,11 +7,22 @@
 // DOM half real behavioural coverage — the thing that would FAIL before the fix (no toggle, no panel,
 // no filtered results, no jump) and PASS after.
 //
-// It MIRRORS chat-foundation.spec.mjs exactly: same tour-suppression beforeEach, the same per-spec
-// email+password signIn helper, the same CHAT_SEED account seeded via the profile-gated seed endpoint
-// (POST /api/v1/test/chat/seed, chat-seed.mjs), and the same mobile-chromium (Pixel 5) surface. No new
-// seed endpoint, no new fixture account, no shared-file change — it reuses the "Sunday Morning Dog Walk"
-// thread ChatSeedService already populates (one system "You joined …" notice + seven human messages).
+// It MIRRORS chat-foundation.spec.mjs's shape: same tour-suppression beforeEach, the same per-spec
+// email+password signIn helper, the profile-gated seed endpoint (POST /api/v1/test/chat/seed,
+// chat-seed.mjs) that populates the "Sunday Morning Dog Walk" thread (one system "You joined …" notice
+// + seven human messages), and the same mobile-chromium (Pixel 5) surface.
+//
+// ISOLATION (the CI-run-29499146715 fix): it does NOT reuse the shared CHAT_SEED fixture account.
+// chat-foundation.spec.mjs asserts CHAT_SEED's server-side unread total is exactly 10 (its Chat-tab
+// badge evidence) — but opening the "Sunday Morning Dog Walk" thread here marks its messages read and
+// drops that account's unread count, and the seed endpoint is idempotent (a re-seed no-ops), so it can
+// never be restored. That cross-spec state bleed is what red chat-foundation. So this spec seeds + drives
+// a FRESH, per-run account it OWNS (created in-spec via the emulator's accounts:signUp, un-gated through
+// the same public-API sequence global-setup.provisionInBackend uses — the exact pattern
+// payment-webhook-safety.spec.mjs already uses), which gets its OWN private copy of the same threads
+// (ChatSeedService keys every thread + the unread state on the CALLER's id, so seeding here touches only
+// this account). Marking its thread read can't reduce CHAT_SEED's total. Still no new fixture account and
+// no shared-file change — the account is created + owned entirely inside this spec.
 //
 // The load-bearing assertions target the specific fixed behaviour of chat-search-core.messageMatches:
 //   • "gate" → EXACTLY the two human messages that contain it ("North gate, 9am …" + "See you all at
@@ -23,7 +34,7 @@
 //   • a no-hit query renders the "No messages found." empty state, not a stale result list.
 
 import { test, expect } from "@playwright/test";
-import { CHAT_SEED } from "../fixtures.mjs";
+import { AUTH_EMULATOR_HOST, API_BASE_URL } from "../fixtures.mjs";
 import { seedChat } from "../chat-seed.mjs";
 
 // The Chat section is entered via the bottom tab bar (#tab-chat), which the CSS only reveals at a phone
@@ -47,9 +58,9 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Sign in a seeded, un-gated account via the email+password ("Try another way") flow — the same path
- *  chat-foundation.spec.mjs / events.spec.mjs use. The account is provisioned onboarded + terms-accepted
- *  in global-setup, so it lands straight in the app (no first-run gate). */
+/** Sign in an un-gated account via the email+password ("Try another way") flow — the same path
+ *  chat-foundation.spec.mjs / events.spec.mjs use. The account must be onboarded + terms-accepted (the
+ *  fresh account below is, via createFreshUngatedAccount), so it lands straight in the app (no gate). */
 async function signIn(page, account) {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -59,6 +70,58 @@ async function signIn(page, account) {
   await page.click("#signin-btn");
   await expect(page.locator("#auth-signed-out")).toBeHidden();
   await expect(page.locator("#auth-signed-in")).toBeVisible();
+}
+
+/**
+ * Create a FRESH, per-run emulator account that THIS spec owns, so seeding + reading its chat can never
+ * touch the shared CHAT_SEED fixture chat-foundation.spec.mjs asserts on (the isolation fix — see the
+ * file header). Same technique payment-webhook-safety.spec.mjs uses: sign it up via the Auth emulator's
+ * own accounts:signUp REST endpoint (unique email keyed on Date.now()), then un-gate it through the exact
+ * public-API sequence global-setup.provisionInBackend runs (GET /me → POST /me/onboarding-complete →
+ * POST /me/accept-terms), replicated inline so no shared helper / fixture / global-setup is touched.
+ * Returns the account creds (email + password) for the browser sign-in AND seedChat (which mints its own
+ * token from them).
+ */
+async function createFreshUngatedAccount() {
+  const email = `e2e-chat-search-${Date.now()}@teammarhaba.test`;
+  const password = "e2e-chat-search-pw-123456";
+
+  // 1) Create the account in the Auth emulator (returnSecureToken → we get an ID token straight back).
+  const signUpUrl =
+    `http://${AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key`;
+  const signUpRes = await fetch(signUpUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  if (!signUpRes.ok) {
+    throw new Error(`emulator signUp failed for ${email}: ${signUpRes.status} ${await signUpRes.text()}`);
+  }
+  const { idToken } = await signUpRes.json();
+  const authed = { Authorization: `Bearer ${idToken}`, Accept: "application/json" };
+
+  // 2) Provision the backend users row (JIT via GET /me), and read the current terms version to accept.
+  const meRes = await fetch(`${API_BASE_URL}/api/v1/me`, { headers: authed });
+  if (!meRes.ok) throw new Error(`provision (GET /me) failed for ${email}: ${meRes.status} ${await meRes.text()}`);
+  const currentTermsVersion = (await meRes.json()).currentTermsVersion;
+
+  // 3) Clear the first-run onboarding gate (TM-250) so the browser sign-in lands straight in the app.
+  const onboardRes = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, { method: "POST", headers: authed });
+  if (!onboardRes.ok) {
+    throw new Error(`onboarding-complete failed for ${email}: ${onboardRes.status} ${await onboardRes.text()}`);
+  }
+
+  // 4) Accept the current terms version (TM-170) so the terms gate is cleared too.
+  if (currentTermsVersion) {
+    const termsRes = await fetch(`${API_BASE_URL}/api/v1/me/accept-terms`, {
+      method: "POST",
+      headers: { ...authed, "Content-Type": "application/json" },
+      body: JSON.stringify({ version: currentTermsVersion }),
+    });
+    if (!termsRes.ok) throw new Error(`accept-terms failed for ${email}: ${termsRes.status} ${await termsRes.text()}`);
+  }
+
+  return { email, password };
 }
 
 /** A named step-screenshot helper (on top of the global screenshot:"on") — a step-by-step trail. */
@@ -77,13 +140,18 @@ test.describe("@chat-search in-thread search filters, excludes system notices, a
   }, testInfo) => {
     const shot = stepShot(page, testInfo, "chat-search");
 
-    // Seed the account's chat via the real endpoint BEFORE we read it — the "Sunday Morning Dog Walk"
-    // thread (thread A) carries one system "You joined …" notice + seven human messages. Idempotent, so
-    // a CI retry re-uses the same seeded threads rather than piling up duplicates.
-    const seeded = await seedChat(CHAT_SEED);
+    // ISOLATION: create + own a FRESH account (never the shared CHAT_SEED fixture — see the file header),
+    // so seeding + reading its chat here can't drop CHAT_SEED's unread total that chat-foundation asserts.
+    const account = await createFreshUngatedAccount();
+
+    // Seed THIS account's chat via the real endpoint BEFORE we read it — it gets its OWN private copy of
+    // the "Sunday Morning Dog Walk" thread (thread A: one system "You joined …" notice + seven human
+    // messages), since ChatSeedService keys every thread on the caller's id. A brand-new account is never
+    // already-seeded, so this always populates fresh.
+    const seeded = await seedChat(account);
     expect(seeded.eventThreads).toBe(2);
 
-    await signIn(page, CHAT_SEED);
+    await signIn(page, account);
 
     // Open the seeded event thread that search operates over.
     await page.locator("#tab-chat").click();

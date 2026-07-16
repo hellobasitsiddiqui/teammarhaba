@@ -83,18 +83,27 @@ test.describe('@ios-badge Chat screen iOS "Coming soon" badge answers a tap (TM-
     await expect(ios).toHaveAttribute("aria-disabled", "true");
     await expect(ios).toHaveClass(/store-badge-disabled/);
 
-    // …but it is NO LONGER a hard-`disabled` <button>. THIS is the before/after line: a `disabled`
-    // button emits no click at all (the reported dead no-op), so un-disabling it is exactly what lets the
-    // tap be answered. Before the fix the `disabled` attribute was present → the click below never fired
-    // and no toast appeared. The raw hasAttribute check pins that precisely (aria-disabled stays; the
-    // hard `disabled` is gone). NB aria-disabled does not block Playwright's .click(), so the tap runs.
+    // …but it is NO LONGER a hard-`disabled` <button>. THIS is the load-bearing before/after line: the
+    // reported bug was that the badge was a real `<button disabled>`, and a disabled button emits no
+    // click at all — a silent dead no-op. The product fix (app-badges.js) un-disables the DOM `disabled`
+    // attribute (while KEEPING aria-disabled, so it's still announced unavailable) so the badge's click
+    // listener can answer a tap. This raw hasAttribute check pins that flip precisely: before the fix it
+    // was `true` (dead), after it is `false` (answerable).
     expect(await ios.evaluate((el) => el.hasAttribute("disabled"))).toBe(false);
     // It's a real <button> (never a dead link with a phantom href), so there's nothing to navigate to.
     expect(await ios.evaluate((el) => el.tagName)).toBe("BUTTON");
 
-    // Tap it. Before the fix this was silent (disabled → no click). After the fix it answers with an
-    // honest toast AND does not navigate away — so proving BOTH: the toast copy, and staying on Chat.
-    await ios.click();
+    // Tap it, and assert the honest feedback the fix adds. IMPORTANT: the badge deliberately keeps
+    // `aria-disabled="true"` (announced unavailable — it is NOT a live download), and Playwright's
+    // actionability treats an `aria-disabled="true"` element as "not enabled", so a plain `.click()`
+    // waits for it to become enabled and then TIMES OUT — that was this spec's original CI failure on
+    // this exact line ("element is not enabled"). A coordinate `.click({ force: true })` is also
+    // unreliable here (the footer badge can sit below the fold / behind boot chrome, so the synthetic
+    // mouse events can miss it). So we dispatch the click straight at the element with `dispatchEvent`,
+    // which targets the badge's own DOM `click` listener directly — exactly the handler a real user's tap
+    // fires — with no hit-testing and no a11y-disabled gate. That listener is what app-badges.js wires
+    // (TM-657); it preventDefaults + shows the honest "coming soon" toast asserted below.
+    await ios.dispatchEvent("click");
 
     const toasts = page.locator("#tm-toasts");
     await expect(toasts).toContainText(IOS_TOAST_TEXT);
