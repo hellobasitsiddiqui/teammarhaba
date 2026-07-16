@@ -213,5 +213,32 @@ public enum AuditAction {
      * {@code ReliabilityService} inside the un-RSVP transaction, so the penalty and its ledger row commit
      * together. The admin console reads a user's ledger by filtering the audit search on this target.
      */
-    RELIABILITY_PENALTY
+    RELIABILITY_PENALTY,
+
+    /** An admin created a catalogue interest via {@code POST /api/v1/admin/interests} (TM-774). */
+    INTEREST_CREATED,
+
+    /** An admin edited a catalogue interest via {@code PATCH /api/v1/admin/interests/{id}} (TM-774). */
+    INTEREST_UPDATED,
+
+    /**
+     * An admin retired (soft-deleted) a catalogue interest via {@code POST
+     * /api/v1/admin/interests/{id}/retire} (TM-774): the row is tombstoned + {@code active=false} but
+     * KEPT — retire is not delete, so any user snapshot referencing it is untouched. Idempotent (a
+     * repeat retire does not re-audit).
+     */
+    INTEREST_RETIRED,
+
+    /**
+     * An admin restored a retired catalogue interest via {@code POST
+     * /api/v1/admin/interests/{id}/restore} (TM-774). Idempotent mirror of {@link #INTEREST_RETIRED}.
+     */
+    INTEREST_RESTORED,
+
+    /**
+     * An admin changed the interests min/max selection bounds via {@code PUT
+     * /api/v1/admin/interests/config} (TM-774). One row per set, carrying the new {@code min}/{@code max}
+     * in its metadata.
+     */
+    INTERESTS_CONFIG_UPDATED
 }

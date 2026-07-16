@@ -96,6 +96,10 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.VenueAdminService venueAdminService;
 
+    // InterestAdminController (TM-774) needs an InterestAdminService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.interests.InterestAdminService interestAdminService;
+
     // AlertController + AlertAdminController (TM-243) need an AlertService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.alert.AlertService alertService;

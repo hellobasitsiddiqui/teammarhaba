@@ -15,8 +15,11 @@ import org.springframework.stereotype.Component;
  * NOT a {@code @ConfigurationProperties}/{@code @Value} constant: a bound record can't change without a
  * redeploy. The 1/3 defaults here are only the fail-safe used if the seed rows are ever missing.
  *
- * <p>This is the read path only. No validation policy / no {@code min <= max} enforcement lives here —
- * enforcing the bounds at selection time belongs to a later ticket (I4); I1 ships only the read path.
+ * <p>TM-773 shipped the read path; TM-774 adds the write passthroughs ({@link #setMinSelections(int)} /
+ * {@link #setMaxSelections(int)}) that the admin interests-config endpoint uses — keeping the
+ * {@code app_config} string keys in exactly one place on the write side too. No {@code min <= max}
+ * enforcement lives here (that cross-field rule is validated at the admin request edge + defensively in
+ * the admin service); this class remains the single typed key/value seam for the two settings.
  */
 @Component
 public class InterestSelectionConfig {
@@ -40,5 +43,15 @@ public class InterestSelectionConfig {
     /** Maximum interests a user may select (DB-backed; default {@value #MAX_DEFAULT}). */
     public int maxSelections() {
         return appConfig.getInt(MAX_KEY, MAX_DEFAULT);
+    }
+
+    /** Persist the minimum-selections bound (TM-774 admin write); routes through the one {@link #MIN_KEY}. */
+    public void setMinSelections(int value) {
+        appConfig.setInt(MIN_KEY, value);
+    }
+
+    /** Persist the maximum-selections bound (TM-774 admin write); routes through the one {@link #MAX_KEY}. */
+    public void setMaxSelections(int value) {
+        appConfig.setInt(MAX_KEY, value);
     }
 }

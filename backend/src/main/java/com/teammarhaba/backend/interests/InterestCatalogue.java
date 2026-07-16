@@ -103,16 +103,39 @@ public class InterestCatalogue {
         return label;
     }
 
+    /**
+     * Rename the interest (TM-774 admin edit). Does NOT bump {@code updatedAt} — the admin service calls
+     * {@link #touch} once after applying all changed fields (mirrors {@code Venue}'s setters).
+     */
+    public void setLabel(String label) {
+        this.label = label;
+    }
+
     public String getCategory() {
         return category;
+    }
+
+    /** Change the grouping bucket (TM-774 admin edit). Does not bump {@code updatedAt} (see {@link #setLabel}). */
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public boolean isHighlighted() {
         return highlighted;
     }
 
+    /** Toggle the featured flag (TM-774 admin edit). Does not bump {@code updatedAt} (see {@link #setLabel}). */
+    public void setHighlighted(boolean highlighted) {
+        this.highlighted = highlighted;
+    }
+
     public int getSortWeight() {
         return sortWeight;
+    }
+
+    /** Change the ordering weight (TM-774 admin edit). Does not bump {@code updatedAt} (see {@link #setLabel}). */
+    public void setSortWeight(int sortWeight) {
+        this.sortWeight = sortWeight;
     }
 
     /** {@code true} while the interest is offered to users (not retired via the active flag). */
