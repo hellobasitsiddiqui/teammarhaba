@@ -26,6 +26,9 @@ import {
   composeE164,
   defaultCountryFor,
   phonePartsError,
+  interestCount,
+  nextDayInterestsNudge,
+  INTERESTS_MAX_FALLBACK,
 } from "../src/assets/profile-core.js";
 
 // The real Profile field shapes profile.js feeds validateProfileField (TM-162) — so these tests
@@ -494,4 +497,97 @@ test("validateProfileField: firstName/lastName/city apply the name-like rule (TM
 test("validateProfileField: the name-like rule is scoped to firstName/lastName/city only (TM-771 wiring)", () => {
   // A digits-only phone must stay valid — the name rule must not leak onto other text-ish fields.
   assert.equal(validateProfileField(PHONE_FIELD, "+447700900123"), "");
+});
+
+// ---- nextDayInterestsNudge (TM-777 / I5) ------------------------------------------------------
+//
+// The next-day completeness nudge: when the user has picked EXACTLY ONE interest and we haven't
+// prompted them today, the strength card shows a CTA to add more (up to the max). The clock (`now`)
+// and the stored "last shown" timestamp (`lastPromptISO`) are injected so the whole decision is
+// deterministic with no localStorage / Date globals — the same injected-clock pattern as formatJoined.
+// Interests are read from `me.interests`; the field is tolerated missing (pre-TM-775 /me → 0 picks).
+
+// A YESTERDAY / EARLIER-TODAY pair relative to a fixed local "now", built from local calendar parts so
+// the same-local-day comparison is exercised in the runner's local timezone (not UTC).
+const NUDGE_NOW = new Date(2026, 6, 15, 14, 0, 0); // 15 Jul 2026, 14:00 local
+const YESTERDAY = new Date(2026, 6, 14, 23, 30, 0).toISOString(); // prior calendar day
+const EARLIER_TODAY = new Date(2026, 6, 15, 9, 0, 0).toISOString(); // same calendar day, earlier
+
+test("nextDayInterestsNudge: 1 pick + never prompted → shows, names the remaining count", () => {
+  const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, lastPromptISO: null });
+  assert.equal(r.show, true);
+  assert.equal(r.count, 1);
+  assert.equal(r.max, 3);
+  assert.equal(r.remaining, 2);
+  assert.match(r.message, /2 more/);
+  assert.match(r.message, /so people find you/); // matches the interests card's existing voice
+});
+
+test("nextDayInterestsNudge: 1 pick + last prompt was YESTERDAY → shows (the core next-day case)", () => {
+  const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, lastPromptISO: YESTERDAY });
+  assert.equal(r.show, true);
+});
+
+test("nextDayInterestsNudge: 1 pick + last prompt was EARLIER TODAY → suppressed (don't nag same-day)", () => {
+  const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, lastPromptISO: EARLIER_TODAY });
+  assert.equal(r.show, false);
+  assert.equal(r.count, 1); // the counts are still computed, only `show` is gated
+});
+
+test("nextDayInterestsNudge: 0 picks (empty array) → never nags (first-run / onboarding)", () => {
+  const r = nextDayInterestsNudge({ interests: [] }, { now: NUDGE_NOW, lastPromptISO: null });
+  assert.equal(r.show, false);
+  assert.equal(r.count, 0);
+});
+
+test("nextDayInterestsNudge: 2 or 3 picks → silent (already engaged / at the typical max)", () => {
+  assert.equal(nextDayInterestsNudge({ interests: ["a", "b"] }, { now: NUDGE_NOW }).show, false);
+  assert.equal(nextDayInterestsNudge({ interests: ["a", "b", "c"] }, { now: NUDGE_NOW }).show, false);
+});
+
+test("nextDayInterestsNudge: an absent interests field (pre-TM-775 /me) → silent, count 0", () => {
+  const r = nextDayInterestsNudge({ firstName: "Basit" }, { now: NUDGE_NOW, lastPromptISO: null });
+  assert.equal(r.show, false);
+  assert.equal(r.count, 0);
+});
+
+test("nextDayInterestsNudge: null me → does not throw, show:false (mirrors profileStrength tolerance)", () => {
+  const r = nextDayInterestsNudge(null, { now: NUDGE_NOW, lastPromptISO: null });
+  assert.equal(r.show, false);
+  assert.equal(r.count, 0);
+});
+
+test("nextDayInterestsNudge: max is honoured from the payload, else defaults to 3", () => {
+  const withMax = nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 5 }, { now: NUDGE_NOW });
+  assert.equal(withMax.max, 5);
+  assert.equal(withMax.remaining, 4);
+  assert.match(withMax.message, /4 more/);
+  // A missing/invalid bound falls back to the shared constant (3).
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW }).max, INTERESTS_MAX_FALLBACK);
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 0 }, { now: NUDGE_NOW }).max, 3);
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: "lots" }, { now: NUDGE_NOW }).max, 3);
+});
+
+test("nextDayInterestsNudge: an invalid stored lastPromptISO is treated as never-shown → shows (no crash)", () => {
+  const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, lastPromptISO: "not-a-date" });
+  assert.equal(r.show, true);
+});
+
+test("nextDayInterestsNudge: defaults are safe — no opts uses real time + never-shown", () => {
+  // Called with no opts at all (uses `now = new Date()`, `lastPromptISO = null`): 1 pick, never shown
+  // → eligible. This pins that the whole options object is optional (the renderer always passes it,
+  // but the default must not throw).
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"] }).show, true);
+});
+
+// ---- interestCount (TM-777 / I5) --------------------------------------------------------------
+
+test("interestCount: array → length; non-array / missing / null → 0 (tolerates pre-TM-775 /me)", () => {
+  assert.equal(interestCount({ interests: ["a", "b"] }), 2);
+  assert.equal(interestCount({ interests: [] }), 0);
+  assert.equal(interestCount({ interests: "hiking" }), 0); // a string is not an array
+  assert.equal(interestCount({ interests: null }), 0);
+  assert.equal(interestCount({}), 0); // field absent
+  assert.equal(interestCount(null), 0);
+  assert.equal(interestCount(undefined), 0);
 });

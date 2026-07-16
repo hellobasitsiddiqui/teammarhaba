@@ -172,6 +172,7 @@ function loadProfileModule(deps) {
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
+    "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
@@ -264,6 +265,9 @@ const deps = {
   // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
   // input) is the control at fault — the real constant, so the comparison is the shipped one.
   PHONE_PICK_COUNTRY_MESSAGE: core.PHONE_PICK_COUNTRY_MESSAGE,
+  // TM-777 (I5): paintHub calls this to decide the next-day interests CTA — the REAL pure decision,
+  // so the renderer's hidden/message wiring runs through the shipped logic.
+  nextDayInterestsNudge: core.nextDayInterestsNudge,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
   // TM-778 interests-core: the REAL pure functions the card maps over, so paintInterests/openInterestPicker
@@ -323,6 +327,8 @@ function makeShell(values = {}) {
     bar: wireClassList(fakeEl("i")),
     barPct: wireClassList(fakeEl("span")),
     barNudge: wireClassList(fakeEl("span")),
+    // TM-777 (I5): the next-day interests CTA button paintHub toggles hidden + sets text on.
+    barInterestsCta: wireClassList(fakeEl("button")),
   };
   return { fields, save: saveBtn, status, root, hub, badges: null, membership: null, form: wireClassList(fakeEl("form")) };
 }

@@ -430,3 +430,81 @@ export function validateProfileField(field, raw) {
   }
   return "";
 }
+
+// ---- Next-day completeness nudge (TM-777 / I5) --------------------------------------------------
+//
+// The Profile-strength card shows a gentle, once-a-day CTA inviting a user who has picked EXACTLY ONE
+// interest to add a couple more (progressive profiling). This is the PURE decision — clock + the stored
+// "last shown" timestamp are injected (exactly like `formatJoined(iso, now = new Date())` above), so it
+// unit-tests under `node --test` with no `localStorage`, no `Date` globals, and no DOM. profile.js is the
+// thin renderer: it reads the last-prompt time from per-uid localStorage, calls this, paints the CTA and
+// stamps "shown today" so the same-day suppression below fires on the next paint.
+//
+// Interests come from `me.interests` (the array merged in by I3/TM-775). In THIS working tree the /me
+// payload does not yet carry `interests`, so `interestCount` MUST tolerate the field being absent — a
+// missing/blank/non-array value reads as 0 picks, which is silent (no nudge). No backend change, no new
+// API call: I5 is frontend-only and reads what /me already returns.
+
+/**
+ * The industry-standard maximum number of interests, used ONLY as the fail-safe when the /me payload
+ * doesn't (yet) carry a `interestsMax` bound. Mirrors the backend's
+ * `InterestSelectionConfig.MAX_DEFAULT` (1/3 seeded defaults) so the client copy stays truthful until
+ * the real bound rides through on /me.
+ */
+export const INTERESTS_MAX_FALLBACK = 3;
+
+/**
+ * How many interests the user has picked. Reads `me.interests` (the I3/TM-775 array) defensively: a
+ * missing field (pre-TM-775 /me), null, or any non-array value all read as 0 — never throws.
+ * @param {object|null|undefined} me a `/me`-shaped object.
+ * @returns {number} the pick count (0 when there's nothing to count).
+ */
+export function interestCount(me) {
+  return Array.isArray(me?.interests) ? me.interests.length : 0;
+}
+
+/**
+ * True when the ISO instant `iso` falls on the SAME LOCAL calendar day as `now`. Local (not UTC) on
+ * purpose: "next day" is a user-perception thing — a prompt shown at 11pm shouldn't re-fire at 1am just
+ * because the UTC date rolled. Returns `false` for a missing/invalid `iso` (so an unparseable stored
+ * value is treated as "not today" → the caller stays eligible rather than crashing).
+ */
+function sameLocalDay(iso, now) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+/**
+ * The I5 next-day completeness-nudge decision (TM-777) — pure and clock/last-prompt-injectable.
+ *
+ * Shows a CTA only when the user has picked EXACTLY ONE interest AND we haven't already prompted them
+ * today. "Never shown" (a null/missing/invalid `lastPromptISO`) counts as eligible → it shows once, and
+ * the renderer then records today's date so the same-day suppression fires on the next paint. 0 picks
+ * (first-run / onboarding) and ≥2 picks (already engaged) are both silent — the nudge is aimed at the
+ * exact "started but stalled at one" state.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object (reads `me.interests` + optional `me.interestsMax`).
+ * @param {{ now?: Date, lastPromptISO?: (string|null) }} [opts]
+ *   `now` = the clock (defaults to real time); `lastPromptISO` = the stored "last shown" timestamp
+ *   (defaults to null = never shown). Both injected so the whole decision is deterministic in tests.
+ * @returns {{ show: boolean, count: number, max: number, remaining: number, message: string }}
+ *   a STRUCTURED result (not a bare string) so the renderer can branch on `show` and reuse the counts.
+ */
+export function nextDayInterestsNudge(me, { now = new Date(), lastPromptISO = null } = {}) {
+  const count = interestCount(me);
+  // The bound rides through on /me when I3 exposes it; until then (and for any bad value) fall back to
+  // the industry-standard 3, kept as the single INTERESTS_MAX_FALLBACK constant so the copy stays honest.
+  const max = Number.isInteger(me?.interestsMax) && me.interestsMax > 0 ? me.interestsMax : INTERESTS_MAX_FALLBACK;
+  const remaining = max - count;
+  // Only the "picked exactly 1" state is a candidate: 0 = onboarding (don't nag before they start), ≥2 =
+  // already engaged / at the typical max. `lastPromptISO` on the same local day suppresses (nagged today);
+  // a missing/invalid value means "never shown" → eligible.
+  const show = count === 1 && !(lastPromptISO != null && sameLocalDay(lastPromptISO, now));
+  const message = `You picked 1 interest — add ${remaining} more so people find you →`;
+  return { show, count, max, remaining, message };
+}
