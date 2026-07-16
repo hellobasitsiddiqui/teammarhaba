@@ -1848,6 +1848,9 @@ h3,
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    /* TM-665: this flex column holds the native file input (web) — without min-width:0 its default
+       min-width:auto floors the column at the input's intrinsic width. */
+    min-width: 0;
 }
 
 .tm-avatar-note {
@@ -1859,6 +1862,11 @@ h3,
 .tm-avatar-file {
     font-size: 0.85rem;
     max-width: 16rem;
+    /* TM-665: on the web platform (native=false) this native <input type=file> renders raw. Its
+       intrinsic ("Choose file" button + "No file chosen") width otherwise expands the mobile layout
+       viewport to ~378px, so on any phone under ~378px Profile opens ZOOMED OUT with a right-hand gap.
+       min-width:0 lets it shrink to the card (matching every other form control). */
+    min-width: 0;
 }
 
 .tm-avatar-progress {

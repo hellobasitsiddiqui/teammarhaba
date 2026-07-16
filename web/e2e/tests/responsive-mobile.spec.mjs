@@ -388,25 +388,40 @@ test.describe("@responsive edit-profile at a phone viewport", () => {
     // out past their card's right edge.
     await page.setViewportSize({ width: 320, height: 900 });
 
-    // Assert every text input is CONTAINED within the edit-profile card. This is deliberately stronger
-    // than a page-scroll check: html{overflow-x:clip} hides such a break-out from scrollWidth, so the
-    // input clips silently WITHOUT ever scrolling the page — a containment check is what actually catches
-    // it. (Verified to fail on main pre-fix: input right ~346 vs card right ~299.)
+    // Assert EVERY form control is CONTAINED within the edit-profile card — text inputs, the notification
+    // and country <select>s (.tm-input), AND the native avatar file input (.tm-avatar-file, which has no
+    // .tm-input class). Containment is deliberately stronger than a page-scroll-only check: it pins each
+    // control, not just the aggregate. (Verified to fail on main pre-fix — the text fields broke out to
+    // ~346 vs card ~299; the avatar file input floored the page at ~378px on its own.)
     const brokeOut = await page.evaluate(() => {
       const card = document.querySelector(".tm-pf-edit");
       const cardRight = card.getBoundingClientRect().right;
       const bad = [];
-      for (const input of card.querySelectorAll(".tm-input")) {
-        const right = input.getBoundingClientRect().right;
+      for (const control of card.querySelectorAll(".tm-input, .tm-avatar-file")) {
+        const right = control.getBoundingClientRect().right;
         if (right > cardRight + 1) {
-          bad.push({ id: input.id, right: Math.round(right), cardRight: Math.round(cardRight) });
+          bad.push({ id: control.id, right: Math.round(right), cardRight: Math.round(cardRight) });
         }
       }
       return bad;
     });
-    expect(brokeOut, `inputs breaking out of the edit-profile card: ${JSON.stringify(brokeOut)}`).toEqual(
+    expect(brokeOut, `controls breaking out of the edit-profile card: ${JSON.stringify(brokeOut)}`).toEqual(
       [],
     );
+
+    // The zoom-out guard: on a phone under ~378px, a control that can't shrink (the native file input was
+    // the culprit — TM-665) floors documentElement.scrollWidth WIDER than the viewport, so Android WebView
+    // opens Profile ZOOMED OUT with a right-hand gap. html has overflow-x:hidden (NOT clip), so the root
+    // stays measurable and scrollWidth still reveals it — assert the page is no wider than the screen.
+    const pageWidth = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+    }));
+    expect(
+      pageWidth.scrollW,
+      `page (${pageWidth.scrollW}px) must not exceed the ${pageWidth.clientW}px viewport — a wider page opens zoomed-out`,
+    ).toBeLessThanOrEqual(pageWidth.clientW + 1);
+
     await expectNoHorizontalPageScroll(page);
   });
 });
