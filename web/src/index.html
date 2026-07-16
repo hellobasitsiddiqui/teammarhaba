@@ -139,8 +139,11 @@
                 <a id="nav-receipts" href="#/receipts" hidden>My tickets</a>
                 <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
-                <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN. -->
-                <a id="nav-admin-events" href="#/admin/events" hidden>Events</a>
+                <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN.
+                     Labelled "Manage events" (not "Events") to disambiguate from the user events-browse
+                     link (#nav-events) above — both are revealed for an admin, so a bare "Events" appeared
+                     twice in the nav (TM-766). -->
+                <a id="nav-admin-events" href="#/admin/events" hidden>Manage events</a>
                 <!-- Admin venues console link (TM-519): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin-venues" href="#/admin/venues" hidden>Venues</a>
                 <!-- Admin messaging link (TM-443 compose → TM-444 sent-history). Now that the sent-history
