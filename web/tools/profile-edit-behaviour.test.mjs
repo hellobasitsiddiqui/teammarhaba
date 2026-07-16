@@ -432,6 +432,73 @@ test("paintHub paints a backend name as inert TEXT (textContent), never parsed H
   });
 });
 
+// ---- nextDayInterestsCtaRenderWiring (TM-777 / I5) --------------------------------------------
+// paintHub is the ONLY place the pure nextDayInterestsNudge decision reaches the DOM: it toggles the
+// CTA button's `hidden` and paints its message, then stamps "shown today" in localStorage so the
+// same-day suppression fires next paint. These pin that render/persist path (previously the harness
+// only wired the fake node so the pre-existing XSS test kept passing — no assertion on the CTA itself).
+
+/** Install a fake `localStorage` (Map-backed) for a callback, capturing writes; restore after. */
+function withFakeLocalStorage(run) {
+  const prior = globalThis.localStorage;
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  try {
+    return run(store);
+  } finally {
+    globalThis.localStorage = prior;
+  }
+}
+
+test("paintHub reveals the interests CTA + paints its message when the user has exactly 1 interest", () => {
+  withFakeDocument(() => {
+    withFakeLocalStorage((store) => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+      // A REAL /me shape (interests array, NO interestsMax) with exactly one pick, never prompted
+      // (empty localStorage) → the nudge is due.
+      profile.paintHub({ firstName: "Ada", interests: [{ label: "hiking", category: "outdoors" }] });
+
+      assert.equal(shell.hub.barInterestsCta.hidden, false, "the CTA is revealed when the nudge is due");
+      // The message names the honest max (3): 1 picked → "add 2 more" — NOT sourced from a phantom config field.
+      assert.match(shell.hub.barInterestsCta.textContent, /add 2 more/i);
+      assert.match(shell.hub.barInterestsCta.textContent, /so people find you/i);
+      // The "shown today" stamp was written per-uid so the same-day suppression fires next paint.
+      const stamped = store.get("tm.i5.interestsNudge.v1.u1");
+      assert.ok(stamped, "paintHub stamps the last-shown timestamp in localStorage");
+      assert.ok(!Number.isNaN(Date.parse(stamped)), "the stamp is a parseable ISO timestamp");
+    });
+  });
+});
+
+test("paintHub keeps the interests CTA hidden + writes no stamp when the nudge is NOT due", () => {
+  withFakeDocument(() => {
+    withFakeLocalStorage((store) => {
+      const shell = makeShell();
+      profile.__setShell(shell);
+      currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+      // 2 picks (already engaged) → silent: the CTA stays hidden and nothing is persisted.
+      profile.paintHub({
+        firstName: "Ada",
+        interests: [
+          { label: "hiking", category: "outdoors" },
+          { label: "chess", category: "games" },
+        ],
+      });
+
+      assert.equal(shell.hub.barInterestsCta.hidden, true, "the CTA stays hidden when not due");
+      assert.equal(store.size, 0, "no last-shown stamp is written when the nudge is suppressed");
+    });
+  });
+});
+
 // ---- saveSurfacesRfc7807FieldErrorsInline -----------------------------------------------------
 
 test("save attaches a 400 ApiError's per-field messages to their fields (not just a toast)", async () => {

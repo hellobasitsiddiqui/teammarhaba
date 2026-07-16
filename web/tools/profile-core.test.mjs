@@ -557,15 +557,31 @@ test("nextDayInterestsNudge: null me → does not throw, show:false (mirrors pro
   assert.equal(r.count, 0);
 });
 
-test("nextDayInterestsNudge: max is honoured from the payload, else defaults to 3", () => {
-  const withMax = nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 5 }, { now: NUDGE_NOW });
-  assert.equal(withMax.max, 5);
-  assert.equal(withMax.remaining, 4);
-  assert.match(withMax.message, /4 more/);
-  // A missing/invalid bound falls back to the shared constant (3).
-  assert.equal(nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW }).max, INTERESTS_MAX_FALLBACK);
-  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 0 }, { now: NUDGE_NOW }).max, 3);
-  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: "lots" }, { now: NUDGE_NOW }).max, 3);
+test("nextDayInterestsNudge: max is the honest constant on a REAL /me shape (no phantom max field)", () => {
+  // A realistic MeResponse (web/src/api-docs/openapi.json): it carries an `interests` array but NO
+  // `interestsMax` — the runtime bound is served only by the ADMIN-only interests-config endpoint, so
+  // a normal profile-page user never sees it. This is the shape production actually feeds the nudge, so
+  // the max the user gets is the honest INTERESTS_MAX_FALLBACK (3), NOT a config value.
+  const realMe = {
+    uid: "u1",
+    email: "a@b.co",
+    displayName: "Ada",
+    interests: [{ label: "hiking", category: "outdoors" }],
+    // deliberately NO interestsMax — mirrors MeResponse.java
+  };
+  const r = nextDayInterestsNudge(realMe, { now: NUDGE_NOW });
+  assert.equal(r.max, INTERESTS_MAX_FALLBACK);
+  assert.equal(r.max, 3);
+  assert.equal(r.remaining, 2);
+  assert.match(r.message, /2 more/);
+});
+
+test("nextDayInterestsNudge: a stray interestsMax is IGNORED — the max is never sourced from the payload", () => {
+  // Regression guard for the phantom-field bug (TM-777): even if something injects an `interestsMax`,
+  // the nudge must NOT read it (MeResponse has no such field; reading it silently ignored admin config
+  // by always falling back to 3). Pin that the max is the constant regardless of any stray field.
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 5 }, { now: NUDGE_NOW }).max, 3);
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 99 }, { now: NUDGE_NOW }).max, 3);
 });
 
 test("nextDayInterestsNudge: an invalid stored lastPromptISO is treated as never-shown → shows (no crash)", () => {

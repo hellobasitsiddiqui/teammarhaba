@@ -446,10 +446,15 @@ export function validateProfileField(field, raw) {
 // API call: I5 is frontend-only and reads what /me already returns.
 
 /**
- * The industry-standard maximum number of interests, used ONLY as the fail-safe when the /me payload
- * doesn't (yet) carry a `interestsMax` bound. Mirrors the backend's
- * `InterestSelectionConfig.MAX_DEFAULT` (1/3 seeded defaults) so the client copy stays truthful until
- * the real bound rides through on /me.
+ * The interests maximum the nudge copy targets. Mirrors the backend's seeded
+ * `InterestSelectionConfig.MAX_DEFAULT` (1/3 seeded defaults). This is an HONEST CONSTANT, not a
+ * config-driven value: the runtime-mutable bound (`interests.max_selections`) is served only by the
+ * ADMIN-only `GET /api/v1/admin/interests/config`, which a normal profile-page user can't reach, and
+ * `MeResponse` carries no max — so there is no user-readable source for the real bound today. Rather
+ * than read a phantom field that is always `undefined` in production (which would silently pin the max
+ * to this default anyway while pretending to be config-driven), we use this constant directly. If an
+ * admin raises the max above 3, the nudge copy will lag until a user-readable min/max endpoint (or an
+ * `interestsMax` field on `/me`) exists — tracked as a follow-up; until then the copy stays truthful.
  */
 export const INTERESTS_MAX_FALLBACK = 3;
 
@@ -488,7 +493,7 @@ function sameLocalDay(iso, now) {
  * (first-run / onboarding) and ≥2 picks (already engaged) are both silent — the nudge is aimed at the
  * exact "started but stalled at one" state.
  *
- * @param {object|null|undefined} me a `/me`-shaped object (reads `me.interests` + optional `me.interestsMax`).
+ * @param {object|null|undefined} me a `/me`-shaped object (reads `me.interests`).
  * @param {{ now?: Date, lastPromptISO?: (string|null) }} [opts]
  *   `now` = the clock (defaults to real time); `lastPromptISO` = the stored "last shown" timestamp
  *   (defaults to null = never shown). Both injected so the whole decision is deterministic in tests.
@@ -497,9 +502,12 @@ function sameLocalDay(iso, now) {
  */
 export function nextDayInterestsNudge(me, { now = new Date(), lastPromptISO = null } = {}) {
   const count = interestCount(me);
-  // The bound rides through on /me when I3 exposes it; until then (and for any bad value) fall back to
-  // the industry-standard 3, kept as the single INTERESTS_MAX_FALLBACK constant so the copy stays honest.
-  const max = Number.isInteger(me?.interestsMax) && me.interestsMax > 0 ? me.interestsMax : INTERESTS_MAX_FALLBACK;
+  // The target max is the honest INTERESTS_MAX_FALLBACK constant (mirrors the backend seeded default 3).
+  // There is NO user-readable source for the runtime bound today — MeResponse has no max field and the
+  // real `interests.max_selections` is served only by the ADMIN-only interests-config endpoint — so we
+  // deliberately do NOT read a phantom `me.interestsMax` (it's always undefined in production and would
+  // pin the max to 3 anyway while pretending to be config-driven). See INTERESTS_MAX_FALLBACK's doc.
+  const max = INTERESTS_MAX_FALLBACK;
   const remaining = max - count;
   // Only the "picked exactly 1" state is a candidate: 0 = onboarding (don't nag before they start), ≥2 =
   // already engaged / at the typical max. `lastPromptISO` on the same local day suppresses (nagged today);
