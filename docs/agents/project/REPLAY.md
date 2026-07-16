@@ -12,7 +12,7 @@ A **prompt-by-prompt replay** of how the TeamMarhaba "Foundation & DevOps" backl
 
 ### Step 1 — Find out what's in Jira
 - **Intent:** Orient — how many tickets exist?
-- **Decision & why:** Always discover the workspace before acting. The connected Jira had one empty project (`SCRUM`/TeamMarhaba), *not* the user's day-job hmcts project. Confirming the target project early avoids creating tickets in the wrong place.
+- **Decision & why:** Always discover the workspace before acting. The connected Jira had one empty project (`SCRUM`/TeamMarhaba), *not* the user's day-job project. Confirming the target project early avoids creating tickets in the wrong place.
 - **Prompt to try:** `how many tickets are in jira?`
 - **Outcome:** 0 tickets; one project (key `SCRUM`, later renamed `TM`).
 
