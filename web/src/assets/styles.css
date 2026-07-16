@@ -1914,6 +1914,18 @@ h3,
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
+    /* TM-665: this field is a grid item in .tm-form-grid AND a flex column; both default to
+       min-width:auto, which floors the field at its input's intrinsic width. On a very narrow phone
+       (Z Flip cover ≈ 321px) that floor exceeds the card width, so the field broke out past the
+       card's right edge and clipped. min-width:0 lets it shrink to the track. */
+    min-width: 0;
+}
+
+/* TM-665 (cont.): the input inside also defaults to min-width:auto, so the flex-column stretch can't
+   shrink it below its intrinsic width. Let it shrink to the field — matching what .tm-phone-row and
+   .tm-field-fill .tm-input already do for the composite rows. */
+.tm-form-field .tm-input {
+    min-width: 0;
 }
 
 /* A field whose input sits beside a one-tap "Use mine" button (timezone/locale — TM-167 union). */

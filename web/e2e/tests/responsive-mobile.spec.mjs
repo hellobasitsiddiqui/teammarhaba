@@ -367,4 +367,46 @@ test.describe("@responsive edit-profile at a phone viewport", () => {
     await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
     await expectNoHorizontalPageScroll(page);
   });
+
+  test("text inputs stay within their card at a very narrow (≈320px) viewport (TM-665)", async ({
+    page,
+  }) => {
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
+    await signInAsAdmin(page);
+
+    const meLoaded = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
+    );
+    await page.evaluate(() => (window.location.hash = "#/profile"));
+    await expect(page.locator("#profile-form")).toBeVisible();
+    await meLoaded;
+
+    // Reproduce the SMALLEST real phone width — the Samsung Z Flip cover screen is ≈321px. The bug only
+    // manifests below ~340px, so the sibling 393px (Pixel 5) test above never caught it: a .tm-form-field
+    // grid item with the default min-width:auto refused to shrink and broke the First/Last name inputs
+    // out past their card's right edge.
+    await page.setViewportSize({ width: 320, height: 900 });
+
+    // Assert every text input is CONTAINED within the edit-profile card. This is deliberately stronger
+    // than a page-scroll check: html{overflow-x:clip} hides such a break-out from scrollWidth, so the
+    // input clips silently WITHOUT ever scrolling the page — a containment check is what actually catches
+    // it. (Verified to fail on main pre-fix: input right ~346 vs card right ~299.)
+    const brokeOut = await page.evaluate(() => {
+      const card = document.querySelector(".tm-pf-edit");
+      const cardRight = card.getBoundingClientRect().right;
+      const bad = [];
+      for (const input of card.querySelectorAll(".tm-input")) {
+        const right = input.getBoundingClientRect().right;
+        if (right > cardRight + 1) {
+          bad.push({ id: input.id, right: Math.round(right), cardRight: Math.round(cardRight) });
+        }
+      }
+      return bad;
+    });
+    expect(brokeOut, `inputs breaking out of the edit-profile card: ${JSON.stringify(brokeOut)}`).toEqual(
+      [],
+    );
+    await expectNoHorizontalPageScroll(page);
+  });
 });
