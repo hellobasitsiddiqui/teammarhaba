@@ -16,12 +16,19 @@
 // until the HITL TM-184 — when it isn't configured the control degrades to a disabled state rather
 // than hard-failing the page.
 
-import { getMe, updateMe, getMembership, ApiError } from "./api.js";
+import {
+  getMe,
+  updateMe,
+  getMembership,
+  getInterestCatalogue,
+  getInterestConfig,
+  ApiError,
+} from "./api.js";
 import { currentUser, signOut } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
 import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
-import { clear, el, toast } from "./ui.js";
+import { clear, el, modal, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
@@ -46,6 +53,16 @@ import {
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
 // CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
 import { COUNTRIES, flagOf } from "./countries.js";
+// Pure Interests-card logic (TM-778) — chip view-model, catalogue grouping, add/remove-within-min/max,
+// and the min/max config normaliser, unit-tested in web/tools/interests-core.test.mjs.
+import {
+  normaliseInterestConfig,
+  savedInterestLabels,
+  interestChipsModel,
+  catalogueGroups,
+  toggleInterest,
+  selectionError,
+} from "./interests-core.js";
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
 // and "Manage" links to the membership screen when the feature flag is on.
@@ -138,6 +155,13 @@ const state = {
   loading: false,
   error: null, // load error (distinct from per-field validation)
   profile: null, // last MeResponse
+  // Interests card (TM-778): the min/max bounds (from GET /api/v1/interests/config, else defaults) and
+  // the offered catalogue (from GET /api/v1/interests/catalogue) for the ADD picker. Both come from the
+  // PUBLIC picker read endpoints (TM-776; any signed-in user) and are fetched best-effort on profile
+  // load; the saved interests themselves live on state.profile.interests (from /me).
+  interestConfig: normaliseInterestConfig(null),
+  interestCatalogue: null, // null = not yet loaded / read failed — the picker degrades honestly
+  interestsSaving: false, // guards against concurrent PATCHes while a chip add/remove is in flight
 };
 
 let shell = null; // { form, fields: Map<key,{input, error, hint}>, save, summary } once built
@@ -313,6 +337,180 @@ function paintHub(profile) {
   hub.barPct.textContent = `${strength.percent}% complete`;
   // The nudge points at the first gaps; at 100% it reads as a reassurance, and we drop the arrow.
   hub.barNudge.textContent = strength.complete ? strength.nudge : `${strength.nudge} →`;
+
+  // Interests card (TM-778) — repaint the saved-interest chips from the same /me payload.
+  paintInterests(profile);
+}
+
+// ---- interests card (TM-778) -----------------------------------------------------------------
+
+/**
+ * Repaint the Interests card body from a MeResponse: one removable chip per saved interest plus an
+ * "＋ add" affordance (when below the max). Reads the saved interests off `profile.interests` and the
+ * min/max bounds off `state.interestConfig` (best-effort GET config, else defaults). Purely a map over
+ * the unit-tested `interestChipsModel` — the add/remove behaviour + min/max gating live there.
+ */
+function paintInterests(profile) {
+  const body = shell?.interestsBody;
+  if (!body) return;
+  const model = interestChipsModel(profile?.interests, state.interestConfig);
+  clear(body);
+
+  const chips = el("div", { class: "tm-pf-chips" });
+  for (const chip of model.chips) {
+    // A saved interest renders as a filled (accent) chip. When removable, it carries a "×" remove
+    // control; at the minimum the chip stays but is non-removable (removing would 400 server-side).
+    if (chip.removable) {
+      chips.append(
+        el("button", {
+          type: "button",
+          class: "tm-pf-chip tm-pf-chip-on tm-pf-chip-remove",
+          "aria-label": `Remove ${chip.label}`,
+          disabled: state.interestsSaving,
+          onClick: () => removeInterest(chip.label),
+        }, [el("span", { text: chip.label }), el("span", { class: "tm-pf-chip-x", "aria-hidden": "true", text: "×" })]),
+      );
+    } else {
+      chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-on", text: chip.label }));
+    }
+  }
+  // The "＋ add" chip opens the catalogue picker; hidden once the max is reached.
+  if (model.canAdd) {
+    chips.append(
+      el("button", {
+        type: "button",
+        class: "tm-pf-chip tm-pf-chip-add",
+        disabled: state.interestsSaving,
+        onClick: openInterestPicker,
+      }, "＋ add"),
+    );
+  }
+  body.append(chips);
+  body.append(el("p", { class: "tm-muted tm-pf-hint", text: model.hint }));
+}
+
+/**
+ * Load the interests metadata (min/max config + the catalogue for the ADD picker) after the profile
+ * itself has painted. Both come from the PUBLIC picker read endpoints (GET /api/v1/interests/config and
+ * /catalogue, TM-776) — any signed-in user may read them, so a normal (non-admin) user gets the real
+ * catalogue and bounds. Kept BEST-EFFORT anyway: those api.js helpers THROW on a non-2xx, so the whole
+ * read is wrapped so a transient failure just leaves the default bounds / an "unavailable" ADD state —
+ * the VIEW + REMOVE paths never depend on these, and the backend PATCH /me stays the authoritative gate.
+ * Repaints the card once the config lands so the bounds (hence the chip removability + hint) reflect the
+ * server config.
+ */
+async function loadInterestsMeta() {
+  try {
+    const [config, catalogue] = await Promise.all([getInterestConfig(), getInterestCatalogue()]);
+    state.interestConfig = normaliseInterestConfig(config);
+    state.interestCatalogue = catalogue; // the public catalogue array (active rows, highlights-first)
+  } catch (err) {
+    // A failed read leaves the defaults / an unavailable picker rather than breaking the card.
+    console.warn("[profile] GET /api/v1/interests catalogue/config failed:", err?.message ?? err);
+  }
+  // Repaint with the real bounds now they're known (they affect removability + the hint copy).
+  if (state.profile) paintInterests(state.profile);
+}
+
+/** Persist a new interests set via PATCH /me, then repaint from the returned MeResponse. */
+async function saveInterests(labels) {
+  if (state.interestsSaving) return;
+  state.interestsSaving = true;
+  if (state.profile) paintInterests(state.profile); // disable the chips while the PATCH is in flight
+  try {
+    const updated = await updateMe({ interests: labels });
+    state.profile = updated;
+    fillForm(updated); // repaints the whole hub (incl. the interests card) from the fresh /me
+    toast("Interests updated.", { type: "success", timeout: 2000 });
+  } catch (err) {
+    // The backend is the authoritative min/max + catalogue gate; surface its RFC-7807 detail verbatim
+    // (e.g. "at least 1" / "at most 3" / "Unknown or retired interest").
+    const message = err instanceof ApiError ? err.message : "Couldn't update your interests. Please try again.";
+    toast(message, { type: "error" });
+  } finally {
+    state.interestsSaving = false;
+    if (state.profile) paintInterests(state.profile);
+  }
+}
+
+/** Remove one saved interest: PATCH /me with the reduced label set (min-gated by the chip render). */
+function removeInterest(label) {
+  const remaining = savedInterestLabels(state.profile?.interests).filter((l) => l !== label);
+  return saveInterests(remaining);
+}
+
+/**
+ * Open the catalogue ADD picker — a modal of the grouped, offered interests as toggle chips, with a
+ * live selection count and a Save that PATCHes the whole chosen set. Starts from the caller's currently
+ * saved interests so the picker doubles as an editor. When the catalogue can't be read (a transient
+ * failure on the public catalogue endpoint — see the api.js note), the modal explains the ADD picker
+ * isn't available yet rather than showing an empty list, so the affordance never silently does nothing.
+ */
+function openInterestPicker() {
+  const max = state.interestConfig.max;
+  const catalogue = state.interestCatalogue;
+
+  // No readable catalogue → honest "not available yet" body (VIEW + REMOVE still work on the card).
+  if (!Array.isArray(catalogue) || catalogue.length === 0) {
+    modal(
+      "Add interests",
+      el("div", { class: "tm-pf-picker-empty" }, [
+        el("p", { text: "The interests list isn't available right now. Please try again later." }),
+      ]),
+    );
+    return;
+  }
+
+  // Pending selection seeded from the saved set; Save PATCHes it. `let` so the toggle handlers can swap
+  // it and re-render the picker body in place.
+  let selected = savedInterestLabels(state.profile?.interests);
+  const bodyWrap = el("div", { class: "tm-pf-picker" });
+  const dialog = modal("Add interests", bodyWrap);
+
+  const renderPicker = () => {
+    clear(bodyWrap);
+    const { groups, selectedCount, atMax } = catalogueGroups(catalogue, selected, { max });
+    bodyWrap.append(
+      el("p", { class: "tm-muted tm-pf-picker-count", text: `${selectedCount} of ${max} selected` }),
+    );
+    for (const group of groups) {
+      bodyWrap.append(el("h4", { class: "tm-pf-picker-cat", text: group.category }));
+      const row = el("div", { class: "tm-pf-chips" });
+      for (const opt of group.options) {
+        row.append(
+          el("button", {
+            type: "button",
+            class: `tm-pf-chip tm-pf-picker-opt${opt.selected ? " tm-pf-chip-on" : ""}`,
+            "aria-pressed": opt.selected ? "true" : "false",
+            disabled: opt.disabled,
+            onClick: () => {
+              selected = toggleInterest(selected, opt.label, { max });
+              renderPicker();
+            },
+          }, opt.label),
+        );
+      }
+      bodyWrap.append(row);
+    }
+    const err = selectionError(selected, state.interestConfig);
+    bodyWrap.append(
+      el("div", { class: "tm-pf-picker-actions" }, [
+        err ? el("p", { class: "tm-field-error", role: "alert", text: err }) : null,
+        el("button", {
+          type: "button",
+          class: "tm-btn tm-btn-primary",
+          disabled: Boolean(err),
+          onClick: async () => {
+            dialog.close();
+            await saveInterests(selected);
+          },
+        }, "Save"),
+      ]),
+    );
+    // Keep the "atMax" state visible via the count line; the disabled options already reflect it.
+    void atMax;
+  };
+  renderPicker();
 }
 
 /** Build the PATCH body: trimmed values, age coerced to a number; blank fields are omitted. */
@@ -364,6 +562,10 @@ async function load() {
   // fetched fresh (apiFetch uses cache:"no-store") on every profile entry so the row shows the caller's
   // CURRENT tier, e.g. "Monthly member" right after subscribing, not a stale "Pay as you go".
   await loadMembership();
+  // Interests metadata (TM-778) — the min/max config + the ADD-picker catalogue, best-effort and
+  // non-blocking (a failure just leaves default bounds / an unavailable picker; VIEW + REMOVE work off
+  // /me regardless). Fired after the profile paints so the card is never gated on it.
+  await loadInterestsMeta();
 }
 
 /**
@@ -844,16 +1046,13 @@ function buildShell(view) {
     el("div", { class: "tm-pf-barlbl" }, [barPct, barNudge]),
   ]);
 
-  // ── Interests (paper-profile) ── no interests field exists on the backend yet (MeResponse has none),
-  // so this matches the wireframe visually with an empty "add" affordance + an honest hint. Live
-  // interest chips need a backend field — noted as a TM-514 follow-up.
-  // reconcile with TM-511 component library (chip component)
-  const interestsCard = pfCard("Interests", [
-    el("div", { class: "tm-pf-chips" }, [
-      el("span", { class: "tm-pf-chip tm-pf-chip-add", text: "＋ add" }),
-    ]),
-    el("p", { class: "tm-muted tm-pf-hint", text: "Add interests so people find you — coming soon." }),
-  ]);
+  // ── Interests (paper-profile) ── the REAL card (TM-778, I6): it VIEWs the caller's saved interests
+  // from MeResponse.interests and lets them ADD/REMOVE within the configured min/max, persisted via
+  // PATCH /api/v1/me (the TM-775 user-selection API). The card body is an empty container that
+  // paintInterests() fills once /me (and the best-effort config/catalogue) have loaded; until then the
+  // hub skeleton (.tm-pf-loading) covers it. reconcile with TM-511 component library (chip component).
+  const interestsBody = el("div", { class: "tm-pf-interests", id: "profile-interests" });
+  const interestsCard = pfCard("Interests", [interestsBody]);
 
   // ── Membership (paper-profile) ── the tier row reflects the caller's REAL membership (TM-643): the
   // sub text is painted from GET /me/membership in load() via paintMembership() (through the pure
@@ -945,6 +1144,8 @@ function buildShell(view) {
     hub: { name: hubName, meta: hubMeta, initial: hubInitial, email: hubEmail, phone: hubPhone, bar, barPct, barNudge },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
+    // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.
+    interestsBody,
   };
 }
 
@@ -986,11 +1187,10 @@ function buildPublicShell(view) {
   const name = el("h2", { class: "tm-pf-pub-name", text: "Your profile" });
   const meta = el("div", { class: "tm-pf-sub tm-pf-pub-meta", text: "" });
 
-  // Interests placeholder — same backend gap as the hub (no interests field yet).
+  // Interests (TM-778): "how others see you" — a READ-ONLY view of the caller's saved interests (from
+  // MeResponse.interests), no add/remove here (editing lives on the hub card). Painted by fillPublic().
   // reconcile with TM-511 component library (chip component)
-  const chips = el("div", { class: "tm-pf-chips tm-pf-pub-chips" }, [
-    el("span", { class: "tm-pf-chip tm-pf-chip-add", text: "＋ interests" }),
-  ]);
+  const chips = el("div", { class: "tm-pf-chips tm-pf-pub-chips" });
 
   const inCommon = el(
     "div",
@@ -1024,11 +1224,23 @@ function buildPublicShell(view) {
     ]),
   );
 
-  publicShell = { avatar, name, meta, status };
+  publicShell = { avatar, name, meta, status, chips };
 }
 
 function fillPublic(profile) {
   if (!publicShell) return;
+  // Interests (TM-778): render the saved interests as read-only chips; a friendly prompt when none.
+  if (publicShell.chips) {
+    clear(publicShell.chips);
+    const labels = savedInterestLabels(profile?.interests);
+    if (labels.length === 0) {
+      publicShell.chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-add", text: "No interests yet" }));
+    } else {
+      for (const label of labels) {
+        publicShell.chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-on", text: label }));
+      }
+    }
+  }
   const pub = publicSummary(profile);
   publicShell.name.textContent = pub.short;
   publicShell.meta.textContent = pub.metaLine || "Add your city to your profile";
