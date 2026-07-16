@@ -205,6 +205,13 @@ body {
     min-height: 100dvh;
     display: grid;
     place-items: center;
+    /* TM-665: pin the single column to the viewport with minmax(0, 1fr) instead of the implicit `auto`
+       track. An `auto` track grows to the max-content of ANY child wider than the screen (e.g. the
+       680px admin .tm-table) and then place-items:center centres that over-wide box — shifting all
+       page content right and clipping it, since html{overflow-x:hidden} hides the left part. On a
+       narrow phone (Z Flip, innerWidth 321px) that reads as "content off-centre / cut off on the
+       right". The minmax(0, 1fr) cap keeps normal centring but stops a wide child ballooning the page. */
+    grid-template-columns: minmax(0, 1fr);
     font-family: var(--font-sans);
     background: var(--page-bg);
     color: var(--fg);
