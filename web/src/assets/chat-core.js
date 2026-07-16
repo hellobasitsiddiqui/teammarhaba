@@ -331,6 +331,37 @@ export function readReceiptLabel(receipt) {
 }
 
 /**
+ * The FRIENDLY read-by bucket label for one of the caller's own messages (TM-829) — still TEXT, never a
+ * ✓/✓✓/✓✓✓ tick (the AC is explicit). Buckets how many OTHER thread members have read it against how many
+ * there are:
+ *   • 0 readers               → "Read by none"      (delivered, nobody's opened it)
+ *   • all other members       → "Read by everyone"  (whole-group-read)
+ *   • some but not all        → "Read by few"        in a larger group, or the exact "Read by N" in a
+ *                                small group (2–3 others) where a specific count reads more naturally than
+ *                                the vague "few".
+ * `otherMemberCount` is the number of OTHER members (excluding the caller) — sourced client-side from the
+ * thread roster the mentions feature already loads. When it's unknown / non-positive we can't say
+ * "everyone" (we don't know the denominator), so any positive read count falls back to the exact
+ * "Read by N". `readerCount` is clamped to a non-negative integer and never allowed to exceed a known
+ * `otherMemberCount` (a stale roster can't make "few" read as more than "everyone").
+ *
+ * @param {number} readerCount how many OTHER members have read the message.
+ * @param {number} [otherMemberCount] how many OTHER members the thread has (roster size minus the caller);
+ *        0 / negative / omitted = unknown denominator.
+ * @returns {string} the friendly label ("" is never returned — a receipt always has at least "Read by none").
+ */
+export function readByLabel(readerCount, otherMemberCount) {
+  const total = Math.trunc(Number(otherMemberCount) || 0);
+  let read = Math.max(0, Math.trunc(Number(readerCount) || 0));
+  if (total > 0) read = Math.min(read, total); // clamp: a stale roster can't exceed the known denominator
+  if (read <= 0) return "Read by none";
+  if (total <= 0) return `Read by ${read}`; // unknown denominator → can't claim "everyone"; be exact
+  if (read >= total) return "Read by everyone";
+  // Some-but-not-all. In a small group (2–3 others) an exact count reads better than the vague "few".
+  return total <= 3 ? `Read by ${read}` : "Read by few";
+}
+
+/**
  * The label shown for a quoted parent whose original has been moderation-removed / is missing (TM-466)
  * — the AC's "message unavailable". Kept here so the DOM and its tests share one string.
  */
@@ -423,6 +454,13 @@ export function toThreadMessage(msg, now = new Date()) {
     id: String(m.id ?? ""),
     body: String(m.body ?? ""),
     system: Boolean(m.system),
+    // TM-828: the sender's identity for the incoming-bubble avatar + name label. `senderName` is the
+    // author's display name (null on a system / admin message — no author to attribute); `senderPhotoUrl`
+    // is the author's photo, currently always null (no server-side photo store — see the backend DTO
+    // note), so the renderer falls back to an initial-in-circle from the name. Trimmed to "" when absent
+    // so a downstream `startsSenderRun` / render only sees a real, non-blank name.
+    senderName: m.senderName == null ? "" : String(m.senderName).trim(),
+    senderPhotoUrl: m.senderPhotoUrl ? String(m.senderPhotoUrl) : null,
     // TM-710: an admin/host ANNOUNCEMENT (the auto-posted opening message, or an admin-sent
     // announcement) renders visually distinct + attributed as an announcement. Classified server-side
     // via the message `kind` and echoed here so the renderer never re-derives it.
@@ -467,6 +505,47 @@ export function toThreadMessages(items, now = new Date()) {
   return (Array.isArray(items) ? items : [])
     .map((m) => toThreadMessage(m, now))
     .sort((a, b) => a.sortAt - b.sortAt);
+}
+
+/**
+ * Whether {@code current} STARTS a new sender-run in the oldest→newest thread — the pure grouping
+ * decision behind the Slack/WhatsApp identity header (TM-828). A run is a consecutive stretch of INCOMING
+ * messages from the same author; the avatar + name label are drawn once at the TOP of the run (when this
+ * returns true) and suppressed on the rest, instead of repeating on every bubble.
+ *
+ * <p>Returns true when {@code current} is an incoming human message AND it opens a run — i.e. there is no
+ * previous message, or the previous one isn't the same author's ordinary incoming message (a different
+ * sender, an own/out-going message, or a system/announcement notice all break the run). Own messages
+ * (`mine`) and system/announcement messages never carry an identity header, so they always return false —
+ * the caller only draws the header on incoming bubbles anyway, but keeping the rule here means the
+ * "same author as the previous incoming line?" decision is one tested predicate, not inline DOM logic.
+ *
+ * <p>Authorship is compared by `senderId` when both messages carry one (the robust key), falling back to
+ * a non-blank `senderName` match when ids are absent (e.g. a lean live frame). A message with neither is
+ * treated as its own run-start (can't be grouped with confidence).
+ *
+ * @param {{mine?: boolean, system?: boolean, announcement?: boolean, senderId?: any, senderName?: string}} current
+ *        the message being rendered (a toThreadMessage view-model, or the raw API row).
+ * @param {?{mine?: boolean, system?: boolean, announcement?: boolean, senderId?: any, senderName?: string}} previous
+ *        the message rendered immediately before it (oldest→newest), or null/undefined at the top.
+ * @returns {boolean} true iff {@code current} should show the sender avatar + name (start of a run).
+ */
+export function startsSenderRun(current, previous) {
+  const c = current || {};
+  // Own / system / announcement messages never get an incoming identity header.
+  if (c.mine === true || c.system === true || c.announcement === true) return false;
+  const p = previous || null;
+  // No previous, or the previous line isn't an ordinary incoming message → this opens a run.
+  if (!p || p.mine === true || p.system === true || p.announcement === true) return true;
+  // Same author as the previous incoming line? Prefer senderId; fall back to a non-blank name match.
+  const cId = c.senderId == null ? "" : String(c.senderId);
+  const pId = p.senderId == null ? "" : String(p.senderId);
+  if (cId && pId) return cId !== pId;
+  const cName = String(c.senderName ?? "").trim();
+  const pName = String(p.senderName ?? "").trim();
+  if (cName && pName) return cName !== pName;
+  // Not enough identity to group with confidence → treat as its own run-start.
+  return true;
 }
 
 /* ─────────────────────────────── Composer (TM-448) ─────────────────────────────────────────────

@@ -374,6 +374,46 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(findByBody(asOther, "written by them").get("mine").asBoolean()).isTrue();
     }
 
+    // ------------------------------------------------------------------ sender identity (TM-828)
+
+    /**
+     * TM-828 fail-before / pass-after: each message carries its author's {@code senderName} (from the
+     * sender {@link User}'s display name) so the web client can render the incoming-bubble avatar + name
+     * label. A system / admin message ({@code senderId == null}) carries a {@code null} name (no author to
+     * attribute). {@code senderPhotoUrl} is always {@code null} today — there is no server-side profile
+     * photo store (the only photo URL in the system is the caller's own Firebase {@code photoURL} on
+     * {@code /me}, not persisted for arbitrary users), so the client renders an initial-in-circle fallback.
+     * Before this ticket the DTO had no {@code senderName} field, so this assertion fails.
+     */
+    @Test
+    void threadCarriesSenderNameFromTheAuthorDisplayNameAndNullForSystemMessages() throws Exception {
+        String uid = "conv-sendername-" + UUID.randomUUID();
+        Long userId = newUser(uid);
+        Long thread = newBroadcastThread();
+        addMember(thread, userId, MemberRole.MEMBER, MuteState.NONE);
+
+        // A human author with a known display name...
+        String authorUid = "conv-sendername-author-" + UUID.randomUUID();
+        Long authorId = users.save(new User(authorUid, authorUid + "@example.com", "Katalin Kovacs")).getId();
+        messages.save(Message.fromUser(thread, authorId, "hi everyone"));
+
+        // ...and a system / admin "from TeamMarhaba" line (null sender).
+        messages.save(Message.fromSystem(thread, "welcome to the thread", null));
+
+        JsonNode body = getJson("/api/v1/conversations/" + thread + "/messages", caller(uid));
+
+        JsonNode human = findByBody(body, "hi everyone");
+        assertThat(human.get("senderId").asLong()).isEqualTo(authorId);
+        assertThat(human.get("senderName").asText()).isEqualTo("Katalin Kovacs");
+        // No server-side photo store — always null (client renders an initial-in-circle fallback).
+        assertThat(human.get("senderPhotoUrl").isNull()).isTrue();
+
+        JsonNode system = findByBody(body, "welcome to the thread");
+        assertThat(system.get("senderId").isNull()).isTrue();
+        assertThat(system.get("senderName").isNull()).isTrue(); // no author identity on a system message
+        assertThat(system.get("senderPhotoUrl").isNull()).isTrue();
+    }
+
     // ------------------------------------------------------------------ unread + mark-read
 
     @Test

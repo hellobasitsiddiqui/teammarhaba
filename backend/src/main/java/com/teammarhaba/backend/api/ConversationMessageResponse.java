@@ -49,8 +49,23 @@ import java.util.List;
  * live subscriber re-syncs the authoritative value from the read API. Clients treat {@code mine == true}
  * as own and anything else ({@code false} or the broadcast's {@code null}) as other.
  *
+ * <p><b>{@code senderName} / {@code senderPhotoUrl}</b> are the author's identity for the incoming-bubble
+ * avatar + name label (TM-828, the Slack/WhatsApp pattern). {@code senderName} is resolved from the
+ * sender {@link com.teammarhaba.backend.user.User}'s {@code displayName} (batch-joined per page, no N+1);
+ * {@code null} for a system / admin message ({@code senderId == null}) and best-effort {@code null} when
+ * the author account can't be resolved. {@code senderPhotoUrl} is <b>always {@code null} today</b>: there
+ * is NO server-side profile photo on the {@code users} row — the only photo URL in the system is the
+ * caller's own Firebase {@code photoURL}, read live from the Admin SDK on {@code /me} (see {@link
+ * com.teammarhaba.backend.auth.AccountState}) and not persisted for arbitrary users. The field is carried
+ * now so the wire contract is stable; the web client renders an initial-in-circle fallback from {@code
+ * senderName} until a server-side photo store lands (a noted follow-up).
+ *
  * @param id          the message's surrogate id
  * @param senderId    the author's {@code users.id}; {@code null} = a system / admin message
+ * @param senderName  the author's display name for the incoming avatar + name label (TM-828); {@code null}
+ *                    for a system / admin message, or best-effort {@code null} if the account is unresolvable
+ * @param senderPhotoUrl the author's profile photo URL (TM-828) — always {@code null} today (no server-side
+ *                    photo store; see the class note), so the client renders an initial-in-circle fallback
  * @param system      convenience: {@code senderId == null} — drives the "from TeamMarhaba" render
  * @param mine        server-computed: {@code senderId == the verified caller's id} (TM-589) — drives
  *                    own-vs-other alignment; {@code null} only on the caller-independent broadcast frame
@@ -70,6 +85,8 @@ import java.util.List;
 public record ConversationMessageResponse(
         Long id,
         Long senderId,
+        String senderName,
+        String senderPhotoUrl,
         boolean system,
         Boolean mine,
         String kind,
@@ -93,6 +110,7 @@ public record ConversationMessageResponse(
      */
     public static ConversationMessageResponse from(
             Message message,
+            String senderName,
             List<EmojiReactionCount> reactions,
             MessageReadReceipt readReceipt,
             QuotedMessage replyTo,
@@ -100,6 +118,11 @@ public record ConversationMessageResponse(
         return new ConversationMessageResponse(
                 message.getId(),
                 message.getSenderId(),
+                // A system / admin message (null sender) has no author identity to show (TM-828).
+                message.getSenderId() == null ? null : senderName,
+                // No server-side profile photo store today — always null; the client renders an
+                // initial-in-circle fallback from senderName (see the class note).
+                null,
                 message.isSystem(),
                 mine,
                 message.getKind().name(),
@@ -123,6 +146,6 @@ public record ConversationMessageResponse(
      * echo), so nothing is lost by omitting them from the broadcast frame.
      */
     public static ConversationMessageResponse from(Message message, List<EmojiReactionCount> reactions) {
-        return from(message, reactions, null, null, null);
+        return from(message, null, reactions, null, null, null);
     }
 }
