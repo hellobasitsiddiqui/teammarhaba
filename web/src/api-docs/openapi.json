@@ -2175,6 +2175,7 @@
           "city" : {
             "maxLength" : 255,
             "minLength" : 0,
+            "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
           },
           "displayName" : {
@@ -2185,11 +2186,13 @@
           "firstName" : {
             "maxLength" : 255,
             "minLength" : 0,
+            "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
           },
           "lastName" : {
             "maxLength" : 255,
             "minLength" : 0,
+            "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
           },
           "locale" : {
