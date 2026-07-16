@@ -21,12 +21,14 @@ import jakarta.validation.constraints.Size;
  *
  * @param label       new label (≤ 120), or {@code null} to leave unchanged (present-but-blank rejected)
  * @param category    new category (≤ 80, a known bucket), or {@code null} to leave unchanged
+ * @param emoji       new emoji glyph (≤ 16, TM-805), or {@code null} to leave unchanged
  * @param highlighted new highlight flag, or {@code null} to leave unchanged
  * @param sortWeight  new sort weight {@code [0, 1000]}, or {@code null} to leave unchanged
  */
 public record UpdateInterestRequest(
         @Size(max = 120) String label,
         @Size(max = 80) String category,
+        @Size(max = 16) String emoji,
         Boolean highlighted,
         @Min(0) @Max(1000) Integer sortWeight) {
 
@@ -44,6 +46,6 @@ public record UpdateInterestRequest(
 
     /** Map onto the domain-side command object ({@code interests} package stays free of api DTOs). */
     InterestPatch toPatch() {
-        return new InterestPatch(label, category, highlighted, sortWeight);
+        return new InterestPatch(label, category, emoji, highlighted, sortWeight);
     }
 }

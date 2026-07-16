@@ -49,6 +49,9 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "emoji" : {
+            "type" : "string"
+          },
           "highlighted" : {
             "type" : "boolean"
           },
@@ -833,6 +836,11 @@
         "properties" : {
           "category" : {
             "maxLength" : 80,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "emoji" : {
+            "maxLength" : 16,
             "minLength" : 0,
             "type" : "string"
           },
@@ -1982,6 +1990,9 @@
           "category" : {
             "type" : "string"
           },
+          "emoji" : {
+            "type" : "string"
+          },
           "highlighted" : {
             "type" : "boolean"
           },
@@ -2328,6 +2339,11 @@
         "properties" : {
           "category" : {
             "maxLength" : 80,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "emoji" : {
+            "maxLength" : 16,
             "minLength" : 0,
             "type" : "string"
           },

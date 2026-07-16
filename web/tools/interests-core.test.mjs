@@ -21,6 +21,8 @@ import {
   catalogueGroups,
   toggleInterest,
   selectionError,
+  interestEmoji,
+  emojiByLabel,
 } from "../src/assets/interests-core.js";
 
 // A realistic MeResponse.interests payload (real InterestResponse shape from openapi.json:
@@ -188,4 +190,71 @@ test("selectionError blocks an above-max selection", () => {
 
 test("selectionError passes a valid selection", () => {
   assert.equal(selectionError(["Walking", "Cycling"], { min: 1, max: 3 }), "");
+});
+
+// ---- interest emoji (TM-805) ------------------------------------------------------------------
+// The catalogue rows now carry a nullable `emoji` (V46 back-fills a glyph for every seed interest).
+// interestEmoji() normalises it for the chip renderers; catalogueGroups/interestChipsModel surface it
+// so the picker + card chips can show the leading glyph, degrading to label-only when there's none.
+
+test("interestEmoji reads and trims a catalogue row's emoji", () => {
+  assert.equal(interestEmoji({ label: "Coffee & cafés", emoji: "☕" }), "☕");
+  assert.equal(interestEmoji({ label: "Padded", emoji: "  🎨  " }), "🎨");
+});
+
+test("interestEmoji returns '' for a missing/blank/non-string emoji (graceful, no glyph)", () => {
+  assert.equal(interestEmoji({ label: "None" }), "");
+  assert.equal(interestEmoji({ label: "Blank", emoji: "   " }), "");
+  assert.equal(interestEmoji({ label: "Wrong type", emoji: 42 }), "");
+  assert.equal(interestEmoji(null), "");
+  assert.equal(interestEmoji(undefined), "");
+});
+
+test("emojiByLabel builds a label→glyph map, omitting glyph-less/blank rows", () => {
+  const map = emojiByLabel([
+    { label: "Coffee & cafés", emoji: "☕" },
+    { label: "Walking", emoji: "🚶" },
+    { label: "No glyph" }, // no emoji → omitted
+    { label: "  ", emoji: "🙈" }, // blank label → omitted
+  ]);
+  assert.equal(map.get("Coffee & cafés"), "☕");
+  assert.equal(map.get("Walking"), "🚶");
+  assert.equal(map.has("No glyph"), false);
+  assert.equal(map.size, 2);
+});
+
+test("emojiByLabel is empty for a null/non-array catalogue", () => {
+  assert.equal(emojiByLabel(null).size, 0);
+  assert.equal(emojiByLabel(undefined).size, 0);
+  assert.equal(emojiByLabel("nope").size, 0);
+});
+
+test("catalogueGroups carries each option's emoji from the catalogue row", () => {
+  const { groups } = catalogueGroups(
+    [
+      { label: "Walking", category: "Sport & Fitness", emoji: "🚶", active: true },
+      { label: "Cycling", category: "Sport & Fitness", active: true }, // no emoji
+    ],
+    [],
+    { max: 3 },
+  );
+  const opts = groups[0].options;
+  assert.equal(opts.find((o) => o.label === "Walking").emoji, "🚶");
+  assert.equal(opts.find((o) => o.label === "Cycling").emoji, ""); // degrades to no glyph
+});
+
+test("interestChipsModel resolves each saved chip's emoji against the passed catalogue", () => {
+  const saved = [{ label: "Coffee & cafés" }, { label: "Walking" }];
+  const catalogue = [
+    { label: "Coffee & cafés", emoji: "☕", active: true },
+    { label: "Walking", active: true }, // no emoji
+  ];
+  const m = interestChipsModel(saved, { min: 1, max: 3, catalogue });
+  assert.equal(m.chips.find((c) => c.label === "Coffee & cafés").emoji, "☕");
+  assert.equal(m.chips.find((c) => c.label === "Walking").emoji, "");
+});
+
+test("interestChipsModel leaves emoji '' when no catalogue is supplied (saved shape has none)", () => {
+  const m = interestChipsModel([{ label: "Walking" }], { min: 1, max: 3 });
+  assert.equal(m.chips[0].emoji, "");
 });

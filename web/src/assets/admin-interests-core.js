@@ -26,6 +26,9 @@
 export const LABEL_MAX = 120;
 /** Category cap — mirrors CreateInterestRequest.category @Size(max = 80) / category VARCHAR(80). */
 export const CATEGORY_MAX = 80;
+/** Emoji cap — mirrors CreateInterestRequest.emoji @Size(max = 16) (generous for multi-codepoint
+ *  glyphs like flags/ZWJ sequences). Blank = no emoji (server stores null). (TM-805) */
+export const EMOJI_MAX = 16;
 /** Sort-weight bounds — mirror CreateInterestRequest.sortWeight @Min(0) @Max(1000); blank = default. */
 export const SORT_WEIGHT_MIN = 0;
 export const SORT_WEIGHT_MAX = 1000;
@@ -114,6 +117,14 @@ export function validateInterestDraft(draft = {}, { requireForCreate = true } = 
     errors.sortWeight = `Must be between ${SORT_WEIGHT_MIN} and ${SORT_WEIGHT_MAX}.`;
   }
 
+  // Emoji (TM-805): optional; the only rule is the length cap (mirrors @Size(max = 16)). Blank is fine
+  // (no glyph). We don't validate that it's "really an emoji" — the admin is trusted, and the picker
+  // renders any short glyph verbatim.
+  const emoji = cleanText(draft.emoji);
+  if (emoji.length > EMOJI_MAX) {
+    errors.emoji = `Must be ${EMOJI_MAX} characters or fewer.`;
+  }
+
   return { errors, canSave: Object.keys(errors).length === 0 };
 }
 
@@ -137,6 +148,10 @@ export function buildInterestPayload(draft = {}) {
   };
   const weight = parseIntOrNull(draft.sortWeight);
   if (typeof weight === "number" && !Number.isNaN(weight)) body.sortWeight = weight;
+  // Emoji (TM-805): always send the (trimmed) value — "" tells the server to clear/leave-blank it, a
+  // non-empty glyph sets it. The backend normalises a blank to null, so a cleared field reads as "no
+  // emoji" (mirrors how the picker renders a null/blank emoji as no glyph).
+  body.emoji = cleanText(draft.emoji);
   return body;
 }
 
@@ -153,6 +168,7 @@ export function toInterestFormModel(interest = {}) {
   return {
     label: str(interest.label),
     category: str(interest.category),
+    emoji: str(interest.emoji), // TM-805 — pre-fill the emoji field for the edit form ("" when none)
     highlighted: Boolean(interest.highlighted),
     sortWeight: interest.sortWeight == null ? "" : String(interest.sortWeight),
   };

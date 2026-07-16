@@ -21,12 +21,15 @@ import jakarta.validation.constraints.Size;
  *
  * @param label       display label, e.g. "Coffee &amp; cafés" (required, ≤ 120)
  * @param category    grouping bucket — must be one of {@link InterestCategories#KNOWN} (required, ≤ 80)
+ * @param emoji       small glyph shown beside the label (TM-805), or omit for none (≤ 16 chars — a
+ *                    generous cap covering multi-codepoint emoji like flags/ZWJ sequences)
  * @param highlighted whether the interest is featured (absent → false)
  * @param sortWeight  ordering weight {@code [0, 1000]}, or omit for the highlighted-aware default
  */
 public record CreateInterestRequest(
         @NotBlank @Size(max = 120) String label,
         @NotBlank @Size(max = 80) String category,
+        @Size(max = 16) String emoji,
         boolean highlighted,
         @Min(0) @Max(1000) Integer sortWeight) {
 
@@ -39,6 +42,6 @@ public record CreateInterestRequest(
 
     /** Map onto the domain-side command object ({@code interests} package stays free of api DTOs). */
     InterestDraft toDraft() {
-        return new InterestDraft(label, category, highlighted, sortWeight);
+        return new InterestDraft(label, category, emoji, highlighted, sortWeight);
     }
 }

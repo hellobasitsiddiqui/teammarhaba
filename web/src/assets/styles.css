@@ -2231,6 +2231,15 @@ h3,
     outline-offset: 2px;
 }
 
+/* Leading catalogue emoji on a picker chip (TM-805). The chip is inline-flex with a 0.35rem gap, so
+   the emoji sits naturally before the label — no extra margin needed, just steady sizing/baseline. */
+#onboarding-view .tm-interests-chips .tm-interests-chip-emoji {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1.02em;
+    line-height: 1;
+}
+
 /* The trailing ✓ is present in the DOM always but only revealed on a selected (.tm-pf-chip-on) chip,
    so a toggle is a pure class change. Inks with --on-accent (the accent chip's text colour). */
 #onboarding-view .tm-interests-chips .tm-interests-chip-check {
@@ -5960,6 +5969,22 @@ button.tm-pf-chip[disabled] {
     font-size: 1.1em;
     line-height: 1;
     opacity: 0.85;
+}
+/* Leading catalogue emoji on a chip (TM-805) — a small decorative glyph before the label. A tiny
+   right margin gives it breathing room from the label (the emoji + label are separate spans with no
+   whitespace between them, so the gap is spelled explicitly). Emoji render in their own colour, so
+   this stays legible on both the plain and accent-filled (.tm-pf-chip-on) chip. */
+.tm-pf-chip-emoji {
+    margin-right: 0.28rem;
+    font-size: 1.02em;
+    line-height: 1;
+}
+/* Leading catalogue emoji before a label in the admin interests list (TM-805) — a small glyph with a
+   little right margin so it reads as a prefix to the label cell text, not part of it. */
+.tm-admin-interest-emoji {
+    margin-right: 0.35rem;
+    font-size: 1.02em;
+    line-height: 1;
 }
 .tm-pf-picker-count {
     margin: 0 0 var(--space-2);

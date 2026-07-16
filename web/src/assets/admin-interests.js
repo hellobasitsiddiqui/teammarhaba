@@ -29,6 +29,7 @@ import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import {
   LABEL_MAX,
+  EMOJI_MAX,
   CATEGORIES,
   SORT_WEIGHT_MIN,
   SORT_WEIGHT_MAX,
@@ -39,6 +40,7 @@ import {
 } from "./admin-interests-core.js";
 import { ADMIN_INTERESTS_ROUTE, adminInterestNewHash, adminInterestEditHash } from "./admin-interests-route.js";
 import { clampPage } from "./admin-paging-core.js";
+import { interestEmoji } from "./interests-core.js"; // shared emoji normaliser (TM-805)
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-catalogue walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 interests)
@@ -389,7 +391,13 @@ function renderTable() {
     {},
     pageRows.map((interest) =>
       el("tr", { dataset: { interestId: String(interest.id) } }, [
-        el("td", {}, [el("span", { class: "tm-event-heading", text: interest.label || "—" })]),
+        el("td", {}, [
+          // Leading catalogue emoji (TM-805) next to the label, only when the row carries one.
+          interestEmoji(interest)
+            ? el("span", { class: "tm-admin-interest-emoji", "aria-hidden": "true", text: interestEmoji(interest) })
+            : null,
+          el("span", { class: "tm-event-heading", text: interest.label || "—" }),
+        ]),
         el("td", { class: "tm-muted", text: interest.category || "—" }),
         el("td", { class: "tm-muted", text: interest.sortWeight == null ? "—" : String(interest.sortWeight) }),
         el("td", {}, [featuredCell(interest)]),
@@ -547,6 +555,7 @@ async function mutateRetire(interest, action, successMessage) {
 // RFC-7807 `errors[].field` maps straight onto the right input).
 const FORM_FIELDS = [
   { key: "label", id: "interest-label", label: "Label", type: "text", maxLength: LABEL_MAX, required: true, hint: 'Shown in the user picker, e.g. "Coffee & cafés".' },
+  { key: "emoji", id: "interest-emoji", label: "Emoji (optional)", type: "text", maxLength: EMOJI_MAX, hint: 'A small glyph shown beside the label, e.g. "☕". Leave blank for none.' },
   { key: "category", id: "interest-category", label: "Category", type: "select", required: true, options: CATEGORY_CHOICES, hint: "One of the fixed catalogue buckets." },
   { key: "sortWeight", id: "interest-weight", label: "Sort weight (optional)", type: "number", min: SORT_WEIGHT_MIN, max: SORT_WEIGHT_MAX, hint: "Higher floats to the top. Blank = default (100 if featured, else 0)." },
   { key: "highlighted", id: "interest-featured", label: "Featured", type: "checkbox", hint: "Featured interests are promoted in the picker." },

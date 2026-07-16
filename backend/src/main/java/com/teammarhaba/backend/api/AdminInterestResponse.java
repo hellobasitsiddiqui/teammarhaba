@@ -17,6 +17,7 @@ import java.time.Instant;
  * @param id         database id — the handle for the {@code /admin/interests/{id}} endpoints
  * @param label      display label
  * @param category   grouping bucket
+ * @param emoji      small glyph shown beside the label (e.g. "☕"), or {@code null} if none (TM-804)
  * @param highlighted whether the interest is featured
  * @param sortWeight ordering weight (higher sorts first)
  * @param active     whether the interest is offered to users (retire sets false)
@@ -29,6 +30,7 @@ public record AdminInterestResponse(
         Long id,
         String label,
         String category,
+        String emoji,
         boolean highlighted,
         int sortWeight,
         boolean active,
@@ -43,6 +45,7 @@ public record AdminInterestResponse(
                 c.getId(),
                 c.getLabel(),
                 c.getCategory(),
+                c.getEmoji(),
                 c.isHighlighted(),
                 c.getSortWeight(),
                 c.isActive(),
