@@ -49,6 +49,9 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "emoji" : {
+            "type" : "string"
+          },
           "highlighted" : {
             "type" : "boolean"
           },
@@ -1980,6 +1983,9 @@
       "PublicInterestResponse" : {
         "properties" : {
           "category" : {
+            "type" : "string"
+          },
+          "emoji" : {
             "type" : "string"
           },
           "highlighted" : {
