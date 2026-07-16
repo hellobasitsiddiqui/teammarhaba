@@ -133,6 +133,57 @@ export function canFinish(selectedLabels, bounds) {
 }
 
 /**
+ * The selection PILL state (paper "Pick interests" redesign, TM-804): the little progress pill under
+ * the subtitle. Below the effective minimum it reads "Pick at least N to continue" (hollow ring, grey
+ * outline); at/above the minimum it flips to "N selected" (✓, accent-light fill). This is a pure copy +
+ * state decision the renderer maps to classes/icons in refreshSelectionPill — extracted here so the
+ * exact wording at 0 / at the min boundary / above the min is unit-testable without a DOM.
+ *
+ * @param {Iterable<string>|Array<string>} selectedLabels the currently-picked labels
+ * @param {{min:number, max:number}} bounds from {@link selectionBounds}
+ * @returns {{satisfied: boolean, count: number, label: string}}
+ */
+export function selectionPillState(selectedLabels, bounds) {
+  const count = countUnique(selectedLabels);
+  const min = bounds?.min ?? 1;
+  const satisfied = count >= min;
+  return {
+    satisfied,
+    count,
+    label: satisfied ? `${count} selected` : `Pick at least ${min} to continue`,
+  };
+}
+
+/**
+ * Whether the user may pick ANOTHER interest — i.e. the selection is still below the max cap. Drives
+ * the max-cap UX (TM-804): once this is false the UNSELECTED chips dim/disable so the ceiling is felt
+ * before submit, while already-selected chips stay toggleable off. Pure counterpart of the inline
+ * `state.selected.size >= state.bounds.max` guard.
+ *
+ * @param {Iterable<string>|Array<string>} selectedLabels
+ * @param {{min:number, max:number}} bounds from {@link selectionBounds}
+ * @returns {boolean} true while below the max, false once the cap is reached
+ */
+export function canSelectMore(selectedLabels, bounds) {
+  return countUnique(selectedLabels) < bounds.max;
+}
+
+/**
+ * The "disable this chip?" predicate for the max-cap dimming (TM-804). A chip is disabled ONLY when the
+ * cap has been reached AND this chip is not itself selected — so at the ceiling the unpicked chips grey
+ * out but the picked ones remain toggleable (letting the user swap a choice). Below the cap nothing is
+ * disabled.
+ *
+ * @param {boolean} isSelected whether THIS chip's label is currently selected
+ * @param {Iterable<string>|Array<string>} selectedLabels the whole selection
+ * @param {{min:number, max:number}} bounds from {@link selectionBounds}
+ * @returns {boolean} true iff the chip should be rendered disabled
+ */
+export function chipDisabled(isSelected, selectedLabels, bounds) {
+  return !isSelected && !canSelectMore(selectedLabels, bounds);
+}
+
+/**
  * Build the PATCH /api/v1/me `interests` payload — a plain array of label strings (NOT objects; the
  * backend UpdateMeRequest.interests is a `List<String>` of labels). De-dupes repeated labels and
  * preserves first-pick order, so the request carries exactly the distinct labels the user chose.

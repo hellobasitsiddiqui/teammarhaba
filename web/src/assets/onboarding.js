@@ -28,6 +28,8 @@ import {
   selectionBounds,
   validateSelection,
   canFinish,
+  selectionPillState,
+  chipDisabled,
   toInterestsPayload,
   selectedLabelsFromMe,
 } from "./onboarding-core.js";
@@ -262,9 +264,9 @@ function paintChip(button, label) {
   button.classList.toggle("tm-pf-chip-on", on);
   button.setAttribute("aria-pressed", on ? "true" : "false");
   // Max-cap UX: once the ceiling is hit, dim/disable the UNSELECTED chips so the limit is felt before
-  // submit; selected chips always stay toggleable OFF so the user can swap a pick.
-  const atMax = state.selected.size >= state.bounds.max;
-  const disabled = atMax && !on;
+  // submit; selected chips always stay toggleable OFF so the user can swap a pick. The predicate is the
+  // pure chipDisabled() in onboarding-core (unit-tested there) so the rule stays DOM-free and covered.
+  const disabled = chipDisabled(on, state.selected, state.bounds);
   button.disabled = disabled;
   button.setAttribute("aria-disabled", disabled ? "true" : "false");
 }
@@ -289,15 +291,14 @@ function repaintAllChips() {
 function refreshSelectionPill() {
   if (!interestsShell?.pill) return;
   const { pill, pillLabel, pillEmpty, pillFilled } = interestsShell;
-  const n = state.selected.size;
-  const satisfied = n >= state.bounds.min;
+  // The satisfied flag + the exact copy come from the pure selectionPillState() in onboarding-core
+  // (unit-tested there); this function only maps that decision onto classes/icons/text — no copy logic.
+  const { satisfied, label } = selectionPillState(state.selected, state.bounds);
   pill.classList.toggle("tm-interests-pill-on", satisfied);
   // Swap the leading icon (hollow ring below the min → ✓ once satisfied) without innerHTML.
   pillEmpty.hidden = satisfied;
   pillFilled.hidden = !satisfied;
-  pillLabel.textContent = satisfied
-    ? `${n} selected`
-    : `Pick at least ${state.bounds.min} to continue`;
+  pillLabel.textContent = label;
 }
 
 /** Update the selection pill + the "Continue" CTA enabled state from the live selection. */
