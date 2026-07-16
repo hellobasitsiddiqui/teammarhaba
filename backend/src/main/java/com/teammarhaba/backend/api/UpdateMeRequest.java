@@ -3,8 +3,10 @@ package com.teammarhaba.backend.api;
 import com.teammarhaba.backend.user.NotificationPref;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 
 /**
  * Body for {@code PATCH /api/v1/me} (TM-112, extended in TM-162). Only the user-editable profile
@@ -46,6 +48,17 @@ import jakarta.validation.constraints.Size;
  *                         non-Paper theme can never be selected via this field.
  * @param themeSketchy     whether the hand-drawn wavy/sketchy wobble is on (TM-529); {@code true} =
  *                         wobble, {@code false} = clean Paper
+ * @param interests        the caller's chosen interest labels (TM-775, closes TM-514).
+ *                         <strong>Full-set replace</strong>: a non-null list is the user's complete
+ *                         new selection — the saved set is replaced with it. {@code null}/omitted
+ *                         leaves the saved interests unchanged (partial-PATCH, like every other field
+ *                         here). Each entry must be a <em>current active</em> catalogue label or the
+ *                         whole PATCH is a uniform {@code 400}; the count is enforced against the
+ *                         configured min/max ({@code InterestSelectionConfig}, default 1–3) server-side
+ *                         in {@link com.teammarhaba.backend.user.UserService}, since bean validation
+ *                         can't read the DB-backed bounds. The element-level {@code @NotBlank}/
+ *                         {@code @Size} rejects a blank/over-long label at the boundary; the outer
+ *                         {@code @Size(max = 50)} is a coarse abuse guard only.
  */
 public record UpdateMeRequest(
         @Size(max = 255) String displayName,
@@ -60,7 +73,8 @@ public record UpdateMeRequest(
         @Size(max = 35) String locale,
         @Pattern(regexp = "^(teal|indigo|coral|amber|plum|ink)$", message = "must be a valid accent swatch")
                 String themeAccent,
-        Boolean themeSketchy) {
+        Boolean themeSketchy,
+        @Size(max = 50, message = "too many interests") List<@NotBlank @Size(max = 120) String> interests) {
 
     /**
      * The TM-771 name-like rule shared by {@code firstName}/{@code lastName}/{@code city}: at least

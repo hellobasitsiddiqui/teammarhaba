@@ -1256,6 +1256,21 @@
         },
         "type" : "object"
       },
+      "InterestResponse" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "sourceInterestId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "LinkPreviewResponse" : {
         "properties" : {
           "description" : {
@@ -1319,6 +1334,12 @@
           },
           "firstName" : {
             "type" : "string"
+          },
+          "interests" : {
+            "items" : {
+              "$ref" : "#/components/schemas/InterestResponse"
+            },
+            "type" : "array"
           },
           "lastActiveAt" : {
             "format" : "date-time",
@@ -2188,6 +2209,16 @@
             "minLength" : 0,
             "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
+          },
+          "interests" : {
+            "items" : {
+              "maxLength" : 120,
+              "minLength" : 0,
+              "type" : "string"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : "array"
           },
           "lastName" : {
             "maxLength" : 255,

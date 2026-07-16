@@ -9,6 +9,11 @@ package com.teammarhaba.backend.user;
  * caller can patch one field without resending the rest. Syntactic validation (sizes, age range,
  * phone pattern, enum) happens at the web boundary; {@code timezone}/{@code locale} get a
  * best-effort semantic check here in the service.
+ *
+ * <p>{@code interests} (TM-775) is a <strong>full-set replace</strong>: a non-null label list is the
+ * user's complete new selection (the prior saved set is replaced with it); {@code null} leaves the
+ * saved interests unchanged. The labels are validated against the active catalogue and the configured
+ * min/max in {@link UserService}, not at the web boundary (the bounds are DB-backed).
  */
 public record ProfileUpdate(
         String displayName,
@@ -21,4 +26,5 @@ public record ProfileUpdate(
         String timezone,
         String locale,
         String themeAccent,
-        Boolean themeSketchy) {}
+        Boolean themeSketchy,
+        java.util.List<String> interests) {}
