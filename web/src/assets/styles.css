@@ -2155,10 +2155,11 @@ h3,
     cursor: not-allowed;
 }
 
-/* ---- Onboarding interests PICK STEP (TM-776) --------------------------------------------------
-   The step-2 picker: category-grouped toggle chips (reusing the paper .tm-pf-chip tokens), a live
-   selected-count line, and a disabled-chip state for the max cap. Token-only, so it tracks the
-   per-user accent + dark/light and the [data-sketchy="on"] wobble already on .tm-onboarding-*. */
+/* ---- Onboarding interests PICK STEP — paper "Pick interests" (TM-804, reworked from TM-776) -------
+   Screens 9/10: a header + accent squiggle (shared .tm-onboarding-* rules above), a subtitle, a live
+   selection pill, then "POPULAR NEAR YOU" + the 7 real-category sections of accent-check toggle chips,
+   and a full-width "Continue →" CTA. Token-only, so it tracks the per-user accent + dark/light and the
+   [data-sketchy="on"] wobble already on .tm-onboarding-*. */
 #onboarding-view .tm-interests-groups {
     display: flex;
     flex-direction: column;
@@ -2172,7 +2173,7 @@ h3,
     gap: var(--space-2);
 }
 
-/* Category heading — uppercase muted, matching the onboarding field-label convention. */
+/* Section label — uppercase grey (paper "Pick interests": "POPULAR NEAR YOU" + the category names). */
 #onboarding-view .tm-interests-group-head {
     margin: 0;
     text-transform: uppercase;
@@ -2182,38 +2183,90 @@ h3,
     color: var(--muted);
 }
 
-/* Toggle chips reuse .tm-pf-chip / .tm-pf-chip-on; make them tappable buttons + focus-visible. */
-#onboarding-view .tm-interests-chips .tm-pf-chip,
-#onboarding-view .tm-interests-chips .tm-pf-chip-on {
-    cursor: pointer;
-    font: inherit;
-    line-height: 1.4;
+/* Selection pill (paper "Pick interests"): rounded 2px-bordered pill under the subtitle. Default =
+   grey outline reading "Pick at least N to continue" + a hollow ring; .tm-interests-pill-on flips it to
+   the accent-light fill reading "N selected" + a ✓. */
+#onboarding-view .tm-interests-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    align-self: flex-start;
+    margin: var(--space-2) 0 var(--space-1);
+    padding: 0.35rem 0.8rem;
+    font-size: var(--fs-1);
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-pill);
 }
 
-#onboarding-view .tm-interests-chips .tm-pf-chip:focus-visible,
-#onboarding-view .tm-interests-chips .tm-pf-chip-on:focus-visible {
+#onboarding-view .tm-interests-pill .tm-interests-pill-icon {
+    flex: none;
+}
+
+/* Satisfied state (≥ min selected): accent-light fill, accent border + inked text. */
+#onboarding-view .tm-interests-pill.tm-interests-pill-on {
+    color: var(--fg);
+    background: var(--accent-light);
+    border-color: var(--accent);
+}
+
+/* Toggle chips (paper "Pick interests"): rounded pill, 2px ink border, label + a trailing ✓ that shows
+   only when selected. Reuse the .tm-pf-chip / .tm-pf-chip-on tokens; the interests scope adds the
+   flex label+check layout + a slightly roomier tap target (~7px 14px, ~15px label). */
+#onboarding-view .tm-interests-chips .tm-interests-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.94rem;
+    line-height: 1.4;
+    padding: 0.42rem 0.85rem;
+}
+
+#onboarding-view .tm-interests-chips .tm-interests-chip:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 
-/* Max-cap: unselected chips dim + go non-interactive once the ceiling is reached. */
-#onboarding-view .tm-interests-chips .tm-pf-chip:disabled {
+/* The trailing ✓ is present in the DOM always but only revealed on a selected (.tm-pf-chip-on) chip,
+   so a toggle is a pure class change. Inks with --on-accent (the accent chip's text colour). */
+#onboarding-view .tm-interests-chips .tm-interests-chip-check {
+    display: none;
+    align-items: center;
+    margin-right: -0.1rem;
+}
+
+#onboarding-view .tm-interests-chips .tm-interests-chip.tm-pf-chip-on .tm-interests-chip-check {
+    display: inline-flex;
+}
+
+/* Max-cap: unselected chips dim + go non-interactive once the ceiling (max) is reached. */
+#onboarding-view .tm-interests-chips .tm-interests-chip:disabled {
     opacity: 0.45;
     cursor: not-allowed;
 }
 
-/* Live "N of max M selected" count line. */
-#onboarding-view .tm-interests-count {
-    margin: var(--space-3) 0 0;
-    font-size: var(--fs-1);
+/* Full-width "Continue →" CTA: accent fill + 2px offset ink shadow when valid; grey + no shadow when
+   below the minimum (disabled). Overrides the shared .tm-cta shadow with the design's crisp 2px offset. */
+#onboarding-view .tm-form-actions:has(.tm-interests-continue) {
+    display: block;
 }
 
-/* "Skip for now" secondary action (only rendered when min is 0) — a quiet ghost next to Finish. */
-#onboarding-view .tm-interests-skip {
-    background: transparent;
+#onboarding-view .tm-interests-continue {
+    width: 100%;
+    box-shadow: 2px 2px 0 var(--fg);
+}
+
+#onboarding-view .tm-interests-continue:disabled {
+    background: var(--surface-2);
     color: var(--muted);
     border-color: var(--border);
     box-shadow: none;
+    opacity: 1; /* solid grey, not a dimmed accent (override the shared .tm-btn:disabled opacity) */
+    cursor: not-allowed;
 }
 
 /* A multi-line message input — the textarea sibling of .tm-input (TM-365). Inherits .tm-input's
