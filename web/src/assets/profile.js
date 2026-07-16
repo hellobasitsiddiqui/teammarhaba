@@ -50,6 +50,7 @@ import {
   phonePartsError,
   PHONE_PICK_COUNTRY_MESSAGE,
   // TM-777 (I5): the pure next-day completeness-nudge decision (picked==1 + not-shown-today → CTA).
+  // The max it targets is injected by the renderer from state.interestConfig (TM-778's shared config).
   nextDayInterestsNudge,
 } from "./profile-core.js";
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
@@ -160,7 +161,9 @@ const state = {
   // Interests card (TM-778): the min/max bounds (from GET /api/v1/interests/config, else defaults) and
   // the offered catalogue (from GET /api/v1/interests/catalogue) for the ADD picker. Both come from the
   // PUBLIC picker read endpoints (TM-776; any signed-in user) and are fetched best-effort on profile
-  // load; the saved interests themselves live on state.profile.interests (from /me).
+  // load; the saved interests themselves live on state.profile.interests (from /me). TM-777 (I5) reuses
+  // state.interestConfig.max (this SAME best-effort config) as the max the next-day nudge copy targets —
+  // one fetch, one source of truth — falling back to the seeded default when the config read failed.
   interestConfig: normaliseInterestConfig(null),
   interestCatalogue: null, // null = not yet loaded / read failed — the picker degrades honestly
   interestsSaving: false, // guards against concurrent PATCHes while a chip add/remove is in flight
@@ -375,11 +378,15 @@ function paintHub(profile) {
   paintInterests(profile);
 
   // TM-777 (I5): the next-day completeness nudge — a quiet, once-a-day CTA to add more interests when
-  // the user has picked exactly one. Pure decision (clock + the stored last-prompt day injected); the
-  // CTA button is hidden by default and only revealed when it's due. Painting is a no-op when hidden.
+  // the user has picked exactly one. Pure decision (clock, stored last-prompt day, and the real
+  // interests max injected); the CTA button is hidden by default and only revealed when it's due.
   const i5 = nextDayInterestsNudge(profile, {
     now: new Date(),
     lastPromptISO: readLastInterestsPrompt(),
+    // The real interests max — reuse the SAME best-effort config the interests card fetched
+    // (state.interestConfig, from GET /api/v1/interests/config via loadInterestsMeta; defaults to the
+    // seeded max when that read failed) so "add N more" names the true bound, tracking an admin change.
+    max: state.interestConfig.max,
   });
   hub.barInterestsCta.hidden = !i5.show;
   if (i5.show) {
@@ -446,17 +453,24 @@ function paintInterests(profile) {
  * Repaints the card once the config lands so the bounds (hence the chip removability + hint) reflect the
  * server config.
  */
-async function loadInterestsMeta() {
+async function loadInterestsMeta({ repaint = true } = {}) {
   try {
     const [config, catalogue] = await Promise.all([getInterestConfig(), getInterestCatalogue()]);
     state.interestConfig = normaliseInterestConfig(config);
     state.interestCatalogue = catalogue; // the public catalogue array (active rows, highlights-first)
   } catch (err) {
-    // A failed read leaves the defaults / an unavailable picker rather than breaking the card.
+    // A failed read degrades to the defaults / an unavailable picker rather than breaking the card.
+    // Reset to the default bounds (not a stale earlier value) so a FAILED refresh across a load()
+    // re-entry can't leave the card — or the TM-777 nudge copy — pinned to an out-of-date max.
+    state.interestConfig = normaliseInterestConfig(null);
+    state.interestCatalogue = null;
     console.warn("[profile] GET /api/v1/interests catalogue/config failed:", err?.message ?? err);
   }
-  // Repaint with the real bounds now they're known (they affect removability + the hint copy).
-  if (state.profile) paintInterests(state.profile);
+  // Repaint with the real bounds now they're known (they affect removability + the hint copy). Skipped
+  // (repaint:false) when load() fetched this BEFORE the first paint — fillForm→paintHub then paints the
+  // card + the TM-777 nudge with the bounds already in place, avoiding a redundant (and nudge-hiding,
+  // once same-day-stamped) second paintHub.
+  if (repaint && state.profile) paintInterests(state.profile);
 }
 
 /** Persist a new interests set via PATCH /me, then repaint from the returned MeResponse. */
@@ -593,7 +607,13 @@ async function load() {
   state.error = null;
   renderStatus();
   try {
-    const profile = await getMe();
+    // Fetch /me AND the interests metadata (TM-778 config + catalogue) in parallel, so the FIRST hub
+    // paint already has the real min/max bounds. This matters for the TM-777 (I5) next-day nudge: its
+    // copy names `state.interestConfig.max`, and paintHub stamps "shown today" the once it fires — so
+    // the max must be known BEFORE that single paint (a later repaint would be suppressed same-day and
+    // hide the just-shown CTA). loadInterestsMeta is best-effort (swallows its own errors), so a config
+    // failure just leaves the default bounds; getMe's own failure still lands in the catch below.
+    const [profile] = await Promise.all([getMe(), loadInterestsMeta({ repaint: false })]);
     state.profile = profile;
     state.loaded = true;
     fillForm(profile);
@@ -609,10 +629,6 @@ async function load() {
   // fetched fresh (apiFetch uses cache:"no-store") on every profile entry so the row shows the caller's
   // CURRENT tier, e.g. "Monthly member" right after subscribing, not a stale "Pay as you go".
   await loadMembership();
-  // Interests metadata (TM-778) — the min/max config + the ADD-picker catalogue, best-effort and
-  // non-blocking (a failure just leaves default bounds / an unavailable picker; VIEW + REMOVE work off
-  // /me regardless). Fired after the profile paints so the card is never gated on it.
-  await loadInterestsMeta();
 }
 
 /**

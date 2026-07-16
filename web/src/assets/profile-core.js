@@ -440,21 +440,22 @@ export function validateProfileField(field, raw) {
 // thin renderer: it reads the last-prompt time from per-uid localStorage, calls this, paints the CTA and
 // stamps "shown today" so the same-day suppression below fires on the next paint.
 //
-// Interests come from `me.interests` (the array merged in by I3/TM-775). In THIS working tree the /me
-// payload does not yet carry `interests`, so `interestCount` MUST tolerate the field being absent — a
-// missing/blank/non-array value reads as 0 picks, which is silent (no nudge). No backend change, no new
-// API call: I5 is frontend-only and reads what /me already returns.
+// Interests come from `me.interests` (the array merged in by TM-775, now on main). `interestCount`
+// still tolerates the field being absent — a missing/blank/non-array value reads as 0 picks, which is
+// silent (no nudge). The pick count needs no extra call (it rides the already-loaded /me). The target
+// MAX is sourced separately: the renderer best-effort fetches the public `GET /api/v1/interests/config`
+// (TM-774) and injects `maxSelections` here, so the copy tracks the admin's runtime bound; on fetch
+// failure it falls back to INTERESTS_MAX_FALLBACK. This pure fn stays frontend-only and side-effect-free
+// — all IO (the /me read, the config fetch, localStorage) lives in profile.js's thin renderer.
 
 /**
- * The interests maximum the nudge copy targets. Mirrors the backend's seeded
- * `InterestSelectionConfig.MAX_DEFAULT` (1/3 seeded defaults). This is an HONEST CONSTANT, not a
- * config-driven value: the runtime-mutable bound (`interests.max_selections`) is served only by the
- * ADMIN-only `GET /api/v1/admin/interests/config`, which a normal profile-page user can't reach, and
- * `MeResponse` carries no max — so there is no user-readable source for the real bound today. Rather
- * than read a phantom field that is always `undefined` in production (which would silently pin the max
- * to this default anyway while pretending to be config-driven), we use this constant directly. If an
- * admin raises the max above 3, the nudge copy will lag until a user-readable min/max endpoint (or an
- * `interestsMax` field on `/me`) exists — tracked as a follow-up; until then the copy stays truthful.
+ * The FALLBACK interests maximum the nudge copy targets. Mirrors the backend's seeded
+ * `InterestSelectionConfig.MAX_DEFAULT` (1/3 seeded defaults). Used only when the real runtime bound
+ * can't be fetched: the renderer best-effort reads the public `GET /api/v1/interests/config` (TM-774,
+ * any signed-in user; returns `minSelections`/`maxSelections`) and injects the real `maxSelections`
+ * into `nextDayInterestsNudge`. If that fetch fails (offline / non-2xx), the nudge falls back to this
+ * constant so the copy stays sensible rather than blank. So the copy tracks an admin's runtime max
+ * change when the fetch succeeds, and degrades to this seeded default when it doesn't.
  */
 export const INTERESTS_MAX_FALLBACK = 3;
 
@@ -494,25 +495,32 @@ function sameLocalDay(iso, now) {
  * exact "started but stalled at one" state.
  *
  * @param {object|null|undefined} me a `/me`-shaped object (reads `me.interests`).
- * @param {{ now?: Date, lastPromptISO?: (string|null) }} [opts]
+ * @param {{ now?: Date, lastPromptISO?: (string|null), max?: number }} [opts]
  *   `now` = the clock (defaults to real time); `lastPromptISO` = the stored "last shown" timestamp
- *   (defaults to null = never shown). Both injected so the whole decision is deterministic in tests.
+ *   (defaults to null = never shown); `max` = the interests-selection maximum the copy targets,
+ *   injected by the renderer from the public `GET /api/v1/interests/config` (`maxSelections`). A
+ *   missing/invalid `max` falls back to {@link INTERESTS_MAX_FALLBACK}. All injected so the whole
+ *   decision is deterministic in tests.
  * @returns {{ show: boolean, count: number, max: number, remaining: number, message: string }}
  *   a STRUCTURED result (not a bare string) so the renderer can branch on `show` and reuse the counts.
  */
-export function nextDayInterestsNudge(me, { now = new Date(), lastPromptISO = null } = {}) {
+export function nextDayInterestsNudge(
+  me,
+  { now = new Date(), lastPromptISO = null, max = INTERESTS_MAX_FALLBACK } = {},
+) {
   const count = interestCount(me);
-  // The target max is the honest INTERESTS_MAX_FALLBACK constant (mirrors the backend seeded default 3).
-  // There is NO user-readable source for the runtime bound today — MeResponse has no max field and the
-  // real `interests.max_selections` is served only by the ADMIN-only interests-config endpoint — so we
-  // deliberately do NOT read a phantom `me.interestsMax` (it's always undefined in production and would
-  // pin the max to 3 anyway while pretending to be config-driven). See INTERESTS_MAX_FALLBACK's doc.
-  const max = INTERESTS_MAX_FALLBACK;
-  const remaining = max - count;
+  // The target max is INJECTED by the renderer from the public `GET /api/v1/interests/config`
+  // (TM-774, `maxSelections`) so the copy tracks an admin's runtime bound. A missing/non-finite/
+  // non-positive injected value (fetch failed, or the caller passed nothing) falls back to the seeded
+  // default constant — we never read a `me.*` field for it (MeResponse carries no max).
+  const injected = Number(max);
+  const resolvedMax = Number.isFinite(injected) && injected > 0 ? injected : INTERESTS_MAX_FALLBACK;
+  const remaining = resolvedMax - count;
   // Only the "picked exactly 1" state is a candidate: 0 = onboarding (don't nag before they start), ≥2 =
   // already engaged / at the typical max. `lastPromptISO` on the same local day suppresses (nagged today);
   // a missing/invalid value means "never shown" → eligible.
   const show = count === 1 && !(lastPromptISO != null && sameLocalDay(lastPromptISO, now));
-  const message = `You picked 1 interest — add ${remaining} more so people find you →`;
-  return { show, count, max, remaining, message };
+  // Product copy uses a hyphen, not an em-dash (global "-" preference).
+  const message = `You picked 1 interest - add ${remaining} more so people find you →`;
+  return { show, count, max: resolvedMax, remaining, message };
 }

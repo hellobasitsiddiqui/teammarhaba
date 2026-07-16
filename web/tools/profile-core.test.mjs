@@ -521,6 +521,9 @@ test("nextDayInterestsNudge: 1 pick + never prompted → shows, names the remain
   assert.equal(r.remaining, 2);
   assert.match(r.message, /2 more/);
   assert.match(r.message, /so people find you/); // matches the interests card's existing voice
+  // Copy uses a hyphen, not an em-dash (global "-" product-owner preference).
+  assert.match(r.message, /1 interest - add/);
+  assert.doesNotMatch(r.message, /—/);
 });
 
 test("nextDayInterestsNudge: 1 pick + last prompt was YESTERDAY → shows (the core next-day case)", () => {
@@ -557,17 +560,15 @@ test("nextDayInterestsNudge: null me → does not throw, show:false (mirrors pro
   assert.equal(r.count, 0);
 });
 
-test("nextDayInterestsNudge: max is the honest constant on a REAL /me shape (no phantom max field)", () => {
-  // A realistic MeResponse (web/src/api-docs/openapi.json): it carries an `interests` array but NO
-  // `interestsMax` — the runtime bound is served only by the ADMIN-only interests-config endpoint, so
-  // a normal profile-page user never sees it. This is the shape production actually feeds the nudge, so
-  // the max the user gets is the honest INTERESTS_MAX_FALLBACK (3), NOT a config value.
+test("nextDayInterestsNudge: no injected max → falls back to the seeded constant (config fetch failed)", () => {
+  // When the renderer can't fetch GET /api/v1/interests/config (offline / non-2xx) it passes no `max`,
+  // so the nudge must fall back to the honest INTERESTS_MAX_FALLBACK (3) rather than a blank/NaN copy.
+  // A realistic MeResponse carries an `interests` array; the max is NEVER read off the payload.
   const realMe = {
     uid: "u1",
     email: "a@b.co",
     displayName: "Ada",
     interests: [{ label: "hiking", category: "outdoors" }],
-    // deliberately NO interestsMax — mirrors MeResponse.java
   };
   const r = nextDayInterestsNudge(realMe, { now: NUDGE_NOW });
   assert.equal(r.max, INTERESTS_MAX_FALLBACK);
@@ -576,12 +577,38 @@ test("nextDayInterestsNudge: max is the honest constant on a REAL /me shape (no 
   assert.match(r.message, /2 more/);
 });
 
-test("nextDayInterestsNudge: a stray interestsMax is IGNORED — the max is never sourced from the payload", () => {
-  // Regression guard for the phantom-field bug (TM-777): even if something injects an `interestsMax`,
-  // the nudge must NOT read it (MeResponse has no such field; reading it silently ignored admin config
-  // by always falling back to 3). Pin that the max is the constant regardless of any stray field.
-  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 5 }, { now: NUDGE_NOW }).max, 3);
-  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 99 }, { now: NUDGE_NOW }).max, 3);
+test("nextDayInterestsNudge: an injected max (from the public config) drives the copy — max 5 → 'add 4 more'", () => {
+  // The renderer best-effort fetches GET /api/v1/interests/config (TM-774, public) and injects
+  // `maxSelections`. When the admin has raised the bound to 5, a 1-pick user should be told to add 4
+  // more (5 − 1), and both `max`/`remaining` reflect the real bound — proving the copy is config-driven.
+  const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, max: 5 });
+  assert.equal(r.show, true);
+  assert.equal(r.count, 1);
+  assert.equal(r.max, 5);
+  assert.equal(r.remaining, 4);
+  assert.match(r.message, /add 4 more/);
+});
+
+test("nextDayInterestsNudge: an invalid injected max (0 / NaN / negative) falls back to the seeded constant", () => {
+  // A non-positive / non-finite injected value (garbage config, or `Number(undefined)` → NaN) must not
+  // produce a nonsense "add 0 more" / "add NaN more" — it degrades to INTERESTS_MAX_FALLBACK (3).
+  for (const bad of [0, -2, NaN, undefined, null, "nope"]) {
+    const r = nextDayInterestsNudge({ interests: ["hiking"] }, { now: NUDGE_NOW, max: bad });
+    assert.equal(r.max, INTERESTS_MAX_FALLBACK, `injected max ${String(bad)} should fall back to 3`);
+    assert.equal(r.remaining, 2);
+  }
+});
+
+test("nextDayInterestsNudge: the max is NEVER sourced from the payload — a stray me.interestsMax is ignored", () => {
+  // Regression guard for the original phantom-field bug (TM-777): the pure fn must read the max only
+  // from the injected `max` option, never from a `me.*` field (MeResponse carries no such field). With
+  // no injected max, a stray `me.interestsMax` must be ignored and the fallback used.
+  assert.equal(nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 9 }, { now: NUDGE_NOW }).max, 3);
+  // And an injected max wins over any payload field regardless.
+  assert.equal(
+    nextDayInterestsNudge({ interests: ["hiking"], interestsMax: 99 }, { now: NUDGE_NOW, max: 4 }).max,
+    4,
+  );
 });
 
 test("nextDayInterestsNudge: an invalid stored lastPromptISO is treated as never-shown → shows (no crash)", () => {
