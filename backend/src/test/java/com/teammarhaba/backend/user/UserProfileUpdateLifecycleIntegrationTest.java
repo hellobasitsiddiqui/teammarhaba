@@ -50,7 +50,7 @@ class UserProfileUpdateLifecycleIntegrationTest extends AbstractIntegrationTest 
 
     /** A partial update that touches only {@code displayName} — the rest null = leave unchanged. */
     private static ProfileUpdate displayNameUpdate(String displayName) {
-        return new ProfileUpdate(displayName, null, null, null, null, null, null, null, null, null, null);
+        return new ProfileUpdate(displayName, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     // ---- patchMeOnSoftDeletedReactivatesOrRefuses --------------------------------------------------

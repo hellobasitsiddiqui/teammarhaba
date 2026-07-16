@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.interests;
 
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -20,4 +21,15 @@ public interface InterestCatalogueRepository extends JpaRepository<InterestCatal
      * (non-tombstoned) interests appear (the {@code @SQLRestriction}).
      */
     List<InterestCatalogue> findAllByOrderBySortWeightDescLabelAsc();
+
+    /**
+     * The active (offered) catalogue rows whose label is one of the given labels, in one
+     * {@code WHERE label IN (…)} read (no N+1). Honours the entity's {@code @SQLRestriction}
+     * (soft-deleted/tombstoned rows are already excluded) and additionally filters {@code active = true},
+     * so only <em>currently offered</em> interests match — both retirement notions are covered. Labels
+     * that are unknown or retired are simply absent from the result, so the caller (TM-775) diffs the
+     * requested set against this to reject an unknown/retired pick with a {@code 400}. Backed by the
+     * label index.
+     */
+    List<InterestCatalogue> findByActiveTrueAndLabelIn(Collection<String> labels);
 }

@@ -132,7 +132,8 @@ public class MeController {
                 r.timezone(),
                 r.locale(),
                 r.themeAccent(),
-                r.themeSketchy());
+                r.themeSketchy(),
+                r.interests());
     }
 
     /**
@@ -224,6 +225,12 @@ public class MeController {
                 // configured thresholds, so the client can show a warning/downgrade banner honestly.
                 reliabilityPolicy.statusFor(user.getLateCancelCount()),
                 user.getThemeAccent(),
-                user.isThemeSketchy());
+                user.isThemeSketchy(),
+                // Saved interests (TM-775, closes the TM-514 gap). Read through UserService so the
+                // controller stays free of the interests repo — both toResponse overloads route through
+                // here, so GET /me, PATCH /me, onboarding and accept-terms all carry interests.
+                userService.interestsFor(user).stream()
+                        .map(InterestResponse::from)
+                        .toList());
     }
 }

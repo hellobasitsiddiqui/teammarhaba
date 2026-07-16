@@ -4,6 +4,7 @@ import com.teammarhaba.backend.auth.AccountState;
 import com.teammarhaba.backend.event.ReliabilityStatus;
 import com.teammarhaba.backend.user.NotificationPref;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * The authenticated caller's profile, returned by {@code GET /api/v1/me}. Identity ({@code uid}/
@@ -57,6 +58,10 @@ import java.time.Instant;
  *                             ids; {@code teal} (the default swatch) for a brand-new account
  * @param themeSketchy         whether the hand-drawn wavy/sketchy wobble is on (TM-529); {@code true}
  *                             (wobble) for a brand-new account, {@code false} = clean Paper
+ * @param interests            the caller's saved interests (TM-775 — the TM-514 gap now filled): each a
+ *                             free-text snapshot ({@code label} + {@code category}) with an optional
+ *                             source-catalogue id. An empty list means none saved. Created/replaced via
+ *                             {@code PATCH /me} and reported on {@code GET /me}. Additive, non-breaking.
  */
 public record MeResponse(
         String uid,
@@ -82,4 +87,5 @@ public record MeResponse(
         int lateCancelCount,
         ReliabilityStatus reliabilityStatus,
         String themeAccent,
-        boolean themeSketchy) {}
+        boolean themeSketchy,
+        List<InterestResponse> interests) {}

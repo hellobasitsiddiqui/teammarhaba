@@ -5,6 +5,11 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.interests.InterestCatalogue;
+import com.teammarhaba.backend.interests.InterestCatalogueRepository;
+import com.teammarhaba.backend.interests.InterestSelectionConfig;
+import com.teammarhaba.backend.interests.UserInterest;
+import com.teammarhaba.backend.interests.UserInterestRepository;
 import com.teammarhaba.backend.membership.SubscriptionRepository;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
@@ -13,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -55,16 +61,25 @@ public class UserService {
     private final AuditService audit;
     private final UserProvisioner provisioner;
     private final SubscriptionRepository subscriptions;
+    private final UserInterestRepository userInterests;
+    private final InterestCatalogueRepository catalogue;
+    private final InterestSelectionConfig interestBounds;
 
     public UserService(
             UserRepository users,
             AuditService audit,
             UserProvisioner provisioner,
-            SubscriptionRepository subscriptions) {
+            SubscriptionRepository subscriptions,
+            UserInterestRepository userInterests,
+            InterestCatalogueRepository catalogue,
+            InterestSelectionConfig interestBounds) {
         this.users = users;
         this.audit = audit;
         this.provisioner = provisioner;
         this.subscriptions = subscriptions;
+        this.userInterests = userInterests;
+        this.catalogue = catalogue;
+        this.interestBounds = interestBounds;
     }
 
     /**
@@ -224,6 +239,15 @@ public class UserService {
             changes.add(change("themeSketchy", user.isThemeSketchy(), update.themeSketchy()));
             user.setThemeSketchy(update.themeSketchy());
         }
+        // Interests (TM-775): full-set replace. A null list = field omitted = leave saved interests
+        // untouched (partial-PATCH, like every field above). A non-null list (including empty) is the
+        // user's complete new set: validate every label against the *active* catalogue, enforce the
+        // configured min/max, then delete-and-reinsert the snapshots. Category is resolved from the
+        // catalogue at save time, preserving TM-773's free-text snapshot invariant — source_interest_id
+        // stays a soft pointer, never a hard FK. Runs inside this @Transactional, so a 400 rolls back.
+        if (update.interests() != null) {
+            replaceInterests(user, update.interests(), changes);
+        }
 
         if (!changes.isEmpty()) {
             // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
@@ -238,6 +262,74 @@ public class UserService {
                     profileChangeMetadata(caller.uid(), caller.uid(), "self", changes));
         }
         return user;
+    }
+
+    /**
+     * The caller's saved interest snapshots (TM-775), owner-scoped — the read path backing the
+     * {@code interests} field on {@code GET}/{@code PATCH /api/v1/me}. Exposed here (rather than
+     * injecting the interests repo into the controller) so {@code MeController} keeps delegating all
+     * user state to this service.
+     */
+    @Transactional(readOnly = true)
+    public List<UserInterest> interestsFor(User user) {
+        return userInterests.findByUserId(user.getId());
+    }
+
+    /**
+     * Replace the caller's saved interests with the submitted label set (TM-775; full-set replace).
+     *
+     * <p>Pipeline: de-duplicate the labels (exact match, first-seen order) → enforce the DB-backed
+     * min/max from {@link InterestSelectionConfig} (default 1–3) → validate every label is a
+     * <em>current active</em> catalogue label (unknown/retired → {@code 400}) → delete the user's
+     * existing snapshots and insert the new set, copying {@code label}/{@code category} by value from
+     * the resolved catalogue row and setting {@code sourceInterestId} to its id (never client-supplied).
+     * All of this runs inside {@link #updateProfile}'s {@code @Transactional}, so the replace is atomic
+     * and any {@code 400} rolls back with no partial write.
+     */
+    private void replaceInterests(User user, List<String> requested, List<Map<String, Object>> changes) {
+        // De-duplicate by exact label, first-seen order preserved (a client double-sending a label
+        // must not inflate the count against min/max or create two identical rows).
+        List<String> wanted = new ArrayList<>(new LinkedHashSet<>(requested));
+
+        // Enforce the DB-backed selection bounds at save time (bean validation can't read these).
+        int min = interestBounds.minSelections();
+        int max = interestBounds.maxSelections();
+        if (wanted.size() < min) {
+            throw new BadRequestException("Select at least " + min + " interest" + (min == 1 ? "" : "s"));
+        }
+        if (wanted.size() > max) {
+            throw new BadRequestException("Select at most " + max + " interest" + (max == 1 ? "" : "s"));
+        }
+
+        // Catalogue-only validation: every submitted label must resolve to a current active catalogue
+        // row (one WHERE label IN (…) read). A label absent from the result is unknown or retired.
+        Map<String, InterestCatalogue> byLabel = new LinkedHashMap<>();
+        if (!wanted.isEmpty()) {
+            for (InterestCatalogue c : catalogue.findByActiveTrueAndLabelIn(wanted)) {
+                byLabel.put(c.getLabel(), c);
+            }
+            List<String> unknown =
+                    wanted.stream().filter(label -> !byLabel.containsKey(label)).toList();
+            if (!unknown.isEmpty()) {
+                throw new BadRequestException("Unknown or retired interest(s): " + String.join(", ", unknown));
+            }
+        }
+
+        // Full-set replace: clear the user's existing snapshots, then insert the resolved new set.
+        List<UserInterest> existing = userInterests.findByUserId(user.getId());
+        List<String> before = existing.stream().map(UserInterest::getLabel).toList();
+        userInterests.deleteAll(existing);
+        for (String label : wanted) {
+            InterestCatalogue c = byLabel.get(label);
+            // Copy label + category by value; the source id is a soft provenance pointer (TM-773).
+            userInterests.save(new UserInterest(user.getId(), c.getLabel(), c.getCategory(), c.getId()));
+        }
+
+        // Audit the change as one field diff (old set → new set), only when it actually changed —
+        // consistent with the no-op-edit discipline of the rest of updateProfile.
+        if (!before.equals(wanted)) {
+            changes.add(change("interests", String.join(", ", before), String.join(", ", wanted)));
+        }
     }
 
     /** A single field diff entry for the profile-change history (TM-185). Null-tolerant (old may be null). */
