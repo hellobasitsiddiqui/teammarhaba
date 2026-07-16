@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import {
   LABEL_MAX,
+  EMOJI_MAX,
   CATEGORY_MAX,
   SORT_WEIGHT_MIN,
   SORT_WEIGHT_MAX,
@@ -29,6 +30,7 @@ import {
 
 test("field caps mirror the backend DTOs", () => {
   assert.equal(LABEL_MAX, 120);
+  assert.equal(EMOJI_MAX, 16);
   assert.equal(CATEGORY_MAX, 80);
   assert.deepEqual([SORT_WEIGHT_MIN, SORT_WEIGHT_MAX], [0, 1000]);
   assert.equal(CONFIG_MIN, 1);
@@ -139,6 +141,28 @@ test("toInterestFormModel round-trips an AdminInterestResponse into form values"
   assert.equal(body.category, "Music & Nightlife");
   assert.equal(body.highlighted, true);
   assert.equal(body.sortWeight, 100);
+});
+
+// --- interest emoji (TM-805) ------------------------------------------------------------------
+
+test("validateInterestDraft accepts an emoji within the cap and a blank (no glyph)", () => {
+  assert.deepEqual(validateInterestDraft(validDraft({ emoji: "☕" })).errors, {});
+  assert.deepEqual(validateInterestDraft(validDraft({ emoji: "" })).errors, {}, "blank emoji is valid (no glyph)");
+});
+
+test("validateInterestDraft rejects an over-cap emoji", () => {
+  const { errors } = validateInterestDraft(validDraft({ emoji: "x".repeat(EMOJI_MAX + 1) }));
+  assert.ok(errors.emoji, "over-cap emoji errors");
+});
+
+test("buildInterestPayload always sends emoji ('' clears it, a glyph sets it)", () => {
+  assert.equal(buildInterestPayload(validDraft({ emoji: "  ☕ " })).emoji, "☕"); // trimmed
+  assert.equal(buildInterestPayload(validDraft({ emoji: "" })).emoji, ""); // cleared → server nulls it
+});
+
+test("toInterestFormModel pre-fills the emoji (and '' when the interest has none)", () => {
+  assert.equal(toInterestFormModel({ label: "Coffee", category: "Food & Drink", emoji: "☕" }).emoji, "☕");
+  assert.equal(toInterestFormModel({ label: "Plain", category: "Food & Drink" }).emoji, ""); // null → ""
 });
 
 // --- config (min/max selection) validation — the fail-before/pass-after regression guard on the PUT ----

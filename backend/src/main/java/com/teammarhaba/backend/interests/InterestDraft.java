@@ -7,8 +7,10 @@ package com.teammarhaba.backend.interests;
  *
  * @param label       display label, e.g. "Coffee &amp; cafés" (required, validated at the edge)
  * @param category    grouping bucket — one of {@link InterestCategories#KNOWN} (validated at the edge)
+ * @param emoji       small glyph shown beside the label (TM-805), or {@code null} for none
  * @param highlighted whether the interest is featured
  * @param sortWeight  ordering weight, or {@code null} to let the service apply the default (100 when
  *                    highlighted, else 0 — the V45 seed convention)
  */
-public record InterestDraft(String label, String category, boolean highlighted, Integer sortWeight) {}
+public record InterestDraft(
+        String label, String category, String emoji, boolean highlighted, Integer sortWeight) {}

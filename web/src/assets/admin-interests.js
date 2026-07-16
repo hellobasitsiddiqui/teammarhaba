@@ -29,6 +29,7 @@ import { clear, confirmDialog, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import {
   LABEL_MAX,
+  EMOJI_MAX,
   CATEGORIES,
   SORT_WEIGHT_MIN,
   SORT_WEIGHT_MAX,
@@ -554,6 +555,7 @@ async function mutateRetire(interest, action, successMessage) {
 // RFC-7807 `errors[].field` maps straight onto the right input).
 const FORM_FIELDS = [
   { key: "label", id: "interest-label", label: "Label", type: "text", maxLength: LABEL_MAX, required: true, hint: 'Shown in the user picker, e.g. "Coffee & cafés".' },
+  { key: "emoji", id: "interest-emoji", label: "Emoji (optional)", type: "text", maxLength: EMOJI_MAX, hint: 'A small glyph shown beside the label, e.g. "☕". Leave blank for none.' },
   { key: "category", id: "interest-category", label: "Category", type: "select", required: true, options: CATEGORY_CHOICES, hint: "One of the fixed catalogue buckets." },
   { key: "sortWeight", id: "interest-weight", label: "Sort weight (optional)", type: "number", min: SORT_WEIGHT_MIN, max: SORT_WEIGHT_MAX, hint: "Higher floats to the top. Blank = default (100 if featured, else 0)." },
   { key: "highlighted", id: "interest-featured", label: "Featured", type: "checkbox", hint: "Featured interests are promoted in the picker." },

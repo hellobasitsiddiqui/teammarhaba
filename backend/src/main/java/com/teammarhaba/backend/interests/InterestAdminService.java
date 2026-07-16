@@ -117,6 +117,9 @@ public class InterestAdminService {
 
         InterestCatalogue interest = new InterestCatalogue(
                 draft.label(), draft.category(), draft.highlighted(), weight, Instant.now());
+        // Optional emoji (TM-805): a blank/whitespace glyph is stored as null (a clean "no emoji"),
+        // matching how the client treats a null/blank emoji as "no glyph".
+        interest.setEmoji(normaliseEmoji(draft.emoji()));
 
         InterestCatalogue saved = catalogue.saveAndFlush(interest);
         // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the 201 body
@@ -152,6 +155,15 @@ public class InterestAdminService {
         if (patch.category() != null && !patch.category().equals(interest.getCategory())) {
             interest.setCategory(patch.category());
             changed.add("category");
+        }
+        // Emoji (TM-805): a present emoji is normalised (blank → null) then applied if it actually
+        // changes. null in the patch means "leave unchanged" (house PATCH convention).
+        if (patch.emoji() != null) {
+            String next = normaliseEmoji(patch.emoji());
+            if (!java.util.Objects.equals(next, interest.getEmoji())) {
+                interest.setEmoji(next);
+                changed.add("emoji");
+            }
         }
         if (patch.highlighted() != null && patch.highlighted() != interest.isHighlighted()) {
             interest.setHighlighted(patch.highlighted());
@@ -279,6 +291,19 @@ public class InterestAdminService {
 
     private static ResourceNotFoundException notFound() {
         return new ResourceNotFoundException("Interest not found.");
+    }
+
+    /**
+     * Normalise an admin-supplied emoji for storage (TM-805): trim it, and treat a blank/whitespace-only
+     * value as {@code null} — a clean "no emoji" — so the column never holds an empty string (which the
+     * client renders identically to null anyway). A {@code null} input passes straight through.
+     */
+    private static String normaliseEmoji(String emoji) {
+        if (emoji == null) {
+            return null;
+        }
+        String trimmed = emoji.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /** The two interests-selection bounds, returned by {@link #getConfig()} / {@link #setConfig}. */
