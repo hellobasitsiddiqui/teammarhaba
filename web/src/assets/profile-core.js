@@ -428,5 +428,9 @@ export function validateProfileField(field, raw) {
     const nameErr = nameFormatError(value);
     if (nameErr) return nameErr;
   }
+  if (NAME_LIKE_KEYS.has(field.key)) {
+    const nameErr = nameFormatError(value);
+    if (nameErr) return nameErr;
+  }
   return "";
 }

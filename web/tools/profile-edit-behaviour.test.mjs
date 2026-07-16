@@ -378,6 +378,16 @@ test("validateField: first name / last name / city reject purely numeric input (
   assert.equal(profile.validateField(field("city"), "St. Albans"), "", "period + space in a city is accepted");
 });
 
+test("validateField: first name / last name / city reject purely numeric input (TM-771)", () => {
+  // Ghalia's repro: "676767" in any of the three name-like fields saved with "Profile saved.".
+  // The rule lives in profile-core's validateProfileField; this pins the delegate wiring end-to-end.
+  assert.match(profile.validateField(field("firstName"), "676767"), /letter/i);
+  assert.match(profile.validateField(field("lastName"), "676767"), /letter/i);
+  assert.match(profile.validateField(field("city"), "676767"), /letter/i);
+  assert.equal(profile.validateField(field("firstName"), "Jean-Luc"), "", "hyphenated names are accepted");
+  assert.equal(profile.validateField(field("city"), "St. Albans"), "", "period + space in a city is accepted");
+});
+
 test("validateField: an empty value is always allowed (clearing a field is never blocked)", () => {
   profile.__setShell(makeShell()); // picker present (GB) — a blank national must still be allowed
   assert.equal(profile.validateField(field("age"), ""), "");
