@@ -39,6 +39,7 @@ import {
 } from "./admin-interests-core.js";
 import { ADMIN_INTERESTS_ROUTE, adminInterestNewHash, adminInterestEditHash } from "./admin-interests-route.js";
 import { clampPage } from "./admin-paging-core.js";
+import { interestEmoji } from "./interests-core.js"; // shared emoji normaliser (TM-805)
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-catalogue walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 interests)
@@ -389,7 +390,13 @@ function renderTable() {
     {},
     pageRows.map((interest) =>
       el("tr", { dataset: { interestId: String(interest.id) } }, [
-        el("td", {}, [el("span", { class: "tm-event-heading", text: interest.label || "—" })]),
+        el("td", {}, [
+          // Leading catalogue emoji (TM-805) next to the label, only when the row carries one.
+          interestEmoji(interest)
+            ? el("span", { class: "tm-admin-interest-emoji", "aria-hidden": "true", text: interestEmoji(interest) })
+            : null,
+          el("span", { class: "tm-event-heading", text: interest.label || "—" }),
+        ]),
         el("td", { class: "tm-muted", text: interest.category || "—" }),
         el("td", { class: "tm-muted", text: interest.sortWeight == null ? "—" : String(interest.sortWeight) }),
         el("td", {}, [featuredCell(interest)]),

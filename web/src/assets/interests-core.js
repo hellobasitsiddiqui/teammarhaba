@@ -22,6 +22,41 @@ export const DEFAULT_INTEREST_MIN = 1;
 export const DEFAULT_INTEREST_MAX = 3;
 
 /**
+ * The display emoji for a catalogue row (TM-805). Reads the nullable `emoji` field the public/admin
+ * catalogue projections now carry (V46 back-fills a glyph for every seed interest), trims it, and
+ * returns "" for anything absent/blank/non-string. Callers render the leading glyph ONLY when this is
+ * non-empty, so a row without an emoji degrades gracefully to a label-only chip. DOM-free + pure so the
+ * chip-render logic stays unit-testable in plain Node.
+ *
+ * @param {{emoji?: string}|null|undefined} row a catalogue row (or anything).
+ * @returns {string} the trimmed emoji glyph, or "" when there is none.
+ */
+export function interestEmoji(row) {
+  const raw = row && typeof row.emoji === "string" ? row.emoji.trim() : "";
+  return raw;
+}
+
+/**
+ * Build a label→emoji lookup from the offered catalogue (TM-805). The profile Interests-card VIEW chips
+ * render from the saved MeResponse.interests (which carry NO emoji — see InterestResponse), so the card
+ * resolves each saved label's glyph against the separately-fetched catalogue. A null/absent catalogue
+ * yields an empty map, so the card degrades to label-only chips rather than breaking.
+ *
+ * @param {Array<{label?: string, emoji?: string}>|null|undefined} catalogue the offered catalogue rows.
+ * @returns {Map<string, string>} label → non-empty emoji glyph (labels without a glyph are omitted).
+ */
+export function emojiByLabel(catalogue) {
+  const map = new Map();
+  if (!Array.isArray(catalogue)) return map;
+  for (const row of catalogue) {
+    const label = row && typeof row.label === "string" ? row.label.trim() : "";
+    const emoji = interestEmoji(row);
+    if (label && emoji) map.set(label, emoji);
+  }
+  return map;
+}
+
+/**
  * Normalise a raw interests-config payload (or null) into a clean {min, max} pair, clamped to the
  * invariants the backend enforces (min ≥ 1, max ≥ min). A null/absent/garbage config → the defaults, so
  * the card renders even when the config endpoint is unreachable (a transient failure on the public
@@ -67,10 +102,16 @@ export function savedInterestLabels(interests) {
  * the "add" affordance should show. Drives the renderer directly — the DOM half just maps each entry to
  * a chip element and reads the flags.
  *
+ * Each chip also carries its display `emoji` (TM-805), resolved by label against the offered catalogue
+ * (passed via the optional `catalogue` bound — the saved MeResponse.interests carry no emoji, so the
+ * glyph is looked up separately). A saved interest with no catalogue match (or no catalogue supplied)
+ * gets `emoji: ""` and the renderer shows a label-only chip.
+ *
  * @param {Array<{label?: string}|string>|null|undefined} interests the saved interests (MeResponse shape).
- * @param {{min?: number, max?: number}} [bounds] the selection bounds (from normaliseInterestConfig).
+ * @param {{min?: number, max?: number, catalogue?: Array<object>}} [bounds] the selection bounds (from
+ *   normaliseInterestConfig) plus, optionally, the offered catalogue rows for emoji resolution.
  * @returns {{
- *   chips: {label: string, removable: boolean}[],
+ *   chips: {label: string, removable: boolean, emoji: string}[],
  *   empty: boolean,
  *   count: number,
  *   canAdd: boolean,
@@ -79,7 +120,7 @@ export function savedInterestLabels(interests) {
  *   hint: string
  * }}
  */
-export function interestChipsModel(interests, { min = DEFAULT_INTEREST_MIN, max = DEFAULT_INTEREST_MAX } = {}) {
+export function interestChipsModel(interests, { min = DEFAULT_INTEREST_MIN, max = DEFAULT_INTEREST_MAX, catalogue } = {}) {
   const labels = savedInterestLabels(interests);
   const count = labels.length;
   const atMin = count <= min;
@@ -88,7 +129,9 @@ export function interestChipsModel(interests, { min = DEFAULT_INTEREST_MIN, max 
   // below min with a 400, so we don't offer a remove that can only fail). At/above the minimum, every
   // chip is removable.
   const removable = !atMin;
-  const chips = labels.map((label) => ({ label, removable }));
+  // Resolve each saved label's glyph from the offered catalogue (TM-805); "" when there's no match.
+  const emojis = emojiByLabel(catalogue);
+  const chips = labels.map((label) => ({ label, removable, emoji: emojis.get(label) || "" }));
   return {
     chips,
     empty: count === 0,
@@ -124,8 +167,11 @@ export function interestsHint(count, min, max) {
  *   active catalogue rows (GET /api/v1/interests/catalogue).
  * @param {string[]} selectedLabels the labels currently selected (the pending picker selection).
  * @param {{max?: number}} [bounds]
+ * Each option also carries its display `emoji` (TM-805, read straight off the catalogue row), so the
+ * ADD picker chips can render the leading glyph — "" when the row has none.
+ *
  * @returns {{
- *   groups: {category: string, options: {label: string, selected: boolean, disabled: boolean}[]}[],
+ *   groups: {category: string, options: {label: string, selected: boolean, disabled: boolean, emoji: string}[]}[],
  *   selectedCount: number,
  *   atMax: boolean
  * }}
@@ -154,6 +200,7 @@ export function catalogueGroups(catalogue, selectedLabels, { max = DEFAULT_INTER
       selected: isSelected,
       // Disabled only when at the cap AND not already selected (you can always DEselect to make room).
       disabled: atMax && !isSelected,
+      emoji: interestEmoji(row), // leading glyph for the picker chip (TM-805); "" when none.
     });
   }
   const groups = order.map((category) => ({ category, options: byCategory.get(category) }));

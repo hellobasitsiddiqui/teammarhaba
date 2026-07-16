@@ -407,11 +407,18 @@ function paintHub(profile) {
 function paintInterests(profile) {
   const body = shell?.interestsBody;
   if (!body) return;
-  const model = interestChipsModel(profile?.interests, state.interestConfig);
+  // Pass the offered catalogue (TM-805) so each saved chip resolves its leading emoji by label — the
+  // saved MeResponse.interests carry no emoji, so the glyph is looked up against the catalogue the ADD
+  // picker already loaded (best-effort; no catalogue → label-only chips, exactly as before).
+  const model = interestChipsModel(profile?.interests, { ...state.interestConfig, catalogue: state.interestCatalogue });
   clear(body);
 
   const chips = el("div", { class: "tm-pf-chips" });
   for (const chip of model.chips) {
+    // Leading catalogue emoji (TM-805), rendered only when present. Decorative → aria-hidden.
+    const emojiSpan = chip.emoji
+      ? el("span", { class: "tm-pf-chip-emoji", "aria-hidden": "true", text: chip.emoji })
+      : null;
     // A saved interest renders as a filled (accent) chip. When removable, it carries a "×" remove
     // control; at the minimum the chip stays but is non-removable (removing would 400 server-side).
     if (chip.removable) {
@@ -422,10 +429,10 @@ function paintInterests(profile) {
           "aria-label": `Remove ${chip.label}`,
           disabled: state.interestsSaving,
           onClick: () => removeInterest(chip.label),
-        }, [el("span", { text: chip.label }), el("span", { class: "tm-pf-chip-x", "aria-hidden": "true", text: "×" })]),
+        }, [emojiSpan, el("span", { text: chip.label }), el("span", { class: "tm-pf-chip-x", "aria-hidden": "true", text: "×" })]),
       );
     } else {
-      chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-on", text: chip.label }));
+      chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-on" }, [emojiSpan, el("span", { text: chip.label })]));
     }
   }
   // The "＋ add" chip opens the catalogue picker; hidden once the max is reached.
@@ -538,6 +545,10 @@ function openInterestPicker() {
       bodyWrap.append(el("h4", { class: "tm-pf-picker-cat", text: group.category }));
       const row = el("div", { class: "tm-pf-chips" });
       for (const opt of group.options) {
+        // Leading catalogue emoji (TM-805) on the picker chip, only when the row carries one.
+        const emojiSpan = opt.emoji
+          ? el("span", { class: "tm-pf-chip-emoji", "aria-hidden": "true", text: opt.emoji })
+          : null;
         row.append(
           el("button", {
             type: "button",
@@ -548,7 +559,7 @@ function openInterestPicker() {
               selected = toggleInterest(selected, opt.label, { max });
               renderPicker();
             },
-          }, opt.label),
+          }, [emojiSpan, el("span", { text: opt.label })]),
         );
       }
       bodyWrap.append(row);

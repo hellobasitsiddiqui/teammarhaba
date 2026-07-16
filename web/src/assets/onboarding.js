@@ -33,6 +33,7 @@ import {
   toInterestsPayload,
   selectedLabelsFromMe,
 } from "./onboarding-core.js";
+import { interestEmoji } from "./interests-core.js";
 
 // The three required fields and their client-side rules, mirroring the backend OnboardingRequest
 // bean validation (name/location non-blank ≤255; age 13–120) so we reject bad input before any
@@ -346,6 +347,10 @@ function chipCheck() {
 /** One toggle chip for a catalogue row — a real <button> so keyboard + aria-pressed work. The chip
  * carries its label text plus a trailing ✓ (revealed only when selected, paper "Pick interests"). */
 function buildChip(row) {
+  // Leading catalogue emoji (TM-805), rendered ONLY when the row carries one (interestEmoji → "" when
+  // absent), so a glyph-less row degrades to a label-only chip. aria-hidden + the label carries the
+  // accessible name, so the emoji is purely decorative to screen readers.
+  const emoji = interestEmoji(row);
   const button = el("button", {
     type: "button",
     class: "tm-pf-chip tm-interests-chip",
@@ -353,6 +358,7 @@ function buildChip(row) {
     "data-label": row.label,
     onClick: () => toggleInterest(row.label),
   }, [
+    emoji ? el("span", { class: "tm-interests-chip-emoji", "aria-hidden": "true", text: emoji }) : null,
     el("span", { class: "tm-interests-chip-label", text: row.label }),
     chipCheck(),
   ]);
