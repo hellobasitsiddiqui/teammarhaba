@@ -92,6 +92,7 @@ class InterestCatalogueControllerIntegrationTest extends AbstractIntegrationTest
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].label").exists())
                 .andExpect(jsonPath("$[0].category").exists())
+                .andExpect(jsonPath("$[0].emoji").exists())
                 .andExpect(jsonPath("$[0].highlighted").exists())
                 .andExpect(jsonPath("$[0].sortWeight").exists())
                 .andExpect(jsonPath("$[0].id").doesNotExist())
@@ -100,6 +101,15 @@ class InterestCatalogueControllerIntegrationTest extends AbstractIntegrationTest
                 .andExpect(jsonPath("$[0].updatedAt").doesNotExist())
                 .andExpect(jsonPath("$[0].deletedAt").doesNotExist())
                 .andExpect(jsonPath("$[0].version").doesNotExist());
+    }
+
+    @Test
+    void catalogueSurfacesTheSeededEmojiOnEachRow() throws Exception {
+        // TM-804: the V46-seeded emoji flows through PublicInterestResponse to the picker read. Find the
+        // known 'Coffee & cafés' row in the response and assert it carries its exact cup glyph.
+        mockMvc.perform(get("/api/v1/interests/catalogue").with(user("cat-emoji-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.label == 'Coffee & cafés')].emoji").value("☕"));
     }
 
     @Test
