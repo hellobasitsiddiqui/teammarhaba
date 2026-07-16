@@ -36,6 +36,17 @@ public interface InterestCatalogueRepository extends JpaRepository<InterestCatal
     List<InterestCatalogue> findAllByOrderBySortWeightDescLabelAsc();
 
     /**
+     * The USER-facing picker read (TM-776): the CURRENTLY OFFERED catalogue, ordered highlights/popular
+     * first (higher {@code sortWeight}) then alphabetically by {@code label}. Filters {@code active = true}
+     * <em>in addition</em> to the entity's {@code @SQLRestriction("deleted_at is null")}, so BOTH retirement
+     * notions are honoured — a row that is soft-deleted (tombstoned) OR merely flipped {@code active=false}
+     * is excluded. This is the exact set the onboarding interests step and the profile Interests card offer,
+     * and it mirrors the label-visibility contract of {@link #findByActiveTrueAndLabelIn} (which the pick
+     * validation uses), so a user can never see a label the submit path would then reject.
+     */
+    List<InterestCatalogue> findByActiveTrueOrderBySortWeightDescLabelAsc();
+
+    /**
      * The active (offered) catalogue rows whose label is one of the given labels, in one
      * {@code WHERE label IN (…)} read (no N+1). Honours the entity's {@code @SQLRestriction}
      * (soft-deleted/tombstoned rows are already excluded) and additionally filters {@code active = true},

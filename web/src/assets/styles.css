@@ -2143,6 +2143,67 @@ h3,
     cursor: not-allowed;
 }
 
+/* ---- Onboarding interests PICK STEP (TM-776) --------------------------------------------------
+   The step-2 picker: category-grouped toggle chips (reusing the paper .tm-pf-chip tokens), a live
+   selected-count line, and a disabled-chip state for the max cap. Token-only, so it tracks the
+   per-user accent + dark/light and the [data-sketchy="on"] wobble already on .tm-onboarding-*. */
+#onboarding-view .tm-interests-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+}
+
+#onboarding-view .tm-interests-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+/* Category heading — uppercase muted, matching the onboarding field-label convention. */
+#onboarding-view .tm-interests-group-head {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+/* Toggle chips reuse .tm-pf-chip / .tm-pf-chip-on; make them tappable buttons + focus-visible. */
+#onboarding-view .tm-interests-chips .tm-pf-chip,
+#onboarding-view .tm-interests-chips .tm-pf-chip-on {
+    cursor: pointer;
+    font: inherit;
+    line-height: 1.4;
+}
+
+#onboarding-view .tm-interests-chips .tm-pf-chip:focus-visible,
+#onboarding-view .tm-interests-chips .tm-pf-chip-on:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Max-cap: unselected chips dim + go non-interactive once the ceiling is reached. */
+#onboarding-view .tm-interests-chips .tm-pf-chip:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* Live "N of max M selected" count line. */
+#onboarding-view .tm-interests-count {
+    margin: var(--space-3) 0 0;
+    font-size: var(--fs-1);
+}
+
+/* "Skip for now" secondary action (only rendered when min is 0) — a quiet ghost next to Finish. */
+#onboarding-view .tm-interests-skip {
+    background: transparent;
+    color: var(--muted);
+    border-color: var(--border);
+    box-shadow: none;
+}
+
 /* A multi-line message input — the textarea sibling of .tm-input (TM-365). Inherits .tm-input's
    colours/border/focus; adds vertical resize + a sensible min height. */
 .tm-textarea {

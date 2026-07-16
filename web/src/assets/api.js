@@ -257,6 +257,47 @@ export async function updateMe(patch) {
 }
 
 /**
+ * GET /api/v1/interests/catalogue — the active interests catalogue for the picker (TM-776). Any
+ * signed-in user may read it (the endpoint inherits the default-authenticated chain; it is NOT the
+ * admin-only `/api/v1/admin/interests`). Returns the CURRENTLY OFFERED interests only (active + not
+ * retired), already ordered highlights/popular first then alphabetically — the same order the client
+ * re-derives when grouping. Each row is the lean public shape `{label, category, highlighted,
+ * sortWeight}` (no internal id/timestamps). A 401 will already have refreshed/redirected via
+ * {@link apiFetch}.
+ *
+ * @returns {Promise<Array<{label: string, category: string, highlighted: boolean, sortWeight: number}>>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getInterestCatalogue() {
+  const response = await apiFetch("/api/v1/interests/catalogue", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/interests/catalogue failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * GET /api/v1/interests/config — the interests min/max-selection bounds (TM-776). Any signed-in user
+ * may read it (default-authenticated chain, NOT the admin-only config endpoint). DB-backed, so it
+ * reflects an admin's runtime change. Returns `{ minSelections, maxSelections }` (seeded 1 / 3). A 401
+ * will already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @returns {Promise<{minSelections: number, maxSelections: number}>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getInterestConfig() {
+  const response = await apiFetch("/api/v1/interests/config", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/interests/config failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/me/onboarding — complete the first-login profile gate (TM-250) in one atomic call:
  * the three required minimum fields (name, location, age) are persisted AND onboarding is marked
  * complete server-side. Unlike {@link updateMe} (partial PATCH), all three are required: the backend
@@ -1455,6 +1496,8 @@ if (typeof window !== "undefined") {
     apiFetch,
     getMe,
     updateMe,
+    getInterestCatalogue,
+    getInterestConfig,
     submitOnboarding,
     completeOnboarding,
     acceptTerms,

@@ -12,9 +12,24 @@
 // shape as the edit-profile view (TM-167), so the two surfaces fail fast the same way. XSS-safety is
 // inherited from el() (textContent only — no innerHTML seam).
 
-import { getMe, submitOnboarding, ApiError } from "./api.js";
+import {
+  getMe,
+  submitOnboarding,
+  updateMe,
+  getInterestCatalogue,
+  getInterestConfig,
+  ApiError,
+} from "./api.js";
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
+import {
+  groupCatalogue,
+  selectionBounds,
+  validateSelection,
+  canFinish,
+  toInterestsPayload,
+  selectedLabelsFromMe,
+} from "./onboarding-core.js";
 
 // The three required fields and their client-side rules, mirroring the backend OnboardingRequest
 // bean validation (name/location non-blank ≤255; age 13–120) so we reject bad input before any
@@ -55,9 +70,20 @@ const FIELDS = [
 const state = {
   loading: false,
   loaded: false,
+  // ---- interests PICK STEP (TM-776) — a post-gate step in the SAME view. The atomic name/location/age
+  // gate above is untouched; interests are the separate PATCH /me follow-on, entered only AFTER the gate
+  // has lifted (onboardingCompleted=true), so a failure here can never trap a user out of the app.
+  step: "profile", // "profile" | "interests"
+  me: null, // the last GET /me (used to pre-select a returning half-onboarded user's saved picks)
+  catalogue: null, // Array<{label,category,highlighted,sortWeight}> once fetched, or null
+  bounds: { min: 1, max: 3 }, // effective selection bounds (server config, hard-min-1 floored)
+  selected: new Set(), // the labels the user has toggled on
+  interestsLoading: false,
+  catalogueFailed: false, // a non-fatal catalogue/config fetch failure → skip the step, don't trap
 };
 
 let shell = null; // { form, fields: Map<field,{input,error}>, submit } once built
+let interestsShell = null; // { finishBtn, countLine, error, chips: Map<label,button> } once built
 
 const $ = (id) => document.getElementById(id);
 
@@ -133,6 +159,7 @@ async function load() {
   // Best-effort pre-fill: a failure here is non-fatal (the user just starts from blank).
   try {
     const profile = await getMe();
+    state.me = profile; // cache for the interests step's returning-user pre-select
     prefill(profile);
   } catch (err) {
     console.warn("[onboarding] GET /api/v1/me failed (starting blank):", err?.message ?? err);
@@ -154,11 +181,15 @@ async function submit(event) {
   const original = shell.submit.textContent;
   shell.submit.textContent = "Saving…";
   try {
-    await submitOnboarding(collectBody());
+    const updated = await submitOnboarding(collectBody());
+    if (updated) state.me = updated; // freshest /me (carries any already-saved interests for pre-select)
     toast("Welcome to Circle!", { type: "success" });
-    // The gate has lifted (server now reports onboardingCompleted). Hand control back to the guard,
-    // which re-checks gating and routes the now-onboarded user on to home / their intended route.
-    onComplete();
+    // The atomic gate has lifted (server now reports onboardingCompleted). Instead of finishing here,
+    // move to the SECOND step — pick interests — in the same view (TM-776). We do NOT call onComplete()
+    // yet; that happens once interests are saved (or the fetch failed, see enterInterestsStep). This
+    // preserves the TM-250 all-or-nothing contract: the gate submitted atomically and independently of
+    // interests, which are a clean PATCH /me follow-on the onboarding endpoint could never carry.
+    await enterInterestsStep();
   } catch (err) {
     if (err instanceof ApiError && err.fieldErrors.length) {
       // Backend RFC-7807 validation: attach each message to its field; toast the leftovers.
@@ -175,6 +206,247 @@ async function submit(event) {
   } finally {
     shell.submit.disabled = false;
     shell.submit.textContent = original;
+  }
+}
+
+// ---- interests PICK STEP (TM-776) -----------------------------------------------------------
+//
+// A post-gate step in the SAME onboarding view. The atomic name/location/age gate has already lifted
+// (onboardingCompleted=true) by the time we get here, so NOTHING below can trap a user out of the app:
+// if the catalogue/config can't be fetched we skip the step and finish; if the interests PATCH fails
+// we keep the user on the step to retry (their gate submission already stuck). Interests are always
+// recoverable later from the profile Interests card.
+
+/**
+ * Enter the interests step: lazily fetch the catalogue + config in parallel, pre-select a returning
+ * user's saved picks, then re-render the card body into the picker. On any fetch failure the step is
+ * skipped entirely (a gated user is never trapped) and control hands back to the router via onComplete.
+ */
+async function enterInterestsStep() {
+  const view = $("onboarding-view");
+  if (!view) {
+    onComplete();
+    return;
+  }
+  state.interestsLoading = true;
+  try {
+    const [catalogue, config] = await Promise.all([getInterestCatalogue(), getInterestConfig()]);
+    state.catalogue = Array.isArray(catalogue) ? catalogue : [];
+    state.bounds = selectionBounds(config);
+  } catch (err) {
+    // Non-fatal: the user already passed the atomic gate. Skip the step rather than trap them; they can
+    // add interests later from the profile Interests card (I6).
+    console.warn("[onboarding] interests catalogue/config fetch failed — skipping the step:", err?.message ?? err);
+    state.catalogueFailed = true;
+    onComplete();
+    return;
+  } finally {
+    state.interestsLoading = false;
+  }
+
+  // Pre-select the returning half-onboarded user's saved picks, keeping only labels still on offer.
+  const offered = new Set(state.catalogue.map((r) => r.label));
+  state.selected = new Set(selectedLabelsFromMe(state.me).filter((label) => offered.has(label)));
+
+  state.step = "interests";
+  buildInterestsStep(view);
+}
+
+/** Repaint one chip's selected/disabled visual state from `state.selected` + the max cap. */
+function paintChip(button, label) {
+  const on = state.selected.has(label);
+  // .tm-pf-chip-on is a MODIFIER layered on top of the base .tm-pf-chip (which carries the
+  // padding/border/radius) — exactly how profile.js pairs them — so keep .tm-pf-chip always and only
+  // toggle the -on modifier. Toggling them mutually-exclusively would strip a selected chip's padding.
+  button.classList.toggle("tm-pf-chip-on", on);
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+  // Max-cap UX: once the ceiling is hit, dim/disable the UNSELECTED chips so the limit is felt before
+  // submit; selected chips always stay toggleable OFF so the user can swap a pick.
+  const atMax = state.selected.size >= state.bounds.max;
+  const disabled = atMax && !on;
+  button.disabled = disabled;
+  button.setAttribute("aria-disabled", disabled ? "true" : "false");
+}
+
+/** Repaint every chip (after any selection change) so the max-cap dimming stays consistent. */
+function repaintAllChips() {
+  if (!interestsShell) return;
+  for (const [label, value] of interestsShell.chips) {
+    // A label maps to a single button, or an array (a highlighted row rendered in Popular AND its home
+    // category) — paint every instance so both copies stay in sync.
+    const buttons = Array.isArray(value) ? value : [value];
+    for (const button of buttons) paintChip(button, label);
+  }
+}
+
+/** Update the live "N of max M selected" count line + the Finish CTA enabled state. */
+function refreshInterestsControls() {
+  if (!interestsShell) return;
+  const n = state.selected.size;
+  interestsShell.countLine.textContent = `${n} of max ${state.bounds.max} selected`;
+  interestsShell.finishBtn.disabled = !canFinish(state.selected, state.bounds);
+  // Clear any stale inline error once the selection is valid again.
+  if (canFinish(state.selected, state.bounds)) setInterestsError("");
+}
+
+/** Toggle a label in the selection, respecting the hard max, then repaint everything. */
+function toggleInterest(label) {
+  if (state.selected.has(label)) {
+    state.selected.delete(label);
+  } else {
+    if (state.selected.size >= state.bounds.max) return; // hard cap — ignore (the chip is disabled anyway)
+    state.selected.add(label);
+  }
+  repaintAllChips();
+  refreshInterestsControls();
+}
+
+/** Show/clear the inline error near the chips (mirrors setFieldError for the picker). */
+function setInterestsError(message) {
+  if (!interestsShell) return;
+  interestsShell.error.textContent = message || "";
+  interestsShell.error.hidden = !message;
+}
+
+/** One toggle chip for a catalogue row — a real <button> so keyboard + aria-pressed work. */
+function buildChip(row) {
+  const button = el("button", {
+    type: "button",
+    class: "tm-pf-chip",
+    "aria-pressed": "false",
+    "data-label": row.label,
+    text: row.label,
+    onClick: () => toggleInterest(row.label),
+  });
+  return button;
+}
+
+/** Build one group section: a muted category heading + a wrap of toggle chips. */
+function buildGroupSection(group, chips) {
+  const heading = el("h3", { class: "tm-interests-group-head", text: group.category });
+  const chipWrap = el("div", { class: "tm-pf-chips tm-interests-chips" });
+  for (const row of group.items) {
+    // A highlighted row appears in Popular AND its home category. Selection is keyed by LABEL, so the
+    // SAME <button> instance can't live in two DOM parents; build a distinct button per placement and
+    // register both under the label so a toggle repaints every copy in sync.
+    const chip = buildChip(row);
+    chipWrap.append(chip);
+    if (chips.has(row.label)) {
+      // Second placement (Popular + home): remember all instances for this label.
+      const existing = chips.get(row.label);
+      const list = Array.isArray(existing) ? existing : [existing];
+      list.push(chip);
+      chips.set(row.label, list);
+    } else {
+      chips.set(row.label, chip);
+    }
+  }
+  return el("section", { class: "tm-interests-group" }, [heading, chipWrap]);
+}
+
+/**
+ * Render the interests picker into the card body: bump the step pill to "Step 2 of 3", swap the
+ * heading + doodle, then a group section per {@link groupCatalogue} (Popular first), a live count line,
+ * an inline error slot, and a primary "Finish" CTA disabled until {@link canFinish}. A "Skip for now"
+ * link is rendered ONLY when the effective min is 0 (the seed default is 1 → hard-min-1 → no skip).
+ */
+function buildInterestsStep(view) {
+  const groups = groupCatalogue(state.catalogue);
+
+  // chips: Map<label, button | button[]> — one entry per label, holding every rendered chip instance so
+  // paintChip can keep a highlighted row's Popular + home copies visually in sync.
+  const chips = new Map();
+  const groupSections = groups.map((group) => buildGroupSection(group, chips));
+
+  const countLine = el("p", { class: "tm-interests-count tm-muted", "aria-live": "polite" });
+  const error = el("p", { class: "tm-field-error", role: "alert", hidden: true });
+
+  const finishBtn = el("button", { class: "tm-btn tm-btn-primary tm-cta", type: "button", onClick: submitInterests }, [
+    el("span", { text: "Finish" }),
+    svg(
+      "svg",
+      { class: "tm-btn-icon", viewBox: "0 0 24 24", width: 18, height: 18, fill: "none",
+        stroke: "currentColor", "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round",
+        "aria-hidden": "true", focusable: "false" },
+      [svg("path", { d: "M5 12h13M13 6l6 6-6 6" })],
+    ),
+  ]);
+
+  const actions = [finishBtn];
+  // Skip is only offered when a user is genuinely allowed to pick nothing (min 0). With the seed default
+  // min 1 the CTA simply stays disabled until at least one is chosen — no Skip link.
+  if (state.bounds.min === 0) {
+    actions.push(
+      el("button", { class: "tm-btn tm-interests-skip", type: "button", text: "Skip for now", onClick: () => onComplete() }),
+    );
+  }
+
+  const body = el("div", { class: "tm-interests-groups" }, groupSections.length
+    ? groupSections
+    // Defensive empty state: the catalogue fetch succeeded but returned nothing. Don't trap — let them finish.
+    : [el("p", { class: "tm-muted", text: "No interests to pick right now — you can add some later." })]);
+
+  clear(view).append(
+    el("div", { class: "tm-onboarding-card" }, [
+      el("div", { class: "tm-admin-head tm-onboarding-head" }, [
+        el("span", { class: "tm-step-pill", "aria-hidden": "true", text: "Step 2 of 3" }),
+        el("h2", {}, [doodle("crowd", { class: "tm-doodle-header", title: "Pick your interests" }), "Pick your interests"]),
+        svg(
+          "svg",
+          { class: "tm-onboarding-squiggle", viewBox: "0 0 180 11", preserveAspectRatio: "none", fill: "none",
+            "aria-hidden": "true", focusable: "false" },
+          [svg("path", { d: "M3 7C34 2.5 56 2.5 82 6s54 4.5 68-.5 30-2 36 1.5", stroke: "currentColor", "stroke-width": 3.2, "stroke-linecap": "round" })],
+        ),
+      ]),
+      el("p", { class: "tm-muted", text: "Choose a few things you're into so we can suggest better meetups." }),
+      body,
+      countLine,
+      error,
+      el("div", { class: "tm-form-actions" }, actions),
+    ]),
+  );
+
+  interestsShell = { finishBtn, countLine, error, chips };
+  repaintAllChips();
+  refreshInterestsControls();
+}
+
+/**
+ * Save the picked interests via PATCH /api/v1/me (interests = the array of labels). Validates
+ * client-side first (fail-fast UX mirror of the server), then submits. On success → finish (onComplete).
+ * On a server 400 (a label just got retired, or a bounds mismatch) → surface it near the chips + toast,
+ * and STAY on the step. Never re-runs the atomic onboarding POST.
+ */
+async function submitInterests() {
+  if (!interestsShell) return;
+  setInterestsError("");
+  const check = validateSelection(state.selected, state.bounds);
+  if (!check.ok) {
+    setInterestsError(check.message);
+    return;
+  }
+
+  interestsShell.finishBtn.disabled = true;
+  const original = interestsShell.finishBtn.querySelector("span")?.textContent ?? "Finish";
+  const labelSpan = interestsShell.finishBtn.querySelector("span");
+  if (labelSpan) labelSpan.textContent = "Saving…";
+  try {
+    await updateMe({ interests: toInterestsPayload(state.selected) });
+    toast("You're all set!", { type: "success" });
+    onComplete(); // interests saved → hand control back to the router, which routes the user on.
+  } catch (err) {
+    if (err instanceof ApiError) {
+      // Surface the server's message (e.g. a bounds mismatch, or a label retired since we loaded).
+      const msg = err.fieldErrors.length ? err.fieldErrors.map((fe) => fe.message).join(" ") : err.message;
+      setInterestsError(msg || "Couldn't save your interests. Please try again.");
+      toast(msg || "Couldn't save your interests. Please try again.", { type: "error" });
+    } else {
+      toast("Couldn't save your interests. Please try again.", { type: "error" });
+    }
+  } finally {
+    if (labelSpan) labelSpan.textContent = original;
+    // Re-enable per the current selection validity (a failed save leaves a valid selection re-submittable).
+    interestsShell.finishBtn.disabled = !canFinish(state.selected, state.bounds);
   }
 }
 
