@@ -19,6 +19,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.interests.InterestCatalogue;
 import com.teammarhaba.backend.interests.InterestCatalogueRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -95,8 +96,13 @@ class InterestAdminControllerIntegrationTest extends AbstractIntegrationTest {
 
     /** Seed an interest directly through the repository (label auto-prefixed for cleanup). */
     private InterestCatalogue seed(String label, boolean highlighted, int weight) {
+        // Truncate the seed timestamp to microseconds — Postgres TIMESTAMPTZ is microsecond-precision and
+        // rounds on store, so a nanosecond Instant.now() (Linux/CI) would not round-trip losslessly. Without
+        // this, the in-memory seeded.getUpdatedAt() (e.g. ...997Z) does not equal the DB-reloaded value (...Z)
+        // in the no-op-PATCH equality assertion (noOpPatchIsSilent). See blackboard TM-419 (precision flake).
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         return catalogue.saveAndFlush(
-                new InterestCatalogue(LABEL_PREFIX + label, TEST_CATEGORY, highlighted, weight, Instant.now()));
+                new InterestCatalogue(LABEL_PREFIX + label, TEST_CATEGORY, highlighted, weight, now));
     }
 
     private String createBody(String label) {
