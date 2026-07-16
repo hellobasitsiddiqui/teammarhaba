@@ -166,24 +166,9 @@
          redirect) is NOT subject to CORS and always works. The probe stays in default (cors) mode on
          purpose: where CORS allows it a real 404 still correctly disables the button; where it
          doesn't, the fetch rejects and the fail-safe .catch keeps the button live. -->
-    <script>
-        (function () {
-            var btn = document.querySelector(".btn");
-            var missing = document.getElementById("apk-missing");
-            var meta = document.getElementById("apk-meta");
-            if (!btn || !missing) return;
-            fetch(btn.getAttribute("href"), { method: "HEAD" })
-                .then(function (r) {
-                    if (!r.ok) {
-                        btn.setAttribute("aria-disabled", "true");
-                        btn.style.opacity = "0.5";
-                        btn.style.pointerEvents = "none";
-                        if (meta) meta.hidden = true;
-                        missing.hidden = false;
-                    }
-                })
-                .catch(function () { /* fail safe — leave the button enabled */ });
-        })();
-    </script>
+    <!-- Externalised to download.js (TM-768) so it runs under the strict CSP (script-src has no
+         'unsafe-inline'); an inline <script> here was silently blocked. Fails safe — the <a download>
+         link always works; see download.js for the CORS / fail-safe rationale. -->
+    <script src="./download.js"></script>
 </body>
 </html>
