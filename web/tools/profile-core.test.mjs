@@ -19,6 +19,7 @@ import {
   publicSummary,
   formatJoined,
   phoneFormatError,
+  nameFormatError,
   validateProfileField,
 } from "../src/assets/profile-core.js";
 
@@ -27,6 +28,8 @@ import {
 // phoneFormatError helper in isolation.
 const PHONE_FIELD = { key: "phone", type: "tel", maxLength: 32, pattern: "^\\+?[0-9 ()./-]{3,32}$" };
 const CITY_FIELD = { key: "city", type: "text", maxLength: 120 };
+const FIRSTNAME_FIELD = { key: "firstName", type: "text", maxLength: 255 };
+const LASTNAME_FIELD = { key: "lastName", type: "text", maxLength: 255 };
 const AGE_FIELD = { key: "age", type: "number", min: 13, max: 120 };
 const NOTIF_FIELD = { key: "notificationPref", type: "select" };
 
@@ -206,7 +209,10 @@ test("validateProfileField: the phone field applies BOTH the char-pattern AND th
 });
 
 test("validateProfileField: the phone digit guard is phone-ONLY — it must not leak to other fields (TM-752 wiring)", () => {
-  assert.equal(validateProfileField(CITY_FIELD, "12"), ""); // '12' is a fine free-text city value
+  // "Rome" has ZERO digits, so if the 7–15 digit guard leaked onto city it would be rejected here.
+  // (A numeric city like "12" is now rejected too, but by TM-771's name-like rule — tested below —
+  // not by the phone guard; this test keeps pinning that the PHONE rule stays phone-scoped.)
+  assert.equal(validateProfileField(CITY_FIELD, "Rome"), "");
 });
 
 test("validateProfileField: number field enforces integer + min/max (extraction preserves behaviour)", () => {
@@ -224,4 +230,44 @@ test("validateProfileField: notificationPref select rejects an unknown option, a
 test("validateProfileField: empty/blank is always allowed (blank = leave unchanged)", () => {
   assert.equal(validateProfileField(PHONE_FIELD, ""), "");
   assert.equal(validateProfileField(AGE_FIELD, "   "), "");
+});
+
+// TM-771: firstName/lastName/city had only a length cap, so a purely numeric value ("676767")
+// saved as a name or city with a "Profile saved." confirmation. nameFormatError adds the missing
+// name-like rule: at least one letter, and only letters/spaces/hyphens/apostrophes/periods.
+test("nameFormatError: rejects purely numeric or letter-less values (TM-771)", () => {
+  assert.notEqual(nameFormatError("676767"), "");   // Ghalia's repro value
+  assert.notEqual(nameFormatError("123 456"), "");  // digits + space, still no letter
+  assert.notEqual(nameFormatError("---"), "");      // allowed punctuation but no letter
+  assert.notEqual(nameFormatError("London2"), "");  // digits mixed into a real name
+});
+
+test("nameFormatError: accepts real names and cities, including punctuation and non-ASCII letters", () => {
+  assert.equal(nameFormatError("Ghalia"), "");
+  assert.equal(nameFormatError("O'Brien"), "");        // apostrophe
+  assert.equal(nameFormatError("Jean-Luc"), "");       // hyphen
+  assert.equal(nameFormatError("St. Albans"), "");     // period + space
+  assert.equal(nameFormatError("São Paulo"), "");      // accented letter
+  assert.equal(nameFormatError("غالية"), "");           // Arabic script
+});
+
+test("nameFormatError: empty/blank is allowed (blank = leave unchanged)", () => {
+  assert.equal(nameFormatError(""), "");
+  assert.equal(nameFormatError("   "), "");
+  assert.equal(nameFormatError(null), "");
+  assert.equal(nameFormatError(undefined), "");
+});
+
+test("validateProfileField: firstName/lastName/city apply the name-like rule (TM-771 wiring)", () => {
+  assert.notEqual(validateProfileField(FIRSTNAME_FIELD, "676767"), "");
+  assert.notEqual(validateProfileField(LASTNAME_FIELD, "676767"), "");
+  assert.notEqual(validateProfileField(CITY_FIELD, "676767"), "");
+  assert.equal(validateProfileField(FIRSTNAME_FIELD, "Ghalia"), "");
+  assert.equal(validateProfileField(LASTNAME_FIELD, "Qazi"), "");
+  assert.equal(validateProfileField(CITY_FIELD, "St. Albans"), "");
+});
+
+test("validateProfileField: the name-like rule is scoped to firstName/lastName/city only (TM-771 wiring)", () => {
+  // A digits-only phone must stay valid — the name rule must not leak onto other text-ish fields.
+  assert.equal(validateProfileField(PHONE_FIELD, "+447700900123"), "");
 });

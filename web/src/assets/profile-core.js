@@ -171,15 +171,37 @@ export function phoneFormatError(value) {
   return "";
 }
 
+/**
+ * TM-771: firstName/lastName/city carried only a length cap, so a purely numeric value ("676767")
+ * saved as a name or city. A name-like value must contain at least one letter (any script — Arabic,
+ * accented Latin, etc.), and may only use letters, combining marks, spaces, hyphens, apostrophes and
+ * periods. Returns a user-facing error, or "" when acceptable. Empty/blank is allowed (blank = leave
+ * the field unchanged), matching phoneFormatError's contract.
+ * @param {string} value the raw name/city input.
+ * @returns {string} an error message, or "" if acceptable.
+ */
+export function nameFormatError(value) {
+  const v = String(value ?? "").trim();
+  if (v === "") return "";
+  if (!/\p{L}/u.test(v) || !/^[\p{L}\p{M} .'’-]+$/u.test(v)) {
+    return "Use letters — spaces, hyphens, apostrophes and periods are fine.";
+  }
+  return "";
+}
+
+/** The Profile fields that carry the TM-771 name-like rule (a letter required, digits rejected). */
+const NAME_LIKE_KEYS = new Set(["firstName", "lastName", "city"]);
+
 /** The valid notification-preference values (TM-162) — shared by the Profile form + its validator. */
 export const NOTIFICATION_PREFS = new Set(["EMAIL", "PUSH", "BOTH"]);
 
 /**
- * Validate one Profile field's raw value against its rules (TM-162 / TM-752). Pure — returns an error
- * message, or "" if valid. Empty is always allowed (blank = leave the field unchanged). Extracted from
- * profile.js so the WHOLE rule is guarded — including that the phone field gets the 7–15 digit check
- * (phoneFormatError) applied ON TOP of its character-pattern (TM-752), and that the check is
- * phone-only. profile.js's validateField is now a thin delegate to this.
+ * Validate one Profile field's raw value against its rules (TM-162 / TM-752 / TM-771). Pure — returns
+ * an error message, or "" if valid. Empty is always allowed (blank = leave the field unchanged).
+ * Extracted from profile.js so the WHOLE rule is guarded — including that the phone field gets the
+ * 7–15 digit check (phoneFormatError) applied ON TOP of its character-pattern (TM-752), that
+ * firstName/lastName/city get the name-like check (nameFormatError, TM-771), and that each check
+ * stays scoped to its own fields. profile.js's validateField is now a thin delegate to this.
  * @param {{key:string,type?:string,min?:number,max?:number,maxLength?:number,pattern?:string}} field
  * @param {string} raw the raw input value.
  * @returns {string} an error message, or "" if valid.
@@ -207,6 +229,10 @@ export function validateProfileField(field, raw) {
   if (field.key === "phone") {
     const phoneErr = phoneFormatError(value);
     if (phoneErr) return phoneErr;
+  }
+  if (NAME_LIKE_KEYS.has(field.key)) {
+    const nameErr = nameFormatError(value);
+    if (nameErr) return nameErr;
   }
   return "";
 }

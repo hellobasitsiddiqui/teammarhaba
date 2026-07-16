@@ -46,10 +46,14 @@ import { profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE } from "./mem
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
 // Keeping a single declarative list keeps the form, the read-back, and the patch builder in sync.
 const TEXT_MAX = 255;
+// firstName/lastName/city are name-like (TM-771): validateProfileField requires at least one letter
+// and rejects digits, so a purely numeric "name" can no longer save. The hint mirrors the age/phone
+// fields' pattern of telling the user the rule up front.
+const NAME_HINT = "Letters, spaces, hyphens and apostrophes only.";
 const FIELDS = [
-  { key: "firstName", label: "First name", type: "text", maxLength: TEXT_MAX, autocomplete: "given-name" },
-  { key: "lastName", label: "Last name", type: "text", maxLength: TEXT_MAX, autocomplete: "family-name" },
-  { key: "city", label: "City", type: "text", maxLength: TEXT_MAX, autocomplete: "address-level2" },
+  { key: "firstName", label: "First name", type: "text", maxLength: TEXT_MAX, autocomplete: "given-name", hint: NAME_HINT },
+  { key: "lastName", label: "Last name", type: "text", maxLength: TEXT_MAX, autocomplete: "family-name", hint: NAME_HINT },
+  { key: "city", label: "City", type: "text", maxLength: TEXT_MAX, autocomplete: "address-level2", hint: NAME_HINT },
   {
     key: "age",
     label: "Age",

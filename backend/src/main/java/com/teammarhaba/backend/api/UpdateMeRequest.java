@@ -16,6 +16,11 @@ import jakarta.validation.constraints.Size;
  *
  * <ul>
  *   <li>{@code age} — bounded to a sensible human range (13–120).
+ *   <li>{@code firstName}/{@code lastName}/{@code city} — name-like text (TM-771): must contain at
+ *       least one letter (any script), and only letters, combining marks, spaces, hyphens,
+ *       apostrophes and periods are allowed — a purely numeric value can no longer persist as a
+ *       name or city. An empty string is accepted (clear/leave blank), consistent with
+ *       {@code phone}. Mirrored client-side in {@code profile-core.js} {@code nameFormatError}.
  *   <li>{@code phone} — lenient pattern: digits, spaces and common separators, optional leading
  *       {@code +}; we do not attempt to verify a real, dialable number. An empty string is also
  *       accepted (clear/leave blank), consistent with the optional {@code @Size} text fields.
@@ -27,9 +32,9 @@ import jakarta.validation.constraints.Size;
  * </ul>
  *
  * @param displayName      the public display name
- * @param firstName        given name
- * @param lastName         family name
- * @param city             free-text city
+ * @param firstName        given name (name-like, TM-771)
+ * @param lastName         family name (name-like, TM-771)
+ * @param city             city name (name-like, TM-771)
  * @param age              age in years, 13–120
  * @param phone            lenient free-text phone number
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -44,9 +49,9 @@ import jakarta.validation.constraints.Size;
  */
 public record UpdateMeRequest(
         @Size(max = 255) String displayName,
-        @Size(max = 255) String firstName,
-        @Size(max = 255) String lastName,
-        @Size(max = 255) String city,
+        @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String firstName,
+        @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String lastName,
+        @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String city,
         @Min(13) @Max(120) Integer age,
         @Size(max = 32) @Pattern(regexp = "^$|^\\+?[0-9 ()./-]{3,32}$", message = "must be a valid phone number")
                 String phone,
@@ -55,4 +60,15 @@ public record UpdateMeRequest(
         @Size(max = 35) String locale,
         @Pattern(regexp = "^(teal|indigo|coral|amber|plum|ink)$", message = "must be a valid accent swatch")
                 String themeAccent,
-        Boolean themeSketchy) {}
+        Boolean themeSketchy) {
+
+    /**
+     * The TM-771 name-like rule shared by {@code firstName}/{@code lastName}/{@code city}: at least
+     * one letter (any script — the lookahead), and only letters, combining marks, spaces, hyphens,
+     * apostrophes and periods. {@code ^$} keeps the empty-string clear semantics.
+     */
+    static final String NAME_LIKE = "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$";
+
+    static final String NAME_LIKE_MESSAGE =
+            "must contain letters (spaces, hyphens, apostrophes and periods are allowed)";
+}
