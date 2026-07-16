@@ -706,6 +706,10 @@
     <!-- Client auth guard + hash router (TM-109): gates #/home behind sign-in, redirects
          signed-out users to #/login and returns them after sign-in, drives the nav. -->
     <script type="module" src="/assets/router.js"></script>
+    <!-- TM-665 TEMPORARY overflow highlighter: inert unless loaded with `?debug=overflow`. Outlines any
+         element poking past the right edge + lists them in a banner, to diagnose the Android profile
+         clip on-device (the emulator doesn't reproduce it). REMOVE with the module once diagnosed. -->
+    <script type="module" src="/assets/overflow-debug.js"></script>
     <!-- Notification panel (TM-456): the bell-opened dropdown listing the caller's notifications from
          the feed API (TM-454) — chat activity grouped per event thread, admin/system items ungrouped.
          Self-registers window.tmNotificationPanel, the open-seam TM-455's bell hands off to (it falls
