@@ -1921,6 +1921,27 @@ h3,
     min-width: 0;
 }
 
+/* TM-781: the phone country picker shares the fill-row with the national input. A <select>'s
+   intrinsic (flex-basis: auto) width is its WIDEST option — "🇻🇨 Saint Vincent and the Grenadines +1"
+   — so left unconstrained it would out-flex the number input to a sliver at phone widths. Cap the
+   picker and keep the national input the dominant share of the row; min-width: 0 lets the closed
+   control truncate long option text instead of forcing the row wider. */
+.tm-phone-row .tm-phone-country {
+    flex: 0 1 40%;
+    max-width: 11rem;
+    min-width: 0;
+}
+
+/* At phone widths the 40%-of-row select still lands within ~1px of the viewport edge (Chromium
+   gives a closed <select> a hair more paint width than its flex box), which tripped the
+   responsive-mobile no-horizontal-scroll guard by 1-2px. A tighter cap buys real headroom; the
+   truncated option text is fine on a phone — the full name is visible in the opened list. */
+@media (max-width: 480px) {
+    .tm-phone-row .tm-phone-country {
+        max-width: 8rem;
+    }
+}
+
 .tm-field-label {
     font-size: 0.85rem;
     font-weight: 600;

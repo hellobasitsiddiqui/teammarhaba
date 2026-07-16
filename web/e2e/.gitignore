@@ -1,4 +1,6 @@
-node_modules/
+# No trailing slash: dev setups symlink node_modules to a shared install, and `pattern/` only
+# matches real directories — the bare name also catches the symlink so it can't be staged.
+node_modules
 package-lock.json
 test-results/
 playwright-report/

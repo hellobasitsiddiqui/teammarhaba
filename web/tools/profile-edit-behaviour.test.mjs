@@ -18,6 +18,18 @@
 //   • profileLoadRendersRetryableErrorState — a failed GET /me sets a retryable error and renderStatus()
 //     paints a Retry control instead of hanging on the loading state.
 //
+// TM-781 (mandatory phone country picker) adds behavioural coverage for the renderer wiring:
+//   • buildField(phone) renders the picker BEFORE the national input, options read
+//     "<emoji flag> <Country name> +<dial>", GB/AE pinned first, and the picker always has a selection;
+//   • fillForm splits a saved E.164 back into picker + national (longest dial wins), soft-defaults
+//     the picker from the city when no phone is saved (without overriding an explicit user pick),
+//     and puts a legacy bare number into the explicit confirm-country state;
+//   • collectPatch composes E.164 from picker + national on save (blank stays blank — never a
+//     dial-code-only value) and save is blocked while the legacy confirm state is unresolved;
+//   • (review fixes) an untouched phone survives an unrelated save byte-identical — NANP secondary
+//     codes and Italy's kept trunk 0 included — and the confirm-country prompt marks the PICKER
+//     (not the national input) aria-invalid.
+//
 // profile.js STATICALLY imports the app's ES modules (api.js → Firebase CDN chain, ui.js, auth.js, …),
 // so it cannot be `import`ed under `node --test`. Like storage-validate-avatar.test.mjs we load the REAL
 // source and evaluate it as a data: URL, but here we ALSO inject the module's dependencies (a tiny fake
@@ -81,6 +93,11 @@ function fakeEl(tag = "div") {
       },
     },
     _children: [],
+    // Captured listeners so tests can drive user events (e.g. the phone country picker's `change`).
+    _listeners: {},
+    addEventListener(type, fn) {
+      this._listeners[type] = fn;
+    },
     setAttribute(k, v) {
       this._attrs[k] = String(v);
     },
@@ -153,14 +170,16 @@ function loadProfileModule(deps) {
     "  clear, el, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
-    "  validateProfileField,\n" +
+    "  validateProfileField, NOTIFICATION_PREFS,\n" +
+    "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
+    "  COUNTRIES, flagOf,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
 
   // A test seam appended to the eval copy only: reach the module-private shell/state + internals.
   const seam = "\nexport function __setShell(s){ shell = s; }\n" +
     "export function __getState(){ return state; }\n" +
-    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS };\n";
+    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField };\n";
 
   const stripped = withoutImports.replace(/gstatic\.com|from ["']\.\//, "");
   assert.doesNotMatch(preamble + stripped, /^import[\s\S]*?from/m, "all top-level imports must be replaced before eval");
@@ -175,6 +194,10 @@ function loadProfileModule(deps) {
 // paintHub paints exactly what ships; the network + UI functions are controllable fakes.
 const coreUrl = new URL("../src/assets/profile-core.js", import.meta.url);
 const core = await import(coreUrl);
+// The country picker data (TM-781) — import-safe pure data, so the REAL list/flags are injected and
+// the option-rendering test proves the exact shipped "<flag> <name> +<dial>" strings.
+const countriesUrl = new URL("../src/assets/countries.js", import.meta.url);
+const countries = await import(countriesUrl);
 const membershipTierUrl = new URL("../src/assets/membership-tier.js", import.meta.url);
 
 let getMeImpl = async () => ({});
@@ -217,6 +240,20 @@ const deps = {
   // profile.js's validateField delegates to the pure validateProfileField in profile-core.js (TM-763):
   // inject the REAL one so the eval copy's validation runs instead of throwing ReferenceError under Node 20.
   validateProfileField: core.validateProfileField,
+  // fillForm reads NOTIFICATION_PREFS for the select default — inject the real set (it was never
+  // needed before TM-781 because no test exercised fillForm through the eval copy).
+  NOTIFICATION_PREFS: core.NOTIFICATION_PREFS,
+  // The TM-781 phone-picker pure logic + country data — the REAL implementations, so these tests
+  // prove the shipped split/compose/default rules through the renderer's own wiring.
+  splitE164: core.splitE164,
+  composeE164: core.composeE164,
+  defaultCountryFor: core.defaultCountryFor,
+  phonePartsError: core.phonePartsError,
+  // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
+  // input) is the control at fault — the real constant, so the comparison is the shipped one.
+  PHONE_PICK_COUNTRY_MESSAGE: core.PHONE_PICK_COUNTRY_MESSAGE,
+  COUNTRIES: countries.COUNTRIES,
+  flagOf: countries.flagOf,
   // membership-tier.js is import-safe (no CDN); use the real pure mapping.
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
   membershipEnabled: () => false,
@@ -234,6 +271,10 @@ function field(key) {
 }
 
 // Build a fake shell whose fields expose { input:{value} } — the surface collectPatch/validateAll read.
+// The phone entry also carries the TM-781 `country` picker: a fake <select> whose .value is the
+// selected iso2 ("" = the legacy confirm-country placeholder). Defaults to GB — like the real
+// picker, it always has a selection; pass `phoneCountry` in `values` to override (or "" to start
+// in the confirm state).
 function makeShell(values = {}) {
   const fields = new Map();
   for (const f of profile.FIELDS) {
@@ -241,7 +282,13 @@ function makeShell(values = {}) {
     input.value = values[f.key] ?? "";
     const errorNode = wireClassList(fakeEl("p"));
     errorNode.hidden = true;
-    fields.set(f.key, { input, error: errorNode });
+    const entry = { input, error: errorNode };
+    if (f.key === "phone") {
+      const country = wireClassList(fakeEl("select"));
+      country.value = values.phoneCountry ?? "GB";
+      entry.country = country;
+    }
+    fields.set(f.key, entry);
   }
   const saveBtn = wireClassList(fakeEl("button"));
   saveBtn.textContent = "Save changes";
@@ -302,12 +349,23 @@ test("validateField: age mirrors the backend 13–120 integer range", () => {
   assert.match(profile.validateField(age, "36.5"), /whole number/, "a non-integer age is rejected");
 });
 
-test("validateField: phone mirrors the backend lenient pattern", () => {
+// TM-781 contract change: the phone input now holds the NATIONAL number and validateField reads the
+// country picker beside it — the old whole-value "lenient pattern" test is superseded by this pair.
+test("validateField: phone validates the (picker, national) pair (TM-781)", () => {
   const phone = field("phone");
-  assert.equal(profile.validateField(phone, "+44 20 7946 0958"), "", "a valid lenient phone is accepted");
-  assert.equal(profile.validateField(phone, "(020) 7946-0958"), "", "separators are allowed");
+  profile.__setShell(makeShell({ phoneCountry: "GB" }));
+  assert.equal(profile.validateField(phone, "7700 900123"), "", "national number + picked country is accepted");
+  assert.equal(profile.validateField(phone, "(020) 7946-0958"), "", "separators are still allowed");
   assert.match(profile.validateField(phone, "not-a-phone!"), /invalid/i, "letters/'!' fail the pattern");
-  assert.match(profile.validateField(phone, "12"), /invalid/i, "too short (min 3) fails the pattern");
+  assert.match(profile.validateField(phone, "12"), /7 to 15/, "too few digits fails the TM-752 guard");
+  assert.match(
+    profile.validateField(phone, "+44 7700 900123"),
+    /country|national/i,
+    "a pasted +dial number is redirected to the picker (never double-composed)",
+  );
+  // The legacy confirm-country state ('' selection) blocks any non-blank number until confirmed.
+  profile.__setShell(makeShell({ phoneCountry: "" }));
+  assert.match(profile.validateField(phone, "7700900123"), /country/i);
 });
 
 test("validateField: first name / last name / city reject purely numeric input (TM-771)", () => {
@@ -321,7 +379,7 @@ test("validateField: first name / last name / city reject purely numeric input (
 });
 
 test("validateField: an empty value is always allowed (clearing a field is never blocked)", () => {
-  // Mirrors the backend treating missing/blank as 'leave unchanged' — the browser must not block it.
+  profile.__setShell(makeShell()); // picker present (GB) — a blank national must still be allowed
   assert.equal(profile.validateField(field("age"), ""), "");
   assert.equal(profile.validateField(field("phone"), "   "), "");
   assert.equal(profile.validateField(field("firstName"), ""), "");
@@ -424,6 +482,158 @@ test("load surfaces a retryable error state (with a Retry control) when GET /me 
     // The loading-skeleton class is cleared so the hub skeleton never shimmers forever on a failure.
     assert.equal(shell.root.classList.contains("tm-pf-loading"), false);
   });
+});
+
+// ---- TM-781: phone country picker renderer wiring ---------------------------------------------
+
+test("buildField(phone): the picker sits BEFORE the input and options read '<flag> <name> +<dial>'", () => {
+  profile.__setShell(makeShell()); // the listeners' setFieldError path needs a shell to write to
+  const built = profile.buildField(field("phone"));
+
+  assert.ok(built.country, "the phone field exposes its country picker");
+  // Option 0 is the (disabled, hidden) legacy confirm-country placeholder — selectable only
+  // programmatically, so a user can never move the picker back to "no country".
+  const opts = built.country._children;
+  assert.equal(opts[0].getAttribute("value"), "");
+  assert.equal(opts[0]._textContent, "Confirm country…");
+  assert.equal(opts[0].disabled, true);
+  // Options 1+2 are the pinned pair, in the exact "<emoji flag> <Country name> +<dial>" format.
+  assert.equal(opts[1].getAttribute("value"), "GB");
+  assert.equal(opts[1]._textContent, "🇬🇧 United Kingdom +44");
+  assert.equal(opts[2].getAttribute("value"), "AE");
+  assert.equal(opts[2]._textContent, "🇦🇪 United Arab Emirates +971");
+  assert.equal(opts.length, countries.COUNTRIES.length + 1, "every country is offered (plus the placeholder)");
+
+  // The picker renders BEFORE the national input inside the field row (the product rule).
+  const row = built.wrapper._children[1]; // [label, control-row, hint, error]
+  assert.equal(row._children[0], built.country);
+  assert.equal(row._children[1], built.input);
+
+  // The picker always has a selection (GB pre-load; fillForm applies the real value), and is labelled.
+  assert.equal(built.country.value, "GB");
+  assert.equal(built.country.getAttribute("aria-label"), "Phone country");
+
+  // A user change marks the pick as explicit — fillForm's soft default must never override it.
+  built.country._listeners.change();
+  assert.equal(built.country.getAttribute("data-user-picked"), "true");
+});
+
+test("fillForm splits a saved E.164 back into picker + national — longest dial wins (TM-781)", () => {
+  const shell = makeShell();
+  profile.__setShell(shell);
+  currentUserImpl = () => null;
+  profile.fillForm({ phone: "+12425550123", city: "Nassau", notificationPref: "EMAIL" });
+
+  assert.equal(shell.fields.get("phone").country.value, "BS", "+1242 (Bahamas) wins over +1 (US)");
+  // The national part keeps its NANP area code — Bahamas composes on the shared "+1", so a later
+  // save reproduces the stored value exactly (the review's split/compose symmetry fix).
+  assert.equal(shell.fields.get("phone").input.value, "2425550123", "the input holds only the national part");
+});
+
+// TM-781 review (HIGH + MEDIUM): collectPatch re-composes and re-sends the phone on EVERY save, so
+// split→compose asymmetry corrupted stored numbers the user never touched — a +1829… Dominican
+// number re-composed onto +1809… (a different subscriber), and Italy's kept trunk 0 was stripped.
+// Prove through the shipped fill→collect wiring that an untouched phone survives byte-identical.
+test("an unrelated save never rewrites a stored phone — NANP secondary codes and Italy included", () => {
+  const stored = ["+18295551234", "+18495551234", "+19395551234", "+16585551234", "+390612345678", "+447700900123"];
+  for (const phone of stored) {
+    const shell = makeShell({ firstName: "Ada" });
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    profile.fillForm({ phone, city: "London" }); // the user then edits e.g. their city and saves
+    const patch = profile.collectPatch();
+    assert.equal(patch.phone, phone, `${phone} must survive an untouched fill → save round-trip`);
+  }
+});
+
+test("fillForm soft-defaults the picker from the city — but an explicit user pick survives (TM-781)", () => {
+  const shell = makeShell();
+  profile.__setShell(shell);
+  currentUserImpl = () => null;
+
+  profile.fillForm({ city: "Dubai" });
+  assert.equal(shell.fields.get("phone").country.value, "AE", "city hint applies when no phone is saved");
+
+  profile.fillForm({ city: "Springfield" });
+  assert.equal(shell.fields.get("phone").country.value, "GB", "unknown city falls back to GB");
+
+  // The user explicitly picks SA; a later refill (e.g. their city now says London) must NOT flip it —
+  // the city is only ever a SOFT default.
+  const country = shell.fields.get("phone").country;
+  country.value = "SA";
+  country.setAttribute("data-user-picked", "true");
+  profile.fillForm({ city: "London" });
+  assert.equal(country.value, "SA", "an explicit selection survives a refill");
+});
+
+test("fillForm puts a legacy bare number into the confirm-country state and save is blocked (TM-781)", async () => {
+  await withFakeDocumentAsync(async () => {
+    TOASTS = [];
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    profile.fillForm({ phone: "07700 900123" }); // stored pre-TM-781: no +dial → country unknown
+
+    const entry = shell.fields.get("phone");
+    assert.equal(entry.country.value, "", "the picker shows the explicit confirm-country placeholder");
+    assert.equal(entry.input.value, "07700 900123", "the legacy digits are preserved for the user");
+    assert.equal(entry.error.hidden, false, "the confirm-country prompt is painted immediately");
+    assert.match(entry.error.textContent, /country/i);
+
+    // Saving without confirming a country is blocked client-side — PATCH /me is never sent.
+    let patched = false;
+    updateMeImpl = async () => { patched = true; return {}; };
+    await profile.save({ preventDefault() {} });
+    assert.equal(patched, false, "no PATCH while the country is unconfirmed");
+    assert.ok(TOASTS.some((t) => t.opts?.type === "error"), "the user is told to fix the highlighted field");
+
+    // Confirming a country unblocks the save: the same digits now compose to E.164.
+    entry.country.value = "GB";
+    let sent = null;
+    updateMeImpl = async (patch) => { sent = patch; return { phone: patch.phone }; };
+    await profile.save({ preventDefault() {} });
+    assert.equal(sent?.phone, "+447700900123", "confirmed country + legacy digits compose to E.164");
+  });
+});
+
+// TM-781 review: the confirm-country prompt is a defect of the PICKER (its value is the ""
+// placeholder), so aria-invalid + the red ring must land on the select — a screen-reader user
+// tabbing through must not hear the perfectly fine national input announced as invalid.
+test("the confirm-country prompt marks the PICKER invalid, not the national input", () => {
+  const shell = makeShell();
+  profile.__setShell(shell);
+  currentUserImpl = () => null;
+  profile.fillForm({ phone: "07700 900123" }); // legacy bare number → the confirm-country state
+
+  const entry = shell.fields.get("phone");
+  assert.equal(entry.country.getAttribute("aria-invalid"), "true", "the select is the control at fault");
+  assert.ok(entry.country.classList.contains("tm-field-invalid"), "the red ring is on the select");
+  assert.equal(entry.input.getAttribute("aria-invalid"), null, "the (fine) national input is not blamed");
+  assert.equal(entry.input.classList.contains("tm-field-invalid"), false);
+
+  // Confirming a country clears the picker's invalid state (the live re-validation path).
+  entry.country.value = "GB";
+  profile.setFieldError("phone", profile.validateField(field("phone"), entry.input.value));
+  assert.equal(entry.country.getAttribute("aria-invalid"), null);
+  assert.equal(entry.country.classList.contains("tm-field-invalid"), false);
+  assert.equal(entry.error.hidden, true, "the prompt is gone once a country is picked");
+
+  // A digit-guard error still faults the INPUT, exactly as before the picker existed.
+  profile.setFieldError("phone", "Enter a valid phone number (7 to 15 digits).");
+  assert.equal(entry.input.getAttribute("aria-invalid"), "true");
+  assert.equal(entry.country.getAttribute("aria-invalid"), null);
+});
+
+test("collectPatch composes the E.164 phone from picker + national — blank stays blank (TM-781)", () => {
+  let shell = makeShell({ firstName: "Ada", phone: " 07700 900123 ", phoneCountry: "GB" });
+  profile.__setShell(shell);
+  let patch = profile.collectPatch();
+  assert.equal(patch.phone, "+447700900123", "composed on save: +dial + national (trunk 0 stripped)");
+
+  shell = makeShell({ firstName: "Ada", phone: "   ", phoneCountry: "AE" });
+  profile.__setShell(shell);
+  patch = profile.collectPatch();
+  assert.ok(!("phone" in patch), "a blank national number is omitted — never a dial-code-only '+971'");
 });
 
 // An async variant of withFakeDocument.

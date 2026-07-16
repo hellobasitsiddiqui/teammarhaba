@@ -37,7 +37,15 @@ import {
   publicSummary,
   validateProfileField,
   NOTIFICATION_PREFS,
+  splitE164,
+  composeE164,
+  defaultCountryFor,
+  phonePartsError,
+  PHONE_PICK_COUNTRY_MESSAGE,
 } from "./profile-core.js";
+// Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
+// CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
+import { COUNTRIES, flagOf } from "./countries.js";
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
 // and "Manage" links to the membership screen when the feature flag is on.
@@ -69,10 +77,14 @@ const FIELDS = [
     label: "Phone",
     type: "tel",
     maxLength: 32,
-    autocomplete: "tel",
-    // Same shape the backend enforces (UpdateMeRequest.phone pattern): optional +, digits/space/()./- .
+    autocomplete: "tel-national",
+    // The input holds only the NATIONAL number since TM-781 (the +dial comes from the country
+    // picker rendered beside it). This lenient char-pattern is DELIBERATELY looser than the
+    // backend's tightened E.164 stored-value pattern: the strict shape (mandatory +dial, digit
+    // floor/ceiling) is enforced by the pure phone rules in profile-core (phonePartsError), which
+    // give targeted messages ("pick a country…") where a bare pattern-mismatch could not.
     pattern: "^\\+?[0-9 ()./-]{3,32}$",
-    hint: "Digits, spaces and + ( ) . / - only.",
+    hint: "Pick a country, then the national number — digits, spaces and ( ) . / - only.",
   },
   {
     key: "notificationPref",
@@ -140,24 +152,42 @@ const $ = (id) => document.getElementById(id);
  * what the user actually typed so we never block clearing a field.
  */
 function validateField(field, raw) {
-  // Thin delegate to the pure, unit-tested rule in profile-core.js (TM-162/TM-752). Keeping the logic
-  // there means the behaviour — incl. the phone 7–15 digit guard on top of the char-pattern — is
-  // guarded by tests, not just this DOM shell.
+  // Thin delegate to the pure, unit-tested rules in profile-core.js (TM-162/TM-752). Keeping the
+  // logic there means the behaviour — incl. the phone 7–15 digit guard on top of the char-pattern —
+  // is guarded by tests, not just this DOM shell.
+  if (field.key === "phone") {
+    // TM-781: the phone is a (country picker, national number) PAIR — validated by the pure
+    // phonePartsError so the whole rule (the confirm-country gate that blocks saving a legacy bare
+    // number + the TM-752 digit guard on the national part) lives in profile-core, not here.
+    const country = shell?.fields.get("phone")?.country;
+    return phonePartsError(country ? country.value : "", raw);
+  }
   return validateProfileField(field, raw);
 }
 
-/** Show/clear the inline error message for a field and reflect it on the input for a11y. */
+/** Show/clear the inline error message for a field and reflect it on the offending control for a11y. */
 function setFieldError(key, message) {
   const f = shell?.fields.get(key);
   if (!f) return;
   f.error.textContent = message || "";
   f.error.hidden = !message;
-  if (message) {
-    f.input.setAttribute("aria-invalid", "true");
-    f.input.classList.add("tm-field-invalid");
+  // TM-781: the confirm-country prompt is a defect of the COUNTRY PICKER (its value is the ""
+  // placeholder), not of the national input — so aria-invalid + the red ring must land on the
+  // select the user actually has to change, and the (perfectly fine) input must not be blamed.
+  // Every other message faults the input, exactly as before the picker existed.
+  const countryAtFault = Boolean(message) && Boolean(f.country) && message === PHONE_PICK_COUNTRY_MESSAGE;
+  setControlInvalid(f.input, Boolean(message) && !countryAtFault);
+  if (f.country) setControlInvalid(f.country, countryAtFault);
+}
+
+/** Reflect one control's invalid state: aria-invalid for AT + the tm-field-invalid ring for sighted users. */
+function setControlInvalid(control, invalid) {
+  if (invalid) {
+    control.setAttribute("aria-invalid", "true");
+    control.classList.add("tm-field-invalid");
   } else {
-    f.input.removeAttribute("aria-invalid");
-    f.input.classList.remove("tm-field-invalid");
+    control.removeAttribute("aria-invalid");
+    control.classList.remove("tm-field-invalid");
   }
 }
 
@@ -181,8 +211,14 @@ function validateAll() {
 /** Populate the inputs from a MeResponse (null/undefined → empty; notificationPref defaults sensibly). */
 function fillForm(profile) {
   for (const field of FIELDS) {
-    const input = shell.fields.get(field.key).input;
+    const entry = shell.fields.get(field.key);
     const value = profile?.[field.key];
+    if (field.key === "phone") {
+      // TM-781: the stored phone maps onto TWO controls (country picker + national input).
+      fillPhoneField(entry, value, profile);
+      continue;
+    }
+    const input = entry.input;
     if (field.type === "select") {
       input.value = NOTIFICATION_PREFS.has(value) ? value : "EMAIL";
     } else {
@@ -199,6 +235,49 @@ function fillForm(profile) {
   }
   // Paint the paper-profile hub summary (identity + completeness) from the same /me payload.
   paintHub(profile);
+}
+
+/**
+ * Fill the phone country picker + national input from the stored value (TM-781). Three states:
+ *
+ *   • saved E.164 ("+447700900123") — split back into picker + national. The SAVED country always
+ *     wins here, so a later city change can never flip an existing phone's country.
+ *   • legacy bare number ("07700 900123", stored before TM-781) — incomplete: the picker moves to
+ *     the disabled "Confirm country…" placeholder and the confirm prompt is painted immediately;
+ *     validateAll() blocks saving until the user picks a real country (an explicit product rule —
+ *     we must not guess which country a bare number belongs to).
+ *   • no saved phone — SOFT-default the picker from the user's city (curated map, fallback GB),
+ *     unless the user already picked a country themselves this session (data-user-picked, set by
+ *     the picker's change listener) — an explicit selection always outranks the soft default.
+ *
+ * @param {{input: HTMLElement, error: HTMLElement, country: HTMLElement|undefined}} entry the
+ *   phone field's controls from the shell.
+ * @param {*} value the stored `me.phone`.
+ * @param {object|null|undefined} profile the full MeResponse (for the city soft-default).
+ */
+function fillPhoneField(entry, value, profile) {
+  const saved = value == null ? "" : String(value).trim();
+  if (!entry.country) {
+    // Defensive: no picker built (shouldn't happen) — fall back to the pre-TM-781 raw fill.
+    entry.input.value = saved;
+    return;
+  }
+  const parsed = splitE164(saved);
+  if (parsed) {
+    entry.country.value = parsed.iso2;
+    entry.input.value = parsed.national;
+    setFieldError("phone", ""); // a clean stored value clears any stale confirm-state prompt
+  } else if (saved !== "") {
+    entry.country.value = ""; // the disabled placeholder — the explicit confirm-country state
+    entry.input.value = saved;
+    setFieldError("phone", phonePartsError("", saved));
+  } else {
+    entry.input.value = "";
+    if (!entry.country.getAttribute("data-user-picked")) {
+      entry.country.value = defaultCountryFor({ phone: "", city: profile?.city });
+    }
+    setFieldError("phone", "");
+  }
 }
 
 /**
@@ -240,7 +319,18 @@ function paintHub(profile) {
 function collectPatch() {
   const patch = {};
   for (const field of FIELDS) {
-    const raw = (shell.fields.get(field.key).input.value ?? "").trim();
+    const entry = shell.fields.get(field.key);
+    const raw = (entry.input.value ?? "").trim();
+    if (field.key === "phone") {
+      // TM-781: storage is E.164, composed from the picker + national input on save. composeE164
+      // returns "" for a blank national number — so blank stays blank (omitted, matching the
+      // untouched-means-no-change PATCH semantics) and a dial-code-only "+44" can never be sent.
+      // An unconfirmed country with a number present also composes to "", but validateAll() has
+      // already blocked that path before collectPatch runs.
+      const composed = composeE164(entry.country ? entry.country.value : "", raw);
+      if (composed !== "") patch[field.key] = composed;
+      continue;
+    }
     if (field.type === "number") {
       // Only send age when present; an empty number field means "no change" rather than 0.
       if (raw !== "") patch[field.key] = Number(raw);
@@ -557,12 +647,49 @@ function buildField(field) {
   // Live-clear an inline error as soon as the user starts correcting the field.
   input.addEventListener("input", () => setFieldError(field.key, validateField(field, input.value)));
 
+  // TM-781: the phone field gets a mandatory country picker rendered BEFORE the national-number
+  // input. Options read "<emoji flag> <Country name> +<dial>" from the curated countries.js list
+  // (GB then AE pinned, rest name-sorted); the flags are Unicode regional-indicator emoji, so the
+  // self-only CSP needs no external assets. The leading "Confirm country…" placeholder is disabled
+  // + hidden: only fillPhoneField can select it PROGRAMMATICALLY (the legacy bare-number confirm
+  // state) — a user can never move the picker back to "no country", so it always holds a selection
+  // and a number can never be composed without one.
+  let country = null;
+  if (field.key === "phone") {
+    country = el(
+      "select",
+      {
+        id: `${id}-country`,
+        class: "tm-input tm-phone-country",
+        name: "phoneCountry",
+        "aria-label": "Phone country",
+        "aria-describedby": describedBy,
+      },
+      [
+        el("option", { value: "", text: "Confirm country…", disabled: true, hidden: true }),
+        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} ${c.name} +${c.dial}` })),
+      ],
+    );
+    // A concrete default so the picker is never empty pre-load; fillPhoneField applies the real
+    // selection (saved-phone country / city soft-default) once /me lands.
+    country.value = "GB";
+    country.addEventListener("change", () => {
+      // An explicit user pick is sticky: fillPhoneField's soft default must never override it.
+      country.setAttribute("data-user-picked", "true");
+      // Re-validate the pair so picking a country clears the legacy confirm-country prompt live.
+      setFieldError(field.key, validateField(field, input.value));
+    });
+  }
+
   const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
   const hint = field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null;
 
   // A "fill" field (timezone/locale) gets a one-tap button that drops in the browser's best guess,
   // then re-validates so any stale inline error clears (TM-167 union — from the #162 build).
-  const control = field.fill
+  // The phone field reuses the same committed flex-row style to seat the picker beside the input.
+  const control = country
+    ? el("div", { class: "tm-field-fill tm-phone-row" }, [country, input])
+    : field.fill
     ? el("div", { class: "tm-field-fill" }, [
         input,
         el(
@@ -589,7 +716,8 @@ function buildField(field) {
     hint,
     error,
   ]);
-  return { wrapper, input, error };
+  // `country` is only present for the phone field (TM-781) — undefined elsewhere.
+  return { wrapper, input, error, country };
 }
 
 // A gear icon (paper-profile top bar). Decorative → aria-hidden; the link that wraps it carries the
@@ -647,7 +775,9 @@ function buildShell(view) {
   const fields = new Map();
   const fieldNodes = FIELDS.map((field) => {
     const built = buildField(field);
-    fields.set(field.key, { input: built.input, error: built.error });
+    // `country` is the phone field's TM-781 picker (undefined for every other field) — kept in the
+    // shell so validateField/collectPatch/fillPhoneField can read the selected iso2.
+    fields.set(field.key, { input: built.input, error: built.error, country: built.country });
     return built.wrapper;
   });
 
