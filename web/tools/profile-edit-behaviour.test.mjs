@@ -163,16 +163,17 @@ function loadProfileModule(deps) {
   // destructure from the injected deps global. Every symbol the module names is provided there.
   const withoutImports = src.replace(/^import[\s\S]*?;\s*$/gm, "");
   const preamble = "const {\n" +
-    "  getMe, updateMe, getMembership, ApiError,\n" +
+    "  getMe, updateMe, getMembership, getInterestCatalogue, getInterestConfig, ApiError,\n" +
     "  currentUser, signOut,\n" +
     "  isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES,\n" +
     "  onAvatarChanged, isNativeCameraAvailable, captureAvatarImage,\n" +
-    "  clear, el, toast, doodle, renderAccountBadges,\n" +
+    "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  COUNTRIES, flagOf,\n" +
+    "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
     "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
 
@@ -199,6 +200,11 @@ const core = await import(coreUrl);
 const countriesUrl = new URL("../src/assets/countries.js", import.meta.url);
 const countries = await import(countriesUrl);
 const membershipTierUrl = new URL("../src/assets/membership-tier.js", import.meta.url);
+// The TM-778 Interests-card pure core — import-safe (no CDN), so inject the REAL functions the card maps
+// over. The api-side catalogue/config helpers are best-effort fakes (null = unavailable, the non-admin
+// degrade path) so paintInterests/loadInterestsMeta run without a network.
+const interestsCoreUrl = new URL("../src/assets/interests-core.js", import.meta.url);
+const interestsCore = await import(interestsCoreUrl);
 
 let getMeImpl = async () => ({});
 let updateMeImpl = async () => ({});
@@ -209,6 +215,10 @@ const deps = {
   getMe: (...a) => getMeImpl(...a),
   updateMe: (...a) => updateMeImpl(...a),
   getMembership: (...a) => getMembershipImpl(...a),
+  // Interests-card api helpers (TM-778): best-effort, so returning null (the "catalogue/config not
+  // readable" degrade path) is a valid response the card handles — VIEW + REMOVE work off /me alone.
+  getInterestCatalogue: async () => null,
+  getInterestConfig: async () => null,
   ApiError,
   currentUser: (...a) => currentUserImpl(...a),
   signOut: async () => {},
@@ -224,6 +234,8 @@ const deps = {
     return node;
   },
   el: fakeElBuilder,
+  // A no-op modal that returns the real `{ close }` handle shape (openInterestPicker calls dialog.close()).
+  modal: () => ({ close: () => {} }),
   toast: (msg, opts) => {
     TOASTS.push({ msg, opts });
   },
@@ -254,6 +266,14 @@ const deps = {
   PHONE_PICK_COUNTRY_MESSAGE: core.PHONE_PICK_COUNTRY_MESSAGE,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
+  // TM-778 interests-core: the REAL pure functions the card maps over, so paintInterests/openInterestPicker
+  // run the shipped chip/grouping/toggle logic through the renderer under Node.
+  normaliseInterestConfig: interestsCore.normaliseInterestConfig,
+  savedInterestLabels: interestsCore.savedInterestLabels,
+  interestChipsModel: interestsCore.interestChipsModel,
+  catalogueGroups: interestsCore.catalogueGroups,
+  toggleInterest: interestsCore.toggleInterest,
+  selectionError: interestsCore.selectionError,
   // membership-tier.js is import-safe (no CDN); use the real pure mapping.
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
   membershipEnabled: () => false,
