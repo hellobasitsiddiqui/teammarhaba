@@ -11,6 +11,10 @@
 // (backend MeResponse, see web/src/api-docs/openapi.json) plus a couple of plain booleans and return
 // plain data the renderer maps to elements.
 
+// Country dial-code data (TM-781) — pure and Node-importable like this module, so importing it here
+// keeps profile-core testable under `node --test` with no DOM/browser shims.
+import { countryByIso2, countryForDial, DIALS_LONGEST_FIRST, cityCountryHint } from "./countries.js";
+
 // The Profile routes. `#/profile` is the Profile hub + inline edit form (kept as ONE route so the
 // existing self-service edit e2e — which navigates to #/profile and expects #profile-form — stays
 // green); `#/profile/public` is the additive "how others see you" public-profile preview. Both live in
@@ -176,11 +180,24 @@ export function formatJoined(iso, now = new Date()) {
   return `${month} ${d.getFullYear()}`;
 }
 
+// The phone validation messages, shared so the digit guard reads identically whichever path raises
+// it, and the "pick a country" prompt is the same in the field error and the stored-value check.
+// PHONE_PICK_COUNTRY_MESSAGE is exported: the renderer (profile.js setFieldError) needs to know
+// when a phone error faults the COUNTRY PICKER (this message) rather than the national input, so
+// the aria-invalid/red-ring state lands on the control the user must actually change.
+const PHONE_DIGIT_RANGE_MESSAGE = "Enter a valid phone number (7 to 15 digits).";
+export const PHONE_PICK_COUNTRY_MESSAGE = "Pick a country for this phone number.";
+const PHONE_NATIONAL_ONLY_MESSAGE = "Enter the national number only — pick the country from the list.";
+
 /**
  * TM-752: the profile phone field's character pattern (^\+?[0-9 ()./-]{3,32}$) validates the allowed
  * CHARACTERS but not the digit COUNT, so "+", "12" and "()." pass as "valid". A real phone number has
  * 7–15 digits (national minimum ~7; E.164 maximum 15). Returns a user-facing error for an out-of-range
  * digit count, or "" when acceptable. Empty/blank is allowed (blank = leave the field unchanged).
+ * Since TM-781 the LIVE phone paths (phonePartsError / validateProfileField) inline a refined rule
+ * — floor of 7 on the national part, E.164 ceiling of 15 on dial+national — so this whole-value
+ * helper is retained as the exported, unit-tested TM-752 primitive (like formatJoined) rather than
+ * being on the hot path.
  * @param {string} value the raw phone input.
  * @returns {string} an error message, or "" if acceptable.
  */
@@ -188,7 +205,155 @@ export function phoneFormatError(value) {
   const v = String(value ?? "").trim();
   if (v === "") return "";
   const digits = (v.match(/[0-9]/g) || []).length;
-  if (digits < 7 || digits > 15) return "Enter a valid phone number (7 to 15 digits).";
+  if (digits < 7 || digits > 15) return PHONE_DIGIT_RANGE_MESSAGE;
+  return "";
+}
+
+// ---- E.164 phone split/compose (TM-781) ---------------------------------------------------------
+//
+// The profile phone is stored as E.164 ("+<dial><national>") and edited as a (country picker,
+// national number) PAIR. These pure rules do the translation both ways plus the picker's default:
+//   splitE164          stored value → { iso2, national }   (form load)
+//   composeE164        picker + input → stored value        (form save)
+//   defaultCountryFor  which country the picker starts on   (no saved phone)
+//   phonePartsError    validation of the live (picker, input) pair
+
+/**
+ * Normalise a national-number input to bare digits for the given country: drop the allowed
+ * formatting characters (space ( ) . / -) and ONE leading trunk "0" (users naturally type
+ * "07700 900123"; E.164 wants "+447700900123", not "+4407700900123") — UNLESS the country's E.164
+ * form keeps its trunk 0 (`keepsTrunkZero` in countries.js: the Italian numbering plan). Without
+ * that flag a correctly stored "+390612345678" would reload as national "0612345678" and re-save
+ * as "+39612345678" — a different subscriber's number — on ANY profile save (a TM-781 review
+ * finding; splitE164→composeE164 must be identity for every valid stored value).
+ *
+ * NB a leading "00" is NOT a trunk zero — it's the international-dialling prefix ("0044…"): the
+ * callers reject that shape outright (hasInternationalPrefix) rather than half-stripping it.
+ */
+function nationalDigits(raw, country) {
+  const digits = String(raw ?? "").replace(/[^0-9]/g, "");
+  return country && country.keepsTrunkZero ? digits : digits.replace(/^0/, "");
+}
+
+/**
+ * True when the input's digits open with "00" — the international-dialling idiom ("0044 7700…"),
+ * the keypad twin of pasting a "+44…" number. Composing it would store a double-dialled value
+ * (the trunk strip drops only ONE zero → "+440447700900123" passes every length check), so both
+ * phonePartsError and composeE164 treat it exactly like the "+"-paste case (a TM-781 review
+ * finding — "00" is the real dialling prefix in GB/AE/SA, the app's primary user base).
+ */
+function hasInternationalPrefix(raw) {
+  return /^00/.test(String(raw ?? "").replace(/[^0-9]/g, ""));
+}
+
+/**
+ * Split a stored E.164 phone back into its picker parts — the form-load half of the TM-781 pair.
+ *
+ * Longest dial code wins ("+1242…" → Bahamas, not +1 US), and dial codes shared by several
+ * territories resolve to their canonical owner (+44 → GB, +7 → RU — see countries.js). Stored
+ * formatting from pre-TM-781 saves ("+44 7700 900123") is tolerated; the returned national part is
+ * always bare digits.
+ *
+ * @param {string|null|undefined} value the stored phone.
+ * @returns {{iso2: string, national: string}|null} null when the value isn't E.164-shaped — blank,
+ *   a legacy bare number with no +dial (the form's confirm-country state), or not a phone at all.
+ */
+export function splitE164(value) {
+  const s = String(value ?? "").trim();
+  if (!s.startsWith("+")) return null;
+  const rest = s.slice(1);
+  // Only digits + the backend-allowed formatting chars may follow the "+"; anything else (letters…)
+  // means this isn't a phone number and there is nothing sensible to split.
+  if (rest === "" || /[^0-9 ()./-]/.test(rest)) return null;
+  const digits = rest.replace(/[^0-9]/g, "");
+  if (digits === "") return null;
+  // DIALS_LONGEST_FIRST is pre-sorted longest→shortest, so the first prefix hit IS the longest match.
+  for (const dial of DIALS_LONGEST_FIRST) {
+    if (digits.startsWith(dial)) {
+      const country = countryForDial(dial);
+      // The COUNTRY's own compose code (country.dial) decides where the national part starts, not
+      // the matched prefix. For NANP prefixes ("1242", "1829"…) that code is "1": the prefix only
+      // picks the country and the area code STAYS in the national part — so composeE164 reproduces
+      // the exact stored value instead of re-composing a secondary code (+1829…) onto the
+      // territory's primary (+1809…), which silently rewrote real numbers (TM-781 review, HIGH).
+      return { iso2: country.iso2, national: digits.slice(country.dial.length) };
+    }
+  }
+  return null; // no known dial code (e.g. "+0…", or an unassigned prefix)
+}
+
+/**
+ * Compose the stored E.164 value from the picker + national input — the form-save half.
+ *
+ * A blank national number composes to "" (the caller omits the field → "blank stays blank"): a
+ * dial-code-only value like "+44" is NEVER produced. Formatting characters and one trunk "0" are
+ * stripped from the national part (see nationalDigits — countries flagged keepsTrunkZero keep
+ * theirs). An unknown/unconfirmed iso2 also returns "" — there's no dial code to compose with —
+ * and so does a "00…" international-prefix input: composing it would store a double-dialled
+ * number ("+44" + "0447700…"), so the pure function refuses outright. Validation
+ * (phonePartsError) blocks both those paths with a targeted message before any real save.
+ *
+ * @param {string|null|undefined} iso2 the picker selection (case-insensitive).
+ * @param {string|null|undefined} national the national-number input, as typed.
+ * @returns {string} "+<dial><digits>", or "".
+ */
+export function composeE164(iso2, national) {
+  const country = countryByIso2(iso2);
+  if (!country) return "";
+  if (hasInternationalPrefix(national)) return "";
+  const digits = nationalDigits(national, country);
+  if (digits === "") return "";
+  return `+${country.dial}${digits}`;
+}
+
+/**
+ * Which country the phone picker should start on: the saved phone's own country when one is stored
+ * (so changing city later never flips an existing phone), else the curated city hint
+ * (London → GB, Dubai → AE, Riyadh → SA, …), else GB. This is a SOFT default — the renderer must
+ * not apply it over a selection the user made explicitly (profile.js tracks that).
+ *
+ * @param {{phone?: string, city?: string}} [me] the relevant `/me` fields.
+ * @returns {string} an iso2 code (always resolves — GB is the final fallback).
+ */
+export function defaultCountryFor({ phone, city } = {}) {
+  const parsed = splitE164(phone);
+  if (parsed) return parsed.iso2;
+  return cityCountryHint(city) || "GB";
+}
+
+/**
+ * Validate the live (country picker, national input) pair — the rule the edit form runs on every
+ * keystroke and on save (TM-781). Returns an error message, or "" when acceptable.
+ *
+ * The cases, in order:
+ *   • blank national → "" — blank = leave unchanged, clearing is never blocked (TM-188 semantics);
+ *   • national starting "+" OR "00" → redirected to the picker. Composing "+44" + "+447…" (or
+ *     "+44" + "0044 7…" — "00" is the international-dialling idiom in GB/AE/SA) would silently
+ *     double the dial code, so a pasted full international number gets a targeted message instead;
+ *   • no/unknown country (the legacy confirm-country placeholder) → "pick a country" — this is what
+ *     blocks saving a legacy bare number until the user confirms where it belongs;
+ *   • bad characters in the national part → format error (mirrors the backend char-pattern);
+ *   • then the digit guard: at least 7 NATIONAL digits (the TM-752 floor, counted post trunk-0
+ *     strip so validation counts exactly what composeE164 would store), and at most 15 digits
+ *     INCLUDING the dial code — the E.164 ceiling, which is also what the backend's stored-value
+ *     pattern enforces (TM-781), so nothing the client accepts can 400 on save.
+ *
+ * @param {string|null|undefined} iso2 the picker selection ("" = the confirm-country placeholder).
+ * @param {string|null|undefined} national the national-number input, as typed.
+ * @returns {string} an error message, or "".
+ */
+export function phonePartsError(iso2, national) {
+  const raw = String(national ?? "").trim();
+  if (raw === "") return "";
+  // Both international-input idioms redirect to the picker — checked before anything else so the
+  // message is the same whether or not a country is currently confirmed.
+  if (raw.startsWith("+") || hasInternationalPrefix(raw)) return PHONE_NATIONAL_ONLY_MESSAGE;
+  const country = countryByIso2(iso2);
+  if (!country) return PHONE_PICK_COUNTRY_MESSAGE;
+  if (!/^[0-9 ()./-]{1,32}$/.test(raw)) return "Format looks invalid.";
+  const digits = nationalDigits(raw, country);
+  // Floor on the national part, ceiling on the composed total (dial + national ≤ 15, per E.164).
+  if (digits.length < 7 || country.dial.length + digits.length > 15) return PHONE_DIGIT_RANGE_MESSAGE;
   return "";
 }
 
@@ -248,8 +413,16 @@ export function validateProfileField(field, raw) {
     return "Format looks invalid.";
   }
   if (field.key === "phone") {
-    const phoneErr = phoneFormatError(value);
-    if (phoneErr) return phoneErr;
+    // TM-781: a stored-shape phone must be E.164 — parseable as +dial+national. A bare national
+    // number (the pre-TM-781 legacy format) is now INCOMPLETE: the message points the user at the
+    // country picker. The digit guard then applies as in phonePartsError: the TM-752 floor of 7 on
+    // the NATIONAL part (so "+44123456" — 8 digits total, 6 national — correctly fails where a
+    // whole-value count would pass) and the E.164 ceiling of 15 on the TOTAL (matching the
+    // backend's stored-value pattern, so client-valid can't 400 server-side).
+    const parsed = splitE164(value);
+    if (!parsed) return PHONE_PICK_COUNTRY_MESSAGE;
+    const totalDigits = (value.match(/[0-9]/g) || []).length;
+    if (parsed.national.length < 7 || totalDigits > 15) return PHONE_DIGIT_RANGE_MESSAGE;
   }
   if (NAME_LIKE_KEYS.has(field.key)) {
     const nameErr = nameFormatError(value);

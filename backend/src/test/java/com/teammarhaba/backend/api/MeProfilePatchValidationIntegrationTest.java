@@ -38,6 +38,13 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  *       an untouched field — the integration half of the collectPatch web-unit test).</li>
  * </ul>
  *
+ * <p>TM-781 adds the E.164 contract tests: the profile phone is now composed client-side as
+ * {@code +<dial><national>} by the mandatory country picker, so the API must refuse any bare
+ * national number (no leading {@code +}) with {@code 400} — otherwise a legacy-style value could
+ * sneak back into storage and defeat the picker's round-trip split. The positive cases pin that
+ * proper E.164 (with or without the long-accepted separator characters between digits) still
+ * round-trips and persists, and that {@code ""} still clears (the TM-188 behaviour).
+ *
  * <p>The authenticated case injects a {@link VerifiedUser} principal directly (token verification is
  * exercised separately); {@link FirebaseAuth} is mocked so the Admin-SDK-backed account-state block on
  * {@code GET /me} degrades to nulls rather than the endpoint failing.
@@ -182,5 +189,104 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.firstName").value("Jean-Luc"))
                 .andExpect(jsonPath("$.lastName").value("O'Brien"))
                 .andExpect(jsonPath("$.city").value("São Paulo"));
+    }
+
+    // ------------------------------------------------------------------
+    // TM-781 — mandatory country picker: the API side of the contract.
+    // The web form always composes +<dial><national>, so a value WITHOUT a
+    // leading + can only come from a stale/bypassing client and must be 400.
+    // ------------------------------------------------------------------
+
+    @Test
+    void patchMeRejectsBareNationalPhoneWithSeparatorsWith400() throws Exception {
+        // "020 7946 0958" is a perfectly plausible UK number as a human would type it — which is
+        // exactly why it must be refused: without the +dial prefix the country is ambiguous and the
+        // picker's E.164 round-trip split would misparse it on the next form open.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bare-phone-sep", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"020 7946 0958\"}"))
+                .andExpect(status().isBadRequest());
+
+        // The rejected value never reached the row (bean validation fires before the service).
+        users.findByFirebaseUid("uid-bare-phone-sep")
+                .ifPresent(u -> assertThat(u.getPhone()).isNull());
+    }
+
+    @Test
+    void patchMeRejectsBareNationalPhoneDigitsOnlyWith400() throws Exception {
+        // Digits-only variant: 10 digits is length-plausible, so this proves the reject is about
+        // the missing leading +, not about length or separator characters.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bare-phone-digits", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"7700900123\"}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-bare-phone-digits")
+                .ifPresent(u -> assertThat(u.getPhone()).isNull());
+    }
+
+    @Test
+    void patchMeAcceptsCompactE164PhoneAndPersistsIt() throws Exception {
+        // The canonical value the picker composes: +dial immediately followed by the national
+        // digits, no separators. 12 digits sits comfortably inside the 7–15 digit guard (TM-752).
+        var who = caller("uid-e164-compact", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700900123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("+447700900123"));
+
+        // Round-trip: genuinely on the row, not just echoed back by the PATCH response.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("+447700900123"));
+        assertThat(users.findByFirebaseUid("uid-e164-compact").orElseThrow().getPhone())
+                .isEqualTo("+447700900123");
+    }
+
+    @Test
+    void patchMeAcceptsE164PhoneWithSeparatorsAndPersistsIt() throws Exception {
+        // Tightening to require the leading + must NOT drop the long-standing leniency about
+        // separator characters BETWEEN digits — human-formatted E.164 still round-trips verbatim.
+        var who = caller("uid-e164-spaced", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+44 20 7946 0958\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"));
+        assertThat(users.findByFirebaseUid("uid-e164-spaced").orElseThrow().getPhone())
+                .isEqualTo("+44 20 7946 0958");
+    }
+
+    @Test
+    void patchMeStillAcceptsEmptyPhoneToClear() throws Exception {
+        // The ^$| empty-string alternative survives the tightening (TM-188): a blank national
+        // number stays blank — the client never composes a dial-code-only value, it sends "".
+        var who = caller("uid-clear-phone", "x@example.com");
+
+        // Set a valid phone first so the clear is observable as a real transition, not a no-op.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700900123\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value(""));
+
+        assertThat(users.findByFirebaseUid("uid-clear-phone").orElseThrow().getPhone())
+                .isEqualTo("");
     }
 }

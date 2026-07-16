@@ -21,8 +21,13 @@ import jakarta.validation.constraints.Size;
  *       apostrophes and periods are allowed — a purely numeric value can no longer persist as a
  *       name or city. An empty string is accepted (clear/leave blank), consistent with
  *       {@code phone}. Mirrored client-side in {@code profile-core.js} {@code nameFormatError}.
- *   <li>{@code phone} — lenient pattern: digits, spaces and common separators, optional leading
- *       {@code +}; we do not attempt to verify a real, dialable number. An empty string is also
+ *   <li>{@code phone} — E.164-shaped (TM-781): a leading {@code +} is <em>required</em>, followed
+ *       by 7–15 digits in total (the TM-752 length guard), with the long-accepted separator
+ *       characters (space, {@code (}, {@code )}, {@code .}, {@code /}, {@code -}) allowed between
+ *       digits only. The mandatory country picker composes {@code +<dial><national>} client-side,
+ *       so a bare national number (no {@code +dial}) can only come from a stale/bypassing client
+ *       and is rejected — it would be country-ambiguous and break the picker's round-trip split.
+ *       We still do not attempt to verify a real, dialable number. An empty string is also
  *       accepted (clear/leave blank), consistent with the optional {@code @Size} text fields.
  *   <li>{@code notificationPref} — the {@link NotificationPref} enum; an unknown value is rejected
  *       by Jackson at deserialization time (uniform {@code 400}).
@@ -36,7 +41,8 @@ import jakarta.validation.constraints.Size;
  * @param lastName         family name (name-like, TM-771)
  * @param city             city name (name-like, TM-771)
  * @param age              age in years, 13–120
- * @param phone            lenient free-text phone number
+ * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
+ *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
  * @param timezone         IANA timezone id, e.g. {@code Europe/London}
  * @param locale           BCP-47 language tag, e.g. {@code en-GB}
@@ -53,7 +59,14 @@ public record UpdateMeRequest(
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String lastName,
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String city,
         @Min(13) @Max(120) Integer age,
-        @Size(max = 32) @Pattern(regexp = "^$|^\\+?[0-9 ()./-]{3,32}$", message = "must be a valid phone number")
+        // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
+        // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
+        // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).
+        // @Size(max = 32) still bounds the overall separator-padded length.
+        @Size(max = 32)
+                @Pattern(
+                        regexp = "^$|^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
+                        message = "must be a valid phone number")
                 String phone,
         NotificationPref notificationPref,
         @Size(max = 64) String timezone,

@@ -22,6 +22,10 @@ import {
   phoneFormatError,
   nameFormatError,
   validateProfileField,
+  splitE164,
+  composeE164,
+  defaultCountryFor,
+  phonePartsError,
 } from "../src/assets/profile-core.js";
 
 // The real Profile field shapes profile.js feeds validateProfileField (TM-162) — so these tests
@@ -232,7 +236,200 @@ test("validateProfileField: the phone field applies BOTH the char-pattern AND th
   assert.notEqual(validateProfileField(PHONE_FIELD, "()."), "");         // no digits (passed the pattern before)
   assert.notEqual(validateProfileField(PHONE_FIELD, "abc1234567"), "");  // letters → rejected by the char-pattern
   assert.equal(validateProfileField(PHONE_FIELD, "+447700900123"), "");  // valid
-  assert.equal(validateProfileField(PHONE_FIELD, "020 7946 0000"), "");  // valid, formatted
+  // TM-781 contract change: "020 7946 0000" used to be VALID here; a stored phone must now be
+  // E.164 (+dial+national), so a bare national number is incomplete — see the TM-781 tests below.
+  assert.notEqual(validateProfileField(PHONE_FIELD, "020 7946 0000"), "");
+});
+
+// ---- TM-781: E.164 split / compose / soft-default country / picker-pair validation ---------------
+//
+// The mandatory country picker stores phones as E.164 ("+<dial><national>", composed on save) and
+// splits them back on load. These tests pin the pure rules: longest-dial-code matching, canonical
+// owners for shared dial codes, blank-stays-blank composition, the saved-phone → city-hint → GB
+// default chain, and the (picker, national) pair validation the form actually runs.
+
+test("splitE164 splits a saved E.164 into country + national — longest dial code wins", () => {
+  assert.deepEqual(splitE164("+447700900123"), { iso2: "GB", national: "7700900123" });
+  assert.deepEqual(splitE164("+971501234567"), { iso2: "AE", national: "501234567" });
+  // The load-bearing example from the product rule: +1242 (Bahamas) must beat +1 (US). The area
+  // code stays in the NATIONAL part — every NANP member composes on the shared "+1", so split →
+  // compose reproduces the stored value exactly (TM-781 review: split/compose symmetry).
+  assert.deepEqual(splitE164("+12425550123"), { iso2: "BS", national: "2425550123" });
+  assert.deepEqual(splitE164("+12025550123"), { iso2: "US", national: "2025550123" });
+  // A NANP SECONDARY code resolves the country without being swallowed into the dial: +1829 is
+  // Dominican, and its national part keeps the 829 (the review's corruption case).
+  assert.deepEqual(splitE164("+18295551234"), { iso2: "DO", national: "8295551234" });
+});
+
+test("splitE164 tolerates stored formatting and resolves shared dial codes canonically", () => {
+  // Pre-TM-781 values could carry legal formatting ("+44 7700 900123") — still splittable.
+  assert.deepEqual(splitE164(" +44 7700 900123 "), { iso2: "GB", national: "7700900123" });
+  // Shared dials resolve to the canonical owner (see countries.test.mjs): +7 → Russia, not KZ.
+  assert.equal(splitE164("+79161234567").iso2, "RU");
+});
+
+test("splitE164 returns null for legacy bare numbers, blanks and non-phones", () => {
+  assert.equal(splitE164("07700 900123"), null); // legacy bare national — no +dial to split on
+  assert.equal(splitE164(""), null);
+  assert.equal(splitE164("   "), null);
+  assert.equal(splitE164(null), null);
+  assert.equal(splitE164(undefined), null);
+  assert.equal(splitE164("+"), null);
+  assert.equal(splitE164("+0123456789"), null); // no dial code starts with 0
+  assert.equal(splitE164("+44abc7700"), null);  // letters are not a phone
+});
+
+test("composeE164 composes +dial+national, stripping formatting and a single trunk 0", () => {
+  assert.equal(composeE164("GB", "07700 900123"), "+447700900123");
+  assert.equal(composeE164("GB", "7700900123"), "+447700900123");
+  assert.equal(composeE164("AE", "(050) 123-4567"), "+971501234567");
+  assert.equal(composeE164("gb", "7700900123"), "+447700900123"); // iso2 is case-insensitive
+});
+
+test("composeE164 returns '' for a blank national number — NEVER a dial-code-only value", () => {
+  assert.equal(composeE164("GB", ""), "");
+  assert.equal(composeE164("GB", "   "), "");
+  assert.equal(composeE164("GB", "()."), "");        // formatting chars but zero digits
+  assert.equal(composeE164("", "7700900123"), "");   // unconfirmed country can't compose
+  assert.equal(composeE164("ZZ", "7700900123"), ""); // unknown country can't compose
+});
+
+test("composeE164 → splitE164 round-trips to the same country + national", () => {
+  // A Bahamian types their full 10-digit number (area code included) against the "+1" picker entry.
+  const composed = composeE164("BS", "242 555 0123");
+  assert.equal(composed, "+12425550123");
+  assert.deepEqual(splitE164(composed), { iso2: "BS", national: "2425550123" });
+});
+
+// TM-781 review (HIGH): DIAL-alias asymmetry silently rewrote stored +1829/+1849/+1939/+1658
+// numbers onto the territory's primary code (+1809/+1787/+1876) on ANY profile save — a different
+// subscriber's number. The fix models all NANP on the single "+1" compose code, so split→compose
+// must now be a strict IDENTITY for every valid stored value, secondary codes included.
+test("splitE164 → composeE164 is identity for stored E.164 values — incl. NANP secondary codes", () => {
+  const stored = [
+    "+447700900123", // GB
+    "+971501234567", // AE
+    "+966501234567", // SA
+    "+12425550123", //  BS — island prefix
+    "+12025550123", //  US
+    "+18095551234", //  DO primary (+1809)
+    "+18295551234", //  DO secondary (+1829) — the review's corruption case
+    "+18495551234", //  DO secondary (+1849)
+    "+17875551234", //  PR primary (+1787)
+    "+19395551234", //  PR secondary (+1939)
+    "+18765551234", //  JM primary (+1876)
+    "+16585551234", //  JM secondary (+1658)
+    "+390612345678", // IT — E.164 KEEPS the trunk 0 (the review's trunk-strip corruption case)
+  ];
+  for (const value of stored) {
+    const parts = splitE164(value);
+    assert.ok(parts, `${value} must split`);
+    assert.equal(composeE164(parts.iso2, parts.national), value, `${value} must round-trip unchanged`);
+  }
+});
+
+test("composeE164 keeps a NANP number on its OWN area code — never the territory's primary (TM-781 review)", () => {
+  // Entering a Dominican +1829 number by hand: picker "Dominican Republic +1" + the 10 digits.
+  // The old per-territory dial would have composed "+1809…" (or the unenterable "+18098295551234").
+  assert.equal(composeE164("DO", "829 555 1234"), "+18295551234");
+  assert.equal(composeE164("PR", "9395551234"), "+19395551234");
+});
+
+test("composeE164 preserves the trunk 0 for keep-trunk-zero countries, still strips it elsewhere (TM-781 review)", () => {
+  // Italy's E.164 keeps the national 0: a stored "+390612345678" reloads as (IT, "0612345678") and
+  // MUST re-compose byte-identical — the old unconditional strip made any unrelated profile save
+  // (e.g. changing city) silently rewrite it to the undialable "+39612345678".
+  assert.equal(composeE164("IT", "0612345678"), "+390612345678");
+  assert.equal(composeE164("IT", "06 1234 5678"), "+390612345678");
+  assert.equal(composeE164("IT", "3312345678"), "+393312345678"); // mobiles have no trunk 0 — unchanged
+  assert.equal(phonePartsError("IT", "0612345678"), ""); // and validation accepts what compose stores
+  // The GB/AE/SA trunk-strip behaviour is untouched.
+  assert.equal(composeE164("GB", "07700 900123"), "+447700900123");
+  assert.equal(composeE164("SA", "0501234567"), "+966501234567");
+});
+
+test("defaultCountryFor: saved-phone country → city hint → GB", () => {
+  // A saved E.164 phone always wins — changing city later must never flip an existing phone country.
+  assert.equal(defaultCountryFor({ phone: "+966501234567", city: "London" }), "SA");
+  // No parseable phone: the curated city map decides (a legacy bare number falls through too —
+  // the FORM shows it as the confirm-country state, but the default chain itself uses the hint)…
+  assert.equal(defaultCountryFor({ phone: "", city: "Dubai" }), "AE");
+  assert.equal(defaultCountryFor({ phone: "07700900123", city: " riyadh " }), "SA");
+  assert.equal(defaultCountryFor({ phone: "", city: "Milton Keynes" }), "GB");
+  // …and an unknown/missing city falls back to GB.
+  assert.equal(defaultCountryFor({ phone: "", city: "Paris" }), "GB");
+  assert.equal(defaultCountryFor({}), "GB");
+  assert.equal(defaultCountryFor(), "GB");
+});
+
+test("phonePartsError: blank national is allowed; a number without a confirmed country is not", () => {
+  assert.equal(phonePartsError("GB", ""), "");
+  assert.equal(phonePartsError("", "   "), "");
+  // The legacy confirm-country state: picker on the '' placeholder + a real number → save blocked,
+  // and the message tells the user to pick a country.
+  assert.match(phonePartsError("", "07700 900123"), /country/i);
+  assert.match(phonePartsError("ZZ", "07700 900123"), /country/i); // unknown iso2 blocks too
+});
+
+test("phonePartsError keeps the TM-752 checks on the national part", () => {
+  assert.equal(phonePartsError("GB", "07700 900123"), "");
+  assert.equal(phonePartsError("SA", "0501234567"), "");
+  assert.match(phonePartsError("GB", "12345"), /7 to 15/);        // too few digits
+  assert.match(phonePartsError("GB", "0123456"), /7 to 15/);      // trunk 0 stripped → only 6 left
+  assert.match(phonePartsError("GB", "not-a-phone!"), /invalid/i); // char-pattern still applies
+  assert.match(phonePartsError("GB", "()."), /7 to 15/);           // chars pass, zero digits
+});
+
+test("phonePartsError caps the COMPOSED value at the E.164 ceiling of 15 digits incl. the dial code", () => {
+  // The backend stores +dial+national and enforces ≤15 digits TOTAL (the E.164 maximum, TM-781).
+  // The client must count the same way, or a long national number would pass here and 400 on save.
+  assert.equal(phonePartsError("GB", "1234567890123"), "");        // 13 national + 2 dial = 15 ✓
+  assert.match(phonePartsError("GB", "12345678901234"), /7 to 15/); // 14 national + 2 dial = 16 ✗
+  assert.match(phonePartsError("SA", "1234567890123"), /7 to 15/);  // 13 national + 3 dial = 16 ✗
+});
+
+test("phonePartsError redirects a pasted full +international number to the picker", () => {
+  // Composing "+44" + "+447700900123" would double the dial code; catch it with a targeted message.
+  assert.match(phonePartsError("GB", "+447700900123"), /country|national/i);
+});
+
+// TM-781 review: "00" is the international-dialling idiom in GB/AE/SA — the app's primary user
+// base — and the keypad twin of pasting a "+…" number. The trunk strip drops only ONE zero, so
+// unguarded it composed "+440447700900123" (15 digits — passes every length check, client AND
+// backend) and silently stored a double-dialled number.
+test("phonePartsError redirects a 00-international-prefix number to the picker, like the + paste", () => {
+  assert.match(phonePartsError("GB", "0044 7700 900123"), /country|national/i);
+  assert.match(phonePartsError("GB", "00447700900123"), /country|national/i);
+  assert.match(phonePartsError("AE", "00971501234567"), /country|national/i);
+  // Same redirect even from the legacy confirm-country state ('' selection).
+  assert.match(phonePartsError("", "0044 7700 900123"), /country|national/i);
+  // A SINGLE trunk zero is not the international prefix — the everyday GB form stays valid.
+  assert.equal(phonePartsError("GB", "07700 900123"), "");
+});
+
+test("composeE164 refuses a 00-prefixed national outright — a double-dialled value is never composed", () => {
+  assert.equal(composeE164("GB", "00447700900123"), "");
+  assert.equal(composeE164("GB", "0044 7700 900123"), "");
+  assert.equal(composeE164("IT", "0039 06 1234 5678"), ""); // keep-trunk-zero countries too
+});
+
+test("validateProfileField: a stored phone must parse as +dial — bare numbers ask for a country (TM-781)", () => {
+  assert.match(validateProfileField(PHONE_FIELD, "07700 900123"), /country/i);
+  assert.match(validateProfileField(PHONE_FIELD, "020 7946 0000"), /country/i);
+  assert.equal(validateProfileField(PHONE_FIELD, "+447700900123"), "");
+  assert.equal(validateProfileField(PHONE_FIELD, "+44 7700 900123"), ""); // stored formatting ok
+});
+
+test("validateProfileField: the 7–15 digit guard applies to the NATIONAL part of the E.164 value (TM-781)", () => {
+  // 8 digits in total — the OLD whole-value guard would have passed this — but only 6 remain after
+  // the +44 dial code, so it must fail. This is the guard moving to the national part.
+  assert.match(validateProfileField(PHONE_FIELD, "+44123456"), /7 to 15/);
+  // A dial-code-only value is never valid (0 national digits) — whatever message path it takes.
+  assert.notEqual(validateProfileField(PHONE_FIELD, "+44"), "");
+  // And the E.164 ceiling — 15 digits INCLUDING the dial code — matches the backend's stored-value
+  // pattern, so nothing the client accepts can 400 on save.
+  assert.equal(validateProfileField(PHONE_FIELD, "+441234567890123"), "");  // 15 digits total ✓
+  assert.match(validateProfileField(PHONE_FIELD, "+4412345678901234"), /7 to 15/); // 16 total ✗
 });
 
 test("validateProfileField: the phone digit guard is phone-ONLY — it must not leak to other fields (TM-752 wiring)", () => {
