@@ -32,6 +32,7 @@ import {
   PROFILE_PUBLIC_ROUTE,
   profileMode,
   identitySummary,
+  accountContact,
   profileStrength,
   publicSummary,
   validateProfileField,
@@ -212,6 +213,14 @@ function paintHub(profile) {
   hub.name.textContent = id.short;
   hub.meta.textContent = id.metaLine || "Add your city and age";
   hub.initial.textContent = id.initial;
+
+  // Account contact (TM-783): the email + phone this account is registered with.
+  const contact = accountContact(profile);
+  hub.email.textContent = contact.email || "No email on file";
+  hub.phone.textContent = contact.phoneDisplay;
+  // A missing phone reads as a muted prompt, not a real value.
+  hub.phone.classList.toggle("tm-pf-contact-empty", !contact.hasPhone);
+  hub.email.classList.toggle("tm-pf-contact-empty", !contact.email);
 
   // Completeness: the photo counts too, read live off the Firebase user's photoURL (the single source
   // of truth, same as the avatar control) rather than anything persisted on our side.
@@ -669,9 +678,24 @@ function buildShell(view) {
   const hubInitial = el("span", { class: "tm-pf-avatar", "aria-hidden": "true", text: "🙂" });
   const hubName = el("div", { class: "tm-pf-name", text: "" });
   const hubMeta = el("div", { class: "tm-pf-sub", text: "" });
+  // ── Account contact (TM-783) ── the email + phone this account is registered with, painted by
+  // paintHub() from the same /me payload. Email is the account identity; phone shows the number or a
+  // "No phone number added" prompt so the line is never silently blank.
+  const hubEmail = el("div", { class: "tm-pf-contact-line", text: "" });
+  const hubPhone = el("div", { class: "tm-pf-contact-line", text: "" });
+  const hubContact = el("div", { class: "tm-pf-contact", "aria-label": "Account contact" }, [
+    el("div", { class: "tm-pf-contact-row" }, [
+      el("span", { class: "tm-pf-contact-ic", "aria-hidden": "true", text: "✉️" }),
+      hubEmail,
+    ]),
+    el("div", { class: "tm-pf-contact-row" }, [
+      el("span", { class: "tm-pf-contact-ic", "aria-hidden": "true", text: "📞" }),
+      hubPhone,
+    ]),
+  ]);
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
     hubInitial,
-    el("div", {}, [hubName, hubMeta]),
+    el("div", {}, [hubName, hubMeta, hubContact]),
   ]);
 
   // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
@@ -784,7 +808,7 @@ function buildShell(view) {
     status,
     avatar,
     root,
-    hub: { name: hubName, meta: hubMeta, initial: hubInitial, bar, barPct, barNudge },
+    hub: { name: hubName, meta: hubMeta, initial: hubInitial, email: hubEmail, phone: hubPhone, bar, barPct, barNudge },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
   };

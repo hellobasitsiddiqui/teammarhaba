@@ -15,6 +15,7 @@ import {
   PROFILE_PUBLIC_ROUTE,
   profileMode,
   identitySummary,
+  accountContact,
   profileStrength,
   publicSummary,
   formatJoined,
@@ -63,6 +64,32 @@ test("profileMode maps the public route to 'public' and everything else to 'view
   assert.equal(profileMode(PROFILE_ROUTE), "view");
   assert.equal(profileMode("#/profile"), "view");
   assert.equal(profileMode("#/anything-else"), "view");
+});
+
+// ---- accountContact (TM-783) ------------------------------------------------------------------
+
+test("accountContact surfaces the account's email and phone from the /me payload", () => {
+  const c = accountContact(me());
+  assert.equal(c.email, "basit@example.com");
+  assert.equal(c.phone, "+44 7700 900123");
+  assert.equal(c.hasPhone, true);
+  assert.equal(c.phoneDisplay, "+44 7700 900123");
+});
+
+test("accountContact shows a friendly prompt (not a blank line) when no phone is on file", () => {
+  const c = accountContact(me({ phone: "" }));
+  assert.equal(c.phone, "");
+  assert.equal(c.hasPhone, false);
+  assert.equal(c.phoneDisplay, "No phone number added");
+});
+
+test("accountContact trims whitespace and tolerates a missing/empty /me object", () => {
+  assert.equal(accountContact({ email: "  a@b.com  ", phone: "  123 456 7890  " }).email, "a@b.com");
+  assert.equal(accountContact({ email: "  a@b.com  ", phone: "  123 456 7890  " }).phone, "123 456 7890");
+  const empty = accountContact(null);
+  assert.equal(empty.email, "");
+  assert.equal(empty.hasPhone, false);
+  assert.equal(empty.phoneDisplay, "No phone number added");
 });
 
 // ---- identitySummary --------------------------------------------------------------------------

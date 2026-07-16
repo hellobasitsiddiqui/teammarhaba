@@ -5632,6 +5632,36 @@ button.tm-c-reaction {
     font-size: var(--fs-2);
 }
 
+/* Account contact (TM-783) — the email + phone the account is registered with, under the name/meta. */
+.tm-pf-contact {
+    margin-top: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.tm-pf-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: var(--fs-2);
+    color: var(--text);
+}
+.tm-pf-contact-ic {
+    font-size: 0.85em;
+    line-height: 1;
+    opacity: 0.85;
+}
+.tm-pf-contact-line {
+    overflow-wrap: anywhere;
+}
+.tm-pf-contact-empty {
+    color: var(--muted);
+    font-style: italic;
+}
+.tm-pf-loading .tm-pf-contact {
+    visibility: hidden;
+}
+
 /* Card — surface with a hand-drawn border + the flat offset shadow the wireframe uses. */
 .tm-pf-card {
     background: var(--surface-card);
