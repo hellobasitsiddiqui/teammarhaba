@@ -146,6 +146,10 @@
                 <a id="nav-admin-events" href="#/admin/events" hidden>Manage events</a>
                 <!-- Admin venues console link (TM-519): shown by router.js only for a signed-in ADMIN. -->
                 <a id="nav-admin-venues" href="#/admin/venues" hidden>Venues</a>
+                <!-- Admin interests console link (TM-779): shown by router.js only for a signed-in ADMIN.
+                     Bare noun "Interests" (mirrors "Venues"); unique among nav labels so the account-nav
+                     dedup guard (nav-admin-events-label.test.mjs) stays green. -->
+                <a id="nav-admin-interests" href="#/admin/interests" hidden>Interests</a>
                 <!-- Admin messaging link (TM-443 compose → TM-444 sent-history). Now that the sent-history
                      list exists (TM-444), this lands admins on the messages hub (#/admin/messages), from
                      which "New message" opens the compose form. Shown by router.js only for a signed-in
@@ -443,6 +447,16 @@
         <!-- Admin venue form (TM-519): the full-page #/admin/venues/new + #/admin/venues/{id}/edit
              create/edit form. admin-venues.js builds it here; router.js owns visibility + the ADMIN gate. -->
         <section id="admin-venue-form-view" class="admin-console" aria-label="Venue form" hidden></section>
+
+        <!-- Admin interests console (TM-779): ADMIN-only #/admin/interests view. admin-interests.js
+             (imported by router.js) builds the catalogue list + create/edit/retire/restore flow + the
+             inline min/max selection-limit config into this container; router.js owns its visibility + the
+             ADMIN gate (same as the venues console). -->
+        <section id="admin-interests-view" class="admin-console" aria-label="Admin interests console" hidden></section>
+
+        <!-- Admin interest form (TM-779): the full-page #/admin/interests/new + #/admin/interests/{id}/edit
+             create/edit form. admin-interests.js builds it here; router.js owns visibility + the ADMIN gate. -->
+        <section id="admin-interest-form-view" class="admin-console" aria-label="Interest form" hidden></section>
 
         <!-- Admin message compose (TM-443): the full-page #/admin/messages/new compose form (audience
              picker + title/body/deep-link + confirm). admin-messages.js (imported by router.js) builds

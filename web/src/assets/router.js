@@ -25,6 +25,13 @@ import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-r
 // the route math (the dynamic-id edit route) is the pure admin-venues-route.js (unit-tested).
 import { enterAdminVenues, enterAdminVenueForm } from "./admin-venues.js";
 import { isAdminVenueFormRoute, parseAdminVenueFormRoute } from "./admin-venues-route.js";
+// Admin interests console + create/edit form (TM-779) — ADMIN-only, same gate as #/admin/venues. The
+// list is #/admin/interests (with the inline min/max config panel); the form is #/admin/interests/new
+// (create) and #/admin/interests/{id}/edit (edit). admin-interests.js mounts the list into
+// #admin-interests-view and the form into #admin-interest-form-view; the route math (the dynamic-id edit
+// route) is the pure admin-interests-route.js (unit-tested).
+import { enterAdminInterests, enterAdminInterestForm } from "./admin-interests.js"; // TM-779
+import { isAdminInterestFormRoute, parseAdminInterestFormRoute } from "./admin-interests-route.js"; // TM-779
 // Admin message compose (TM-443): the full-page #/admin/messages/new compose form, ADMIN-only (same
 // gate as #/admin). admin-messages.js mounts it into #admin-message-form-view; the route math is the
 // pure admin-message-route.js (unit-tested on the PR gate). Kept additive to this shared router.
@@ -79,6 +86,9 @@ const ADMIN_EVENTS = "#/admin/events";
 // Admin venues console (TM-519) — protected + ADMIN-only, the same gate as #/admin/events. Its own
 // exact-match hash; admin-venues.js mounts into #admin-venues-view.
 const ADMIN_VENUES = "#/admin/venues";
+// Admin interests console (TM-779) — protected + ADMIN-only, the same gate as #/admin/venues. Its own
+// exact-match hash; admin-interests.js mounts into #admin-interests-view.
+const ADMIN_INTERESTS = "#/admin/interests"; // TM-779
 // Admin sent-history list (TM-444) — protected + ADMIN-only, the same gate as #/admin. Its own exact
 // hash (the bare #/admin/messages, distinct from the #/admin/messages/new compose sub-route, TM-443);
 // admin-sent-history.js mounts into #admin-message-list-view. The one route string lives in
@@ -142,7 +152,7 @@ const MEMBERSHIP = "#/membership";
 // PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
 // the membership tier route.
 const RECEIPTS = "#/receipts";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]);
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -214,6 +224,8 @@ function isProtected(route) {
     isAdminEventFormRoute(route) ||
     // Admin venue create/edit form (TM-519) — ADMIN-only, so protected too.
     isAdminVenueFormRoute(route) ||
+    // Admin interest create/edit form (TM-779) — ADMIN-only, so protected too.
+    isAdminInterestFormRoute(route) ||
     // Admin message compose (TM-443) — ADMIN-only, so protected too.
     isAdminMessageComposeRoute(route) ||
     // Membership tier screen (TM-606) — protected (any signed-in user) when the flag is on.
@@ -262,6 +274,13 @@ let adminVenuesActive = false;
 // repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does
 // (mirrors adminEventFormEntered).
 let adminVenueFormEntered = null;
+// Admin interests console (TM-779): whether the interests list is currently mounted, so we (re)load it
+// only on entry (mirrors adminVenuesActive).
+let adminInterestsActive = false; // TM-779
+// Admin interest form (TM-779): the last form route we entered (#/admin/interests/new or …/{id}/edit), so
+// a repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does
+// (mirrors adminVenueFormEntered).
+let adminInterestFormEntered = null; // TM-779
 // Admin message compose (TM-443): whether the compose page is currently mounted, so we mount it once on
 // entry and reset on leaving (mirrors the single-route views like notifications). The route is a single
 // exact hash (#/admin/messages/new), so a boolean is enough — there's no id to switch between.
@@ -350,7 +369,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash;
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
@@ -359,6 +378,8 @@ function currentRoute() {
   if (isAdminEventFormRoute(hash)) return hash;
   // Admin venue form (create/edit): return the raw hash so the {id} in an edit route survives (TM-519).
   if (isAdminVenueFormRoute(hash)) return hash;
+  // Admin interest form (create/edit): return the raw hash so the {id} in an edit route survives (TM-779).
+  if (isAdminInterestFormRoute(hash)) return hash; // TM-779
   // Admin message compose (TM-443): the exact #/admin/messages/new route.
   if (isAdminMessageComposeRoute(hash)) return hash;
   // Membership tier screen (TM-606): the exact #/membership route, but ONLY when the membership flag is
@@ -397,6 +418,8 @@ function render() {
   const adminEventFormView = $("admin-event-form-view");
   const adminVenuesView = $("admin-venues-view");
   const adminVenueFormView = $("admin-venue-form-view");
+  const adminInterestsView = $("admin-interests-view"); // TM-779
+  const adminInterestFormView = $("admin-interest-form-view"); // TM-779
   const profileView = $("profile-view");
   const onboardingView = $("onboarding-view");
   const termsView = $("terms-view");
@@ -415,6 +438,10 @@ function render() {
   if (adminVenuesView) adminVenuesView.hidden = route !== ADMIN_VENUES;
   // Admin venue form (TM-519) — shown for the create route and any {id} edit route.
   if (adminVenueFormView) adminVenueFormView.hidden = !isAdminVenueFormRoute(route);
+  // Admin interests console (TM-779) — shown for the exact #/admin/interests route.
+  if (adminInterestsView) adminInterestsView.hidden = route !== ADMIN_INTERESTS; // TM-779
+  // Admin interest form (TM-779) — shown for the create route and any {id} edit route.
+  if (adminInterestFormView) adminInterestFormView.hidden = !isAdminInterestFormRoute(route); // TM-779
   // Admin message compose (TM-443) — shown for the exact #/admin/messages/new route.
   const adminMessageFormView = $("admin-message-form-view");
   if (adminMessageFormView) adminMessageFormView.hidden = !isAdminMessageComposeRoute(route);
@@ -464,6 +491,7 @@ function render() {
   const navAdmin = $("nav-admin");
   const navAdminEvents = $("nav-admin-events");
   const navAdminVenues = $("nav-admin-venues");
+  const navAdminInterests = $("nav-admin-interests"); // TM-779
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   if (navSignOut) navSignOut.hidden = !signedIn;
@@ -497,6 +525,8 @@ function render() {
   if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
   // The admin venues console link (TM-519) follows the same ADMIN-only, hidden-while-gated rule.
   if (navAdminVenues) navAdminVenues.hidden = !(signedIn && isAdmin) || gated;
+  // The admin interests console link (TM-779) follows the same ADMIN-only, hidden-while-gated rule.
+  if (navAdminInterests) navAdminInterests.hidden = !(signedIn && isAdmin) || gated; // TM-779
   // The admin "Messages" link (TM-443) — the entry point to the compose page — follows the same
   // ADMIN-only, hidden-while-gated rule. It targets compose directly since the sent-history list
   // (#/admin/messages) is TM-444 (a later wave) and doesn't exist yet.
@@ -633,6 +663,21 @@ function guard() {
     go(HOME);
     return;
   }
+  // Admin interests console (TM-779) is ADMIN-only too — same rule as #/admin/venues; the backend
+  // (TM-774) is the real gate, this just avoids showing an unusable page to a non-admin.
+  if (route === ADMIN_INTERESTS && shouldBounceNonAdmin({ isAdmin, roleResolved })) { // TM-779
+    toast("Admins only.", { type: "error" });
+    adminInterestsActive = false;
+    go(HOME);
+    return;
+  }
+  // The full-page interest create/edit form (TM-779) is ADMIN-only too — same rule as the interests console.
+  if (isAdminInterestFormRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) { // TM-779
+    toast("Admins only.", { type: "error" });
+    adminInterestFormEntered = null;
+    go(HOME);
+    return;
+  }
   // The full-page message compose form (TM-443) is ADMIN-only too — same rule as the consoles above.
   if (isAdminMessageComposeRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
@@ -703,6 +748,28 @@ function guard() {
     }
   } else {
     adminVenueFormEntered = null;
+  }
+  // Admin interests console (TM-779): mount on entry, (re)load its list each entry, reset on leaving so a
+  // future entry reloads. Same lifecycle as the venues console above.
+  if (route === ADMIN_INTERESTS && isAdmin) { // TM-779
+    if (!adminInterestsActive) {
+      adminInterestsActive = true;
+      enterAdminInterests();
+    }
+  } else {
+    adminInterestsActive = false;
+  }
+  // Full-page interest create/edit form (TM-779): (re)enter whenever the form route CHANGES (create vs a
+  // specific edit id), reset on leaving — and returning to #/admin/interests re-runs enterAdminInterests(),
+  // which reloads the list so a just-saved create/edit shows immediately. Mirrors the venue form.
+  if (isAdminInterestFormRoute(route) && isAdmin) { // TM-779
+    if (route !== adminInterestFormEntered) {
+      adminInterestFormEntered = route;
+      const target = parseAdminInterestFormRoute(route);
+      enterAdminInterestForm(target.mode, target.id);
+    }
+  } else {
+    adminInterestFormEntered = null;
   }
   // Full-page message compose (TM-443): mount once on entry into #/admin/messages/new, reset on leaving
   // so a future entry re-mounts a fresh draft. Single exact route, so a boolean guard is enough (unlike

@@ -58,6 +58,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 for (const [file, fn] of [
   ["admin-events.js", "loadEvents"],
   ["admin-venues.js", "loadVenues"],
+  ["admin-interests.js", "loadInterests"], // TM-779: the interests console shares the same guard shape
 ]) {
   test(`${file} ${fn}() bails while a load is already in flight`, () => {
     const src = readFileSync(join(HERE, "../src/assets/", file), "utf8");
