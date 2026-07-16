@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
-import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 
 // Golden-path end-to-end journey (TM-341) — ONE long happy-path run that walks the whole core
 // experience in a single test, as living evidence the product works front-to-back:
@@ -128,7 +128,9 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   const stamp = Date.now();
   const email = `e2e-golden-${stamp}@teammarhaba.test`;
   const location = `Goldenville-${stamp}`;
-  const city = `Golden-City-${stamp}`;
+  // Letters-only: the profile city field rejects digits since TM-771 (email/location keep the
+  // numeric stamp — only the name-like profile fields carry the rule).
+  const city = `Golden-City-${lettersOnlyStamp()}`;
 
   // A step screenshot helper: an explicit, named shot per major step (on top of the global
   // screenshot:"on"), so the run's artifacts read as a step-by-step trail of the journey.

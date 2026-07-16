@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
-import { ADMIN, dbConfig } from "../fixtures.mjs";
+import { ADMIN, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 
 // Edit-profile round-trip (TM-167): sign in → open the self-service #/profile view → edit a couple
 // of fields → save → assert the UI reflects success AND the change persists to the database via
@@ -35,8 +35,9 @@ async function openProfile(page) {
 }
 
 test("@profile a user edits their profile via #/profile and the change persists", async ({ page }) => {
-  // A value unique to this run so the assertion can't pass on stale data.
-  const city = `Testville-${Date.now()}`;
+  // A value unique to this run so the assertion can't pass on stale data — letters-only, because
+  // the city field rejects digits since TM-771.
+  const city = `Testville-${lettersOnlyStamp()}`;
 
   await openProfile(page);
 

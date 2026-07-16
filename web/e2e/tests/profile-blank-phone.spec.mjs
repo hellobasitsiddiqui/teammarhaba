@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
-import { ADMIN, dbConfig } from "../fixtures.mjs";
+import { ADMIN, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 
 // Blank-phone save regression (TM-188): a user with NO phone number edits an unrelated field and
 // saves — this MUST succeed (no 400). The original bug rejected the whole PATCH /api/v1/me when the
@@ -11,8 +11,9 @@ import { ADMIN, dbConfig } from "../fixtures.mjs";
 // phone, so ADMIN's phone is null/empty going in; we also clear the field explicitly to be sure.
 
 test("@profile saving the profile with a blank phone succeeds (TM-188 regression)", async ({ page }) => {
-  // A value unique to this run so the assertion can't pass on stale data.
-  const city = `Phoneless-${Date.now()}`;
+  // A value unique to this run so the assertion can't pass on stale data — letters-only, because
+  // the city field rejects digits since TM-771.
+  const city = `Phoneless-${lettersOnlyStamp()}`;
 
   // 1. Sign in (real Firebase flow against the Auth emulator). Email-code is the default front door
   // (TM-234); the email+password form (#password / #signin-btn) lives under "Try another way", so we

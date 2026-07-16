@@ -151,4 +151,36 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
         assertThat(users.findByFirebaseUid("uid-keep-phone").orElseThrow().getPhone())
                 .isEqualTo("+44 20 7946 0958");
     }
+
+    @Test
+    void patchMeRejectsPurelyNumericNameAndCityWith400() throws Exception {
+        // TM-771: firstName/lastName/city carried only @Size, so a purely numeric value ("676767")
+        // persisted as a name or city. The name-like @Pattern (at least one letter; letters, spaces,
+        // hyphens, apostrophes and periods only) must reject it at the bean-validation boundary.
+        for (String fieldName : List.of("firstName", "lastName", "city")) {
+            mockMvc.perform(patch("/api/v1/me")
+                            .with(caller("uid-numeric-" + fieldName, "x@example.com"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"" + fieldName + "\":\"676767\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        // The rejected write left no row-level trace.
+        users.findByFirebaseUid("uid-numeric-firstName")
+                .ifPresent(u -> assertThat(u.getFirstName()).isNull());
+    }
+
+    @Test
+    void patchMeAcceptsRealNamesIncludingPunctuationAndNonAscii() throws Exception {
+        // The TM-771 negative must not over-reject: hyphens, apostrophes, periods, spaces and
+        // non-ASCII letters are all legitimate name/city characters and must round-trip.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-real-name", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Jean-Luc\",\"lastName\":\"O'Brien\",\"city\":\"São Paulo\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Jean-Luc"))
+                .andExpect(jsonPath("$.lastName").value("O'Brien"))
+                .andExpect(jsonPath("$.city").value("São Paulo"));
+    }
 }

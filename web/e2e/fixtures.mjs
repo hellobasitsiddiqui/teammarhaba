@@ -95,3 +95,13 @@ export const dbConfig = {
   user: process.env.DB_USER || "app",
   password: process.env.DB_PASSWORD || "devpassword",
 };
+
+/**
+ * A per-run unique, LETTERS-ONLY stamp (digits 0-9 → a-j). The profile name/city fields reject
+ * digits since TM-771, so unique-per-run values typed into First name / Last name / City must be
+ * alphabetic — e.g. `Testville-${lettersOnlyStamp()}`. Emails, event locations and other free-text
+ * fields can keep the plain numeric Date.now() form.
+ */
+export function lettersOnlyStamp() {
+  return String(Date.now()).replace(/\d/g, (d) => "abcdefghij"[Number(d)]);
+}
