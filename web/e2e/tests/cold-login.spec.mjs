@@ -121,11 +121,11 @@ test("@auth cold login: from a fully signed-out state, an emailed code signs the
   await expect(page.locator("#emailcode-sent-to")).toHaveText(email);
 
   // ── Step 2: fetch the issued code and enter it → the backend verifies + mints a custom token → ─
-  //           the client signs in with it (signInWithCustomToken).
+  //           the client signs in with it (signInWithCustomToken). TM-867: filling the first OTP
+  //           box with the whole code distributes across the six boxes + AUTO-submits (no click).
   const code = await peekCode(email);
   expect(code).toMatch(/^\d{6}$/);
   await page.fill("#emailcode-code", code);
-  await page.click("#emailcode-verify-btn");
 
   // ── Boots into the app: the sign-out control appears and the signed-out form is gone. ────────
   await expect(page.locator("#signout-btn")).toBeVisible();

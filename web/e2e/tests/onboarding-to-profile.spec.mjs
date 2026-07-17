@@ -69,8 +69,8 @@ async function signInFreshUser(page, email, deepLink) {
   await page.click("#emailcode-send-btn");
   await requested;
   const code = await peekCode(email);
+  // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  await page.click("#emailcode-verify-btn");
   // Signed in (the nav sign-out control appears regardless of where the guard then routes us).
   await expect(page.locator("#signout-btn")).toBeVisible();
 }

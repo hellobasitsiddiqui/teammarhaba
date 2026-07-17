@@ -19,6 +19,8 @@ import {
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 import { isWebViewEnv } from "./auth-env.js";
 import { authErrorMessage } from "./login-error.js";
+import { attachOtpInput } from "./otp-input.js";
+import { makeSingleFlight } from "./otp-input-core.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -30,7 +32,7 @@ const els = {
   emailStep: $("emailcode-step-email"),
   codeStep: $("emailcode-step-code"),
   sentTo: $("emailcode-sent-to"),
-  code: $("emailcode-code"),
+  codeGroup: $("emailcode-otp"), // TM-867: the six-box OTP group (was the single #emailcode-code input)
   sendCode: $("emailcode-send-btn"),
   verifyCode: $("emailcode-verify-btn"),
   resendCode: $("emailcode-resend-btn"),
@@ -42,7 +44,7 @@ const els = {
   phone: $("phone"),
   smsPhoneStep: $("sms-step-phone"),
   smsCodeStep: $("sms-step-code"),
-  smsCode: $("sms-code"),
+  smsCodeGroup: $("sms-otp"), // TM-867: the six-box OTP group (was the single #sms-code input)
   smsSend: $("sms-send-btn"),
   smsVerify: $("sms-verify-btn"),
   recaptcha: $("recaptcha-container"),
@@ -58,6 +60,15 @@ const els = {
   signOut: $("signout-btn"),
 };
 
+// TM-867: the six-box OTP widgets (otp-input.js) over the static boxes in index.html. Typing the
+// 6th digit / pasting a full code / a programmatic setValue (the TM-407 native-autofill seam) all
+// land in onComplete, which auto-submits through the SAME single-flight `run()` wrapper as the
+// visible "Sign in" buttons — one verify path, shared busy/error handling, no double-submit.
+// (`run` / the verify functions are declared below; they're only *called* at event time, so the
+// forward references are safe.) The visible buttons stay as an a11y / JS-edge-case fallback.
+const emailOtp = attachOtpInput({ group: els.codeGroup, onComplete: () => run(verifyAndSignIn) });
+const smsOtp = attachOtpInput({ group: els.smsCodeGroup, onComplete: () => run(verifySms) });
+
 function showError(err) {
   // Friendly-message resolution lives in login-error.js: coded Firebase errors map by code (with a
   // generic fallback for unmapped codes — never the raw Firebase string), backend ApiErrors keep
@@ -67,17 +78,18 @@ function showError(err) {
   els.error.hidden = !msg;
 }
 
-// Every interactive control, disabled together while a request is in flight.
+// Every interactive control, disabled together while a request is in flight. The OTP boxes are
+// spread in (TM-867) so a verify in flight greys out all twelve digit boxes with everything else.
 function controls() {
   return [
     els.email,
-    els.code,
+    ...(emailOtp?.boxes ?? []),
     els.sendCode,
     els.verifyCode,
     els.resendCode,
     els.backToEmail,
     els.phone,
-    els.smsCode,
+    ...(smsOtp?.boxes ?? []),
     els.smsSend,
     els.smsVerify,
     els.password,
@@ -94,8 +106,12 @@ function setBusy(busy) {
   els.form?.setAttribute("aria-busy", String(busy));
 }
 
-// Run an auth action with shared error/loading handling.
-async function run(action) {
+// Run an auth action with shared error/loading handling. Single-flight (TM-867): the OTP widget's
+// auto-submit can fire while a verify is already running (e.g. a paste races a click on the visible
+// button, or a re-completed code after an error) — makeSingleFlight silently drops the re-entrant
+// call, so a second request can never leave the door. setBusy's disabling already stops most
+// double-triggers at the DOM; this guards the programmatic/synthetic paths it can't.
+const run = makeSingleFlight(async (action) => {
   showError(null);
   setBusy(true);
   try {
@@ -105,7 +121,7 @@ async function run(action) {
   } finally {
     setBusy(false);
   }
-}
+});
 
 // ---- Email-code flow (default) -------------------------------------------------------------
 
@@ -116,14 +132,14 @@ function showCodeStep(email) {
   if (els.sentTo) els.sentTo.textContent = email;
   els.emailStep.hidden = true;
   els.codeStep.hidden = false;
-  els.code?.focus();
+  emailOtp?.focus(); // first box, ready for the code (was the single input's focus())
 }
 
 function showEmailStep() {
   pendingEmail = null;
   els.codeStep.hidden = true;
   els.emailStep.hidden = false;
-  if (els.code) els.code.value = "";
+  emailOtp?.clear(); // a stale half-typed code must not survive into the next attempt
 }
 
 async function sendEmailCode() {
@@ -133,7 +149,8 @@ async function sendEmailCode() {
 }
 
 async function verifyAndSignIn() {
-  const code = (els.code.value || "").trim();
+  // TM-867: the code is assembled from the six boxes by the widget (digits only by construction).
+  const code = emailOtp?.value() ?? "";
   const customToken = await verifyEmailCode(pendingEmail, code);
   await signInWithEmailCodeToken(customToken);
 }
@@ -168,12 +185,13 @@ async function sendSms() {
   smsConfirmation = await startPhoneSignIn(phone, els.recaptcha);
   els.smsPhoneStep.hidden = true;
   els.smsCodeStep.hidden = false;
-  els.smsCode?.focus();
+  smsOtp?.focus();
 }
 
 async function verifySms() {
   if (!smsConfirmation) throw new Error("Please request an SMS code first.");
-  await smsConfirmation.confirm((els.smsCode.value || "").trim());
+  // TM-867: code assembled from the six SMS boxes (same widget as the email step).
+  await smsConfirmation.confirm(smsOtp?.value() ?? "");
 }
 
 els.smsSend?.addEventListener("click", () => run(sendSms));
@@ -222,6 +240,10 @@ onAuthChanged((user) => {
   }
   if (!signedIn && wasSignedIn) {
     els.form?.reset();
+    // form.reset() blanks the box ELEMENTS but not the widgets' internal state — clear both so a
+    // stale code can't be resubmitted by the next completion (TM-867). showEmailStep() already
+    // clears the email widget; the SMS one is ours to clear here.
+    smsOtp?.clear();
     showEmailStep();
     if (els.alternatives) els.alternatives.hidden = true;
     els.tryAnother?.setAttribute("aria-expanded", "false");
