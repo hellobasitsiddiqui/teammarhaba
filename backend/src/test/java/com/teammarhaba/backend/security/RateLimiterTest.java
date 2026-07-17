@@ -73,13 +73,14 @@ class RateLimiterTest {
 
     @Test
     void anonymousCallerIsKeyedByTheProxyAppendedClientIp_notTheSpoofableLeftmost() {
-        // TM-732: Cloud Run APPENDS the real client IP as the LAST X-Forwarded-For entry. A caller can
-        // prepend anything to forge an IP / mint a fresh bucket. Header "9.9.9.9, 8.8.8.8, 130.211.0.1":
-        // the client prepended "9.9.9.9", the true client is "8.8.8.8" (what the front end saw), and
-        // Cloud Run appended "130.211.0.1". With one trusted hop the key must be the true client, not the
-        // attacker-prepended leftmost "9.9.9.9" the old code used.
+        // TM-858: for direct Cloud Run, GFE APPENDS the real client IP as the LAST X-Forwarded-For
+        // entry. A caller can prepend anything to forge an IP / mint a fresh bucket. Header
+        // "9.9.9.9, 130.211.0.1, 8.8.8.8": the client prepended "9.9.9.9" and "130.211.0.1", and GFE
+        // appended the true client "8.8.8.8" (what it saw) last. With one trusted hop the key must be
+        // that true client — not the attacker-prepended leftmost "9.9.9.9" the pre-TM-732 code used, nor
+        // the spoofable second-from-last entry the TM-732 code mistakenly picked.
         MockHttpServletRequest forwarded = request("169.254.0.1");
-        forwarded.addHeader("X-Forwarded-For", "9.9.9.9, 8.8.8.8, 130.211.0.1");
+        forwarded.addHeader("X-Forwarded-For", "9.9.9.9, 130.211.0.1, 8.8.8.8");
         assertThat(limiter.clientKey(forwarded)).isEqualTo("ip:8.8.8.8");
 
         // No forwarding header -> fall back to the direct socket address.

@@ -109,13 +109,23 @@ jobs:
             exit 0
           fi
 
-          # Strand test: look at the LATEST completed Deploy run for main. A Deploy run only concludes
+          # Strand test: look at the LATEST completed Deploy run. A Deploy run only concludes
           # `success` after its Promote + TM-131 "Verify rollout" steps pass — i.e. its revision IS
           # serving. So a successful latest run ⇒ whatever serves is what was deliberately deployed;
           # the HEAD mismatch is an intentionally-undeployed commit ⇒ DO NOTHING (gate respected).
           # A strand only exists when the latest Deploy run FAILED / was cancelled / timed out (it
           # started but didn't land) — that is the only case we re-dispatch to roll forward.
-          LAST_CONCLUSION="$(gh run list --workflow=deploy.yml --branch=main --status=completed \
+          #
+          # TM-859: do NOT filter by `--branch=main`. The real production deploys run on the `deploy`
+          # label of a PR MERGE (deploy.yml's `pull_request: [closed]` trigger); a `pull_request` run's
+          # headBranch is the PR SOURCE branch, not `main`, so `--branch=main` matched only the manual
+          # `workflow_dispatch` runs and silently skipped every merge-triggered deploy. That let a
+          # stranded merge deploy hide behind an older successful manual run (LAST_CONCLUSION="success"
+          # → short-circuit → strand never healed), defeating this workflow's whole TM-146 purpose.
+          # Every Deploy run deploys `main` regardless of trigger (dispatch = main HEAD; the PR trigger
+          # is gated on `branches: [main]`), so querying by workflow + completed status alone correctly
+          # returns the most-recent RELEVANT Deploy run — dispatch OR merge — which is what we want.
+          LAST_CONCLUSION="$(gh run list --workflow=deploy.yml --status=completed \
             --limit 1 --json conclusion --jq '.[0].conclusion // empty' 2>/dev/null || echo '')"
           echo "latest completed Deploy conclusion: ${LAST_CONCLUSION:-<none>}"
           if [ "${LAST_CONCLUSION}" = "success" ]; then
