@@ -115,6 +115,10 @@ test("describeWhen: same-day end → a time range; invalid start → empty", () 
 test("countdownText: minute / hour / day buckets, and non-positive → 'now'", () => {
   assert.equal(countdownText(30 * 60000), "in 30 min");
   assert.equal(countdownText(3 * 3600000), "in 3 h");
+  // Below the 24h cutoff we still count in hours; on the boundary the singular
+  // "day" arm becomes reachable (round(30/24) === 1) — TM-869 regression.
+  assert.equal(countdownText(23 * 3600000), "in 23 h");
+  assert.equal(countdownText(30 * 3600000), "in 1 day");
   assert.equal(countdownText(50 * 3600000), "in 2 days");
   assert.equal(countdownText(0), "now");
   assert.equal(countdownText(-5000), "now");
