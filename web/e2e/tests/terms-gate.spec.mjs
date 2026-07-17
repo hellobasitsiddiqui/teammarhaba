@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { completeOnboarding } from "../helpers/onboarding.mjs";
 
 // Terms/privacy acceptance gate (TM-170): after the first-login profile gate (TM-250), a brand-new
 // user is routed to a blocking "before you continue" step showing the current terms version + links
@@ -45,40 +46,21 @@ async function signInFreshUser(page, email) {
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 
-/** Clear the first-login profile gate so we land on the SECOND gate (terms).
- *
- *  Robust against the onboarding gate's async prefill (TM-590): onboarding.js `load()` fires a mount
- *  GET /api/v1/me and pre-fills the form from it. For a brand-new user that prefill is BLANK, so a value
- *  typed BEFORE the response lands is clobbered back to empty — the same async-populate clobber the
- *  edit-profile spec documents (TM-198). The submit then no-ops on empty-field validation and NO POST
- *  fires, so the old `waitForResponse(POST /api/v1/me/onboarding)` hung to the 60s test timeout.
- *  Golden-path only dodged this because a full-page screenshot between the form appearing and the fill
- *  gave the prefill time to land first.
- *
- *  Fix: wait on the app OUTCOME — the onboarding gate LIFTING — instead of a specific POST, and retry the
- *  fill+submit so a late prefill that clears the fields can't strand the test. Deterministic regardless
- *  of prefill timing. */
-async function completeOnboarding(page) {
-  await expect(page.locator("#onboarding-form")).toBeVisible();
-  await expect(async () => {
-    // Already through (a prior iteration's submit landed)? Nothing left to do.
-    if (await page.locator("#onboarding-view").isHidden()) return;
-    await page.fill("#onboarding-name", "Terms Tester");
-    await page.fill("#onboarding-location", `Termsville-${Date.now()}`);
-    await page.fill("#onboarding-age", "30");
-    await page.click("#onboarding-form button[type=submit]");
-    // The gate lifts once the POST succeeds (the router re-guards → the terms gate). If a late prefill
-    // wiped the fields the submit no-ops and the gate stays up, so this times out and the outer retry
-    // re-fills (the prefill has since landed, so the values now stick).
-    await expect(page.locator("#onboarding-view")).toBeHidden({ timeout: 5_000 });
-  }).toPass({ timeout: 30_000 });
-}
+// The first-login profile gate + the interests picker are now walked by the shared
+// helpers/onboarding.mjs `completeOnboarding` (TM-851): onboarding is a two-step flow inside
+// `#onboarding-view` — profile gate → interests picker → the router hands off to the terms gate. The
+// helper is robust against the onboarding gate's async prefill (TM-590), and completes the interests
+// step (min-1 gate, seed config) before the terms gate can appear. See that file for the full rationale.
 
 test("@terms a brand-new user is terms-gated, accepts, and then enters the app", async ({ page }) => {
   const email = `e2e-terms-${Date.now()}@teammarhaba.test`;
 
   await signInFreshUser(page, email);
-  await completeOnboarding(page);
+  await completeOnboarding(page, {
+    name: "Terms Tester",
+    location: `Termsville-${Date.now()}`,
+    age: 30,
+  });
 
   // GATED: routed to the terms view; the home view is NOT shown and the version + links are present.
   await expect(page.locator("#terms-view")).toBeVisible();

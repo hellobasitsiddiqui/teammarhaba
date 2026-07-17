@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // Cold onboarding → profile journey (TM-738 P0). A BRAND-NEW passwordless user who deep-links the
 // Profile page is INTERCEPTED by the first-login gate (TM-250): the guard in router.js can't let a
@@ -116,7 +117,13 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await page.click("#onboarding-form button[type=submit]");
   await saved;
 
-  // The onboarding gate lifts, but a brand-new user hits the SECOND gate — terms acceptance (TM-170).
+  // The onboarding gate lifts into the SECOND onboarding step — the interests picker (TM-776/TM-804),
+  // rendered into the SAME #onboarding-view. Complete it (select the minimum, Continue → PATCH /me) so
+  // the router hands off to the terms gate — the stashed #/profile intended route is still preserved
+  // throughout. Done via the shared helper (TM-851).
+  await completeInterestsStep(page);
+
+  // The interests step done, a brand-new user hits the SECOND first-run gate — terms acceptance (TM-170).
   // Accept the current version to clear it. (The gate STILL preserves the stashed #/profile target.)
   await expect(page.locator("#terms-view")).toBeVisible();
   await expect(page.locator("#profile-view")).toBeHidden();

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // First-login profile gate (TM-250): a brand-new passwordless user is routed to a blocking
 // "complete your profile" form (Name, Location, Age) and cannot enter the app until it's filled +
@@ -73,7 +74,13 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await page.click("#onboarding-form button[type=submit]");
   await saved;
 
-  // The onboarding gate lifts, but a brand-new user now hits the SECOND gate — terms acceptance
+  // The onboarding gate lifts into the SECOND onboarding step — the interests picker (TM-776/TM-804),
+  // rendered into the SAME #onboarding-view. Complete it (select the minimum, Continue → PATCH /me) so
+  // the router hands off to the terms gate. Done via the shared helper (TM-851) so future onboarding
+  // changes touch one place.
+  await completeInterestsStep(page);
+
+  // The interests step done, a brand-new user now hits the SECOND first-run gate — terms acceptance
   // (TM-170): they haven't accepted the current terms version yet. Accept it to reach the app.
   await expect(page.locator("#terms-view")).toBeVisible();
   await expect(page.locator("#auth-signed-in")).toBeHidden();
