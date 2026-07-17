@@ -477,6 +477,27 @@ class RevolutPaymentProviderTest {
     }
 
     @Test
+    void acceptsAFutureSkewedWebhookWhenTheServerClockRunsBehind() {
+        // TM-871: the replay guard used Math.abs(now - ts), so a FUTURE-skewed timestamp (this app
+        // server's clock running behind Revolut's) was rejected exactly like a stale one. A correctly
+        // signed settle webhook then 401'd, and after retries a paid order could sit PENDING (money
+        // captured, no RSVP). The replay concern is about PAST deliveries only, so future skew must be
+        // TOLERATED. Simulate a server ~10 minutes behind: the delivery timestamp is 10 minutes in the
+        // FUTURE relative to this clock. Under the old Math.abs check that reads as |−10min| > 5min and is
+        // rejected exactly like a stale delivery; under the past-only staleness check it is accepted.
+        String body = "{\"event\":\"ORDER_COMPLETED\",\"order_id\":\"rev-order-1\"}";
+        String futureTs = String.valueOf(System.currentTimeMillis() + 10 * 60 * 1000);
+        String signature = "v1=" + sign(WEBHOOK_SECRET, "v1." + futureTs + "." + body);
+
+        Optional<PaymentWebhookEvent> event =
+                provider(SECRET_KEY, WEBHOOK_SECRET).parseWebhookEvent(bytes(body), signature, futureTs);
+
+        assertThat(event).isPresent();
+        assertThat(event.get().providerOrderId()).isEqualTo("rev-order-1");
+        assertThat(event.get().paid()).isTrue();
+    }
+
+    @Test
     void acceptsAFreshEpochSecondsTimestamp() {
         // Unit tolerance: a 10-digit value is treated as epoch seconds and normalised, so a provider
         // sending seconds instead of milliseconds still verifies while fresh.
