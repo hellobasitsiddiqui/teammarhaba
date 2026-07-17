@@ -74,6 +74,41 @@ test("reconcile no longer treats a plain serving!=main-HEAD mismatch as a strand
   );
 });
 
+test("reconcile strand-decision query does NOT filter Deploy runs by --branch=main (TM-859)", () => {
+  // The real production deploys run on the `deploy` label of a PR MERGE (deploy.yml's
+  // `pull_request: [closed]` trigger). A pull_request run's headBranch is the PR SOURCE branch, not
+  // `main`, so `gh run list --workflow=deploy.yml --branch=main` matched only the manual
+  // workflow_dispatch runs and SILENTLY SKIPPED every merge-triggered deploy. A stranded merge
+  // deploy then hid behind an older successful manual run (LAST_CONCLUSION="success" →
+  // short-circuit) and was never healed — defeating this workflow's whole TM-146 purpose.
+  //
+  // Fail-before: the pre-fix line was `--workflow=deploy.yml --branch=main --status=completed`, so
+  // this assertion fails on it. Pass-after: the `--branch=main` filter is dropped.
+  // Isolate the ACTUAL command assignment line (the one that runs `gh run list`), not the prose
+  // comments above it that legitimately mention `--branch=main` when explaining the fix. We match
+  // from the `LAST_CONCLUSION="$(gh run list` assignment up to `--json conclusion` (the command may
+  // wrap across lines with a trailing backslash) so only the real command is inspected.
+  const strandCmd = RECONCILE.match(
+    /LAST_CONCLUSION="\$\(gh run list[\s\S]*?--json conclusion/,
+  );
+  assert.ok(
+    strandCmd,
+    "the strand-decision must read the latest completed Deploy conclusion via `gh run list`",
+  );
+  const strandQuery = strandCmd[0];
+  assert.match(
+    strandQuery,
+    /gh run list --workflow=deploy\.yml[^\n]*--status=completed/,
+    "the strand query must still list the latest COMPLETED Deploy run by workflow",
+  );
+  assert.doesNotMatch(
+    strandQuery,
+    /--branch=main/,
+    "the strand query must NOT filter by --branch=main — that excludes PR-merge-triggered Deploy " +
+      "runs (headBranch = PR source branch), so a stranded merge deploy would never be healed",
+  );
+});
+
 // ---- Finding 2: deploy.yml candidate revision must be pinned, not race-read -------------------
 
 test("deploy pins the candidate revision name via --revision-suffix", () => {

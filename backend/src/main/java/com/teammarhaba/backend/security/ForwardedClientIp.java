@@ -9,22 +9,37 @@ import org.springframework.util.StringUtils;
  *
  * <p><strong>Why the leftmost entry is wrong.</strong> {@code X-Forwarded-For} is written by each
  * proxy <em>appending</em> the address it saw the request come from. So the header reads
- * {@code <spoofable...>, <client>, <proxy1>, <proxy2>, ...} — the trustworthy entries are the
+ * {@code <spoofable...>, <client>, <proxy2>, ...} — the trustworthy entries are the
  * <em>rightmost</em> ones, written by infrastructure we control; everything to their left is whatever
- * the caller chose to send. Taking the <em>leftmost</em> entry (the old code) therefore keys on a
- * value the attacker fully controls: they prepend {@code X-Forwarded-For: 1.2.3.4} and Cloud Run's
- * front end simply appends the real client IP after it. That lets a single source mint a fresh
- * rate-limit bucket per request (bypassing per-IP anti-abuse) and forge any other client's IP.
+ * the caller chose to send. Taking the <em>leftmost</em> entry (the original TM-247/pre-TM-732 code)
+ * therefore keys on a value the attacker fully controls: they prepend {@code X-Forwarded-For: 1.2.3.4}
+ * and Cloud Run's front end simply appends the real client IP after it. That lets a single source mint
+ * a fresh rate-limit bucket per request (bypassing per-IP anti-abuse) and forge any other client's IP.
  *
- * <p><strong>The fix: count trusted hops from the right.</strong> We trust exactly
- * {@code trustedProxyHops} proxies between the client and the app (for direct Cloud Run that is
- * <strong>1</strong>: Cloud Run's front end, which always appends the true client IP as the last
- * entry). The real client is then the entry immediately to the <em>left</em> of those trusted hops:
- * index {@code (size - 1 - trustedProxyHops)} counting from the left. Anything the caller prepended
- * sits further left and is ignored. If the header is shorter than the trusted-hop count (fewer
- * entries than infrastructure would ever produce — only possible from a malformed/forged request that
- * bypassed the proxy, e.g. in local dev), we fall back to the direct socket address rather than trust
- * a caller-supplied value.
+ * <p><strong>The fix: count trusted hops from the right, and the last-appending trusted hop wrote the
+ * real client (TM-858).</strong> We trust exactly {@code trustedProxyHops} proxies between the client
+ * and the app. For this deployment's <strong>direct Cloud Run</strong> topology that is
+ * <strong>1</strong>: Google's front end (GFE) terminates the connection and <em>appends the real
+ * immediate client IP as the LAST (rightmost) entry</em> — that entry it wrote is trustworthy, and it
+ * is the only one that is: every entry to its left is caller-supplied and spoofable. The real client
+ * is therefore the <em>leftmost entry of the trusted-hop block</em>: index
+ * {@code (size - trustedProxyHops)} counting from the left. With one trusted hop that is the last
+ * entry ({@code size - 1}); a second trusted appending hop (e.g. an external HTTP(S) Load Balancer in
+ * front, which would append its own IP after GFE's client-IP entry) shifts the real client one place
+ * left to {@code size - 2}, which {@code trustedProxyHops == 2} selects. Anything the caller prepended
+ * sits further left and is ignored.
+ *
+ * <p><strong>Why not second-from-last (the TM-732 bug this fixes).</strong> The TM-732 change indexed
+ * {@code (size - 1 - trustedProxyHops)} — one entry too far left — on the mistaken belief that Cloud
+ * Run appends its <em>own internal</em> address last and the client second-from-last. For a direct
+ * Cloud Run service GFE appends the <em>client</em> IP last, so that off-by-one (a) picked a
+ * caller-supplied, spoofable entry — the anti-spoof guarantee was not actually enforced — and (b)
+ * mis-keyed every legitimate direct request (whose header is just the single client IP, giving index
+ * {@code -1} → fallback), collapsing all direct traffic into one shared {@code RemoteAddr} bucket.
+ *
+ * <p>If the header is shorter than the trusted-hop count (fewer entries than infrastructure would ever
+ * produce — only possible from a malformed/forged request that bypassed the proxy, e.g. in local dev),
+ * we fall back to the direct socket address rather than trust a caller-supplied value.
  *
  * <p>With {@code trustedProxyHops == 0} (no reverse proxy — plain local dev) the header is ignored
  * entirely and the direct socket address is used, which is exactly right: there is no trusted proxy to
@@ -79,8 +94,11 @@ public final class ForwardedClientIp {
             return null;
         }
         String[] entries = headerValue.split(",");
-        // The real client sits immediately left of the trusted hops: index (size - 1 - trustedHops).
-        int clientIndex = entries.length - 1 - trustedProxyHops;
+        // The last-appending trusted hop (GFE, for direct Cloud Run) wrote the real client IP as the
+        // rightmost entry, so the real client is the LEFTMOST entry of the trusted-hop block: index
+        // (size - trustedHops). With one trusted hop that is the last entry (size - 1) — the true
+        // client GFE observed — NOT the second-from-last (the TM-858 off-by-one this replaces).
+        int clientIndex = entries.length - trustedProxyHops;
         if (clientIndex < 0) {
             // Fewer entries than infrastructure would ever emit — a forged/short header that didn't
             // traverse the expected proxy chain. Don't trust any of it; fall back to the socket address.

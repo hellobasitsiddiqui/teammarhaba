@@ -81,9 +81,10 @@ class RateLimitFilterIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void anonymousClientIsThrottledByIp() throws Exception {
-        // Realistic Cloud Run shape "<client>, <cloud-run-hop>" (TM-732): the limiter keys on the client
-        // entry the trusted proxy appended, counted from the right — not the spoofable leftmost.
-        String ip = "203.0.113.7, 130.211.0.1";
+        // Realistic direct Cloud Run shape "<spoofable-prepend>, <client>" (TM-858): GFE appends the
+        // real client IP as the LAST entry, and the limiter keys on that rightmost trusted entry —
+        // "203.0.113.7" here — not the spoofable leftmost "130.211.0.1" a caller can prepend.
+        String ip = "130.211.0.1, 203.0.113.7";
 
         // Anonymous /api/** requests still count against the limit; under it they reach the security
         // chain and get the normal 401 (no token), proving the limiter isn't what's rejecting them yet.
