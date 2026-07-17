@@ -440,13 +440,30 @@ public class UserService {
      * self-attests the supplied age ({@code ageVerified = true}), since an age is always on record by
      * construction. Idempotent on the flag, but the profile fields are always (re)written from the
      * request, so re-submitting overwrites with the latest values.
+     *
+     * <p>TM-883: the captured name also seeds {@code firstName}/{@code lastName} (first word →
+     * first name, remainder → last name) — previously onboarding only ever wrote
+     * {@code displayName}, so first/last name stayed {@code null} forever unless the user found the
+     * edit form, and the profile identity header had nothing but fallbacks to show. The split only
+     * runs when BOTH parts are still unset: an explicit first/last name (edited via
+     * {@code PATCH /me}) is a user's own correction and must never be overwritten by this heuristic
+     * on a re-submit.
      */
     @Transactional
     public User completeProfileOnboarding(
             VerifiedUser caller, String name, String location, Integer age, String phone) {
         User user = provision(caller);
 
-        user.setDisplayName(requireText(name, "name"));
+        String fullName = requireText(name, "name");
+        user.setDisplayName(fullName);
+        boolean seedNames = user.getFirstName() == null && user.getLastName() == null;
+        if (seedNames) {
+            // Whitespace-split, limit 2: "Ibn Battuta" → ("Ibn", "Battuta"), "Mary Jane Watson" →
+            // ("Mary", "Jane Watson"), a single word → first name only (lastName stays null).
+            String[] parts = fullName.split("\\s+", 2);
+            user.setFirstName(parts[0]);
+            user.setLastName(parts.length > 1 ? parts[1] : null);
+        }
         user.setCity(requireText(location, "location"));
         user.setAge(age); // range already enforced (18–99) by bean validation at the boundary
         user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
@@ -455,13 +472,20 @@ public class UserService {
         user.completeOnboarding();
         user.setAgeVerified(true); // an age is always on record here (required field) — self-attested
 
-        // The gate is a profile fill plus an onboarding completion; record both for a complete trail.
+        // The gate is a profile fill plus an onboarding completion; record both for a complete trail
+        // (the fields list names first/last name only when the TM-883 seed actually wrote them).
         audit.record(
                 caller.uid(),
                 AuditAction.PROFILE_UPDATED,
                 TARGET_USER,
                 caller.uid(),
-                Map.of("fields", "displayName,city,age,phone", "via", "onboarding"));
+                Map.of(
+                        "fields",
+                        seedNames
+                                ? "displayName,firstName,lastName,city,age,phone"
+                                : "displayName,city,age,phone",
+                        "via",
+                        "onboarding"));
         if (!wasComplete) {
             audit.record(
                     caller.uid(),
