@@ -1513,10 +1513,19 @@ h3,
 
 .tm-modal {
     width: min(34rem, 96vw);
-    /* Cap the modal to the backdrop's content box (viewport minus its safe-area padding) and lay it
+    /* Cap the modal to the visible viewport (minus the backdrop's safe-area inset padding) and lay it
        out as a column so the head stays pinned and the body scrolls (TM-421). Without this a long
-       create/edit form overflows the viewport and its submit button sits below the fold, unreachable. */
-    max-height: 100%;
+       create/edit form overflows the viewport and its submit button sits below the fold, unreachable.
+       TM-830: `max-height: 100%` only constrains when an ancestor has a *definite* height. Under the
+       `display:grid; place-items:center` backdrop the percentage failed to resolve on mobile, so the
+       modal grew to its full content height and `.tm-modal-body`'s `overflow-y:auto` was inert — the
+       tall Interests "+ add" picker's Save button sat ~1650px below the fold, unreachable. Pin the cap
+       to the *viewport* instead (100vh fallback → 100dvh where supported, mirroring `body`), subtracting
+       the backdrop's top+bottom inset padding (1rem + env() each) so the modal never exceeds the visible
+       area and its body reliably scrolls on a short phone viewport. Short modals (RSVP confirm, disable
+       account) stay well under the cap, so they render unchanged. */
+    max-height: calc(100vh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
 }
