@@ -12,6 +12,10 @@
 // (loaded via <script type="module"> in index.html) rather than a classic IIFE script. Module scripts
 // defer, but #build-info is already in the DOM before this runs, so the timing is unchanged in effect.
 import { formatBuildStamp } from "./footer-core.js";
+// TM-847: the pure SHA-shortening + Cloud-Run-revision-trimming helpers were previously nested in the
+// IIFE below with no test coverage. They now live in build-info-core.js (unit-tested) and are imported
+// here — no behaviour change, just a testable seam (the same `*-core.js` split the rest of the app uses).
+import { shortSha, trimRevision } from "./build-info-core.js";
 
 (function stampBuildInfo() {
   const el = document.getElementById("build-info");
@@ -54,20 +58,6 @@ import { formatBuildStamp } from "./footer-core.js";
       /* backend unreachable — keep the web-only stamp */
     });
 
-  // Reduce a build id to a short 7-char SHA. A full 40-char git SHA is truncated; anything already
-  // short (a short SHA, "dev", or a legacy describe string from an old backend) is left untouched.
-  function shortSha(id) {
-    if (!id) return "";
-    return /^[0-9a-f]{40}$/i.test(id) ? id.slice(0, 7) : id;
-  }
-
-  // Trim a Cloud Run revision to a compact `r<number>` (TM-610). Cloud Run names revisions
-  // `<service>-<NNNNN>-<suffix>` (e.g. teammarhaba-backend-00184-rik); we keep just the revision
-  // number, dropping the service-name prefix and the random suffix. "local" (off Cloud Run) and
-  // anything that doesn't match are hidden rather than shown raw.
-  function trimRevision(rev) {
-    if (!rev || rev === "local") return "";
-    const m = rev.match(/-(\d+)(?:-\w+)?$/);
-    return m ? `r${m[1]}` : "";
-  }
+  // shortSha() and trimRevision() moved to build-info-core.js (TM-847) and imported above, so they're
+  // unit-testable. No behaviour change — the IIFE still calls them exactly as before.
 })();

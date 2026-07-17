@@ -26,6 +26,8 @@ import { confirmSensitiveAction } from "./biometric-confirm.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
 import { clampPage } from "./admin-paging-core.js";
+// TM-847: the pure role→friendly-label mapping (TM-612), extracted so it's unit-testable.
+import { roleLabel } from "./admin-role-label-core.js";
 import {
   MAX_TITLE,
   MAX_BODY,
@@ -834,7 +836,8 @@ function roleBadge(role) {
   // ("ADMIN"/"USER"). This matches statusBadge ("Enabled"/"Disabled") and the role filter's
   // friendly options ("Users"/"Admins") just below, so the console reads consistently. The raw
   // role still drives the CSS class (`tm-badge-role-admin`/`-user`), so styling is unchanged.
-  const label = role === "ADMIN" ? "Admin" : "User";
+  // TM-847: the label mapping is now the unit-tested roleLabel() in admin-role-label-core.js.
+  const label = roleLabel(role);
   return el("span", { class: `tm-badge tm-badge-role-${role.toLowerCase()}`, text: label });
 }
 
