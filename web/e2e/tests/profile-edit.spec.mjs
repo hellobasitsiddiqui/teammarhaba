@@ -35,34 +35,51 @@ async function openProfile(page) {
 }
 
 test("@profile a user edits their profile via #/profile and the change persists", async ({ page }) => {
-  // A value unique to this run so the assertion can't pass on stale data — letters-only, because
-  // the city field rejects digits since TM-771.
-  const city = `Testville-${lettersOnlyStamp()}`;
+  // TM-877: city is a DROPDOWN now (London / Milton Keynes / Sharjah / Karachi), so the run-unique
+  // free-text city is gone. Uniqueness for the persistence assertion moves to firstName
+  // (letters-only, TM-771); the city pick pins the new select round-trip.
+  const first = `Testville${lettersOnlyStamp()}`;
 
   await openProfile(page);
 
-  // Edit two fields: a free-text one (city) and the enum (notificationPref).
-  await page.fill("#profile-city", city);
+  // Edit three fields: a free-text one (firstName), the new city dropdown, and the enum.
+  await page.fill("#profile-firstName", first);
+  await page.selectOption("#profile-city", "Karachi");
   await page.selectOption("#profile-notificationPref", "BOTH");
 
   // Save → success toast.
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Profile saved");
 
-  // It persisted: the users row now carries the new city + preference.
+  // It persisted: the users row now carries the new name, city + preference.
   const client = new pg.Client(dbConfig);
   await client.connect();
   try {
     const { rows } = await client.query(
-      "SELECT city, notification_pref FROM users WHERE lower(email) = lower($1)",
+      "SELECT first_name, city, notification_pref FROM users WHERE lower(email) = lower($1)",
       [ADMIN.email],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].city).toBe(city);
+    expect(rows[0].first_name).toBe(first);
+    expect(rows[0].city).toBe("Karachi");
     expect(rows[0].notification_pref).toBe("BOTH");
   } finally {
     await client.end();
   }
+});
+
+test("@profile the city dropdown offers exactly the allowed cities (TM-877)", async ({ page }) => {
+  await openProfile(page);
+
+  // The select exists (no more free-text input) and offers the placeholder + the four cities.
+  const options = page.locator("#profile-city option");
+  await expect(options).toHaveText(["Choose a city…", "London", "Milton Keynes", "Sharjah", "Karachi"]);
+
+  // The phone country soft-default keeps resolving for a picked city: with no user-picked country,
+  // the stored-phone country wins (the seeded account has a +44 phone), so just assert the picker
+  // holds a concrete selection — the pure mapping (London/MK→GB, Sharjah→AE, Karachi→PK) is pinned
+  // by web/tools/countries.test.mjs.
+  await expect(page.locator("#profile-phone-country")).not.toHaveValue("");
 });
 
 test("@profile a user with a blank phone can save their profile (TM-188)", async ({ page }) => {
@@ -79,10 +96,17 @@ test("@profile a user with a blank phone can save their profile (TM-188)", async
 test("@profile client-side validation blocks an out-of-range age before any save", async ({ page }) => {
   await openProfile(page);
 
-  // 200 is outside the allowed 13–120 range — the inline error shows and the save is rejected.
-  await page.fill("#profile-age", "200");
+  // 17 is outside the allowed 18–99 band (TM-884; it was legal under the old 13–120 range) — the
+  // inline error shows and the save is rejected.
+  await page.fill("#profile-age", "17");
   await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(page.locator("#profile-age-error")).toBeVisible();
+  await expect(page.locator("#profile-age-error")).toContainText("18 or more");
   await expect(page.locator("#tm-toasts .tm-toast-error")).toBeVisible();
+
+  // The upper bound moved too: 100 (legal under 13–120) is now rejected.
+  await page.fill("#profile-age", "100");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.locator("#profile-age-error")).toContainText("99 or less");
 });

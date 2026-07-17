@@ -357,6 +357,58 @@ export function phonePartsError(iso2, national) {
   return "";
 }
 
+// ---- City dropdown (TM-877) ---------------------------------------------------------------------
+
+/**
+ * The interim allowed city list (TM-877): the profile city is now picked from a fixed dropdown
+ * rather than typed free-text. Deliberately tiny — the cities the user base actually lives in —
+ * and superseded by the admin-managed location list (TM-878). Each entry must have a
+ * `cityCountryHint` mapping (countries.js) so the phone picker's soft default keeps resolving.
+ */
+export const CITY_OPTIONS = Object.freeze(["London", "Milton Keynes", "Sharjah", "Karachi"]);
+
+/**
+ * Validate a city dropdown choice (TM-877). Returns an error message, or "" when acceptable.
+ *
+ * Blank is allowed (blank = leave unchanged, the TM-188 semantics). A value from CITY_OPTIONS is
+ * allowed. Crucially, the caller's ALREADY-SAVED city is also allowed even when it's off-list
+ * (e.g. "Dubai" saved before the list existed) — the renderer keeps it selectable as an extra
+ * option, so an existing profile is never invalidated or silently overwritten on save.
+ *
+ * @param {string|null|undefined} value the selected city.
+ * @param {string|null|undefined} savedCity the caller's currently-saved city (off-list allowance).
+ * @returns {string} an error message, or "".
+ */
+export function cityChoiceError(value, savedCity) {
+  const v = String(value ?? "").trim();
+  if (v === "") return "";
+  if (CITY_OPTIONS.includes(v)) return "";
+  if (v === String(savedCity ?? "").trim()) return "";
+  return "Choose a city from the list.";
+}
+
+// ---- Phone completion gate (TM-880) -------------------------------------------------------------
+
+/**
+ * Whether the signed-in caller must be routed to the first-use completion gate to supply a phone
+ * number (TM-880: phone is mandatory; email stays optional). True when the `/me` profile carries no
+ * VALID stored E.164 phone — that covers "no phone at all" AND a legacy bare number saved before
+ * TM-781 (country-ambiguous, so the user must confirm its country: the same confirm-country rule
+ * the edit form enforces). Applies to ALL users, existing phone-less accounts included — the gate
+ * decision, not just a new-signup rule.
+ *
+ * Fails OPEN on a missing/degraded `/me` (null → false), exactly like the onboarding + terms gates
+ * in router.js: a backend hiccup must never trap a user behind a gate. The backend is the real
+ * authority — it refuses to mark onboarding complete without a valid phone.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object (reads `me.phone`).
+ * @returns {boolean} true when the completion gate should intercept.
+ */
+export function needsPhoneNumber(me) {
+  if (!me) return false;
+  return !splitE164(me.phone);
+}
+
 /**
  * TM-771: firstName/lastName/city carried only a length cap, so a purely numeric value ("676767")
  * saved as a name or city. A name-like value must contain at least one letter (any script — Arabic,

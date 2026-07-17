@@ -31,8 +31,12 @@ function ageCounts(ageValue) {
 
 test("profileStrength counts a positive integer age just above the zero boundary", () => {
   assert.equal(ageCounts(1), true);
-  assert.equal(ageCounts(13), true); // the app's real minimum self-reported age.
-  assert.equal(ageCounts(120), true); // the app's real maximum.
+  assert.equal(ageCounts(18), true); // the app's real minimum self-reported age (TM-884; was 13).
+  assert.equal(ageCounts(99), true); // the app's real maximum (TM-884; was 120).
+  // Grandfathered out-of-band values (saved under the old 13–120 rule) still count toward strength —
+  // the bar reflects what's on record; the 18–99 band is an edit-time rule, not a read-time one.
+  assert.equal(ageCounts(15), true);
+  assert.equal(ageCounts(120), true);
 });
 
 test("profileStrength does NOT count age at or below the zero boundary", () => {

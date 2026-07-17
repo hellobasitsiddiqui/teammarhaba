@@ -1,8 +1,10 @@
 // First-login "complete your profile" gate (TM-250) — the #/onboarding view. A new passwordless
 // user lands here (routed by the guard in router.js) and CANNOT enter the app until they supply the
-// three required minimum fields — Name, Location, Age — which post atomically to
-// POST /api/v1/me/onboarding. On success the backend marks onboarding complete and the gate lifts;
-// the guard then sends the user on to where they were headed (home, or a deep-linked route).
+// four required minimum fields — Name, Location, Age, and (since TM-880) a valid Phone — which post
+// atomically to POST /api/v1/me/onboarding. On success the backend marks onboarding complete and the
+// gate lifts; the guard then sends the user on to where they were headed (home, or a deep-linked
+// route). TM-880 also routes EXISTING phone-less accounts back through this same gate (the router's
+// needsPhoneNumber check), so there is exactly one completion gate, not a second inconsistent one.
 //
 // Why a dedicated atomic endpoint (not the partial PATCH /me): the gate is all-or-nothing — name +
 // location + age are validated together and the onboarding-complete flag flips in the same
@@ -34,11 +36,16 @@ import {
   selectedLabelsFromMe,
 } from "./onboarding-core.js";
 import { interestEmoji } from "./interests-core.js";
+// TM-880: the gate now also collects a REQUIRED phone as a (country picker, national number) pair —
+// the same TM-781 machinery the edit-profile form uses (one rule set, no second inconsistent gate).
+import { splitE164, composeE164, defaultCountryFor, phonePartsError } from "./profile-core.js";
+import { COUNTRIES, flagOf } from "./countries.js";
 
-// The three required fields and their client-side rules, mirroring the backend OnboardingRequest
-// bean validation (name/location non-blank ≤255; age 13–120) so we reject bad input before any
-// round-trip AND match exactly what the server will accept. The `field` key is the request property;
-// `meKey` is where the current value lives on a MeResponse (so a half-completed gate pre-fills).
+// The four required fields and their client-side rules, mirroring the backend OnboardingRequest
+// bean validation (name/location non-blank ≤255; age 18–99 TM-884; phone required E.164 TM-880) so
+// we reject bad input before any round-trip AND match exactly what the server will accept. The
+// `field` key is the request property; `meKey` is where the current value lives on a MeResponse (so
+// a half-completed gate — or an existing phone-less account routed back through it — pre-fills).
 const TEXT_MAX = 255;
 const FIELDS = [
   {
@@ -64,10 +71,23 @@ const FIELDS = [
     meKey: "age",
     label: "Age",
     type: "number",
-    min: 13,
-    max: 120,
+    // TM-884: the platform age band is 18–99 (was 13–120), mirroring the backend @Min/@Max.
+    min: 18,
+    max: 99,
     autocomplete: "off",
-    hint: "Between 13 and 120.",
+    hint: "Between 18 and 99.",
+  },
+  {
+    // TM-880: phone is MANDATORY (email stays optional — it's the Firebase identity, not a form
+    // field). The input holds only the NATIONAL number; the +dial comes from the country picker
+    // rendered beside it (TM-781 pair), so storage is always unambiguous E.164.
+    field: "phone",
+    meKey: "phone",
+    label: "Phone",
+    type: "tel",
+    maxLength: 32,
+    autocomplete: "tel-national",
+    hint: "Pick a country, then your national number.",
   },
 ];
 
@@ -96,8 +116,15 @@ const $ = (id) => document.getElementById(id);
 /** Validate one field's raw value against its rules. Returns an error message, or "" if valid. */
 function validateField(field, raw) {
   const value = (raw ?? "").trim();
-  // All three are REQUIRED here (unlike the partial edit-profile form, where blank = "leave alone").
+  // ALL fields are REQUIRED here (unlike the partial edit-profile form, where blank = "leave alone").
   if (value === "") return `${field.label} is required.`;
+  if (field.field === "phone") {
+    // TM-880: the (country picker, national number) pair — the same pure TM-781 rule set the edit
+    // form runs (phonePartsError: confirm-country gate, digit floor/ceiling), so the two surfaces
+    // can never disagree on what a valid phone is.
+    const country = shell?.fields.get("phone")?.country;
+    return phonePartsError(country ? country.value : "", value);
+  }
   if (field.type === "number") {
     const n = Number(value);
     if (!Number.isInteger(n)) return "Enter a whole number.";
@@ -146,16 +173,56 @@ function validateAll() {
 /** Pre-fill the inputs from a MeResponse — a returning, half-completed user keeps what they had. */
 function prefill(profile) {
   for (const field of FIELDS) {
-    const input = shell.fields.get(field.field).input;
+    const entry = shell.fields.get(field.field);
+    if (field.field === "phone") {
+      prefillPhone(entry, profile);
+      continue;
+    }
     const value = profile?.[field.meKey];
-    input.value = value == null ? "" : String(value);
+    entry.input.value = value == null ? "" : String(value);
   }
 }
 
-/** Build the request body: trimmed name/location, age coerced to a number. */
+/**
+ * Pre-fill the phone (country picker, national input) pair from the stored value (TM-880), the
+ * same three states fillPhoneField handles on the edit form (TM-781):
+ *   • saved E.164 — split back into picker + national (an already-phoned account passing through);
+ *   • legacy bare number — the explicit confirm-country state: picker moves to the disabled
+ *     placeholder, the prompt paints, and submit is blocked until a country is picked;
+ *   • no phone — soft-default the picker from the profile city (else GB), unless the user already
+ *     picked a country themselves this session.
+ */
+function prefillPhone(entry, profile) {
+  const saved = profile?.phone == null ? "" : String(profile.phone).trim();
+  if (!entry.country) {
+    entry.input.value = saved; // defensive: no picker built (shouldn't happen)
+    return;
+  }
+  const parsed = splitE164(saved);
+  if (parsed) {
+    entry.country.value = parsed.iso2;
+    entry.input.value = parsed.national;
+    setFieldError("phone", "");
+  } else if (saved !== "") {
+    entry.country.value = ""; // the disabled placeholder — the explicit confirm-country state
+    entry.input.value = saved;
+    setFieldError("phone", phonePartsError("", saved));
+  } else {
+    entry.input.value = "";
+    if (!entry.country.getAttribute("data-user-picked")) {
+      entry.country.value = defaultCountryFor({ phone: "", city: profile?.city });
+    }
+  }
+}
+
+/** Build the request body: trimmed name/location, age coerced to a number, phone composed to E.164. */
 function collectBody() {
   const get = (k) => (shell.fields.get(k).input.value ?? "").trim();
-  return { name: get("name"), location: get("location"), age: Number(get("age")) };
+  // TM-880: storage is E.164, composed from the picker + national input — same as the edit form's
+  // collectPatch. validateAll has already blocked a blank/unconfirmed pair before this runs.
+  const phoneEntry = shell.fields.get("phone");
+  const phone = composeE164(phoneEntry.country ? phoneEntry.country.value : "", get("phone"));
+  return { name: get("name"), location: get("location"), age: Number(get("age")), phone };
 }
 
 async function load() {
@@ -560,6 +627,8 @@ const FIELD_ICONS = {
   name: () => fieldIcon(["M12 4.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8", "M5.5 20a6.5 6.5 0 0 1 13 0"]),
   location: () => fieldIcon(["M12 21s6.5-5.5 6.5-10.5a6.5 6.5 0 0 0-13 0C5.5 15.5 12 21 12 21z", "M12 12.5a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4"]),
   age: () => fieldIcon(["M3.5 6.5q0-1.5 2-1.5h13q2 0 2 1.5v13q0 1.5-2 1.5h-13q-2 0-2-1.5z", "M3.5 9.5h17", "M8 3v3.5M16 3v3.5"]),
+  // A handset for the mandatory phone field (TM-880), same line-art style as its siblings.
+  phone: () => fieldIcon(["M5.5 4h3l1.6 4-2 1.6a12.5 12.5 0 0 0 6.3 6.3l1.6-2 4 1.6v3q0 1.5-1.6 1.5A16.4 16.4 0 0 1 4 5.6Q4 4 5.5 4z"]),
 };
 
 function buildField(field) {
@@ -584,14 +653,44 @@ function buildField(field) {
   // Live-clear an inline error as soon as the user starts correcting the field.
   input.addEventListener("input", () => setFieldError(field.field, validateField(field, input.value)));
 
+  // TM-880: the phone field gets the mandatory country picker rendered BEFORE the national-number
+  // input — the exact TM-781 control the edit-profile form uses (same options format, same disabled
+  // "Confirm country…" placeholder that only prefillPhone can select programmatically for a legacy
+  // bare number, same sticky data-user-picked semantics against the city soft-default).
+  let country = null;
+  if (field.field === "phone") {
+    country = el(
+      "select",
+      {
+        id: `${id}-country`,
+        class: "tm-input tm-phone-country",
+        name: "phoneCountry",
+        "aria-label": "Phone country",
+        "aria-describedby": describedBy,
+      },
+      [
+        el("option", { value: "", text: "Confirm country…", disabled: true, hidden: true }),
+        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} ${c.name} +${c.dial}` })),
+      ],
+    );
+    country.value = "GB"; // concrete default pre-load; prefillPhone applies the real selection
+    country.addEventListener("change", () => {
+      country.setAttribute("data-user-picked", "true");
+      setFieldError(field.field, validateField(field, input.value));
+    });
+  }
+
   const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
   const hint = field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null;
 
   // paper-complete-profile field: an uppercase muted label (via .tm-field-label CSS) + a leading inline
   // icon sitting inside a wrapper alongside the input. .tm-field-input keeps the icon + input on one row;
-  // the input keeps its id/name/class so validation + submit are unchanged.
+  // the input keeps its id/name/class so validation + submit are unchanged. The phone field seats its
+  // country picker between the icon and the national input (the tm-phone-row flex pairing, TM-880).
   const icon = FIELD_ICONS[field.field]?.();
-  const inputRow = el("div", { class: "tm-field-input" }, [icon, input]);
+  const inputRow = country
+    ? el("div", { class: "tm-field-input tm-phone-row" }, [icon, country, input])
+    : el("div", { class: "tm-field-input" }, [icon, input]);
 
   const wrapper = el("div", { class: "tm-form-field" }, [
     el("label", { class: "tm-field-label", for: id, text: field.label }),
@@ -599,7 +698,8 @@ function buildField(field) {
     hint,
     error,
   ]);
-  return { wrapper, input, error };
+  // `country` is only present for the phone field (TM-880) — undefined elsewhere.
+  return { wrapper, input, error, country };
 }
 
 // TM-684: avatar upload + bio ship disabled; wire to onboarding payload
@@ -640,7 +740,9 @@ function buildShell(view) {
   const fields = new Map();
   const fieldNodes = FIELDS.map((field) => {
     const built = buildField(field);
-    fields.set(field.field, { input: built.input, error: built.error });
+    // `country` is the phone field's TM-781-style picker (undefined for every other field) — kept in
+    // the shell so validateField/collectBody/prefillPhone can read the selected iso2 (TM-880).
+    fields.set(field.field, { input: built.input, error: built.error, country: built.country });
     return built.wrapper;
   });
 

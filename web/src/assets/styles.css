@@ -2103,6 +2103,18 @@ h3,
     outline: none;
 }
 
+/* TM-880: the gate's phone row seats the TM-781 country picker between the icon and the national
+   input. The id-scoped `.tm-field-input .tm-input` rule above out-specifies the generic
+   `.tm-phone-row .tm-phone-country` cap, so without this the <select> flexes to its WIDEST option
+   ("🇻🇨 Saint Vincent and the Grenadines +1") and crushes the number input to a sliver. Re-cap it
+   here (the phone-width value — the gate is a phone-first surface) and let the closed control
+   truncate; the full country name is visible in the opened list. */
+#onboarding-view .tm-field-input .tm-phone-country {
+    flex: 0 1 40%;
+    max-width: 8rem;
+    min-width: 0;
+}
+
 /* Reflect an invalid field on the wrapper (JS toggles .tm-field-invalid on the inner input). */
 #onboarding-view .tm-field-input:has(.tm-field-invalid) {
     border-color: var(--danger);

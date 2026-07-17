@@ -58,6 +58,25 @@ public class UserService {
     /** Stable default ordering when the caller requests none. */
     private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.ASC, "id");
 
+    /**
+     * The interim allowed city list (TM-877) — the profile city is picked from a fixed dropdown.
+     * Mirrors {@code CITY_OPTIONS} in {@code web/src/assets/profile-core.js}; the admin-managed
+     * version of this list is TM-878. A NEW city value must come from this set, but a caller
+     * re-sending their ALREADY-SAVED off-list city is accepted (see {@link #updateProfile}), so
+     * profiles saved before the list existed (e.g. "Dubai") are preserved, never invalidated.
+     */
+    private static final Set<String> ALLOWED_CITIES = Set.of("London", "Milton Keynes", "Sharjah", "Karachi");
+
+    /**
+     * The stored-phone E.164 shape (TM-781/TM-880): mandatory {@code +}, 7–15 digits, separators
+     * only between digits — the same rule {@code UpdateMeRequest.phone} enforces at the boundary
+     * (minus the empty-string clear alternative). Used to refuse an onboarding-complete transition
+     * for an account with no valid phone on record (TM-880), which also catches legacy
+     * country-ambiguous bare numbers saved before TM-781.
+     */
+    private static final java.util.regex.Pattern E164_PHONE =
+            java.util.regex.Pattern.compile("^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$");
+
     private final UserRepository users;
     private final AuditService audit;
     private final UserProvisioner provisioner;
@@ -197,6 +216,12 @@ public class UserService {
             user.setLastName(update.lastName());
         }
         if (update.city() != null && !Objects.equals(user.getCity(), update.city())) {
+            // TM-877: a NEW city must come from the allowed dropdown list. Reached only when the
+            // value actually differs from the stored one, so re-sending an already-saved off-list
+            // city ("Dubai") is a no-op above and stays preserved; "" keeps its clear semantics.
+            if (!update.city().isEmpty() && !ALLOWED_CITIES.contains(update.city())) {
+                throw new BadRequestException("Choose a city from the list");
+            }
             changes.add(change("city", user.getCity(), update.city()));
             user.setCity(update.city());
         }
@@ -368,10 +393,16 @@ public class UserService {
      * <p>Age attestation is tied to the TM-162 {@code age} field: completing onboarding self-attests
      * the age the user supplied, so {@code age_verified} is set true here <em>only once an age is on
      * record</em>. Real ID verification is out of scope for this ticket.
+     *
+     * <p>Phone is mandatory (TM-880): the transition is refused with a {@code 400} unless a valid
+     * E.164 phone is already on record, so the onboarding-complete state can't be reached without
+     * one via this endpoint either — the API can't bypass the completion gate. (The atomic gate
+     * {@link #completeProfileOnboarding} collects the phone in the same request instead.)
      */
     @Transactional
     public User completeOnboarding(VerifiedUser caller) {
         User user = provision(caller);
+        requirePhoneOnRecord(user);
         boolean wasComplete = user.isOnboardingCompleted();
         boolean ageWasVerified = user.isAgeVerified();
 
@@ -393,15 +424,17 @@ public class UserService {
     }
 
     /**
-     * Complete the first-login "profile gate" in one atomic transaction (TM-250): persist the three
-     * required minimum fields (name → {@code displayName}, location → {@code city}, age) <em>and</em>
-     * mark onboarding complete, so a new passwordless user can't enter the app with an empty shell.
+     * Complete the first-use "profile gate" in one atomic transaction (TM-250, extended in TM-880):
+     * persist the four required minimum fields (name → {@code displayName}, location → {@code city},
+     * age, phone) <em>and</em> mark onboarding complete, so a user can't enter the app with an empty
+     * shell or without a phone.
      *
-     * <p>Unlike {@link #updateProfile} (partial PATCH), this is all-or-nothing: all three values are
-     * required by the {@code OnboardingRequest} bean validation at the web boundary; here we
-     * additionally reject blank/whitespace-only name and location (a {@code @Size(min=1)} lets a
-     * single space through). The whole thing runs in one {@code @Transactional} unit, so the profile
-     * write and the onboarding-flag flip commit together or not at all — the gate never half-applies.
+     * <p>Unlike {@link #updateProfile} (partial PATCH), this is all-or-nothing: all four values are
+     * required by the {@code OnboardingRequest} bean validation at the web boundary (age 18–99
+     * TM-884; phone E.164 TM-880); here we additionally reject blank/whitespace-only text values (a
+     * {@code @Size(min=1)} lets a single space through). The whole thing runs in one
+     * {@code @Transactional} unit, so the profile write and the onboarding-flag flip commit together
+     * or not at all — the gate never half-applies.
      *
      * <p>Reuses the existing onboarding-complete machinery (TM-163): completing onboarding here also
      * self-attests the supplied age ({@code ageVerified = true}), since an age is always on record by
@@ -409,12 +442,14 @@ public class UserService {
      * request, so re-submitting overwrites with the latest values.
      */
     @Transactional
-    public User completeProfileOnboarding(VerifiedUser caller, String name, String location, Integer age) {
+    public User completeProfileOnboarding(
+            VerifiedUser caller, String name, String location, Integer age, String phone) {
         User user = provision(caller);
 
         user.setDisplayName(requireText(name, "name"));
         user.setCity(requireText(location, "location"));
-        user.setAge(age); // range already enforced (13–120) by bean validation at the boundary
+        user.setAge(age); // range already enforced (18–99) by bean validation at the boundary
+        user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
 
         boolean wasComplete = user.isOnboardingCompleted();
         user.completeOnboarding();
@@ -426,7 +461,7 @@ public class UserService {
                 AuditAction.PROFILE_UPDATED,
                 TARGET_USER,
                 caller.uid(),
-                Map.of("fields", "displayName,city,age", "via", "onboarding"));
+                Map.of("fields", "displayName,city,age,phone", "via", "onboarding"));
         if (!wasComplete) {
             audit.record(
                     caller.uid(),
@@ -444,6 +479,18 @@ public class UserService {
             throw new BadRequestException(field + " is required");
         }
         return value.trim();
+    }
+
+    /**
+     * TM-880: refuse the onboarding-complete transition unless a valid E.164 phone is on record.
+     * Catches "no phone at all" AND a legacy country-ambiguous bare number (pre-TM-781) — the same
+     * two states the client's completion gate routes back through {@code #/onboarding} for.
+     */
+    private static void requirePhoneOnRecord(User user) {
+        String phone = user.getPhone();
+        if (phone == null || !E164_PHONE.matcher(phone).matches()) {
+            throw new BadRequestException("A phone number is required to complete onboarding");
+        }
     }
 
     /**

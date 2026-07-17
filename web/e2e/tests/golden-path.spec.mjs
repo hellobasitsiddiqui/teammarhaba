@@ -154,6 +154,8 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await page.fill("#onboarding-name", "Golden Tester");
   await page.fill("#onboarding-location", location);
   await page.fill("#onboarding-age", "29");
+  // TM-880: phone is mandatory at the gate — national number; the GB-default picker composes +44….
+  await page.fill("#onboarding-phone", "7700 900321");
   const onboarded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

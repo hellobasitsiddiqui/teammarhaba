@@ -170,7 +170,7 @@ function loadProfileModule(deps) {
     "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
-    "  validateProfileField, NOTIFICATION_PREFS,\n" +
+    "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
@@ -260,6 +260,10 @@ const deps = {
   // fillForm reads NOTIFICATION_PREFS for the select default — inject the real set (it was never
   // needed before TM-781 because no test exercised fillForm through the eval copy).
   NOTIFICATION_PREFS: core.NOTIFICATION_PREFS,
+  // TM-877: the city dropdown's allowed list + validator — the REAL pure implementations, so the
+  // select options / off-list preservation tests prove the shipped rules.
+  CITY_OPTIONS: core.CITY_OPTIONS,
+  cityChoiceError: core.cityChoiceError,
   // The TM-781 phone-picker pure logic + country data — the REAL implementations, so these tests
   // prove the shipped split/compose/default rules through the renderer's own wiring.
   splitE164: core.splitE164,
@@ -370,14 +374,38 @@ test("collectPatch omits an empty age rather than sending 0", () => {
 
 // ---- clientValidateFieldMirrorsBackendAgePhone ------------------------------------------------
 
-test("validateField: age mirrors the backend 13–120 integer range", () => {
+test("validateField: age mirrors the backend 18–99 integer range (TM-884)", () => {
   const age = field("age");
   assert.equal(profile.validateField(age, "36"), "", "an in-range whole number is accepted");
-  assert.equal(profile.validateField(age, "13"), "", "the lower bound (13) is inclusive");
-  assert.equal(profile.validateField(age, "120"), "", "the upper bound (120) is inclusive");
-  assert.match(profile.validateField(age, "12"), /13 or more/, "below 13 is rejected (matches @Min(13))");
-  assert.match(profile.validateField(age, "121"), /120 or less/, "above 120 is rejected (matches @Max(120))");
+  assert.equal(profile.validateField(age, "18"), "", "the lower bound (18) is inclusive");
+  assert.equal(profile.validateField(age, "99"), "", "the upper bound (99) is inclusive");
+  assert.match(profile.validateField(age, "17"), /18 or more/, "below 18 is rejected (matches @Min(18))");
+  assert.match(profile.validateField(age, "100"), /99 or less/, "above 99 is rejected (matches @Max(99))");
   assert.match(profile.validateField(age, "36.5"), /whole number/, "a non-integer age is rejected");
+});
+
+test("age grandfathering (TM-884): an existing under-18 account can still save its other fields", async () => {
+  await withFakeDocumentAsync(async () => {
+    // A 13–120-era account (age 15) loads its profile — the saved age pre-fills the (now 18-min)
+    // field. The UNCHANGED value must neither fail validation nor be re-sent in the PATCH, so the
+    // account can still edit e.g. its name; only an actual age EDIT is banded to 18–99.
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMeImpl = async () => ({ firstName: "Young", age: 15 });
+    getMembershipImpl = async () => ({});
+    await profile.load();
+
+    const age = field("age");
+    assert.equal(shell.fields.get("age").input.value, "15", "the saved age pre-fills the field");
+    assert.equal(profile.validateField(age, "15"), "", "the UNCHANGED saved age passes validation");
+    assert.match(profile.validateField(age, "16"), /18 or more/, "an actual under-18 EDIT is still rejected");
+
+    shell.fields.get("firstName").input.value = "Younger";
+    const patch = profile.collectPatch();
+    assert.equal(patch.firstName, "Younger");
+    assert.ok(!("age" in patch), "the unchanged age is omitted — never re-attested against the new band");
+  });
 });
 
 // TM-781 contract change: the phone input now holds the NATIONAL number and validateField reads the
@@ -399,14 +427,69 @@ test("validateField: phone validates the (picker, national) pair (TM-781)", () =
   assert.match(profile.validateField(phone, "7700900123"), /country/i);
 });
 
-test("validateField: first name / last name / city reject purely numeric input (TM-771)", () => {
-  // Ghalia's repro: "676767" in any of the three name-like fields saved with "Profile saved.".
-  // The rule lives in profile-core's validateProfileField; this pins the delegate wiring end-to-end.
+test("validateField: first and last name reject purely numeric input (TM-771)", () => {
+  // Ghalia's repro: "676767" in a name-like field saved with "Profile saved.". The rule lives in
+  // profile-core's validateProfileField; this pins the delegate wiring end-to-end. (City left this
+  // trio in TM-877 — it's a dropdown now, covered by the allowed-list tests below.)
   assert.match(profile.validateField(field("firstName"), "676767"), /letter/i);
   assert.match(profile.validateField(field("lastName"), "676767"), /letter/i);
-  assert.match(profile.validateField(field("city"), "676767"), /letter/i);
   assert.equal(profile.validateField(field("firstName"), "Jean-Luc"), "", "hyphenated names are accepted");
-  assert.equal(profile.validateField(field("city"), "St. Albans"), "", "period + space in a city is accepted");
+});
+
+// ---- TM-877: city dropdown ---------------------------------------------------------------------
+
+test("the city field is a SELECT of the four allowed cities behind a blank placeholder (TM-877)", () => {
+  const city = field("city");
+  assert.equal(city.type, "select", "city is a dropdown, not free text");
+  assert.deepEqual(
+    city.options.map(([value]) => value),
+    ["", "London", "Milton Keynes", "Sharjah", "Karachi"],
+    "a no-choice placeholder plus exactly the interim allowed list (admin-managed list is TM-878)",
+  );
+});
+
+test("validateField: city accepts the allowed list (and blank), rejects an off-list pick (TM-877)", () => {
+  const city = field("city");
+  for (const allowed of ["London", "Milton Keynes", "Sharjah", "Karachi"]) {
+    assert.equal(profile.validateField(city, allowed), "", `${allowed} is on the allowed list`);
+  }
+  assert.equal(profile.validateField(city, ""), "", "blank stays allowed (no change)");
+  assert.match(profile.validateField(city, "Bristol"), /list/i, "an off-list city is rejected");
+});
+
+test("an existing OFF-LIST city is preserved: kept selectable, valid, and round-tripped (TM-877)", async () => {
+  await withFakeDocumentAsync(async () => {
+    // A profile saved before the dropdown existed carries city "Dubai" — off the allowed list. It
+    // must be injected as a selectable option, pass validation, and survive an unrelated save
+    // byte-identical (never silently overwritten by the new list).
+    const shell = makeShell({ firstName: "Ada" });
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMeImpl = async () => ({ firstName: "Ada", city: "Dubai" });
+    getMembershipImpl = async () => ({});
+    await profile.load();
+
+    const citySelect = shell.fields.get("city").input;
+    assert.equal(citySelect.value, "Dubai", "the saved off-list city is selected");
+    assert.equal(
+      citySelect._children.some((o) => o.getAttribute && o.getAttribute("value") === "Dubai"),
+      true,
+      "an option for the off-list value was injected so it stays selectable",
+    );
+    assert.equal(profile.validateField(field("city"), "Dubai"), "", "the saved off-list value stays valid");
+
+    // The user edits an unrelated field and saves: the city round-trips unchanged.
+    shell.fields.get("firstName").input.value = "Ada B";
+    const patch = profile.collectPatch();
+    assert.equal(patch.city, "Dubai", "the off-list city survives an unrelated save");
+
+    // A refill with the same value must not stack duplicate injected options.
+    profile.fillForm({ firstName: "Ada", city: "Dubai" });
+    const dubaiOptions = citySelect._children.filter(
+      (o) => o.getAttribute && o.getAttribute("value") === "Dubai",
+    );
+    assert.equal(dubaiOptions.length, 1, "re-fills reuse the injected option (no duplicates)");
+  });
 });
 
 test("validateField: an empty value is always allowed (clearing a field is never blocked)", () => {

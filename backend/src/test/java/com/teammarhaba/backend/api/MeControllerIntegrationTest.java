@@ -232,7 +232,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"firstName\":\"Grace\",\"city\":\"Baltimore\"}"))
+                        .content("{\"firstName\":\"Grace\",\"city\":\"Sharjah\"}"))
                 .andExpect(status().isOk());
 
         // A second PATCH touching only one field must not wipe the others.
@@ -243,7 +243,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Grace"))
                 .andExpect(jsonPath("$.lastName").value("Hopper"))
-                .andExpect(jsonPath("$.city").value("Baltimore"));
+                .andExpect(jsonPath("$.city").value("Sharjah"));
     }
 
     @Test
@@ -252,6 +252,116 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-bad-age", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"age\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void ageIsBoundedToEighteenToNinetyNine() throws Exception {
+        // TM-884: the platform age band tightened from 13–120 to 18–99 on new saves/edits. 17 and
+        // 100 (both legal under the old band) are now rejected; the new inclusive bounds save fine.
+        var who = caller("uid-age-band", "band@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":17}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":100}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":18}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.age").value(18));
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":99}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.age").value(99));
+    }
+
+    @Test
+    void existingUnderageAccountIsGrandfatheredOnReadAndUnrelatedEdits() throws Exception {
+        // TM-884 grandfathering: an account whose stored age predates the 18–99 band is never
+        // rejected on read, and a PATCH that omits age (the client omits an unchanged value) still
+        // saves other fields and leaves the stored age untouched. Only a NEW age save is banded.
+        var who = caller("uid-age-gf", "gf@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-age-gf").orElseThrow();
+        saved.setAge(15); // a 13–120-era value, seeded directly (the API can no longer write it)
+        users.save(saved);
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.age").value(15));
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Young\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Young"))
+                .andExpect(jsonPath("$.age").value(15));
+    }
+
+    @Test
+    void cityRejectsAnOffListNewValueWith400() throws Exception {
+        // TM-877: city is a dropdown of the interim allowed list — a NEW value outside it (fine
+        // name-like text, so it passes the TM-771 pattern) must be refused at the service.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-city", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Bristol\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void cityAcceptsEveryAllowedListValue() throws Exception {
+        var who = caller("uid-city-list", "list@example.com");
+        for (String city : new String[] {"London", "Milton Keynes", "Sharjah", "Karachi"}) {
+            mockMvc.perform(patch("/api/v1/me")
+                            .with(who)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"city\":\"" + city + "\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.city").value(city));
+        }
+    }
+
+    @Test
+    void savedOffListCityIsPreservedNotOverwritten() throws Exception {
+        // TM-877 must-not-break: an existing off-list city (saved before the list existed) is
+        // preserved — re-sending it unchanged is accepted, and an unrelated edit leaves it intact.
+        var who = caller("uid-city-dubai", "dubai@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-city-dubai").orElseThrow();
+        saved.setCity("Dubai"); // seeded directly — the API can no longer introduce it
+        users.save(saved);
+
+        // Re-sending the SAME off-list value (the client re-submits the whole form) is a no-op 200.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Dubai\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("Dubai"));
+
+        // An unrelated edit leaves the off-list city untouched.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Expat\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("Dubai"));
+
+        // But a DIFFERENT off-list value is still refused — the allowance is the saved value only.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Manchester\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -343,11 +453,12 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteSetsFlagAndVerifiesAgeWhenAgeOnRecord() throws Exception {
         var who = caller("uid-onboard", "ada@example.com");
 
-        // Age supplied first (TM-162), so completing onboarding self-attests it (TM-163).
+        // Age supplied first (TM-162), so completing onboarding self-attests it (TM-163). A phone
+        // must also be on record before the transition is allowed (TM-880).
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"age\":36}"))
+                        .content("{\"age\":36,\"phone\":\"+447700900123\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -366,10 +477,46 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteLeavesAgeUnverifiedWhenNoAgeOnRecord() throws Exception {
         var who = caller("uid-onboard-noage", "eve@example.com");
 
+        // Phone on record (the TM-880 precondition) but no age: the flag flips, the age stays unverified.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700900124\"}"))
+                .andExpect(status().isOk());
+
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.onboardingCompleted").value(true))
                 .andExpect(jsonPath("$.ageVerified").value(false));
+    }
+
+    @Test
+    void onboardingCompleteRejectedWithoutPhoneOnRecordWith400() throws Exception {
+        // TM-880: the onboarding-complete state must be unreachable without a valid E.164 phone —
+        // this endpoint is the API's other route to it, so it too refuses a phone-less account.
+        var who = caller("uid-onboard-nophone", "nophone@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isBadRequest());
+
+        // Nothing half-applied: the account is still not onboarding-complete.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(false));
+    }
+
+    @Test
+    void onboardingCompleteRejectedWithLegacyBarePhoneOnRecordWith400() throws Exception {
+        // TM-880: a pre-TM-781 bare national number on record is country-ambiguous — NOT a valid
+        // E.164 phone — so the transition is refused until the user confirms it through the gate.
+        var who = caller("uid-onboard-barephone", "bare@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-onboard-barephone").orElseThrow();
+        saved.setPhone("07700 900123"); // legacy shape, seeded directly (the API no longer accepts it)
+        users.save(saved);
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -379,6 +526,13 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         // repeat call must stay 200 and keep the flag true (no error, no flip back to false).
         var who = caller("uid-onboard-twice", "rumi@example.com");
 
+        // A phone on record first — the TM-880 precondition for the transition.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700900125\"}"))
+                .andExpect(status().isOk());
+
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.onboardingCompleted").value(true));
@@ -393,19 +547,22 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void onboardingGatePersistsNameLocationAgeAndCompletesInOneShot() throws Exception {
-        // TM-250: the first-login profile gate. One atomic POST sets name (→ displayName),
-        // location (→ city) and age, flips onboardingCompleted, and self-attests the age.
+    void onboardingGatePersistsNameLocationAgePhoneAndCompletesInOneShot() throws Exception {
+        // TM-250 + TM-880: the first-use profile gate. One atomic POST sets name (→ displayName),
+        // location (→ city), age AND the mandatory phone, flips onboardingCompleted, and
+        // self-attests the age.
         var who = caller("uid-gate", "ibn@example.com");
 
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Ibn Battuta\",\"location\":\"Tangier\",\"age\":30}"))
+                        .content("{\"name\":\"Ibn Battuta\",\"location\":\"Tangier\",\"age\":30,"
+                                + "\"phone\":\"+212612345678\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
                 .andExpect(jsonPath("$.city").value("Tangier"))
                 .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.phone").value("+212612345678"))
                 .andExpect(jsonPath("$.onboardingCompleted").value(true))
                 .andExpect(jsonPath("$.ageVerified").value(true));
 
@@ -415,6 +572,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
                 .andExpect(jsonPath("$.city").value("Tangier"))
                 .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.phone").value("+212612345678"))
                 .andExpect(jsonPath("$.onboardingCompleted").value(true));
 
         // And on the row itself (not just echoed back in the response).
@@ -422,6 +580,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(saved.getDisplayName()).isEqualTo("Ibn Battuta");
         assertThat(saved.getCity()).isEqualTo("Tangier");
         assertThat(saved.getAge()).isEqualTo(30);
+        assertThat(saved.getPhone()).isEqualTo("+212612345678");
         assertThat(saved.isOnboardingCompleted()).isTrue();
     }
 
@@ -431,7 +590,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  Timbuktu  \",\"age\":40}"))
+                        .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  Timbuktu  \",\"age\":40,"
+                                + "\"phone\":\"+22370000000\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Mansa Musa"))
                 .andExpect(jsonPath("$.city").value("Timbuktu"));
@@ -442,7 +602,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noname", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"location\":\"Cairo\",\"age\":25}"))
+                        .content("{\"location\":\"Cairo\",\"age\":25,\"phone\":\"+201234567890\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -451,7 +611,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-blankloc", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"   \",\"age\":25}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"   \",\"age\":25,\"phone\":\"+201234567890\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -460,16 +620,48 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noage", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\"}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"phone\":\"+201234567890\"}"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void onboardingGateRejectsOutOfRangeAgeWith400() throws Exception {
+        // 5 was always out of range; 17 became out of range when TM-884 tightened the band to 18–99.
+        for (int age : new int[] {5, 17, 100}) {
+            mockMvc.perform(post("/api/v1/me/onboarding")
+                            .with(caller("uid-gate-badage", "x@example.com"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":" + age
+                                    + ",\"phone\":\"+201234567890\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    void onboardingGateRejectsMissingPhoneWith400() throws Exception {
+        // TM-880: phone is a REQUIRED gate field — the pre-TM-880 three-field body must now 400,
+        // and nothing half-applies (the account stays not-onboarding-complete).
+        var who = caller("uid-gate-nophone", "gatenophone@example.com");
         mockMvc.perform(post("/api/v1/me/onboarding")
-                        .with(caller("uid-gate-badage", "x@example.com"))
+                        .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":5}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":25}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-gate-nophone")
+                .ifPresent(u -> assertThat(u.isOnboardingCompleted()).isFalse());
+    }
+
+    @Test
+    void onboardingGateRejectsBareNonE164PhoneWith400() throws Exception {
+        // TM-880: a bare national number (no +dial) is country-ambiguous and must be refused — the
+        // client's country picker always composes +<dial><national>, so only a bypassing caller
+        // could send this shape.
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-barephone", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":25,"
+                                + "\"phone\":\"07700 900123\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -481,7 +673,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Half\",\"location\":\"Done\",\"age\":200}"))
+                        .content("{\"name\":\"Half\",\"location\":\"Done\",\"age\":200,\"phone\":\"+447700900123\"}"))
                 .andExpect(status().isBadRequest());
 
         // The account may not exist yet (request rejected before provision) — if it does, it's clean.

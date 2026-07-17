@@ -1652,8 +1652,8 @@
         "properties" : {
           "age" : {
             "format" : "int32",
-            "maximum" : 120,
-            "minimum" : 13,
+            "maximum" : 99,
+            "minimum" : 18,
             "type" : "integer"
           },
           "location" : {
@@ -1665,9 +1665,15 @@
             "maxLength" : 255,
             "minLength" : 1,
             "type" : "string"
+          },
+          "phone" : {
+            "maxLength" : 32,
+            "minLength" : 0,
+            "pattern" : "^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
+            "type" : "string"
           }
         },
-        "required" : [ "age", "location", "name" ],
+        "required" : [ "age", "location", "name", "phone" ],
         "type" : "object"
       },
       "OrderView" : {
@@ -2374,8 +2380,8 @@
         "properties" : {
           "age" : {
             "format" : "int32",
-            "maximum" : 120,
-            "minimum" : 13,
+            "maximum" : 99,
+            "minimum" : 18,
             "type" : "integer"
           },
           "city" : {

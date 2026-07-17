@@ -67,7 +67,7 @@ class MeHistoryPaginationAndDiffIntegrationTest extends AbstractIntegrationTest 
 
         // Now PATCH BOTH fields in one request, but only city actually changes — firstName is re-sent at
         // its CURRENT value. The mixed request is the gap: only the changed field must be in the diff.
-        patchMe(who, "{\"firstName\":\"Ada\",\"city\":\"Paris\"}");
+        patchMe(who, "{\"firstName\":\"Ada\",\"city\":\"Karachi\"}");
 
         mockMvc.perform(get("/api/v1/me/history").with(who))
                 .andExpect(status().isOk())
@@ -78,7 +78,7 @@ class MeHistoryPaginationAndDiffIntegrationTest extends AbstractIntegrationTest 
                 .andExpect(jsonPath("$.items[0].metadata.changes.length()").value(1))
                 .andExpect(jsonPath("$.items[0].metadata.changes[0].field").value("city"))
                 .andExpect(jsonPath("$.items[0].metadata.changes[0].old").value("London"))
-                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Paris"));
+                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Karachi"));
     }
 
     // ---- getMeHistoryPaginationSortAllowList ----------------------------------------------------
@@ -86,7 +86,7 @@ class MeHistoryPaginationAndDiffIntegrationTest extends AbstractIntegrationTest 
     @Test
     void historyRejectsASortOutsideTheEndpointAllowListWith400() throws Exception {
         var who = caller("uid-badsort", "badsort@example.com");
-        patchMe(who, "{\"city\":\"Konya\"}");
+        patchMe(who, "{\"city\":\"Sharjah\"}");
 
         // `email` is a real user column but NOT in the /me/history allow-list ({createdAt, id}); the
         // controller must 400 it rather than pass it through to Spring Data (which would 500 / leak schema).
@@ -97,7 +97,7 @@ class MeHistoryPaginationAndDiffIntegrationTest extends AbstractIntegrationTest 
     @Test
     void historyAcceptsTheAllowListedSortProperties() throws Exception {
         var who = caller("uid-goodsort", "goodsort@example.com");
-        patchMe(who, "{\"city\":\"Bursa\"}");
+        patchMe(who, "{\"city\":\"Sharjah\"}");
 
         // Both allow-listed properties, in both directions, are accepted (200) — the timeline is sortable
         // by time and identity, the two the endpoint opts in.
@@ -113,21 +113,21 @@ class MeHistoryPaginationAndDiffIntegrationTest extends AbstractIntegrationTest 
         var who = caller("uid-page", "page@example.com");
 
         // Three distinct edits → three PROFILE_UPDATED entries, recorded oldest→newest.
-        patchMe(who, "{\"city\":\"Cairo\"}");
-        patchMe(who, "{\"city\":\"Alexandria\"}");
-        patchMe(who, "{\"city\":\"Giza\"}");
+        patchMe(who, "{\"city\":\"Karachi\"}");
+        patchMe(who, "{\"city\":\"Sharjah\"}");
+        patchMe(who, "{\"city\":\"Milton Keynes\"}");
 
-        // Page 0, size 2 → the two newest (default sort is createdAt DESC): Giza then Alexandria.
+        // Page 0, size 2 → the two newest (default sort is createdAt DESC): Milton Keynes then Sharjah.
         mockMvc.perform(get("/api/v1/me/history").param("page", "0").param("size", "2").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(2))
-                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Giza"))
-                .andExpect(jsonPath("$.items[1].metadata.changes[0].new").value("Alexandria"));
+                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Milton Keynes"))
+                .andExpect(jsonPath("$.items[1].metadata.changes[0].new").value("Sharjah"));
 
-        // Page 1, size 2 → the remaining oldest entry: Cairo.
+        // Page 1, size 2 → the remaining oldest entry: Karachi.
         mockMvc.perform(get("/api/v1/me/history").param("page", "1").param("size", "2").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(1))
-                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Cairo"));
+                .andExpect(jsonPath("$.items[0].metadata.changes[0].new").value("Karachi"));
     }
 }

@@ -17,12 +17,19 @@ import java.util.List;
  * <p>Validation is deliberately lenient at the edges (TM-162):
  *
  * <ul>
- *   <li>{@code age} — bounded to a sensible human range (13–120).
+ *   <li>{@code age} — bounded to the platform age band, 18–99 (TM-884; was 13–120). Enforced on
+ *       <em>new saves/edits only</em>: existing under-18 accounts are grandfathered — nothing
+ *       rejects them on read, and a PATCH that omits {@code age} (the client omits an unchanged
+ *       value) leaves the stored value untouched.
  *   <li>{@code firstName}/{@code lastName}/{@code city} — name-like text (TM-771): must contain at
  *       least one letter (any script), and only letters, combining marks, spaces, hyphens,
  *       apostrophes and periods are allowed — a purely numeric value can no longer persist as a
  *       name or city. An empty string is accepted (clear/leave blank), consistent with
  *       {@code phone}. Mirrored client-side in {@code profile-core.js} {@code nameFormatError}.
+ *       {@code city} is additionally constrained to the allowed city list (TM-877) in
+ *       {@link com.teammarhaba.backend.user.UserService}, which needs the stored row: a NEW city
+ *       value must come from the list, but the caller's already-saved off-list city is preserved
+ *       (re-sending it unchanged is accepted), so no existing profile is invalidated.
  *   <li>{@code phone} — E.164-shaped (TM-781): a leading {@code +} is <em>required</em>, followed
  *       by 7–15 digits in total (the TM-752 length guard), with the long-accepted separator
  *       characters (space, {@code (}, {@code )}, {@code .}, {@code /}, {@code -}) allowed between
@@ -41,8 +48,8 @@ import java.util.List;
  * @param displayName      the public display name
  * @param firstName        given name (name-like, TM-771)
  * @param lastName         family name (name-like, TM-771)
- * @param city             city name (name-like, TM-771)
- * @param age              age in years, 13–120
+ * @param city             city name (name-like TM-771; allowed-list constrained TM-877 — see above)
+ * @param age              age in years, 18–99 (TM-884; existing out-of-band values grandfathered)
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
  *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -71,7 +78,7 @@ public record UpdateMeRequest(
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String firstName,
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String lastName,
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String city,
-        @Min(13) @Max(120) Integer age,
+        @Min(18) @Max(99) Integer age,
         // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
         // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).

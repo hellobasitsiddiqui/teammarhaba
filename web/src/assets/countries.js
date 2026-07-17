@@ -422,6 +422,7 @@ const CITY_HINTS = new Map([
   ["sharjah", "AE"],
   ["riyadh", "SA"],
   ["jeddah", "SA"],
+  ["karachi", "PK"],
 ]);
 
 /**

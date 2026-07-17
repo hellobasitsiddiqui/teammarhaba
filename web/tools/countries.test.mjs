@@ -128,6 +128,9 @@ test("cityCountryHint maps the curated cities, case- and whitespace-insensitivel
   assert.equal(cityCountryHint("Sharjah"), "AE");
   assert.equal(cityCountryHint("Riyadh"), "SA");
   assert.equal(cityCountryHint("jeddah"), "SA");
+  // TM-877: every city offered by the profile dropdown (profile-core CITY_OPTIONS) must resolve a
+  // phone-picker soft default, or picking it would silently break the TM-781 country pre-select.
+  assert.equal(cityCountryHint("Karachi"), "PK");
 });
 
 test("cityCountryHint returns null for unknown/blank cities (the caller owns the GB fallback)", () => {

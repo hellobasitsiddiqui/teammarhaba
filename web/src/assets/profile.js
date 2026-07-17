@@ -44,6 +44,10 @@ import {
   publicSummary,
   validateProfileField,
   NOTIFICATION_PREFS,
+  // TM-877: the city dropdown's allowed list + its validator (which also allows the caller's
+  // already-saved off-list city, so an existing "Dubai" profile is never invalidated).
+  CITY_OPTIONS,
+  cityChoiceError,
   splitE164,
   composeE164,
   defaultCountryFor,
@@ -82,15 +86,29 @@ const NAME_HINT = "Letters, spaces, hyphens and apostrophes only.";
 const FIELDS = [
   { key: "firstName", label: "First name", type: "text", maxLength: TEXT_MAX, autocomplete: "given-name", hint: NAME_HINT },
   { key: "lastName", label: "Last name", type: "text", maxLength: TEXT_MAX, autocomplete: "family-name", hint: NAME_HINT },
-  { key: "city", label: "City", type: "text", maxLength: TEXT_MAX, autocomplete: "address-level2", hint: NAME_HINT },
+  {
+    // TM-877: city is a dropdown of the interim allowed list (admin-managed version is TM-878),
+    // reusing the existing select machinery (see notificationPref). The leading blank option keeps
+    // "no city yet" honest — a new user is never silently defaulted to the first city — and
+    // collectPatch's blank-omission then means "no change", exactly like the old text field.
+    // fillForm keeps an already-saved OFF-LIST city (e.g. "Dubai") selectable via an injected
+    // option, so an existing profile is preserved, never overwritten on save.
+    key: "city",
+    label: "City",
+    type: "select",
+    options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])],
+  },
   {
     key: "age",
     label: "Age",
     type: "number",
-    min: 13,
-    max: 120,
+    // TM-884: the platform age band is 18–99 (was 13–120), mirrored by the backend @Min/@Max.
+    // Existing under-18 accounts are GRANDFATHERED: validateField/collectPatch let an UNCHANGED
+    // saved age through so those accounts can still edit the rest of their profile.
+    min: 18,
+    max: 99,
     autocomplete: "off",
-    hint: "Between 13 and 120.",
+    hint: "Between 18 and 99.",
   },
   {
     key: "phone",
@@ -191,6 +209,18 @@ function validateField(field, raw) {
     const country = shell?.fields.get("phone")?.country;
     return phonePartsError(country ? country.value : "", raw);
   }
+  if (field.key === "city") {
+    // TM-877: the city must come from the allowed dropdown list — except the caller's own saved
+    // off-list city (kept selectable by fillForm), which must stay valid so it's never overwritten.
+    return cityChoiceError(raw, state.profile?.city);
+  }
+  if (field.key === "age") {
+    // TM-884 grandfather: an existing account whose SAVED age is now out of band (e.g. a 15-year-old
+    // from the 13–120 era) must still be able to save the rest of their profile — an UNCHANGED age
+    // is not a new attestation, so it passes here (and collectPatch omits it from the PATCH).
+    const raw2 = String(raw ?? "").trim();
+    if (raw2 !== "" && state.profile?.age != null && raw2 === String(state.profile.age)) return "";
+  }
   return validateProfileField(field, raw);
 }
 
@@ -248,7 +278,9 @@ function fillForm(profile) {
       continue;
     }
     const input = entry.input;
-    if (field.type === "select") {
+    if (field.key === "city") {
+      fillCitySelect(input, value);
+    } else if (field.type === "select") {
       input.value = NOTIFICATION_PREFS.has(value) ? value : "EMAIL";
     } else {
       input.value = value == null ? "" : String(value);
@@ -307,6 +339,25 @@ function fillPhoneField(entry, value, profile) {
     }
     setFieldError("phone", "");
   }
+}
+
+/**
+ * Select the saved city in the TM-877 dropdown. A saved value on the allowed list (or "") selects
+ * directly. A saved OFF-LIST city (e.g. "Dubai", stored before the list existed) gets its own extra
+ * option injected so it stays both VISIBLE and SELECTABLE — the product rule: an existing city is
+ * preserved, never silently overwritten on save. The `data-offlist` marker keeps re-fills (reset /
+ * post-save refresh) from stacking duplicate options for the same value.
+ *
+ * @param {HTMLSelectElement} select the city <select>.
+ * @param {*} value the stored `me.city`.
+ */
+function fillCitySelect(select, value) {
+  const saved = value == null ? "" : String(value).trim();
+  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+    select.append(el("option", { value: saved, text: saved }));
+    select.setAttribute("data-offlist", saved);
+  }
+  select.value = saved;
 }
 
 // ── Next-day interests nudge persistence (TM-777 / I5) ──────────────────────────────────────────
@@ -603,7 +654,12 @@ function collectPatch() {
     }
     if (field.type === "number") {
       // Only send age when present; an empty number field means "no change" rather than 0.
-      if (raw !== "") patch[field.key] = Number(raw);
+      // TM-884 grandfather: an UNCHANGED age is omitted too — re-saving the form must not turn the
+      // pre-filled saved age into a "new" attestation the tightened 18–99 backend range would
+      // reject for a grandfathered (13–120 era) account. Only an actual edit is sent.
+      if (raw !== "" && !(state.profile?.[field.key] != null && Number(raw) === Number(state.profile[field.key]))) {
+        patch[field.key] = Number(raw);
+      }
     } else if (raw !== "") {
       // Omit blank optional text fields rather than sending "" — a blank phone would otherwise
       // be rejected by the server pattern (TM-188), and an untouched field should mean "no change".

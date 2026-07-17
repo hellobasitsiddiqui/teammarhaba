@@ -107,10 +107,12 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await expect(page.locator("#onboarding-name-error")).toBeVisible();
   await expect(page.locator("#onboarding-view")).toBeVisible();
 
-  // Fill the three required fields and submit → POST /api/v1/me/onboarding.
+  // Fill the four required fields and submit → POST /api/v1/me/onboarding. Phone is the national
+  // number (TM-880); the country picker beside it defaults to GB, so it stores as E.164 +44….
   await page.fill("#onboarding-name", displayName);
   await page.fill("#onboarding-location", location);
   await page.fill("#onboarding-age", String(age));
+  await page.fill("#onboarding-phone", "7700 900789");
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );
