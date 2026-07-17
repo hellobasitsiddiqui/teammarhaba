@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // Golden-path end-to-end journey (TM-341) — ONE long happy-path run that walks the whole core
 // experience in a single test, as living evidence the product works front-to-back:
@@ -158,6 +159,13 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   );
   await page.click("#onboarding-form button[type=submit]");
   await onboarded;
+
+  // ── STEP 2b: INTERESTS picker (TM-776/TM-804) — the second onboarding step, in the SAME view. ─
+  // The profile gate lifts into "What are you into?" — a min-1 chip picker (seed config min 1 / max 3).
+  // Complete it (select the minimum → Continue → PATCH /me) via the shared helper (TM-851) so the router
+  // then hands off to the terms gate.
+  await completeInterestsStep(page);
+  await shot("interests");
 
   // ── STEP 3: TERMS gate (TM-170) — the second gate; accept the current version to enter. ──────
   await expect(page.locator("#terms-view")).toBeVisible();
