@@ -36,15 +36,33 @@ function label(el) {
 /** Every visible element whose right edge exceeds the viewport width, worst overflow first. */
 function offenders() {
   const w = window.innerWidth;
-  const out = [];
+  const out = { real: [], contained: [] };
   for (const el of document.body.querySelectorAll("*")) {
     if (el.id === "tm-overflow-debug") continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
-    if (r.right > w + THRESHOLD) out.push({ el, over: Math.round(r.right - w), right: Math.round(r.right) });
+    if (r.right > w + THRESHOLD) {
+      const rec = { el, over: Math.round(r.right - w), right: Math.round(r.right) };
+      // An element inside a horizontal-scroll ancestor (e.g. a wide table in .tm-table-wrap) is MEANT
+      // to overflow it — swipeable, not a page bug. Split those out so they don't drown the real,
+      // page-shifting overflow.
+      (inScrollWrapper(el) ? out.contained : out.real).push(rec);
+    }
   }
-  out.sort((a, b) => b.over - a.over);
+  out.real.sort((a, b) => b.over - a.over);
+  out.contained.sort((a, b) => b.over - a.over);
   return out;
+}
+
+/** True if some ancestor (up to body) is an ACTIVE horizontal-scroll container that contains el. */
+function inScrollWrapper(el) {
+  let p = el.parentElement;
+  while (p && p !== document.body && p !== document.documentElement) {
+    const ox = getComputedStyle(p).overflowX;
+    if ((ox === "auto" || ox === "scroll") && p.scrollWidth > p.clientWidth + 1) return true;
+    p = p.parentElement;
+  }
+  return false;
 }
 
 let banner = null;
@@ -77,20 +95,33 @@ function scan() {
     return;
   }
   clearOutlines();
-  const list = offenders();
+  const iw = window.innerWidth;
+  const pageW = document.documentElement.scrollWidth;
+  const pageOver = Math.round(pageW - iw);
+  const { real, contained } = offenders();
   const b = ensureBanner();
-  if (!list.length) {
-    b.textContent = `TM-665 overflow debug · innerWidth ${window.innerWidth}px · ✓ nothing overflows the right edge on this screen`;
-    return;
-  }
-  list.slice(0, 15).forEach(({ el }) => {
+
+  // Headline = the PAGE-level verdict: does the document itself overflow / shift? That is the real
+  // TM-665 question. An element overflowing a scroll wrapper (counted separately below) is not a bug.
+  const head =
+    pageOver > 1
+      ? `❌ PAGE OVERFLOWS by +${pageOver}px  (scrollWidth ${pageW} > innerWidth ${iw}) — page is shifting/clipping`
+      : `✓ PAGE FITS  (scrollWidth ${pageW} ≈ innerWidth ${iw}) — no page shift`;
+
+  real.slice(0, 12).forEach(({ el }) => {
     el.style.outline = "2px solid #ff2d55";
     el.setAttribute("data-tm-of", "1");
   });
-  const lines = list.slice(0, 15).map((o) => `+${o.over}px  ${label(o.el)}  (right ${o.right} > ${window.innerWidth})`);
-  b.textContent =
-    `TM-665 overflow debug · innerWidth ${window.innerWidth}px · ${list.length} element(s) past the right edge:\n` +
-    lines.join("\n");
+
+  const body = real.length
+    ? `\nReal page-level overflow (${real.length}):\n` +
+      real.slice(0, 12).map((o) => `+${o.over}px  ${label(o.el)}`).join("\n")
+    : `\nNo un-contained overflow — nothing is pushing the page wide.`;
+  const tail = contained.length
+    ? `\n(${contained.length} element(s) overflow inside a scroll wrapper — expected/swipeable, ignore)`
+    : "";
+
+  b.textContent = `TM-665 overflow debug · innerWidth ${iw}px\n${head}${body}${tail}`;
 }
 
 function start() {
