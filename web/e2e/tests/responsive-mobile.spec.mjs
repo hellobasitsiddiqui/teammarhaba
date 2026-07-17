@@ -422,6 +422,19 @@ test.describe("@responsive edit-profile at a phone viewport", () => {
       `page (${pageWidth.scrollW}px) must not exceed the ${pageWidth.clientW}px viewport — a wider page opens zoomed-out`,
     ).toBeLessThanOrEqual(pageWidth.clientW + 1);
 
+    // Centring guard (TM-665): the edit-profile card must sit with roughly EQUAL left/right margins.
+    // Regression: .profile-view was min(48rem, 96vw) — wider than main.app's padded content box on a
+    // narrow phone, which broke `margin: auto` and pinned the cards ~14px off-centre (left gap 14 vs
+    // right gap 0). Assert symmetry within a small tolerance.
+    const gaps = await page.evaluate(() => {
+      const r = document.querySelector(".tm-pf-edit").getBoundingClientRect();
+      return { left: Math.round(r.left), right: Math.round(window.innerWidth - r.right) };
+    });
+    expect(
+      Math.abs(gaps.left - gaps.right),
+      `edit-profile card off-centre: leftGap=${gaps.left} rightGap=${gaps.right}`,
+    ).toBeLessThanOrEqual(2);
+
     await expectNoHorizontalPageScroll(page);
   });
 });

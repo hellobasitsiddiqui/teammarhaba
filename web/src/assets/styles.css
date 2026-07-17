@@ -1741,7 +1741,11 @@ h3,
 
 /* Same shell width/alignment as the admin console so the two protected pages feel consistent. */
 .profile-view {
-    width: min(48rem, 96vw);
+    /* TM-665: use 100% (not 96vw) of the padded main.app content box. main.app already adds side
+       padding, so 96vw (wider than main's content box on a narrow phone) overflowed it and broke the
+       `margin: auto` centring — the cards pinned ~14px off-centre. 100% fills the content box and
+       centres symmetrically inside main's padding. (Desktop is unchanged: 48rem still caps first.) */
+    width: min(48rem, 100%);
     margin: 1.5rem auto 0;
     text-align: left;
 }
