@@ -85,9 +85,12 @@ export function filenameFor(mimeType) {
  */
 function imageMimeFromDataUrl(dataUrl) {
   if (typeof dataUrl !== "string") throw new Error("No image was returned.");
-  const match = /^data:([^;,]+)(;base64)?,/s.exec(dataUrl);
+  // TM-838: allow an EMPTY mime segment ([^;,]* not +) — Android's camera/gallery picker sometimes
+  // returns "data:;base64,<bytes>" with no mime, which used to fail the match entirely and throw
+  // "unexpected format". A blank mime defaults to image/jpeg (the capture is an image regardless).
+  const match = /^data:([^;,]*)(;base64)?,/s.exec(dataUrl);
   if (!match) throw new Error("The captured image was in an unexpected format.");
-  const mime = match[1] || "application/octet-stream";
+  const mime = match[1] || "image/jpeg";
   if (!mime.startsWith("image/")) throw new Error("That capture wasn't an image.");
   return mime;
 }
@@ -105,7 +108,8 @@ function imageMimeFromDataUrl(dataUrl) {
  */
 export function dataUrlToFile(dataUrl) {
   const mime = imageMimeFromDataUrl(dataUrl);
-  const match = /^data:[^;,]+(;base64)?,(.*)$/s.exec(dataUrl);
+  // TM-838: [^;,]* (not +) so a blank-mime "data:;base64,…" still matches — mirrors imageMimeFromDataUrl.
+  const match = /^data:[^;,]*(;base64)?,(.*)$/s.exec(dataUrl);
   const isBase64 = Boolean(match[1]);
   const data = match[2];
 
@@ -139,7 +143,14 @@ export async function dataUrlToFileAsync(dataUrl) {
     const res = await fetch(dataUrl);
     blob = await res.blob();
   } catch {
-    throw new Error("The captured image was in an unexpected format.");
+    // TM-838 regression fix: some Android System WebView / Samsung Internet versions do NOT support
+    // fetch() on data: URLs, so the TM-335 async switch broke avatar capture entirely on those devices
+    // ("unexpected format", both camera and gallery — worked on desktop). Fall back to the synchronous
+    // atob decoder — exactly the pre-#259 behaviour that worked — instead of failing the upload. The
+    // main-thread block this fallback reintroduces (the TM-335 ANR risk) only happens on the affected
+    // devices, and a brief block beats a total failure; the fast fetch() path stays primary everywhere
+    // it works.
+    return dataUrlToFile(dataUrl);
   }
   const type = blob.type && blob.type.startsWith("image/") ? blob.type : mime;
   return new File([blob], filenameFor(type), { type });
