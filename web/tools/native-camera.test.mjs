@@ -97,6 +97,45 @@ test("dataUrlToFileAsync rejects a non-image or malformed data URL (same friendl
   await assert.rejects(() => dataUrlToFileAsync(null), /No image/i);
 });
 
+// ---- TM-838: Android regression — fetch() on data: URLs -------------------------------------
+
+test("dataUrlToFileAsync falls back to the sync decoder when fetch() fails on a data: URL (TM-838)", async () => {
+  // Regression from TM-335 (#259): the decode was switched atob -> fetch(dataUrl).blob(). Some Android
+  // System WebView / Samsung Internet versions do NOT support fetch() on data: URLs, so every capture
+  // threw "unexpected format" (worked on desktop). The async path must fall back to the sync decoder
+  // (the pre-#259 behaviour) rather than fail the whole upload.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("Failed to fetch"); // what an Android WebView does for a data: URL
+  };
+  try {
+    const file = await dataUrlToFileAsync(PNG_DATA_URL);
+    assert.ok(file instanceof File, "should still return a File via the sync fallback");
+    assert.equal(file.type, "image/png");
+    assert.ok(file.size > 0, "fallback-decoded bytes should be non-empty");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("dataUrlToFileAsync tolerates a blank/missing MIME (Android sometimes omits it) — TM-838", async () => {
+  // Android's picker can return "data:;base64,<bytes>" with no MIME segment. Pre-fix the regex required
+  // a non-empty MIME and threw "unexpected format"; a blank MIME should default to an image type.
+  const blankMime = "data:;base64," + PNG_DATA_URL.split(",")[1];
+  const file = await dataUrlToFileAsync(blankMime);
+  assert.ok(file instanceof File);
+  assert.ok(file.type.startsWith("image/"), "blank MIME should default to an image type, not reject");
+  assert.ok(file.size > 0);
+});
+
+test("dataUrlToFile tolerates a blank/missing MIME (TM-838)", () => {
+  const blankMime = "data:;base64," + PNG_DATA_URL.split(",")[1];
+  const file = dataUrlToFile(blankMime);
+  assert.ok(file instanceof File);
+  assert.ok(file.type.startsWith("image/"), "blank MIME should default to an image type, not reject");
+  assert.ok(file.size > 0);
+});
+
 // ---- classifyCameraError --------------------------------------------------------------------
 
 test("a user cancel is classified as a graceful no-op (not an error)", () => {
