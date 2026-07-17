@@ -19,12 +19,21 @@ export const OTP_LENGTH = 6;
  * input rejected" and "paste strips spaces/formatting" are both enforced: whatever the browser hands
  * us (typed char, pasted "123 456", an OS one-time-code autofill), only 0-9 survives.
  *
+ * Eastern Arabic (٠١٢٣٤٥٦٧٨٩, U+0660–U+0669) and Extended Arabic-Indic / Persian (۰-۹,
+ * U+06F0–U+06F9) digits NORMALISE to ASCII first rather than being stripped: an Arabic-locale
+ * numeric keypad (very relevant to this product's Saudi user base) can emit these for the digit
+ * keys, and stripping them would make every keystroke silently vanish with no error at all.
+ *
  * @param {unknown} text anything the DOM produced (input value, clipboard text); non-strings coerce
  * @param {number} [max] maximum digits to keep (default OTP_LENGTH)
- * @returns {string} up to `max` digit characters
+ * @returns {string} up to `max` ASCII digit characters
  */
 export function sanitizeDigits(text, max = OTP_LENGTH) {
-  return String(text ?? "").replace(/\D/g, "").slice(0, max);
+  return String(text ?? "")
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)) // Arabic-Indic → ASCII
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)) // Persian → ASCII
+    .replace(/\D/g, "")
+    .slice(0, max);
 }
 
 /**

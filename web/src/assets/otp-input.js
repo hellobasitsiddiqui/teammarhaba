@@ -75,9 +75,22 @@ export function attachOtpInput({ group, onComplete }) {
         render();
         return;
       }
+      // Select-on-focus SHOULD make typing replace a filled box's digit — but Chrome/Safari
+      // collapse a focus-handler selection to a caret on the click's mouseup (the classic
+      // select-on-focus bug), so the typed digit can INSERT beside the old one instead: the value
+      // becomes e.g. "28" (stored "2" + typed "8"). Recognise that exact shape — two chars, one of
+      // them this box's stored digit — and treat it as a replace-in-place with the NEW char.
+      // Without this, distribute() would spill the second char into (and clobber) the NEXT box and
+      // auto-submit a doubly-wrong code (TM-867 review fix; the pointer/mouse-up re-select below
+      // prevents most occurrences — this catches whatever still slips through).
+      let text = box.value;
+      if (text.length === 2 && values[i]) {
+        if (text[0] === values[i]) text = text[1]; // caret was after the old digit
+        else if (text[1] === values[i]) text = text[0]; // caret was before it
+      }
       // Non-digit input comes back from distribute() as a no-op state — render() then visibly
       // rejects it by snapping the box back to its stored value.
-      adopt(distribute(values, i, box.value));
+      adopt(distribute(values, i, text));
     });
 
     // Backspace + arrows are keydown because we must preventDefault BEFORE the browser mutates the
@@ -108,6 +121,18 @@ export function attachOtpInput({ group, onComplete }) {
 
     // Select on focus so typing into an already-filled box REPLACES its digit (no appended chars).
     box.addEventListener("focus", () => box.select());
+
+    // …but Chrome/Safari (desktop click AND iOS tap) collapse a selection made in a focus handler
+    // back to a caret via the subsequent mouseup's default action. preventDefault on mouseup is
+    // the canonical counter (it stops the caret placement); re-select()ing on pointerup/mouseup is
+    // the belt-and-braces so the whole digit stays selected however the events interleave
+    // (TM-867 review fix — pairs with the 2-char normalisation in the input handler above).
+    const keepSelection = (e) => {
+      e.preventDefault();
+      box.select();
+    };
+    box.addEventListener("pointerup", keepSelection);
+    box.addEventListener("mouseup", keepSelection);
   });
 
   return {

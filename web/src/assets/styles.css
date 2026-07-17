@@ -169,6 +169,7 @@
 button,
 a,
 label.field,
+.auth-otp-box, /* the six OTP digit boxes sit in a div.field, not a label.field (TM-867) */
 [role="button"],
 .linkish {
     touch-action: manipulation;

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { API_BASE_URL } from "../fixtures.mjs";
+import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "../fixtures.mjs";
 
 // Six-box OTP input with auto-submit (TM-867) — the email-code verify step now renders six
 // single-digit boxes (#emailcode-code … #emailcode-code-6) instead of one input, and typing the
@@ -122,4 +122,61 @@ test("@auth backspace walks back through the boxes and non-digits are rejected",
   // Nothing auto-submitted along the way — still on the code step, still signed out.
   await expect(page.locator("#emailcode-step-code")).toBeVisible();
   await expect(page.locator("#signout-btn")).toBeHidden();
+});
+
+test("@auth a failed auto-submit re-focuses box 1 so the code can be retyped straight away", async ({ page }) => {
+  // Review fix (TM-867): the verify disables every box (setBusy), which drops focus to <body>;
+  // on FAILURE run() must hand focus back to the widget or keyboard/AT users re-navigate from
+  // the top of the page to correct the code.
+  const email = `e2e-otp-refocus-${Date.now()}@teammarhaba.test`;
+  const code = await reachCodeStep(page, email);
+
+  // A deterministically WRONG code: the real one with its last digit flipped.
+  const wrong = code.slice(0, 5) + String((Number(code[5]) + 1) % 10);
+  await box(page, 1).pressSequentially(wrong, { delay: 40 });
+
+  // The auto-submitted verify fails: error banner up, still signed out, and — the fix — focus is
+  // back on the first box (selected) rather than lost to the document body.
+  await expect(page.locator("#auth-error")).toBeVisible();
+  await expect(page.locator("#signout-btn")).toBeHidden();
+  await expect(box(page, 1)).toBeFocused();
+
+  // The recovery is immediate: retyping the CORRECT code from the restored focus signs in.
+  await box(page, 1).pressSequentially(code, { delay: 40 });
+  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+});
+
+test("@auth SMS: the texted code auto-submits from the six boxes — sign-in with NO verify click", async ({ page }) => {
+  // Review fix (TM-867): SMS auto-submit previously had no failing signal anywhere — the Maestro
+  // flow's verify tap is optional (it silently masks a regression) and the web SMS smoke stopped
+  // before code entry. This completes SMS sign-in in the browser exactly like the email test:
+  // fill the first box, never touch #sms-verify-btn.
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.click("#try-another-btn");
+
+  // A number unique to this spec so the emulator session lookup below is unambiguous.
+  const phone = "+16505550142";
+  await page.fill("#phone", phone);
+  await page.click("#sms-send-btn");
+  await expect(page.locator("#sms-step-code")).toBeVisible();
+
+  // The step reveal focuses the first SMS box (same deferred-focus contract as the email step).
+  await expect(page.locator("#sms-code")).toBeFocused();
+
+  // Fetch the code the Auth emulator "texted" — the SMS twin of the email peek endpoint.
+  const res = await fetch(
+    `http://${AUTH_EMULATOR_HOST}/emulator/v1/projects/${PROJECT_ID}/verificationCodes`,
+  );
+  if (!res.ok) throw new Error(`verificationCodes lookup failed: ${res.status}`);
+  const { verificationCodes = [] } = await res.json();
+  const session = verificationCodes.filter((v) => v.phoneNumber === phone).at(-1);
+  expect(session?.code).toMatch(/^\d{6}$/);
+
+  // The crux: filling box 1 fans the code out and AUTO-submits — no #sms-verify-btn click. If the
+  // SMS auto-submit wiring regresses, this stays signed out and fails loudly.
+  await page.fill("#sms-code", session.code);
+  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
 });

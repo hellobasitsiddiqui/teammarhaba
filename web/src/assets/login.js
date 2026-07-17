@@ -106,6 +106,21 @@ function setBusy(busy) {
   els.form?.setAttribute("aria-busy", String(busy));
 }
 
+// Deferred focus (TM-867 review fix): focus() on a DISABLED input is a spec-mandated no-op, and
+// while an action runs inside run() every control — including all twelve OTP boxes — is disabled
+// by setBusy(true). So actions never focus directly; they QUEUE a focus request here and run()
+// applies it right after setBusy(false) re-enables the controls. The step-visibility guard stops
+// a stale request from stealing focus if the user has already navigated away (e.g. tapped "Use a
+// different email" the instant the request landed).
+let pendingFocus = null; // () => void, applied once by run() after the busy window closes
+
+function requestFocus(widget, stepEl) {
+  pendingFocus = () => {
+    if (stepEl?.hidden) return; // the step changed under us — don't yank focus somewhere stale
+    widget?.focus(); // first box, selected — ready to (re)type the code
+  };
+}
+
 // Run an auth action with shared error/loading handling. Single-flight (TM-867): the OTP widget's
 // auto-submit can fire while a verify is already running (e.g. a paste races a click on the visible
 // button, or a re-completed code after an error) — makeSingleFlight silently drops the re-entrant
@@ -114,12 +129,23 @@ function setBusy(busy) {
 const run = makeSingleFlight(async (action) => {
   showError(null);
   setBusy(true);
+  pendingFocus = null; // a fresh action owns the focus outcome — drop anything stale
   try {
     await action();
   } catch (err) {
     showError(err);
+    // A FAILED verify disabled the very box the user was typing in (dropping focus to <body> and,
+    // on iOS, dismissing the keyboard). Put focus back on the offending widget so a keyboard or
+    // screen-reader user can immediately retype the code instead of tabbing back from the top.
+    if (action === verifyAndSignIn) requestFocus(emailOtp, els.codeStep);
+    else if (action === verifySms) requestFocus(smsOtp, els.smsCodeStep);
   } finally {
     setBusy(false);
+    // Only now are the boxes enabled again — apply whatever focus the action (or the catch above)
+    // queued. Cleared before calling so a re-entrant run can't double-apply it.
+    const focusNow = pendingFocus;
+    pendingFocus = null;
+    focusNow?.();
   }
 });
 
@@ -132,7 +158,9 @@ function showCodeStep(email) {
   if (els.sentTo) els.sentTo.textContent = email;
   els.emailStep.hidden = true;
   els.codeStep.hidden = false;
-  emailOtp?.focus(); // first box, ready for the code (was the single input's focus())
+  // Queued, not immediate: this runs inside run()'s busy window where the boxes are disabled and
+  // a direct focus() would silently no-op (TM-867 review fix — the e2e spec pins this focus).
+  requestFocus(emailOtp, els.codeStep);
 }
 
 function showEmailStep() {
@@ -185,7 +213,7 @@ async function sendSms() {
   smsConfirmation = await startPhoneSignIn(phone, els.recaptcha);
   els.smsPhoneStep.hidden = true;
   els.smsCodeStep.hidden = false;
-  smsOtp?.focus();
+  requestFocus(smsOtp, els.smsCodeStep); // deferred past the busy window, same as the email step
 }
 
 async function verifySms() {

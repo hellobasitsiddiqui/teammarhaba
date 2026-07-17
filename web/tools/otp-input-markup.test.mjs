@@ -25,16 +25,29 @@ function groupMarkup(id) {
   return { openTag: HTML.match(new RegExp(`<div id="${id}"[^>]*>`))[0], inner: m[1] };
 }
 
-for (const [groupId, firstBoxId] of [
-  ["emailcode-otp", "emailcode-code"],
-  ["sms-otp", "sms-code"],
+for (const [groupId, firstBoxId, labelId, labelText] of [
+  ["emailcode-otp", "emailcode-code", "emailcode-otp-label", "6-digit code"],
+  ["sms-otp", "sms-code", "sms-otp-label", "SMS code"],
 ]) {
   test(`#${groupId} is a labelled role=group of six numeric boxes with stable first-box id #${firstBoxId}`, () => {
     const { openTag, inner } = groupMarkup(groupId);
 
-    // The group announces itself as one control to assistive tech.
+    // The group announces itself as one control to assistive tech, NAMED BY the visible field
+    // label via aria-labelledby (TM-867 review fix): a duplicate aria-label let the accessible
+    // name drift from the visible text — on the SMS step it actually did ("SMS code" visible vs
+    // "6-digit code" announced), breaking label-in-name for voice-control users (WCAG 2.5.3).
     assert.match(openTag, /role="group"/, "container carries role=group");
-    assert.match(openTag, /aria-label="6-digit code"/, "group is labelled '6-digit code'");
+    assert.match(
+      openTag,
+      new RegExp(`aria-labelledby="${labelId}"`),
+      "group is named by its visible label",
+    );
+    assert.doesNotMatch(openTag, /aria-label=/, "no duplicate aria-label to drift from the visible text");
+    assert.match(
+      HTML,
+      new RegExp(`<span id="${labelId}">${labelText}</span>`),
+      `the visible '${labelText}' label carries the id the group points at`,
+    );
 
     // Six inputs, every one on the numeric keypad, each announcing its position.
     const inputs = inner.match(/<input[^>]*>/g) ?? [];

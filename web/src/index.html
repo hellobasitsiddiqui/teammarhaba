@@ -273,9 +273,12 @@
                            • Every box is inputmode="numeric" → numeric keypad on mobile. No maxlength:
                              the JS distributes/truncates instead, because maxlength would clip a
                              multi-digit autofill before the input handler could fan it out. -->
+                    <!-- The visible field label NAMES the group via aria-labelledby (not a duplicate
+                         aria-label), so the accessible name can never drift from what sighted /
+                         voice-control users see (WCAG 1.3.1 + 2.5.3 — TM-867 review fix). -->
                     <div class="field auth-field auth-code-field">
-                        <span>6-digit code</span>
-                        <div id="emailcode-otp" class="auth-otp" role="group" aria-label="6-digit code">
+                        <span id="emailcode-otp-label">6-digit code</span>
+                        <div id="emailcode-otp" class="auth-otp" role="group" aria-labelledby="emailcode-otp-label">
                             <input id="emailcode-code" class="auth-otp-box" type="text" inputmode="numeric"
                                    autocomplete="one-time-code" aria-label="Digit 1 of 6" />
                             <input id="emailcode-code-2" class="auth-otp-box" type="text" inputmode="numeric"
@@ -340,8 +343,8 @@
                              it — and carries autocomplete="one-time-code" for the OS SMS suggestion. -->
                         <div id="sms-step-code" class="auth-step auth-verify" hidden>
                             <div class="field auth-field auth-code-field">
-                                <span>SMS code</span>
-                                <div id="sms-otp" class="auth-otp" role="group" aria-label="6-digit code">
+                                <span id="sms-otp-label">SMS code</span>
+                                <div id="sms-otp" class="auth-otp" role="group" aria-labelledby="sms-otp-label">
                                     <input id="sms-code" class="auth-otp-box" type="text" inputmode="numeric"
                                            autocomplete="one-time-code" aria-label="Digit 1 of 6" />
                                     <input id="sms-code-2" class="auth-otp-box" type="text" inputmode="numeric"

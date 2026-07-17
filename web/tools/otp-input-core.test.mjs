@@ -29,6 +29,15 @@ test("sanitizeDigits strips spaces/formatting and caps at the box count", () => 
   assert.equal(sanitizeDigits(undefined), "");
 });
 
+test("sanitizeDigits normalises Eastern Arabic and Persian digits to ASCII (Arabic-locale keypads)", () => {
+  // An Arabic-locale numeric keypad can emit these for the digit keys (Saudi user base) — they
+  // must NORMALISE, not silently strip, or every keystroke vanishes with no error (TM-867 review fix).
+  assert.equal(sanitizeDigits("١٢٣٤٥٦"), "123456"); // Arabic-Indic U+0660–U+0669
+  assert.equal(sanitizeDigits("۱۲۳۴۵۶"), "123456"); // Extended Arabic-Indic / Persian U+06F0–U+06F9
+  assert.equal(sanitizeDigits("٠٩۰۹"), "0909"); // both ranges' endpoints map correctly
+  assert.equal(sanitizeDigits("٤"), "4"); // the single-keystroke (typed digit) case
+});
+
 // ---- distribute: typing fills + advances, the 6th digit completes ---------------------------
 
 test("typing one digit at a time fills each box, advances focus, and completes on the 6th", () => {
