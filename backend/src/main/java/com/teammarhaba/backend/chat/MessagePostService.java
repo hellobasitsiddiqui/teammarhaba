@@ -8,6 +8,7 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
+import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
@@ -154,7 +155,8 @@ public class MessagePostService {
     @Transactional
     public ConversationMessageResponse post(
             VerifiedUser caller, Long conversationId, String body, Long replyToMessageId) {
-        Long userId = users.provision(caller).getId();
+        User author = users.provision(caller);
+        Long userId = author.getId();
 
         // Membership gate FIRST (TM-573): an unknown thread has no membership row and falls through to
         // the same 403 as a non-member / REMOVED member, so a POST can't probe which thread ids exist —
@@ -212,6 +214,7 @@ public class MessagePostService {
         // round-trip through the read API.
         return ConversationMessageResponse.from(
                 saved,
+                author.getDisplayName(), // sender identity for the incoming-bubble label (TM-828)
                 List.of(),
                 MessageReadReceipt.empty(),
                 QuotedMessage.resolve(replyToMessageId, parent),
@@ -244,7 +247,8 @@ public class MessagePostService {
      */
     @Transactional
     public ConversationMessageResponse postAnnouncement(VerifiedUser caller, Long conversationId, String body) {
-        Long adminId = users.provision(caller).getId();
+        User admin = users.provision(caller);
+        Long adminId = admin.getId();
 
         // No membership gate (admins may announce in any event chat) — but the thread must exist. Unlike
         // the ordinary post, existence is NOT hidden here: the caller is already an authenticated admin
@@ -268,7 +272,12 @@ public class MessagePostService {
         publisher.publishEvent(new MessageCreatedEvent(saved));
 
         return ConversationMessageResponse.from(
-                saved, List.of(), MessageReadReceipt.empty(), QuotedMessage.resolve(null, null), true);
+                saved,
+                admin.getDisplayName(), // sender identity for the incoming-bubble label (TM-828)
+                List.of(),
+                MessageReadReceipt.empty(),
+                QuotedMessage.resolve(null, null),
+                true);
     }
 
     /**

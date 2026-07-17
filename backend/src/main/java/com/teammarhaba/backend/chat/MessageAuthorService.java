@@ -9,6 +9,7 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
+import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
@@ -153,7 +154,8 @@ public class MessageAuthorService {
     @Transactional
     public ConversationMessageResponse editOwnMessage(
             VerifiedUser caller, Long conversationId, Long messageId, String newBody) {
-        Long userId = users.provision(caller).getId();
+        User author = users.provision(caller);
+        Long userId = author.getId();
         Message message = requireOwnLiveMessage(conversationId, messageId, userId);
 
         // Edit-only gates: the thread must be open, and the edit must be within the window. Delete has
@@ -181,7 +183,12 @@ public class MessageAuthorService {
                 .summariesFor(userId, List.of(messageId))
                 .getOrDefault(messageId, List.of());
         return ConversationMessageResponse.from(
-                message, reactions, MessageReadReceipt.empty(), quotedParent(message), true);
+                message,
+                author.getDisplayName(), // sender identity for the incoming-bubble label (TM-828)
+                reactions,
+                MessageReadReceipt.empty(),
+                quotedParent(message),
+                true);
     }
 
     /**

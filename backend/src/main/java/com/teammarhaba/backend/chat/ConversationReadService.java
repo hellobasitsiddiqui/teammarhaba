@@ -281,6 +281,21 @@ public class ConversationReadService {
                 ? Map.of()
                 : messages.findAllById(parentIds).stream().collect(Collectors.toMap(Message::getId, Function.identity()));
 
+        // Sender display names (TM-828) for the incoming-bubble avatar + name label — ONE batched query
+        // for every distinct human author on the page (no N+1), keyed by users.id. System / admin messages
+        // (null senderId) contribute no id and get a null name (no author identity to show). There is no
+        // server-side profile photo store, so senderPhotoUrl stays null and the client renders an
+        // initial-in-circle fallback from the name (see ConversationMessageResponse's class note).
+        Set<Long> senderIds = page.getContent().stream()
+                .map(Message::getSenderId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> senderNames = senderIds.isEmpty()
+                ? Map.of()
+                : userAccounts.findAllById(senderIds).stream()
+                        .filter(user -> user.getDisplayName() != null)
+                        .collect(Collectors.toMap(User::getId, User::getDisplayName));
+
         // Every message carries: its reaction chips (TM-461), a read receipt if it's the caller's own
         // (TM-463, else null), a quoted-parent snippet if it's a reply (TM-466, else null), and the
         // own-message flag (TM-589) — all batch-resolved / computed here, so the timeline renders with no
@@ -293,6 +308,7 @@ public class ConversationReadService {
         // the client knowing its own numeric id.
         return PageResponse.from(page, message -> ConversationMessageResponse.from(
                 message,
+                message.getSenderId() == null ? null : senderNames.get(message.getSenderId()),
                 summaries.getOrDefault(message.getId(), List.of()),
                 receipts.get(message.getId()),
                 quotedParent(message, parents),

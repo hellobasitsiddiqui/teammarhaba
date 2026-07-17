@@ -4641,6 +4641,40 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     font-weight: 600;
     color: var(--muted);
 }
+
+/* Sender identity on an incoming message that starts a sender-run (TM-828): the author's avatar (a
+   circle) + their display name, drawn once at the top of a run of their consecutive messages. Left
+   aligned (inherits the incoming bubble's flex-start). */
+.tm-chat-identity {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 2px 0;
+}
+/* The avatar CIRCLE — a solid-line border (Basit's explicit requirement: solid, not dashed/none). The
+   photo variant is an <img> cover-fitted into the circle; the no-photo fallback reuses the shared
+   initial-in-circle avatar (.tm-c-avatar), which already carries the same solid border + round shape. */
+.tm-chat-avatar {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-pill);
+    border: 2px solid var(--fg); /* SOLID line — the ticket's explicit avatar-border requirement */
+    object-fit: cover;
+    background: var(--surface-2);
+}
+/* The fallback initial-in-circle: size it to match the photo circle; its solid border comes from
+   .tm-c-avatar, so it reads identically to the photo variant. */
+.tm-chat-avatar.tm-chat-avatar--fallback {
+    display: inline-grid;
+    place-items: center;
+    font-size: var(--fs-2);
+}
+.tm-chat-sender-name {
+    font-size: var(--fs-1);
+    font-weight: 600;
+    color: var(--muted);
+}
 .tm-chat-bub {
     padding: var(--space-2) var(--space-3);
     font: inherit;

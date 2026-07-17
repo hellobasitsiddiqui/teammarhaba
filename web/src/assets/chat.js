@@ -788,9 +788,15 @@ function repaintBody() {
   // server flagged it `mine` (TM-589 — the direct own-message signal), OR it carries a read receipt
   // (which the server only attaches to the caller's OWN messages, TM-463). Any of these is an authoritative
   // "mine" signal for a loaded message (not just this session); it also gates the edit/delete affordances.
+  let prev = null;
   for (const m of all) {
     const mine = Boolean(m.pending) || thread.mineIds.has(m.id) || Boolean(m.mine) || Boolean(m.readReceipt);
-    body.append(messageRow(m, mine));
+    // TM-828: the sender avatar + name label is drawn once at the top of a consecutive INCOMING run.
+    // `startsSenderRun` is the pure grouping decision (chat-core) given this message + the one before it;
+    // an own bubble, a system/announcement notice, or a run continuation returns false → no header.
+    const runStart = core.startsSenderRun(mine ? { ...m, mine: true } : m, prev);
+    body.append(messageRow(m, mine, runStart));
+    prev = mine ? { ...m, mine: true } : m;
   }
   if (atBottom) requestAnimationFrame(() => { body.scrollTop = body.scrollHeight; });
 }
@@ -1279,8 +1285,10 @@ function emptyThread() {
  * confirms.
  * @param {Object} m the message view-model (from chat-core).
  * @param {boolean} mine whether to render it as an out-going bubble.
+ * @param {boolean} runStart whether this INCOMING message starts a new sender-run (TM-828) — draws the
+ *   sender avatar + name label once at the top of a run of the same author's messages, not on every bubble.
  */
-function messageRow(m, mine = false) {
+function messageRow(m, mine = false, runStart = false) {
   // Admin/host announcement (TM-710): the auto-posted opening message or an admin-sent announcement.
   // Rendered as a distinct, centred announcement block — attributed as an announcement (host / admin) —
   // whether it's a system "from TeamMarhaba" post or an admin-authored one, so it never renders as an
@@ -1295,6 +1303,14 @@ function messageRow(m, mine = false) {
     // Anchor for tap-to-scroll from a reply's quote (TM-466).
     "data-msg-id": m.id || null,
   });
+  // Sender identity (TM-828): on an INCOMING message that starts a new sender-run, draw the author's
+  // avatar (photo circle, or an initial-in-circle fallback) + display-name label once, above the bubble.
+  // Own (out-going) bubbles never get it; a run continuation (runStart false) shows the bubble alone so
+  // the identity isn't repeated on every consecutive line.
+  if (!mine && runStart) {
+    const identity = senderIdentity(m);
+    if (identity) row.append(identity);
+  }
   // Reply / quote (TM-466): render the quoted parent above the body — tap it to scroll to the original;
   // a removed original shows "message unavailable" (core already substitutes the copy) and isn't tappable.
   if (m.replyTo) row.append(quoteBlock(m.replyTo));
@@ -1360,6 +1376,48 @@ function messageRow(m, mine = false) {
     row.append(ownMessageActions(m));
   }
   return row;
+}
+
+/**
+ * The sender identity header for an incoming message that starts a sender-run (TM-828): the author's
+ * avatar (a circle) + their display name, drawn once at the top of the run. The avatar is the sender's
+ * PHOTO in a circle with a solid border when a photo URL is present; with no photo (the current
+ * backend reality — no server-side photo store, senderPhotoUrl is always null) it falls back to the
+ * shared initial-in-circle avatar (`avatar()` from components.js), whose circle already carries the same
+ * solid border. The name comes from `senderName`; when it's blank (an unresolvable author) the whole
+ * header is omitted (returns null) rather than rendering an empty label.
+ *
+ * <p>All text goes through el()'s textContent (never innerHTML) and the photo src is set as a plain
+ * attribute, so a hostile display name / URL can't inject markup.
+ * @param {{senderName?: string, senderPhotoUrl?: (string|null)}} m the message view-model (chat-core).
+ * @returns {?HTMLElement} the header node, or null when there's no name to show.
+ */
+function senderIdentity(m) {
+  const name = String(m.senderName ?? "").trim();
+  if (!name) return null; // no author identity to show (e.g. an unresolvable account) — omit the header
+  const avatarNode = m.senderPhotoUrl
+    ? el("img", {
+        class: "tm-chat-avatar",
+        src: m.senderPhotoUrl,
+        alt: name,
+        loading: "lazy",
+        // A broken/failed photo falls back to the initial-in-circle by swapping in the fallback node.
+        onError: (e) => {
+          const fallback = avatar(name);
+          fallback.classList.add("tm-chat-avatar", "tm-chat-avatar--fallback");
+          e.target.replaceWith(fallback);
+        },
+      })
+    : (() => {
+        // No photo → the shared initial-in-circle avatar (its circle already has the solid border).
+        const node = avatar(name);
+        node.classList.add("tm-chat-avatar", "tm-chat-avatar--fallback");
+        return node;
+      })();
+  return el("div", { class: "tm-chat-identity", "data-testid": "chat-identity" }, [
+    avatarNode,
+    el("span", { class: "tm-chat-sender-name", "data-testid": "chat-sender-name", text: name }),
+  ]);
 }
 
 /**
@@ -1826,7 +1884,13 @@ function previewHost(url) {
  * @param {{count: number, readerIds: string[]}} receipt a normalised receipt (chat-core).
  */
 function readReceiptIndicator(receipt) {
-  const label = core.readReceiptLabel(receipt); // "Sent" | "Read by N"
+  // TM-829: friendly buckets ("Read by none" / "Read by few" / "Read by everyone", or an exact "Read by N"
+  // in a small group) instead of always "Read by N". The denominator = OTHER thread members, taken from
+  // the roster the mentions feature already loads (getConversationMembers returns everyone EXCEPT the
+  // caller, so its length IS the other-member count); 0 when the roster hasn't loaded → readByLabel stays
+  // exact ("Read by N"). Text indicator only — no ticks (the AC is explicit).
+  const otherMemberCount = Array.isArray(thread.members) ? thread.members.length : 0;
+  const label = core.readByLabel(receipt.count, otherMemberCount);
   if (receipt.count <= 0) {
     return el("div", { class: "tm-chat-receipt tm-chat-receipt--empty", "data-testid": "chat-receipt" }, [
       el("span", { class: "tm-chat-receipt-text", text: label }),

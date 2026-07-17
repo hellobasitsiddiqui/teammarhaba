@@ -642,6 +642,12 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "senderName" : {
+            "type" : "string"
+          },
+          "senderPhotoUrl" : {
+            "type" : "string"
+          },
           "system" : {
             "type" : "boolean"
           }
