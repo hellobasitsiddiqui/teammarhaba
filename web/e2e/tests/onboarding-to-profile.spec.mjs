@@ -145,24 +145,28 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   // The nav Profile link is back now the gates are cleared.
   await expect(page.locator("#nav-profile")).toBeVisible();
 
-  // The onboarding-supplied identity actually populates the Profile hub (paper-profile): the hub name
-  // renders the display name (single onboarding "name" ⇒ display_name ⇒ identitySummary.short == full),
-  // and the meta line carries the city + age they entered. This proves onboarding fed the profile, not
-  // just that some profile page rendered.
-  await expect(page.locator(".tm-pf-name")).toHaveText(displayName);
+  // The onboarding-supplied identity actually populates the Profile hub (paper-profile): since TM-883
+  // the captured name also seeds first/last name ("Fresh User <run>" → "Fresh" / "User <run>"), so the
+  // hub renders the wireframe's compact "First L." identity ("Fresh U.") — no longer the raw
+  // display-name fallback — and the meta line carries the city + age they entered. This proves
+  // onboarding fed the profile, not just that some profile page rendered.
+  await expect(page.locator(".tm-pf-name")).toHaveText("Fresh U.");
   await expect(page.locator(".tm-pf-id")).toContainText(location);
   await expect(page.locator(".tm-pf-id")).toContainText(String(age));
 
-  // It persisted: name → display_name, location → city, age, and the onboarding flag are on the row.
+  // It persisted: name → display_name PLUS the TM-883 first/last split, location → city, age, and the
+  // onboarding flag are on the row.
   const client = new pg.Client(dbConfig);
   await client.connect();
   try {
     const { rows } = await client.query(
-      "SELECT display_name, city, age, onboarding_completed FROM users WHERE lower(email) = lower($1)",
+      "SELECT display_name, first_name, last_name, city, age, onboarding_completed FROM users WHERE lower(email) = lower($1)",
       [email],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].display_name).toBe(displayName);
+    expect(rows[0].first_name).toBe("Fresh");
+    expect(rows[0].last_name).toBe(`User ${run}`);
     expect(rows[0].city).toBe(location);
     expect(rows[0].age).toBe(age);
     expect(rows[0].onboarding_completed).toBe(true);
