@@ -28,9 +28,10 @@ import {
  *   `group` — the role="group" container holding the six <input> boxes (null-safe: returns null so
  *   callers can optional-chain, e.g. if a stale cached index.html predates the boxes);
  *   `onComplete` — called with the assembled 6-digit code whenever an action leaves ALL boxes
- *   filled (type of the 6th digit, a full paste, setValue). May fire more than once — e.g. the user
- *   corrects one digit after a failed verify and completes the code again; the caller is expected
- *   to guard re-entry (login.js's run() is single-flight).
+ *   filled (type of the 6th digit, a full paste, setValue). It fires on ANY input that leaves the
+ *   set complete — so a caller that keeps a rejected code in the boxes would get a mixed old/new
+ *   submit on the first correcting keystroke. login.js therefore clear()s the widget on a failed
+ *   verify and guards re-entry (run() is single-flight).
  * @returns {{boxes: HTMLInputElement[], value: () => string, setValue: (code: unknown) => void,
  *   clear: () => void, focus: () => void}|null}
  */

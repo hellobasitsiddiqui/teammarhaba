@@ -134,11 +134,18 @@ const run = makeSingleFlight(async (action) => {
     await action();
   } catch (err) {
     showError(err);
-    // A FAILED verify disabled the very box the user was typing in (dropping focus to <body> and,
-    // on iOS, dismissing the keyboard). Put focus back on the offending widget so a keyboard or
-    // screen-reader user can immediately retype the code instead of tabbing back from the top.
-    if (action === verifyAndSignIn) requestFocus(emailOtp, els.codeStep);
-    else if (action === verifySms) requestFocus(smsOtp, els.smsCodeStep);
+    // A FAILED verify leaves the boxes holding the rejected code while setBusy has dropped focus
+    // to <body> (and, on iOS, dismissed the keyboard). Standard OTP recovery: CLEAR the code and
+    // hand focus back to box 1 so the user retypes from scratch. Clearing is also load-bearing —
+    // the widget fires onComplete on ANY input that leaves all six boxes filled, so retyping over
+    // a stale full set would auto-submit a mixed old/new code on the FIRST keystroke.
+    if (action === verifyAndSignIn) {
+      emailOtp?.clear();
+      requestFocus(emailOtp, els.codeStep);
+    } else if (action === verifySms) {
+      smsOtp?.clear();
+      requestFocus(smsOtp, els.smsCodeStep);
+    }
   } finally {
     setBusy(false);
     // Only now are the boxes enabled again — apply whatever focus the action (or the catch above)

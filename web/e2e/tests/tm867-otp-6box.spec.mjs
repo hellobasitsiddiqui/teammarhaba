@@ -136,10 +136,16 @@ test("@auth a failed auto-submit re-focuses box 1 so the code can be retyped str
   await box(page, 1).pressSequentially(wrong, { delay: 40 });
 
   // The auto-submitted verify fails: error banner up, still signed out, and — the fix — focus is
-  // back on the first box (selected) rather than lost to the document body.
+  // back on the first box rather than lost to the document body.
   await expect(page.locator("#auth-error")).toBeVisible();
   await expect(page.locator("#signout-btn")).toBeHidden();
   await expect(box(page, 1)).toBeFocused();
+
+  // Standard OTP recovery: the rejected code is CLEARED, ready for a fresh entry. (Load-bearing:
+  // were the stale code kept, the first retyped digit would leave all six boxes filled and
+  // auto-submit a mixed old/new code — exactly what the first branch e2e run caught.)
+  await expect(box(page, 1)).toHaveValue("");
+  await expect(box(page, 6)).toHaveValue("");
 
   // The recovery is immediate: retyping the CORRECT code from the restored focus signs in.
   await box(page, 1).pressSequentially(code, { delay: 40 });
