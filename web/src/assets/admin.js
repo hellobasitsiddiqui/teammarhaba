@@ -26,6 +26,10 @@ import { confirmSensitiveAction } from "./biometric-confirm.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
 import { clampPage } from "./admin-paging-core.js";
+// TM-612 (tests backfilled in TM-847): the pure role-token → friendly-label mapping, extracted so it's
+// unit-testable (roleBadge itself can't be imported under `node --test` — it pulls the Firebase CDN via
+// ui.js/api.js). The badge markup stays here; only the label decision moves.
+import { roleLabel } from "./admin-role-core.js";
 import {
   MAX_TITLE,
   MAX_BODY,
@@ -834,7 +838,9 @@ function roleBadge(role) {
   // ("ADMIN"/"USER"). This matches statusBadge ("Enabled"/"Disabled") and the role filter's
   // friendly options ("Users"/"Admins") just below, so the console reads consistently. The raw
   // role still drives the CSS class (`tm-badge-role-admin`/`-user`), so styling is unchanged.
-  const label = role === "ADMIN" ? "Admin" : "User";
+  // The label decision lives in admin-role-core.js (TM-847) so it's unit-testable; the branch is
+  // identical (`"ADMIN" → "Admin"`, else → "User").
+  const label = roleLabel(role);
   return el("span", { class: `tm-badge tm-badge-role-${role.toLowerCase()}`, text: label });
 }
 

@@ -11,7 +11,15 @@
 // lives in footer-core.js (formatBuildStamp, unit-tested); to import it this file is an ES module now
 // (loaded via <script type="module"> in index.html) rather than a classic IIFE script. Module scripts
 // defer, but #build-info is already in the DOM before this runs, so the timing is unchanged in effect.
+//
+// TM-847: the pure identifier logic (shortSha, trimRevision, and the collapse-vs-split decision) now
+// lives in build-info-core.js so it can be unit-tested (web/tools/build-info.test.mjs) — it used to be
+// private closures in this IIFE and shipped untested (flagged by the TM-824 "Easy Wins 1" closure
+// review). This file stays a thin DOM shell: it reads config + the backend /version, calls those pure
+// helpers, and writes the result to textContent. The behaviour is unchanged — the same functions, only
+// now importable rather than inlined.
 import { formatBuildStamp } from "./footer-core.js";
+import { shortSha, buildStampParts } from "./build-info-core.js";
 
 (function stampBuildInfo() {
   const el = document.getElementById("build-info");
@@ -32,19 +40,20 @@ import { formatBuildStamp } from "./footer-core.js";
     .then((res) => (res.ok ? res.json() : null))
     .then((v) => {
       if (!v) return;
-      // Prefer the precise `sha` anchor (TM-610); fall back to `version` for older backends
-      // that predate the sha field. Either way we render it as a short SHA.
-      const apiVersion = shortSha(v.sha || v.version);
-      if (!apiVersion) return;
-
-      const web = shortSha(webVersion);
-      const rev = trimRevision(v.revision);
-      const revSuffix = rev ? ` · ${rev}` : "";
+      // Prefer the precise `sha` anchor (TM-610); fall back to `version` for older backends that predate
+      // the sha field. buildStampParts (TM-847, build-info-core.js) reduces both surfaces to short SHAs,
+      // trims the revision to `r<number>`, and decides whether they collapse to one value or have drifted.
+      const { web, api, revSuffix } = buildStampParts({
+        webVersion,
+        apiSha: v.sha || v.version,
+        revision: v.revision,
+      });
+      if (!api) return; // backend answered but carried no usable SHA — keep the web-only stamp.
 
       // Collapse to one SHA when web and api match (the normal case — both deployed from the same
       // commit); only split to a LABELLED `web … · backend …` when they've drifted apart, so it's
       // clear which SHA is which surface (TM-666). formatBuildStamp owns that pure formatting.
-      el.textContent = formatBuildStamp({ webSha: web, apiSha: apiVersion, revSuffix });
+      el.textContent = formatBuildStamp({ webSha: web, apiSha: api, revSuffix });
 
       if (v.buildTime && v.buildTime !== "unknown") {
         el.title = `backend built ${v.buildTime}`;
@@ -53,21 +62,4 @@ import { formatBuildStamp } from "./footer-core.js";
     .catch(() => {
       /* backend unreachable — keep the web-only stamp */
     });
-
-  // Reduce a build id to a short 7-char SHA. A full 40-char git SHA is truncated; anything already
-  // short (a short SHA, "dev", or a legacy describe string from an old backend) is left untouched.
-  function shortSha(id) {
-    if (!id) return "";
-    return /^[0-9a-f]{40}$/i.test(id) ? id.slice(0, 7) : id;
-  }
-
-  // Trim a Cloud Run revision to a compact `r<number>` (TM-610). Cloud Run names revisions
-  // `<service>-<NNNNN>-<suffix>` (e.g. teammarhaba-backend-00184-rik); we keep just the revision
-  // number, dropping the service-name prefix and the random suffix. "local" (off Cloud Run) and
-  // anything that doesn't match are hidden rather than shown raw.
-  function trimRevision(rev) {
-    if (!rev || rev === "local") return "";
-    const m = rev.match(/-(\d+)(?:-\w+)?$/);
-    return m ? `r${m[1]}` : "";
-  }
 })();
