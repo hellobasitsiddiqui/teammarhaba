@@ -126,7 +126,15 @@ test("interestsHint guides an empty state toward the minimum, never says 'coming
 
 test("interestsHint counts down remaining room, and announces the cap at the max", () => {
   assert.match(interestsHint(2, 1, 3), /Add up to 1 more/);
-  assert.match(interestsHint(3, 1, 3), /maximum of 3/);
+  assert.match(interestsHint(3, 1, 3), /You've added the maximum of 3/);
+});
+
+test("interestsHint reads correctly when OVER the max (never claims they 'added the maximum')", () => {
+  // A count above max (e.g. the config's max was lowered after the user saved) must not say
+  // "You've added the maximum of N" — it reads as over the ceiling instead (TM-874).
+  const over = interestsHint(4, 1, 3);
+  assert.match(over, /over the maximum of 3/);
+  assert.doesNotMatch(over, /added the maximum/);
 });
 
 // ---- catalogueGroups (the ADD picker) ---------------------------------------------------------

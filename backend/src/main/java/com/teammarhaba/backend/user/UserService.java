@@ -17,6 +17,7 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -315,9 +316,18 @@ public class UserService {
             }
         }
 
-        // Full-set replace: clear the user's existing snapshots, then insert the resolved new set.
+        // Change detection as SETS, not order-sensitive lists (TM-874). findByUserId returns rows in an
+        // unspecified order, so an order-sensitive List.equals would treat a same-set re-save as a change
+        // and churn a delete-and-reinsert (fresh ids/created_at) plus a spurious PROFILE_UPDATED diff on
+        // every no-op save. The user's interests are a SET (already de-duplicated above), so compare by
+        // set membership: an unchanged set skips both the rewrite and the audit entry.
         List<UserInterest> existing = userInterests.findByUserId(user.getId());
         List<String> before = existing.stream().map(UserInterest::getLabel).toList();
+        if (new HashSet<>(before).equals(new HashSet<>(wanted))) {
+            return; // true no-op: same interests (any order) → no delete/reinsert, no audit diff.
+        }
+
+        // Full-set replace: clear the user's existing snapshots, then insert the resolved new set.
         userInterests.deleteAll(existing);
         for (String label : wanted) {
             InterestCatalogue c = byLabel.get(label);
@@ -325,11 +335,9 @@ public class UserService {
             userInterests.save(new UserInterest(user.getId(), c.getLabel(), c.getCategory(), c.getId()));
         }
 
-        // Audit the change as one field diff (old set → new set), only when it actually changed —
+        // Audit the change as one field diff (old set → new set) — reached only when the set changed,
         // consistent with the no-op-edit discipline of the rest of updateProfile.
-        if (!before.equals(wanted)) {
-            changes.add(change("interests", String.join(", ", before), String.join(", ", wanted)));
-        }
+        changes.add(change("interests", String.join(", ", before), String.join(", ", wanted)));
     }
 
     /** A single field diff entry for the profile-change history (TM-185). Null-tolerant (old may be null). */

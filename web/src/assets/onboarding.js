@@ -424,7 +424,9 @@ function buildSelectionPill() {
  * "What are you into?" + accent squiggle, the subtitle, a live selection pill, then a group section per
  * {@link groupCatalogue} ("POPULAR NEAR YOU" first, then the real categories), an inline error slot, and
  * a full-width "Continue →" CTA disabled until {@link canFinish}. NO skip — the step is a hard gate
- * (product-owner decision on TM-804); even a min-0 config just leaves Continue disabled at 0 selected.
+ * (product-owner decision on TM-804). The always-at-least-one guard is NOT `canFinish(0, {min:0})` (that
+ * returns true) — it's {@link selectionBounds}, which FLOORS the effective min to 1 even if the config
+ * says 0, so `state.bounds.min` is never below 1 and Continue stays disabled until one interest is picked.
  */
 function buildInterestsStep(view) {
   const groups = groupCatalogue(state.catalogue);

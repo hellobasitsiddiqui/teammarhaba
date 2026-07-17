@@ -177,7 +177,7 @@ public class ChatSeedService {
         Instant now = Instant.now();
         Event event = new Event(
                 heading,
-                "A friendly TeamMarhaba meetup. Seeded for chat foundation evidence (TM-587).",
+                "A friendly Circle meetup. Seeded for chat foundation evidence (TM-587).",
                 "Marhaba Community Hall, 1 Test Street",
                 "Europe/London",
                 now.plus(Duration.ofHours(2)),

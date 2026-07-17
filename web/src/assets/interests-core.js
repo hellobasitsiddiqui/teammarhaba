@@ -151,7 +151,11 @@ export function interestsHint(count, min, max) {
       ? `Add at least ${min} interest${min === 1 ? "" : "s"} so people find you.`
       : "Add interests so people find you.";
   }
-  if (count >= max) {
+  if (count > max) {
+    // Over the ceiling (e.g. a since-lowered max): don't claim they've "added the maximum".
+    return `You're over the maximum of ${max}.`;
+  }
+  if (count === max) {
     return `You've added the maximum of ${max}.`;
   }
   return `Add up to ${max - count} more.`;

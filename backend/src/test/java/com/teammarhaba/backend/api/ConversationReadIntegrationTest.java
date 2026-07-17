@@ -104,7 +104,7 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         // Activity order: post to the event thread first, then the broadcast (separate txns → the
         // broadcast's message is newer), so the broadcast sorts ahead as most-recently-active.
         messages.save(Message.fromUser(eventThread, newUser("conv-list-sender"), "see you there"));
-        messages.save(Message.fromSystem(broadcast, "Welcome to TeamMarhaba", "/home"));
+        messages.save(Message.fromSystem(broadcast, "Welcome to Circle", "/home"));
 
         JsonNode body = getJson("/api/v1/me/conversations", caller(uid));
 
@@ -116,7 +116,7 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(top.get("type").asText()).isEqualTo("ADMIN_BROADCAST");
         assertThat(top.get("title").asText()).isEqualTo("Circle"); // fixed broadcast title
         assertThat(top.get("eventId").isNull()).isTrue(); // no event ref for a broadcast
-        assertThat(top.get("lastMessagePreview").asText()).isEqualTo("Welcome to TeamMarhaba");
+        assertThat(top.get("lastMessagePreview").asText()).isEqualTo("Welcome to Circle");
         assertThat(top.get("unreadCount").asLong()).isEqualTo(1); // caller has never read it
 
         JsonNode second = body.get("items").get(1);
