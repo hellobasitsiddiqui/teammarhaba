@@ -83,10 +83,12 @@ public class RevolutPaymentProvider implements PaymentProvider {
     private static final Set<String> FAILED_EVENTS = Set.of("ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED");
 
     /**
-     * Replay window (TM-623): how far a webhook's {@code Revolut-Request-Timestamp} may deviate from
-     * the server clock before the delivery is rejected. The timestamp is inside the signed payload, so
-     * an attacker can't forge a fresh one — but WITHOUT this check any captured signed delivery would
-     * verify forever. 5 minutes matches Revolut's own guidance and absorbs normal clock skew + retry lag.
+     * Replay window (TM-623): how far in the PAST a webhook's {@code Revolut-Request-Timestamp} may be
+     * before the delivery is rejected as stale. The timestamp is inside the signed payload, so an
+     * attacker can't forge a fresh one — but WITHOUT this check any captured signed delivery would verify
+     * forever. 5 minutes matches Revolut's own guidance and absorbs normal clock skew + retry lag. The
+     * check is PAST-ONLY (TM-871): future skew, where this server's clock runs behind Revolut's, is
+     * tolerated so a genuine, correctly-signed settle is not rejected just because our clock drifted.
      */
     private static final Duration MAX_WEBHOOK_AGE = Duration.ofMinutes(5);
 
@@ -388,8 +390,14 @@ public class RevolutPaymentProvider implements PaymentProvider {
         if (timestampMs < 100_000_000_000L) {
             timestampMs *= 1000; // looks like epoch seconds — normalise to milliseconds
         }
-        if (Math.abs(System.currentTimeMillis() - timestampMs) > MAX_WEBHOOK_AGE.toMillis()) {
-            log.warn("Rejecting Revolut webhook: timestamp outside the {} replay window", MAX_WEBHOOK_AGE);
+        // Past-only staleness check (TM-871): reject only when the delivery is too OLD. The replay concern
+        // is about PAST deliveries — a captured signed delivery must not stay valid forever — so we reject
+        // when it is older than the window. FUTURE skew (this server's clock running BEHIND Revolut's) must
+        // be TOLERATED: a Math.abs() check rejected a future-skewed-but-genuine settle exactly like a stale
+        // one, so a >~5min-behind clock 401'd correctly-signed settles until, after retries, a paid order
+        // sat PENDING (money captured, no RSVP). Not-yet-in-the-future deliveries verify normally.
+        if (System.currentTimeMillis() - timestampMs > MAX_WEBHOOK_AGE.toMillis()) {
+            log.warn("Rejecting Revolut webhook: timestamp older than the {} replay window", MAX_WEBHOOK_AGE);
             return Optional.empty();
         }
 
