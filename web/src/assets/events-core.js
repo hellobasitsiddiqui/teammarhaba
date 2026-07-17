@@ -189,7 +189,7 @@ export function countdownText(ms) {
   if (mins < 1) return "under a minute";
   if (mins < 60) return `in ${mins} min`;
   const hours = Math.round(mins / 60);
-  if (hours < 48) return `in ${hours} h`;
+  if (hours < 24) return `in ${hours} h`;
   const days = Math.round(hours / 24);
   return `in ${days} ${days === 1 ? "day" : "days"}`;
 }
