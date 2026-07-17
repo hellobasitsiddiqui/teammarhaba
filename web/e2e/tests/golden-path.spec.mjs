@@ -131,7 +131,10 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   const location = `Goldenville-${stamp}`;
   // Letters-only: the profile city field rejects digits since TM-771 (email/location keep the
   // numeric stamp — only the name-like profile fields carry the rule).
-  const city = `Golden-City-${lettersOnlyStamp()}`;
+  // TM-877: city is a dropdown now — a fixed allowed value. Run-unique persistence evidence moves
+  // to firstName (letters-only, TM-771).
+  const city = "Sharjah";
+  const first = `Golden${lettersOnlyStamp()}`;
 
   // A step screenshot helper: an explicit, named shot per major step (on top of the global
   // screenshot:"on"), so the run's artifacts read as a step-by-step trail of the journey.
@@ -196,7 +199,8 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 
-  await page.fill("#profile-city", city);
+  await page.fill("#profile-firstName", first);
+  await page.selectOption("#profile-city", city); // TM-877: the city is picked, not typed
   await page.selectOption("#profile-notificationPref", "BOTH");
   await page.getByRole("button", { name: "Save changes" }).click();
   // Scope to the NEWEST success toast (.last()): this is a long journey, so an earlier success toast
@@ -206,16 +210,17 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await expect(page.locator("#tm-toasts .tm-toast-success").last()).toContainText("Profile saved");
   await shot("profile-saved");
 
-  // It persisted: the users row carries the new city + preference.
+  // It persisted: the users row carries the new name, city + preference.
   {
     const client = new pg.Client(dbConfig);
     await client.connect();
     try {
       const { rows } = await client.query(
-        "SELECT city, notification_pref FROM users WHERE lower(email) = lower($1)",
+        "SELECT first_name, city, notification_pref FROM users WHERE lower(email) = lower($1)",
         [email],
       );
       expect(rows).toHaveLength(1);
+      expect(rows[0].first_name).toBe(first);
       expect(rows[0].city).toBe(city);
       expect(rows[0].notification_pref).toBe("BOTH");
     } finally {
