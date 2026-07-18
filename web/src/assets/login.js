@@ -2,7 +2,8 @@
 //
 // Wires the signed-out panel in index.html to the Firebase auth module (TM-105) and the backend
 // email-code endpoints (TM-234, via api.js). The DEFAULT front door is a 6-digit EMAIL code:
-//   enter email → "Email me a code" → enter code → signed in (with a rate-limited Resend).
+//   enter email → "Email me a code" → enter code → signed in (with a rate-limited Resend —
+//   TM-866 gives the rate limit a visible 30s countdown on the resend/send buttons).
 // "Try another way" reveals SMS (Firebase Phone Auth) + the existing email+password — nothing was
 // removed, no user migration. Reflects auth state, surfaces errors, disables controls in flight.
 
@@ -21,6 +22,7 @@ import { isWebViewEnv } from "./auth-env.js";
 import { authErrorMessage } from "./login-error.js";
 import { attachOtpInput } from "./otp-input.js";
 import { makeSingleFlight } from "./otp-input-core.js";
+import { attachResendCooldown } from "./resend-cooldown.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -55,6 +57,8 @@ const els = {
   google: $("google-btn"),
   // Shared.
   error: $("auth-error"),
+  status: $("auth-status"), // TM-866: polite live region for cooldown start/expiry announcements
+
   signedIn: $("auth-signed-in"),
   userEmail: $("user-email"),
   signOut: $("signout-btn"),
@@ -68,6 +72,18 @@ const els = {
 // forward references are safe.) The visible buttons stay as an a11y / JS-edge-case fallback.
 const emailOtp = attachOtpInput({ group: els.codeGroup, onComplete: () => run(verifyAndSignIn) });
 const smsOtp = attachOtpInput({ group: els.smsCodeGroup, onComplete: () => run(verifySms) });
+
+/** Announce a (non-error) status change politely — writes the aria-live region, never the alert. */
+function announceStatus(message) {
+  if (els.status) els.status.textContent = message;
+}
+
+// TM-866: one cooldown per send/resend button. Each is started by login.js ONLY after a send the
+// backend accepted (a failed/429'd send throws first, so the button stays usable for an immediate
+// retry), holds its button disabled with a ticking "Resend in 0:29" label, and restores the
+// original label at zero. setBusy() consults these after its sweep — see syncDisabled() below.
+const emailResendCooldown = attachResendCooldown({ button: els.resendCode, announce: announceStatus });
+const smsSendCooldown = attachResendCooldown({ button: els.smsSend, announce: announceStatus });
 
 function showError(err) {
   // Friendly-message resolution lives in login-error.js: coded Firebase errors map by code (with a
@@ -103,6 +119,13 @@ function setBusy(busy) {
   controls().forEach((el) => {
     if (el) el.disabled = busy;
   });
+  // The sweep above just wrote EVERY control's disabled flag — including the send/resend buttons a
+  // cooldown may currently own — so setBusy(false) would flicker-enable a mid-countdown button.
+  // The cooldowns re-assert their claim here, in the same synchronous task as the sweep, so the
+  // browser never paints the in-between enabled state. (They only ever re-DISABLE; re-enabling
+  // stays the expiry tick's job, so setBusy(true) windows are never fought either.)
+  emailResendCooldown?.syncDisabled();
+  smsSendCooldown?.syncDisabled();
   els.form?.setAttribute("aria-busy", String(busy));
 }
 
@@ -168,6 +191,9 @@ function showCodeStep(email) {
   // Queued, not immediate: this runs inside run()'s busy window where the boxes are disabled and
   // a direct focus() would silently no-op (TM-867 review fix — the e2e spec pins this focus).
   requestFocus(emailOtp, els.codeStep);
+  // TM-866: the code step always appears on the heels of an ACCEPTED send, so the Resend it
+  // reveals starts held — the countdown label explains the wait instead of a surprise 429.
+  emailResendCooldown?.start();
 }
 
 function showEmailStep() {
@@ -175,12 +201,24 @@ function showEmailStep() {
   els.codeStep.hidden = true;
   els.emailStep.hidden = false;
   emailOtp?.clear(); // a stale half-typed code must not survive into the next attempt
+  // TM-866: leaving the code step retires its cooldown (stops the interval, restores "Resend").
+  // Deliberate UX call: going back and re-sending is a fresh send — the SERVER cooldown still
+  // guards a too-fast repeat to the same address; the client window is presentation only.
+  emailResendCooldown?.reset();
 }
 
 async function sendEmailCode() {
   const email = els.email.value.trim();
   await requestEmailCode(email);
-  showCodeStep(email);
+  showCodeStep(email); // also starts the resend cooldown (TM-866) — only reached on success
+}
+
+// TM-866: resend is its own named action (was an inline arrow) so success can start the cooldown.
+// A failed resend throws on the first line: no cooldown, the 429/network error surfaces via run()'s
+// shared catch exactly as before, and the user can retry immediately.
+async function resendEmailCode() {
+  await requestEmailCode(pendingEmail);
+  emailResendCooldown?.start();
 }
 
 async function verifyAndSignIn() {
@@ -197,7 +235,13 @@ els.form?.addEventListener("submit", (e) => {
   if (!els.emailStep.hidden) run(sendEmailCode);
 });
 els.verifyCode?.addEventListener("click", () => run(verifyAndSignIn));
-els.resendCode?.addEventListener("click", () => run(() => requestEmailCode(pendingEmail)));
+els.resendCode?.addEventListener("click", () => {
+  // The disabled attribute stops real users during the cooldown; this guard stops the
+  // programmatic/synthetic clicks a disabled attribute can't (dispatchEvent bypasses it) — the
+  // same belt-and-braces philosophy as the single-flight run() (TM-866).
+  if (emailResendCooldown?.isActive()) return;
+  run(resendEmailCode);
+});
 els.backToEmail?.addEventListener("click", () => {
   showError(null);
   showEmailStep();
@@ -221,6 +265,9 @@ async function sendSms() {
   els.smsPhoneStep.hidden = true;
   els.smsCodeStep.hidden = false;
   requestFocus(smsOtp, els.smsCodeStep); // deferred past the busy window, same as the email step
+  // TM-866: a successfully-texted code holds the send button (the SMS twin of the email resend
+  // cooldown). Only reached on success — a failed startPhoneSignIn throws above, no cooldown.
+  smsSendCooldown?.start();
 }
 
 async function verifySms() {
@@ -229,7 +276,10 @@ async function verifySms() {
   await smsConfirmation.confirm(smsOtp?.value() ?? "");
 }
 
-els.smsSend?.addEventListener("click", () => run(sendSms));
+els.smsSend?.addEventListener("click", () => {
+  if (smsSendCooldown?.isActive()) return; // synthetic-click guard, same as the email resend
+  run(sendSms);
+});
 els.smsVerify?.addEventListener("click", () => run(verifySms));
 
 // ---- Existing email + password (kept working, nothing removed) -----------------------------
@@ -273,6 +323,12 @@ onAuthChanged((user) => {
   if (signedIn && els.userEmail) {
     els.userEmail.textContent = user.email ?? user.phoneNumber ?? user.displayName ?? user.uid;
   }
+  if (signedIn) {
+    // TM-866: signing in leaves the login view — stop both countdown intervals (timer hygiene)
+    // and restore the buttons so a later sign-out re-enters the form in its shipped state.
+    emailResendCooldown?.reset();
+    smsSendCooldown?.reset();
+  }
   if (!signedIn && wasSignedIn) {
     els.form?.reset();
     // form.reset() blanks the box ELEMENTS but not the widgets' internal state — clear both so a
@@ -285,6 +341,9 @@ onAuthChanged((user) => {
     els.smsPhoneStep.hidden = false;
     els.smsCodeStep.hidden = true;
     smsConfirmation = null;
+    // Cooldowns were already reset on sign-IN above; this is the same belt-and-braces the
+    // smsOtp.clear() above applies — the re-shown steps must never inherit a stale hold (TM-866).
+    smsSendCooldown?.reset();
   }
   wasSignedIn = signedIn;
 });

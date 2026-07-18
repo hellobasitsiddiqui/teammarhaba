@@ -256,7 +256,7 @@
 
                 <!-- Step 2 — enter the 6-digit code (revealed after a code is sent). -->
                 <!-- TM-867: true six-box OTP input (replaces the TM-683 single "evoke the boxes" field).
-                     On-screen keypad still deferred; the resend countdown is TM-866 (follow-up). -->
+                     On-screen keypad still deferred; the resend countdown landed in TM-866. -->
                 <div id="emailcode-step-code" class="auth-step auth-verify" hidden>
                     <div class="auth-verify-head">
                         <h2 class="auth-verify-title">Enter your code</h2>
@@ -312,6 +312,14 @@
                      paper-signin--error treatment — danger colour + a warning-triangle icon (a CSS
                      ::before background so it survives login.js's textContent write; no nested node). -->
                 <p id="auth-error" class="auth-error" role="alert" hidden></p>
+
+                <!-- TM-866: polite status line for the resend-cooldown announcements ("You can request
+                     a new code in 30 seconds." / "…now."). Its OWN region — not the role="alert" error
+                     above (assertive, would interrupt) — and visually hidden: the sighted cue is the
+                     ticking button label itself. In the markup from page load (never [hidden]) because
+                     live regions only announce reliably when the region EXISTS before its first write;
+                     login.js writes its textContent at cooldown start and expiry, never per tick. -->
+                <p id="auth-status" class="visually-hidden" aria-live="polite"></p>
 
                 <!-- "Try another way" disclosure: SMS + the existing email+password (TM-234). -->
                 <button id="try-another-btn" type="button" class="linkish" aria-expanded="false"

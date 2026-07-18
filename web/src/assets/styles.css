@@ -613,6 +613,24 @@ body {
         url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b00020' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 22 20H2L12 3.5Z'/%3E%3Cpath d='M12 10v4.2'/%3E%3Ccircle cx='12' cy='17.4' r='0.7' fill='%23b00020'/%3E%3C/svg%3E");
 }
 
+/* TM-866: screen-reader-only utility (the classic clip-pattern) — keeps an element in the
+   accessibility tree (so its aria-live announcements fire) while removing it from the visual
+   layout. Used by the #auth-status cooldown live region; generic on purpose — any future
+   SR-only text can reuse it. NOT display:none / visibility:hidden (those silence AT too), and
+   1px×1px rather than 0 because some screen readers skip zero-sized boxes. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 /* ═══ Login/auth Paper reskin (paper-signin / paper-verify) ══════════════════════════════════════
    Scoped under #auth-signed-out (and its .auth-card) so it restyles ONLY the sign-in card — the base
    `.auth button` / `.field input` selectors are reused app-wide and stay untouched. Token-only (no
