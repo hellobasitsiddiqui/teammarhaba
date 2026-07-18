@@ -58,7 +58,6 @@ const els = {
   // Shared.
   error: $("auth-error"),
   status: $("auth-status"), // TM-866: polite live region for cooldown start/expiry announcements
-
   signedIn: $("auth-signed-in"),
   userEmail: $("user-email"),
   signOut: $("signout-btn"),
