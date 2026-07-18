@@ -196,4 +196,17 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
 
 - **(2026-07-18, wave-login-1) Sprint-lifecycle + lane playbooks now live beside the lane docs.** [CROSS-AGENT.md](../CROSS-AGENT.md) is the load-first checklist for STARTING/CLOSING any sprint (Backlog→Refinement grooming, gate tickets created at sprint START, evidence-before-In-Review, fail-before/pass-after tests for every fixed finding, merged-state closure review, serving-revision asserts). Lane contracts (e.g. the login screen's auto-submit/busy/deferred-focus invariants) live in per-lane files like [LOGIN-AGENT.md](../LOGIN-AGENT.md). Append fleet lessons here; put lifecycle rules there.
 
+### 2026-07-18 — Background watchers die with the agent's turn (wave-profile-1)
+
+- **A subagent that "arms a monitor" and ends its message has lost the monitor.** Twice in
+  wave-profile-1 a build agent finished with "watchers will wake me when CI/e2e completes" — its
+  backgrounded waits died with the turn, once leaving a committed-but-unpushed branch and no PR.
+  The wake never comes.
+- **Recovery:** resume the same agent (it keeps its context) with explicit instructions: finish
+  the last mile INLINE — foreground waits only (`gh pr checks --watch` in the foreground), no
+  background jobs. Worked both times.
+- **Prevention:** bake into every build-agent prompt: *"never end your turn while verification is
+  pending — wait in the foreground even if slow."* Only the orchestrator can own long background
+  watches (it gets completion notifications; a subagent does not).
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
