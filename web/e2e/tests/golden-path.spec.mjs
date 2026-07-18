@@ -76,8 +76,8 @@ async function signInFreshUser(page, email) {
   await requested;
   const code = await peekCode(email);
   expect(code).toMatch(/^\d{6}$/);
+  // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  await page.click("#emailcode-verify-btn");
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 

@@ -41,8 +41,8 @@ async function signInFreshUser(page, email) {
   await page.click("#emailcode-send-btn");
   await requested;
   const code = await peekCode(email);
+  // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  await page.click("#emailcode-verify-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();
 }
 

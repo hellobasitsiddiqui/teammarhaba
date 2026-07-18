@@ -92,14 +92,19 @@ env:
 - assertVisible:
     id: "sms-step-code"
 
-# Step 2 — enter the fixed code and sign in.
+# Step 2 — enter the fixed code and sign in. TM-867: sms-code is now the FIRST of six single-digit
+# boxes; typing auto-advances box to box and the 6th digit AUTO-submits the verify. (If the IME
+# instead dumps the whole string into the first box, the widget fans it out — same end state.)
 - tapOn:
-    id: "sms-code" # <input id="sms-code">
+    id: "sms-code" # <input id="sms-code"> — first box of the six-box OTP widget
 - inputText: ${SMS_CODE}
 - hideKeyboard   # same: IME covers the Sign in button
 - takeScreenshot: 04-code-entered
+# The explicit tap is now a FALLBACK only (optional): auto-submit has usually already signed us in
+# and hidden the button by the time we get here — a hard tap would fail on the vanished element.
 - tapOn:
     id: "sms-verify-btn" # "Sign in"
+    optional: true
 
 # First-run product tour (TM-135) auto-fires on home; its .tm-tour-blocker overlay covers the page.
 # Not suppressed in the native app (suppressAutoTours is web-harness-only), so dismiss it here.

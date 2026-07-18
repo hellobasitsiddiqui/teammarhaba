@@ -169,6 +169,7 @@
 button,
 a,
 label.field,
+.auth-otp-box, /* the six OTP digit boxes sit in a div.field, not a label.field (TM-867) */
 [role="button"],
 .linkish {
     touch-action: manipulation;
@@ -768,7 +769,7 @@ body {
     border-radius: var(--radius-pill);
 }
 
-/* Verify / OTP step (paper-verify): centred head + a single input evoking the boxed code look. */
+/* Verify / OTP step (paper-verify): centred head + the six-box code widget. */
 #auth-signed-out .auth-verify-head {
     text-align: center;
 }
@@ -778,19 +779,40 @@ body {
     font-size: 1.4rem;
 }
 
-/* TM-683: single input styled as a large, centred, letter-spaced code field that EVOKES the 6-box OTP
-   look. No real 6 boxes / keypad / countdown (deferred). */
-#auth-signed-out .auth-code-input {
+/* TM-867: the six-box OTP widget (replaces the TM-683 single "evoke the boxes" input; the on-screen
+   keypad stays deferred, the resend countdown is TM-866). Mobile-first: the boxes flex-shrink with
+   min-width:0 rather than overflowing, so the row always fits a 390px viewport — max-width just
+   stops them ballooning on desktop. Base border/radius/colour comes from the shared `.field input`
+   + `#auth-signed-out .auth-field input` rules (paper look, offset ink shadow); font cues (size,
+   tabular digits, tinted background) carry over from the retired .auth-code-input. */
+#auth-signed-out .auth-otp {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: center;
+}
+
+#auth-signed-out .auth-otp-box {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 3.1rem;
+    padding: 0.55rem 0;
     text-align: center;
-    font-size: 1.6rem;
-    letter-spacing: 0.5em;
-    /* pull the trailing letter-spacing gap back so the glyphs read centred */
-    text-indent: 0.5em;
-    font-variant-numeric: tabular-nums;
-    padding: 0.6rem 0.4rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums; /* equal-width digits — boxes don't wobble as you type */
     background: var(--accent-light);
     border-color: var(--fg-line-strong);
     box-shadow: var(--shadow-sm);
+}
+
+/* Active-box highlight: the accent ring (`:focus`, not just :focus-visible — the "which box is
+   next" cue matters on touch too, where :focus-visible may not match) plus a lifted background so
+   the current box reads distinct from the tinted resting state. Errors stay on the shared
+   #auth-error banner (per-field inline validation is TM-685, still deferred). */
+#auth-signed-out .auth-otp-box:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    background: var(--surface-card);
 }
 
 /* Quiet accent text-links for resend / back (paper-verify quiet links) — override the .secondary

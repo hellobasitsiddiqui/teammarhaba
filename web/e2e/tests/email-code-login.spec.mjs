@@ -51,11 +51,12 @@ test("@auth email-code is the default and a user signs in with the emailed code"
   await expect(page.locator("#emailcode-step-code")).toBeVisible();
   await expect(page.locator("#emailcode-sent-to")).toHaveText(email);
 
-  // Step 2: fetch the issued code and enter it → signed in.
+  // Step 2: fetch the issued code and enter it → signed in. TM-867: #emailcode-code is now the
+  // FIRST of six boxes; filling it with the whole code distributes one digit per box and
+  // AUTO-submits (the OS-autofill path) — no verify click (it would race the form hiding).
   const code = await peekCode(email);
   expect(code).toMatch(/^\d{6}$/);
   await page.fill("#emailcode-code", code);
-  await page.click("#emailcode-verify-btn");
 
   // Signed in: the sign-out control appears and the signed-out form is gone.
   await expect(page.locator("#signout-btn")).toBeVisible();
@@ -72,8 +73,8 @@ test("@auth a wrong code shows an error and does not sign the user in", async ({
   await page.click("#emailcode-send-btn");
   await requested;
 
+  // TM-867: filling the six-box widget with a (wrong) full code auto-submits it — no verify click.
   await page.fill("#emailcode-code", "000000");
-  await page.click("#emailcode-verify-btn");
 
   // The error surfaces and the user stays on the signed-out form.
   await expect(page.locator("#auth-error")).toBeVisible();

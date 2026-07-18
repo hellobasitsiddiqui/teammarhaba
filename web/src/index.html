@@ -255,21 +255,44 @@
                 </div>
 
                 <!-- Step 2 — enter the 6-digit code (revealed after a code is sent). -->
-                <!-- TM-683: single input styled as a code field; true 6-box OTP + keypad + resend countdown deferred -->
+                <!-- TM-867: true six-box OTP input (replaces the TM-683 single "evoke the boxes" field).
+                     On-screen keypad still deferred; the resend countdown is TM-866 (follow-up). -->
                 <div id="emailcode-step-code" class="auth-step auth-verify" hidden>
                     <div class="auth-verify-head">
                         <h2 class="auth-verify-title">Enter your code</h2>
                         <p class="auth-hint">We emailed a 6-digit code to <strong id="emailcode-sent-to"></strong>.</p>
                     </div>
-                    <!-- The real flow uses ONE input. It's styled (styles.css .auth-code-input) as a large,
-                         centred, letter-spaced "code field" that EVOKES the boxed 6-digit look without
-                         building six separate boxes / a keypad / a countdown (all deferred, see above).
-                         id / inputmode / pattern / maxlength are untouched (login.js reads them). -->
-                    <label class="field auth-field auth-code-field">
-                        <span>6-digit code</span>
-                        <input id="emailcode-code" class="auth-code-input" type="text" inputmode="numeric"
-                               autocomplete="one-time-code" pattern="\d{6}" maxlength="6" />
-                    </label>
+                    <!-- Six REAL single-character inputs (best per-box focus + screen-reader story: the
+                         group announces "6-digit code", each box "Digit N of 6"). Behaviour — auto-advance,
+                         backspace nav, paste distribution, auto-submit on the 6th digit — is attached by
+                         otp-input.js via login.js. Contract notes:
+                           • The FIRST box keeps id="emailcode-code": the stable automation hook the e2e
+                             specs fill (a full code set there fans out across all boxes + auto-submits,
+                             exactly what the OS one-time-code autofill does too) — and the ONLY box with
+                             autocomplete="one-time-code", so the OS suggestion lands there.
+                           • Every box is inputmode="numeric" → numeric keypad on mobile. No maxlength:
+                             the JS distributes/truncates instead, because maxlength would clip a
+                             multi-digit autofill before the input handler could fan it out. -->
+                    <!-- The visible field label NAMES the group via aria-labelledby (not a duplicate
+                         aria-label), so the accessible name can never drift from what sighted /
+                         voice-control users see (WCAG 1.3.1 + 2.5.3 — TM-867 review fix). -->
+                    <div class="field auth-field auth-code-field">
+                        <span id="emailcode-otp-label">6-digit code</span>
+                        <div id="emailcode-otp" class="auth-otp" role="group" aria-labelledby="emailcode-otp-label">
+                            <input id="emailcode-code" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="one-time-code" aria-label="Digit 1 of 6" />
+                            <input id="emailcode-code-2" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="off" aria-label="Digit 2 of 6" />
+                            <input id="emailcode-code-3" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="off" aria-label="Digit 3 of 6" />
+                            <input id="emailcode-code-4" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="off" aria-label="Digit 4 of 6" />
+                            <input id="emailcode-code-5" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="off" aria-label="Digit 5 of 6" />
+                            <input id="emailcode-code-6" class="auth-otp-box" type="text" inputmode="numeric"
+                                   autocomplete="off" aria-label="Digit 6 of 6" />
+                        </div>
+                    </div>
                     <div class="auth-actions">
                         <!-- Primary "Sign in" with a check glyph (paper-verify .vbtn). -->
                         <button id="emailcode-verify-btn" type="button" class="auth-cta">
@@ -315,15 +338,27 @@
                                 <button id="sms-send-btn" type="button">Text me a code</button>
                             </div>
                         </div>
-                        <!-- TM-683: single input styled as a code field; true 6-box OTP + keypad + resend countdown deferred -->
+                        <!-- TM-867: same six-box OTP widget as the email verify step (see the contract
+                             notes there). First box keeps id="sms-code" — the Maestro mobile flows tap
+                             it — and carries autocomplete="one-time-code" for the OS SMS suggestion. -->
                         <div id="sms-step-code" class="auth-step auth-verify" hidden>
-                            <label class="field auth-field auth-code-field">
-                                <span>SMS code</span>
-                                <!-- Single input styled as a code field (see the email verify step). id /
-                                     inputmode / pattern / maxlength untouched (login.js reads them). -->
-                                <input id="sms-code" class="auth-code-input" type="text" inputmode="numeric"
-                                       autocomplete="one-time-code" pattern="\d{6}" maxlength="6" />
-                            </label>
+                            <div class="field auth-field auth-code-field">
+                                <span id="sms-otp-label">SMS code</span>
+                                <div id="sms-otp" class="auth-otp" role="group" aria-labelledby="sms-otp-label">
+                                    <input id="sms-code" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="one-time-code" aria-label="Digit 1 of 6" />
+                                    <input id="sms-code-2" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="off" aria-label="Digit 2 of 6" />
+                                    <input id="sms-code-3" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="off" aria-label="Digit 3 of 6" />
+                                    <input id="sms-code-4" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="off" aria-label="Digit 4 of 6" />
+                                    <input id="sms-code-5" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="off" aria-label="Digit 5 of 6" />
+                                    <input id="sms-code-6" class="auth-otp-box" type="text" inputmode="numeric"
+                                           autocomplete="off" aria-label="Digit 6 of 6" />
+                                </div>
+                            </div>
                             <div class="auth-actions">
                                 <button id="sms-verify-btn" type="button" class="auth-cta">
                                     <span>Sign in</span>

@@ -19,6 +19,8 @@ import {
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 import { isWebViewEnv } from "./auth-env.js";
 import { authErrorMessage } from "./login-error.js";
+import { attachOtpInput } from "./otp-input.js";
+import { makeSingleFlight } from "./otp-input-core.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -30,7 +32,7 @@ const els = {
   emailStep: $("emailcode-step-email"),
   codeStep: $("emailcode-step-code"),
   sentTo: $("emailcode-sent-to"),
-  code: $("emailcode-code"),
+  codeGroup: $("emailcode-otp"), // TM-867: the six-box OTP group (was the single #emailcode-code input)
   sendCode: $("emailcode-send-btn"),
   verifyCode: $("emailcode-verify-btn"),
   resendCode: $("emailcode-resend-btn"),
@@ -42,7 +44,7 @@ const els = {
   phone: $("phone"),
   smsPhoneStep: $("sms-step-phone"),
   smsCodeStep: $("sms-step-code"),
-  smsCode: $("sms-code"),
+  smsCodeGroup: $("sms-otp"), // TM-867: the six-box OTP group (was the single #sms-code input)
   smsSend: $("sms-send-btn"),
   smsVerify: $("sms-verify-btn"),
   recaptcha: $("recaptcha-container"),
@@ -58,6 +60,15 @@ const els = {
   signOut: $("signout-btn"),
 };
 
+// TM-867: the six-box OTP widgets (otp-input.js) over the static boxes in index.html. Typing the
+// 6th digit / pasting a full code / a programmatic setValue (the TM-407 native-autofill seam) all
+// land in onComplete, which auto-submits through the SAME single-flight `run()` wrapper as the
+// visible "Sign in" buttons — one verify path, shared busy/error handling, no double-submit.
+// (`run` / the verify functions are declared below; they're only *called* at event time, so the
+// forward references are safe.) The visible buttons stay as an a11y / JS-edge-case fallback.
+const emailOtp = attachOtpInput({ group: els.codeGroup, onComplete: () => run(verifyAndSignIn) });
+const smsOtp = attachOtpInput({ group: els.smsCodeGroup, onComplete: () => run(verifySms) });
+
 function showError(err) {
   // Friendly-message resolution lives in login-error.js: coded Firebase errors map by code (with a
   // generic fallback for unmapped codes — never the raw Firebase string), backend ApiErrors keep
@@ -67,17 +78,18 @@ function showError(err) {
   els.error.hidden = !msg;
 }
 
-// Every interactive control, disabled together while a request is in flight.
+// Every interactive control, disabled together while a request is in flight. The OTP boxes are
+// spread in (TM-867) so a verify in flight greys out all twelve digit boxes with everything else.
 function controls() {
   return [
     els.email,
-    els.code,
+    ...(emailOtp?.boxes ?? []),
     els.sendCode,
     els.verifyCode,
     els.resendCode,
     els.backToEmail,
     els.phone,
-    els.smsCode,
+    ...(smsOtp?.boxes ?? []),
     els.smsSend,
     els.smsVerify,
     els.password,
@@ -94,18 +106,55 @@ function setBusy(busy) {
   els.form?.setAttribute("aria-busy", String(busy));
 }
 
-// Run an auth action with shared error/loading handling.
-async function run(action) {
+// Deferred focus (TM-867 review fix): focus() on a DISABLED input is a spec-mandated no-op, and
+// while an action runs inside run() every control — including all twelve OTP boxes — is disabled
+// by setBusy(true). So actions never focus directly; they QUEUE a focus request here and run()
+// applies it right after setBusy(false) re-enables the controls. The step-visibility guard stops
+// a stale request from stealing focus if the user has already navigated away (e.g. tapped "Use a
+// different email" the instant the request landed).
+let pendingFocus = null; // () => void, applied once by run() after the busy window closes
+
+function requestFocus(widget, stepEl) {
+  pendingFocus = () => {
+    if (stepEl?.hidden) return; // the step changed under us — don't yank focus somewhere stale
+    widget?.focus(); // first box, selected — ready to (re)type the code
+  };
+}
+
+// Run an auth action with shared error/loading handling. Single-flight (TM-867): the OTP widget's
+// auto-submit can fire while a verify is already running (e.g. a paste races a click on the visible
+// button, or a re-completed code after an error) — makeSingleFlight silently drops the re-entrant
+// call, so a second request can never leave the door. setBusy's disabling already stops most
+// double-triggers at the DOM; this guards the programmatic/synthetic paths it can't.
+const run = makeSingleFlight(async (action) => {
   showError(null);
   setBusy(true);
+  pendingFocus = null; // a fresh action owns the focus outcome — drop anything stale
   try {
     await action();
   } catch (err) {
     showError(err);
+    // A FAILED verify leaves the boxes holding the rejected code while setBusy has dropped focus
+    // to <body> (and, on iOS, dismissed the keyboard). Standard OTP recovery: CLEAR the code and
+    // hand focus back to box 1 so the user retypes from scratch. Clearing is also load-bearing —
+    // the widget fires onComplete on ANY input that leaves all six boxes filled, so retyping over
+    // a stale full set would auto-submit a mixed old/new code on the FIRST keystroke.
+    if (action === verifyAndSignIn) {
+      emailOtp?.clear();
+      requestFocus(emailOtp, els.codeStep);
+    } else if (action === verifySms) {
+      smsOtp?.clear();
+      requestFocus(smsOtp, els.smsCodeStep);
+    }
   } finally {
     setBusy(false);
+    // Only now are the boxes enabled again — apply whatever focus the action (or the catch above)
+    // queued. Cleared before calling so a re-entrant run can't double-apply it.
+    const focusNow = pendingFocus;
+    pendingFocus = null;
+    focusNow?.();
   }
-}
+});
 
 // ---- Email-code flow (default) -------------------------------------------------------------
 
@@ -116,14 +165,16 @@ function showCodeStep(email) {
   if (els.sentTo) els.sentTo.textContent = email;
   els.emailStep.hidden = true;
   els.codeStep.hidden = false;
-  els.code?.focus();
+  // Queued, not immediate: this runs inside run()'s busy window where the boxes are disabled and
+  // a direct focus() would silently no-op (TM-867 review fix — the e2e spec pins this focus).
+  requestFocus(emailOtp, els.codeStep);
 }
 
 function showEmailStep() {
   pendingEmail = null;
   els.codeStep.hidden = true;
   els.emailStep.hidden = false;
-  if (els.code) els.code.value = "";
+  emailOtp?.clear(); // a stale half-typed code must not survive into the next attempt
 }
 
 async function sendEmailCode() {
@@ -133,7 +184,8 @@ async function sendEmailCode() {
 }
 
 async function verifyAndSignIn() {
-  const code = (els.code.value || "").trim();
+  // TM-867: the code is assembled from the six boxes by the widget (digits only by construction).
+  const code = emailOtp?.value() ?? "";
   const customToken = await verifyEmailCode(pendingEmail, code);
   await signInWithEmailCodeToken(customToken);
 }
@@ -168,12 +220,13 @@ async function sendSms() {
   smsConfirmation = await startPhoneSignIn(phone, els.recaptcha);
   els.smsPhoneStep.hidden = true;
   els.smsCodeStep.hidden = false;
-  els.smsCode?.focus();
+  requestFocus(smsOtp, els.smsCodeStep); // deferred past the busy window, same as the email step
 }
 
 async function verifySms() {
   if (!smsConfirmation) throw new Error("Please request an SMS code first.");
-  await smsConfirmation.confirm((els.smsCode.value || "").trim());
+  // TM-867: code assembled from the six SMS boxes (same widget as the email step).
+  await smsConfirmation.confirm(smsOtp?.value() ?? "");
 }
 
 els.smsSend?.addEventListener("click", () => run(sendSms));
@@ -222,6 +275,10 @@ onAuthChanged((user) => {
   }
   if (!signedIn && wasSignedIn) {
     els.form?.reset();
+    // form.reset() blanks the box ELEMENTS but not the widgets' internal state — clear both so a
+    // stale code can't be resubmitted by the next completion (TM-867). showEmailStep() already
+    // clears the email widget; the SMS one is ours to clear here.
+    smsOtp?.clear();
     showEmailStep();
     if (els.alternatives) els.alternatives.hidden = true;
     els.tryAnother?.setAttribute("aria-expanded", "false");
