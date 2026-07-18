@@ -1659,11 +1659,13 @@
           "location" : {
             "maxLength" : 255,
             "minLength" : 1,
+            "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
           },
           "name" : {
             "maxLength" : 255,
             "minLength" : 1,
+            "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
             "type" : "string"
           },
           "phone" : {
@@ -2380,8 +2382,6 @@
         "properties" : {
           "age" : {
             "format" : "int32",
-            "maximum" : 99,
-            "minimum" : 18,
             "type" : "integer"
           },
           "city" : {

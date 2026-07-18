@@ -1,8 +1,6 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.user.NotificationPref;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -18,9 +16,13 @@ import java.util.List;
  *
  * <ul>
  *   <li>{@code age} — bounded to the platform age band, 18–99 (TM-884; was 13–120). Enforced on
- *       <em>new saves/edits only</em>: existing under-18 accounts are grandfathered — nothing
- *       rejects them on read, and a PATCH that omits {@code age} (the client omits an unchanged
- *       value) leaves the stored value untouched.
+ *       <em>new saves/edits only</em>, in {@link com.teammarhaba.backend.user.UserService} behind
+ *       the unchanged-value guard (TM-900) rather than here: bean validation would run BEFORE the
+ *       service's {@code Objects.equals} no-op check, so an API client re-sending an unchanged
+ *       grandfathered age (e.g. a 13–120-era 15) would be 400ed out of saving anything. Existing
+ *       out-of-band accounts are grandfathered — nothing rejects them on read, an unchanged
+ *       re-send is a no-op, and a PATCH that omits {@code age} (the web client omits an unchanged
+ *       value) leaves the stored value untouched. A NEW value must be 18–99.
  *   <li>{@code firstName}/{@code lastName}/{@code city} — name-like text (TM-771): must contain at
  *       least one letter (any script), and only letters, combining marks, spaces, hyphens,
  *       apostrophes and periods are allowed — a purely numeric value can no longer persist as a
@@ -49,7 +51,8 @@ import java.util.List;
  * @param firstName        given name (name-like, TM-771)
  * @param lastName         family name (name-like, TM-771)
  * @param city             city name (name-like TM-771; allowed-list constrained TM-877 — see above)
- * @param age              age in years, 18–99 (TM-884; existing out-of-band values grandfathered)
+ * @param age              age in years, 18–99 for new values (TM-884; band enforced in the service
+ *                         behind the unchanged-guard, TM-900 — grandfathered values re-send fine)
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
  *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -78,7 +81,9 @@ public record UpdateMeRequest(
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String firstName,
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String lastName,
         @Size(max = 255) @Pattern(regexp = NAME_LIKE, message = NAME_LIKE_MESSAGE) String city,
-        @Min(18) @Max(99) Integer age,
+        // No @Min/@Max here (TM-900): the 18–99 band is enforced in UserService.updateProfile BEHIND
+        // the Objects.equals unchanged-guard, so an unchanged grandfathered age re-sends as a no-op.
+        Integer age,
         // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
         // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).

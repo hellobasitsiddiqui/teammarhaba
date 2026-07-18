@@ -107,7 +107,8 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   // the name-error check below detects the clobber and the outer retry re-fills.
   await expect(async () => {
     await page.fill("#onboarding-name", "Gate Tester");
-    await page.fill("#onboarding-location", "Gateville");
+    // TM-898: location is the allowed-cities <select> now — a list city, picked not typed.
+    await page.selectOption("#onboarding-location", "London");
     await page.fill("#onboarding-age", "30");
     await page.click("#onboarding-form button[type=submit]");
     await expect(page.locator("#onboarding-phone-error")).toContainText("required", { timeout: 2_000 });

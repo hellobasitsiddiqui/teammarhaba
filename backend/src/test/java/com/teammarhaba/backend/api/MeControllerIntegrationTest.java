@@ -308,6 +308,44 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void patchAcceptsUnchangedGrandfatheredAgeAndStillBandsNewValues() throws Exception {
+        // TM-900: grandfathering must hold for ANY API client, not just the web form (which omits an
+        // unchanged age from the PATCH). The band check lives in the service BEHIND the
+        // Objects.equals unchanged-guard (mirroring the TM-877 city pattern), so re-sending the
+        // stored out-of-band age is a no-op 200 — the rest of the form still saves — while a NEW
+        // out-of-band value (even on the same account) is still a 400.
+        var who = caller("uid-age-resend", "resend@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-age-resend").orElseThrow();
+        saved.setAge(15); // a 13–120-era value, seeded directly (the API can no longer write it)
+        users.save(saved);
+
+        // Re-sending the SAME grandfathered age (a client that echoes the whole form) is a no-op 200
+        // and must not block the other fields in the request.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":15,\"firstName\":\"Still\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.age").value(15))
+                .andExpect(jsonPath("$.firstName").value("Still"));
+
+        // A DIFFERENT out-of-band value is still refused — the allowance is the saved value only.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":16}"))
+                .andExpect(status().isBadRequest());
+
+        // And on a fresh account (no stored age) the same value is a NEW save → banded → 400.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-age-new15", "new15@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":15}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void cityRejectsAnOffListNewValueWith400() throws Exception {
         // TM-877: city is a dropdown of the interim allowed list — a NEW value outside it (fine
         // name-like text, so it passes the TM-771 pattern) must be refused at the service.
@@ -338,7 +376,10 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         var who = caller("uid-city-dubai", "dubai@example.com");
         mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
         var saved = users.findByFirebaseUid("uid-city-dubai").orElseThrow();
-        saved.setCity("Dubai"); // seeded directly — the API can no longer introduce it
+        // Seeded directly: since TM-898 NEITHER write path can introduce an off-list city — PATCH /me
+        // (TM-877) and the onboarding gate both refuse a new one — so a pre-list value can only be
+        // planted straight on the row. (Before TM-898 the gate's location field could still write it.)
+        saved.setCity("Dubai");
         users.save(saved);
 
         // Re-sending the SAME off-list value (the client re-submits the whole form) is a no-op 200.
@@ -363,6 +404,50 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"city\":\"Manchester\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void storedUntrimmedCityRoundTripsItsTrimmedResubmission() throws Exception {
+        // TM-900: the client's fillCitySelect TRIMS the saved city before re-selecting it, so a
+        // legacy row stored with padding (" Dubai ") comes back from a full-form save as "Dubai".
+        // The service must trim BEFORE the equality/allow-list checks — otherwise the trimmed
+        // re-submission reads as a NEW off-list value and every full-form save 400s.
+        var who = caller("uid-city-padded", "padded@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-city-padded").orElseThrow();
+        saved.setCity(" Dubai "); // a legacy padded value, seeded directly
+        users.save(saved);
+
+        // The trimmed echo of the stored value is an unchanged no-op 200, not a rejected new city.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Dubai\",\"firstName\":\"Expat\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Expat"));
+
+        // A different off-list value is still refused — trimming must not widen the allowance.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Manchester\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void patchTrimsANewCityBeforeTheAllowListCheck() throws Exception {
+        // TM-900: an allowed-list city arriving with stray padding ("  London  " passes the
+        // NAME_LIKE pattern — spaces are legal name characters) must be recognised as the list value
+        // and stored trimmed, not bounced as off-list.
+        var who = caller("uid-city-padnew", "padnew@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"  London  \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("London"));
+        assertThat(users.findByFirebaseUid("uid-city-padnew").orElseThrow().getCity())
+                .isEqualTo("London");
     }
 
     @Test
@@ -556,11 +641,11 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Ibn Battuta\",\"location\":\"Tangier\",\"age\":30,"
+                        .content("{\"name\":\"Ibn Battuta\",\"location\":\"London\",\"age\":30,"
                                 + "\"phone\":\"+212612345678\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
-                .andExpect(jsonPath("$.city").value("Tangier"))
+                .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(30))
                 .andExpect(jsonPath("$.phone").value("+212612345678"))
                 .andExpect(jsonPath("$.onboardingCompleted").value(true))
@@ -570,7 +655,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/me").with(who))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
-                .andExpect(jsonPath("$.city").value("Tangier"))
+                .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(30))
                 .andExpect(jsonPath("$.phone").value("+212612345678"))
                 .andExpect(jsonPath("$.onboardingCompleted").value(true));
@@ -578,7 +663,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         // And on the row itself (not just echoed back in the response).
         var saved = users.findByFirebaseUid("uid-gate").orElseThrow();
         assertThat(saved.getDisplayName()).isEqualTo("Ibn Battuta");
-        assertThat(saved.getCity()).isEqualTo("Tangier");
+        assertThat(saved.getCity()).isEqualTo("London");
         assertThat(saved.getAge()).isEqualTo(30);
         assertThat(saved.getPhone()).isEqualTo("+212612345678");
         assertThat(saved.isOnboardingCompleted()).isTrue();
@@ -620,7 +705,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Sting\",\"location\":\"Newcastle\",\"age\":45,"
+                        .content("{\"name\":\"Sting\",\"location\":\"Karachi\",\"age\":45,"
                                 + "\"phone\":\"+447700900002\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Sting"))
@@ -633,7 +718,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-multiword", "mary@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Mary Jane Watson\",\"location\":\"York\",\"age\":31,"
+                        .content("{\"name\":\"Mary Jane Watson\",\"location\":\"Sharjah\",\"age\":31,"
                                 + "\"phone\":\"+447700900003\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Mary"))
@@ -655,7 +740,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Amelia Williams\",\"location\":\"Leadworth\",\"age\":26,"
+                        .content("{\"name\":\"Amelia Williams\",\"location\":\"London\",\"age\":26,"
                                 + "\"phone\":\"+447700900004\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Amelia Williams"))
@@ -669,11 +754,96 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  Timbuktu  \",\"age\":40,"
+                        .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  London  \",\"age\":40,"
                                 + "\"phone\":\"+22370000000\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Mansa Musa"))
-                .andExpect(jsonPath("$.city").value("Timbuktu"));
+                .andExpect(jsonPath("$.city").value("London"));
+    }
+
+    @Test
+    void onboardingGateRejectsNonNameLikeNameWith400AndNeverSeedsNames() throws Exception {
+        // TM-898 (from the TM-892 review): the gate's name seeds displayName AND — via the TM-883
+        // split — firstName/lastName, so it must carry the same TM-771 name-like rule as the
+        // PATCH /me fields. Onboarding as "676767" used to persist first_name=676767, a value the
+        // edit form itself then refuses to re-save. Now the boundary 400s it, so a non-name-like
+        // name can never reach the TM-883 seed at all.
+        var who = caller("uid-gate-numname", "num@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"676767\",\"location\":\"London\",\"age\":30,"
+                                + "\"phone\":\"+447700900005\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Nothing seeded: the row (if the request even provisioned one) carries no name parts.
+        users.findByFirebaseUid("uid-gate-numname").ifPresent(u -> {
+            assertThat(u.getDisplayName()).isNull();
+            assertThat(u.getFirstName()).isNull();
+            assertThat(u.getLastName()).isNull();
+            assertThat(u.isOnboardingCompleted()).isFalse();
+        });
+    }
+
+    @Test
+    void onboardingGateRejectsNonNameLikeLocationWith400() throws Exception {
+        // TM-898: location maps onto the same city column as PATCH /me's name-like city field, so a
+        // purely numeric location must be refused at the boundary too.
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-numloc", "numloc@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon User\",\"location\":\"676767\",\"age\":30,"
+                                + "\"phone\":\"+447700900006\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onboardingGateRejectsAnOffListNewLocationWith400() throws Exception {
+        // TM-898: the gate must enforce the TM-877 allowed-city list like PATCH /me does — a
+        // name-like but off-list location ("Bristol") used to persist and bypass the dropdown.
+        var who = caller("uid-gate-offlist", "offlist@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Anon User\",\"location\":\"Bristol\",\"age\":30,"
+                                + "\"phone\":\"+447700900007\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Nothing half-applied: the account (if provisioned) is still un-onboarded with no city.
+        users.findByFirebaseUid("uid-gate-offlist").ifPresent(u -> {
+            assertThat(u.getCity()).isNull();
+            assertThat(u.isOnboardingCompleted()).isFalse();
+        });
+    }
+
+    @Test
+    void onboardingGateAcceptsResubmittedSavedOffListCityButRejectsOtherOffListValues() throws Exception {
+        // TM-898: the gate's list check carries the same saved-value allowance as
+        // UserService.updateProfile (TM-877) — an account whose STORED city is off-list (saved
+        // before the list existed) may pass back through the gate re-submitting that same value
+        // (the gate dropdown keeps it selectable), but any OTHER off-list value is still refused.
+        var who = caller("uid-gate-dubai", "gatedubai@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk()); // provision the row
+        var saved = users.findByFirebaseUid("uid-gate-dubai").orElseThrow();
+        saved.setCity("Dubai"); // seeded directly — the API can no longer introduce it
+        users.save(saved);
+
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Expat User\",\"location\":\"Dubai\",\"age\":30,"
+                                + "\"phone\":\"+447700900008\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("Dubai"))
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
+
+        // The allowance is the saved value only — a different off-list city is still a 400.
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Expat User\",\"location\":\"Manchester\",\"age\":30,"
+                                + "\"phone\":\"+447700900008\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -681,7 +851,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noname", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"location\":\"Cairo\",\"age\":25,\"phone\":\"+201234567890\"}"))
+                        .content("{\"location\":\"London\",\"age\":25,\"phone\":\"+201234567890\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -699,7 +869,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noage", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"phone\":\"+201234567890\"}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"phone\":\"+201234567890\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -710,7 +880,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
             mockMvc.perform(post("/api/v1/me/onboarding")
                             .with(caller("uid-gate-badage", "x@example.com"))
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":" + age
+                            .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":" + age
                                     + ",\"phone\":\"+201234567890\"}"))
                     .andExpect(status().isBadRequest());
         }
@@ -724,7 +894,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":25}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":25}"))
                 .andExpect(status().isBadRequest());
 
         users.findByFirebaseUid("uid-gate-nophone")
@@ -739,7 +909,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-barephone", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"Cairo\",\"age\":25,"
+                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":25,"
                                 + "\"phone\":\"07700 900123\"}"))
                 .andExpect(status().isBadRequest());
     }
@@ -752,7 +922,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Half\",\"location\":\"Done\",\"age\":200,\"phone\":\"+447700900123\"}"))
+                        .content("{\"name\":\"Half\",\"location\":\"London\",\"age\":200,\"phone\":\"+447700900123\"}"))
                 .andExpect(status().isBadRequest());
 
         // The account may not exist yet (request rejected before provision) — if it does, it's clean.
