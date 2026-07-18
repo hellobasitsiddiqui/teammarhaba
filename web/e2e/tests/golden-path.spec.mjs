@@ -128,9 +128,9 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   // is guaranteed never-seen (⇒ un-onboarded ⇒ both first-run gates fire).
   const stamp = Date.now();
   const email = `e2e-golden-${stamp}@teammarhaba.test`;
-  const location = `Goldenville-${stamp}`;
-  // Letters-only: the profile city field rejects digits since TM-771 (email/location keep the
-  // numeric stamp — only the name-like profile fields carry the rule).
+  // TM-898: the onboarding gate's location is the TM-877 allowed-cities dropdown now (it was free
+  // text) — a LIST city, distinct from the later profile-edit `city` so that edit is a real change.
+  const location = "London";
   // TM-877: city is a dropdown now — a fixed allowed value. Run-unique persistence evidence moves
   // to firstName (letters-only, TM-771).
   const city = "Sharjah";
@@ -155,7 +155,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await expect(page.locator("#auth-signed-in")).toBeHidden();
   await shot("onboarding-gate");
   await page.fill("#onboarding-name", "Golden Tester");
-  await page.fill("#onboarding-location", location);
+  await page.selectOption("#onboarding-location", location); // TM-898: the gate city is picked, not typed
   await page.fill("#onboarding-age", "29");
   // TM-880: phone is mandatory at the gate — national number; the GB-default picker composes +44….
   await page.fill("#onboarding-phone", "7700 900321");

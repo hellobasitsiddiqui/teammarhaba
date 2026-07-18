@@ -38,12 +38,24 @@ import {
 import { interestEmoji } from "./interests-core.js";
 // TM-880: the gate now also collects a REQUIRED phone as a (country picker, national number) pair —
 // the same TM-781 machinery the edit-profile form uses (one rule set, no second inconsistent gate).
-import { splitE164, composeE164, defaultCountryFor, phonePartsError } from "./profile-core.js";
+// TM-898 adds the profile form's other two input rules to the gate for the same reason: the TM-877
+// allowed-city list (CITY_OPTIONS + cityChoiceError — location is now the same dropdown, not free
+// text) and the TM-771 name-like check (nameFormatError) on the captured name.
+import {
+  splitE164,
+  composeE164,
+  defaultCountryFor,
+  phonePartsError,
+  CITY_OPTIONS,
+  cityChoiceError,
+  nameFormatError,
+} from "./profile-core.js";
 import { COUNTRIES, flagOf } from "./countries.js";
 
 // The four required fields and their client-side rules, mirroring the backend OnboardingRequest
-// bean validation (name/location non-blank ≤255; age 18–99 TM-884; phone required E.164 TM-880) so
-// we reject bad input before any round-trip AND match exactly what the server will accept. The
+// bean validation (name non-blank ≤255 + name-like TM-771/TM-898; location from the TM-877 allowed
+// city list TM-898; age 18–99 TM-884; phone required E.164 TM-880) so we reject bad input before
+// any round-trip AND match exactly what the server will accept. The
 // `field` key is the request property; `meKey` is where the current value lives on a MeResponse (so
 // a half-completed gate — or an existing phone-less account routed back through it — pre-fills).
 const TEXT_MAX = 255;
@@ -58,13 +70,18 @@ const FIELDS = [
     hint: "How you'll appear to others.",
   },
   {
+    // TM-898: location is the SAME allowed-cities dropdown as the profile edit form's city field
+    // (TM-877) — it was free text here, so the gate could persist an off-list city the profile form
+    // refuses. The leading blank option keeps "not chosen yet" honest (every gate field is
+    // required, so blank simply fails validation); a returning account's saved OFF-LIST city is
+    // injected as an extra option by prefill (the fillCitySelect pattern), matching the backend
+    // gate's saved-value allowance, so a pre-list profile can still re-submit its own value.
     field: "location",
     meKey: "city",
     label: "Location",
-    type: "text",
-    maxLength: TEXT_MAX,
-    autocomplete: "address-level2",
-    hint: "Your town or city.",
+    type: "select",
+    options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])],
+    hint: "Pick the city closest to you.",
   },
   {
     field: "age",
@@ -132,8 +149,20 @@ function validateField(field, raw) {
     if (field.max != null && n > field.max) return `Must be ${field.max} or less.`;
     return "";
   }
+  if (field.field === "location") {
+    // TM-898: the gate mirrors the profile form's TM-877 dropdown rule — the choice must come from
+    // the allowed list, with the caller's already-saved (possibly off-list) city still allowed;
+    // that saved value is exactly the extra option prefill's fillCitySelect injects.
+    return cityChoiceError(value, state.me?.city);
+  }
   if (field.maxLength != null && value.length > field.maxLength) {
     return `Must be ${field.maxLength} characters or fewer.`;
+  }
+  if (field.field === "name") {
+    // TM-898: the captured name seeds firstName/lastName server-side (TM-883), so it carries the
+    // same TM-771 name-like rule as the edit form's name fields — mirroring the backend
+    // OnboardingRequest pattern so client-valid input can't 400 server-side.
+    return nameFormatError(value);
   }
   return "";
 }
@@ -179,8 +208,36 @@ function prefill(profile) {
       continue;
     }
     const value = profile?.[field.meKey];
+    if (field.field === "location") {
+      // TM-898: the location dropdown needs the fillCitySelect treatment (off-list injection), not
+      // a plain value assignment — an unknown value on a <select> silently selects nothing.
+      fillCitySelect(entry.input, value);
+      continue;
+    }
     entry.input.value = value == null ? "" : String(value);
   }
+}
+
+/**
+ * Select the saved city in the gate's TM-877 dropdown — the same fillCitySelect pattern as the
+ * profile edit form (profile.js): a saved value on the allowed list (or "") selects directly, while
+ * a saved OFF-LIST city (e.g. "Dubai", stored before the list existed) gets its own extra option
+ * injected so it stays visible and re-submittable. The backend gate carries the matching saved-value
+ * allowance (TM-898), so an existing pre-list profile passing back through the gate (TM-880 re-gates
+ * phone-less accounts here) is never invalidated. The `data-offlist` marker keeps repeat prefills
+ * from stacking duplicate options for the same value; trimming matches the server's trimmed
+ * comparison (TM-900), so a legacy padded stored value round-trips too.
+ *
+ * @param {HTMLSelectElement} select the location <select>.
+ * @param {*} value the stored `me.city`.
+ */
+function fillCitySelect(select, value) {
+  const saved = value == null ? "" : String(value).trim();
+  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+    select.append(el("option", { value: saved, text: saved }));
+    select.setAttribute("data-offlist", saved);
+  }
+  select.value = saved;
 }
 
 /**
@@ -637,20 +694,32 @@ function buildField(field) {
   const hintId = field.hint ? `${id}-hint` : null;
   const describedBy = [hintId, errorId].filter(Boolean).join(" ");
 
-  const input = el("input", {
-    id,
-    class: "tm-input",
-    type: field.type,
-    name: field.field,
-    required: true,
-    maxLength: field.maxLength,
-    min: field.min,
-    max: field.max,
-    autocomplete: field.autocomplete,
-    inputmode: field.type === "number" ? "numeric" : null,
-    "aria-describedby": describedBy,
-  });
-  // Live-clear an inline error as soon as the user starts correcting the field.
+  let input;
+  if (field.type === "select") {
+    // TM-898: the location dropdown — the same select machinery as the profile form's city field
+    // (profile.js buildField), so the two surfaces offer the identical TM-877 allowed list.
+    input = el(
+      "select",
+      { id, class: "tm-input", name: field.field, required: true, "aria-describedby": describedBy },
+      field.options.map(([value, label]) => el("option", { value, text: label })),
+    );
+  } else {
+    input = el("input", {
+      id,
+      class: "tm-input",
+      type: field.type,
+      name: field.field,
+      required: true,
+      maxLength: field.maxLength,
+      min: field.min,
+      max: field.max,
+      autocomplete: field.autocomplete,
+      inputmode: field.type === "number" ? "numeric" : null,
+      "aria-describedby": describedBy,
+    });
+  }
+  // Live-clear an inline error as soon as the user starts correcting the field (a <select> fires
+  // "input" on a choice too, so the one listener covers both control kinds).
   input.addEventListener("input", () => setFieldError(field.field, validateField(field, input.value)));
 
   // TM-880: the phone field gets the mandatory country picker rendered BEFORE the national-number

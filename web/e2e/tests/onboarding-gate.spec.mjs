@@ -48,7 +48,10 @@ async function signInFreshUser(page, email) {
 
 test("@onboarding a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
   const email = `e2e-onboard-${Date.now()}@teammarhaba.test`;
-  const location = `Gateville-${Date.now()}`;
+  // TM-898: location is the TM-877 allowed-cities dropdown now (it was free text, which let the
+  // gate persist an off-list city the profile form refuses). A multi-word list city pins the
+  // value-with-a-space case end-to-end.
+  const location = "Milton Keynes";
 
   await signInFreshUser(page, email);
 
@@ -67,10 +70,21 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await expect(page.locator("#onboarding-phone-error")).toContainText("required");
   await expect(page.locator("#onboarding-view")).toBeVisible();
 
+  // The location control is the allowed-cities DROPDOWN (TM-898), not free text: a real <select>
+  // offering exactly the blank "choose" affordance plus the TM-877 list — same as the profile form.
+  await expect(page.locator("select#onboarding-location")).toBeVisible();
+  await expect(page.locator("#onboarding-location option")).toHaveText([
+    "Choose a city…",
+    "London",
+    "Milton Keynes",
+    "Sharjah",
+    "Karachi",
+  ]);
+
   // Fill all four required fields and submit (phone = national number; the country picker beside it
   // defaults to GB for a fresh user, so it composes + stores as E.164 +44…, TM-880/TM-781).
   await page.fill("#onboarding-name", "Fresh User");
-  await page.fill("#onboarding-location", location);
+  await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", "27");
   await page.fill("#onboarding-phone", "7700 900456");
   const saved = page.waitForResponse(

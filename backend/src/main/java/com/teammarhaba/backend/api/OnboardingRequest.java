@@ -22,8 +22,18 @@ import jakarta.validation.constraints.Size;
  * <ul>
  *   <li>{@code name} — required, non-blank, max 255 (a {@code @NotBlank}-equivalent: {@code @NotNull}
  *       plus a min length of 1 after trimming is enforced at the service via {@code requireText}).
- *   <li>{@code location} — required, non-blank, max 255.
- *   <li>{@code age} — required, bounded to the platform age band 18–99 (TM-884; was 13–120).
+ *       Name-like (TM-771, added by TM-898): the same {@code NAME_LIKE} pattern as
+ *       {@code UpdateMeRequest.firstName}/{@code lastName} — the captured name seeds
+ *       {@code firstName}/{@code lastName} (TM-883), so a purely numeric name would persist parts
+ *       the edit form's own validation then refuses to re-save.
+ *   <li>{@code location} — required, non-blank, max 255. Name-like too (TM-898): it maps onto the
+ *       same {@code city} column {@code UpdateMeRequest.city} guards. The TM-877 allowed-city list
+ *       is additionally enforced in {@link com.teammarhaba.backend.user.UserService} (it needs the
+ *       stored row for the saved-value allowance), exactly as it is for {@code PATCH /me}.
+ *   <li>{@code age} — required, bounded to the platform age band 18–99 (TM-884; was 13–120). Unlike
+ *       {@code PATCH /me} (whose band moved into the service behind the unchanged-guard, TM-900),
+ *       the hard band stays here: every gate submission (re)writes the age, so there is no
+ *       unchanged-value case to grandfather.
  *   <li>{@code phone} — required (TM-880: phone is mandatory; email stays optional — it is the
  *       Firebase-auth identity, not a profile field). Must be E.164-shaped, the same stored-value
  *       pattern {@code PATCH /me} enforces (TM-781): a mandatory leading {@code +}, 7–15 digits in
@@ -32,14 +42,21 @@ import jakarta.validation.constraints.Size;
  *       unbypassable via the API: onboarding cannot be marked complete without a valid phone.
  * </ul>
  *
- * @param name     the public display name; required, 1–255 chars
- * @param location free-text location (stored as {@code city}); required, 1–255 chars
+ * @param name     the public display name; required, 1–255 chars, name-like (TM-771/TM-898)
+ * @param location the profile city (stored as {@code city}); required, 1–255 chars, name-like, and
+ *                 allowed-list constrained in the service (TM-877/TM-898)
  * @param age      age in years; required, 18–99
  * @param phone    E.164 phone number; required (e.g. {@code +447700900123})
  */
 public record OnboardingRequest(
-        @NotNull @Size(min = 1, max = 255) String name,
-        @NotNull @Size(min = 1, max = 255) String location,
+        @NotNull
+                @Size(min = 1, max = 255)
+                @Pattern(regexp = UpdateMeRequest.NAME_LIKE, message = UpdateMeRequest.NAME_LIKE_MESSAGE)
+                String name,
+        @NotNull
+                @Size(min = 1, max = 255)
+                @Pattern(regexp = UpdateMeRequest.NAME_LIKE, message = UpdateMeRequest.NAME_LIKE_MESSAGE)
+                String location,
         @NotNull @Min(18) @Max(99) Integer age,
         @NotNull
                 @Size(max = 32)

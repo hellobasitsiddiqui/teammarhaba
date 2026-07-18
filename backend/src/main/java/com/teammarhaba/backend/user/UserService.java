@@ -62,10 +62,24 @@ public class UserService {
      * The interim allowed city list (TM-877) — the profile city is picked from a fixed dropdown.
      * Mirrors {@code CITY_OPTIONS} in {@code web/src/assets/profile-core.js}; the admin-managed
      * version of this list is TM-878. A NEW city value must come from this set, but a caller
-     * re-sending their ALREADY-SAVED off-list city is accepted (see {@link #updateProfile}), so
-     * profiles saved before the list existed (e.g. "Dubai") are preserved, never invalidated.
+     * re-sending their ALREADY-SAVED off-list city is accepted (see {@link #updateProfile} and —
+     * since TM-898 — the onboarding gate {@link #completeProfileOnboarding}, which enforces the
+     * same rule), so profiles saved before the list existed (e.g. "Dubai") are preserved, never
+     * invalidated.
      */
     private static final Set<String> ALLOWED_CITIES = Set.of("London", "Milton Keynes", "Sharjah", "Karachi");
+
+    /**
+     * The platform age band, 18–99 (TM-884). For {@code PATCH /me} it is enforced HERE — behind the
+     * unchanged-value guard in {@link #updateProfile} (TM-900) — not by bean validation on
+     * {@code UpdateMeRequest}: the boundary would reject an unchanged grandfathered age (a 13–120-era
+     * value) before the service's no-op check could wave it through, locking those accounts out of
+     * saving anything. {@code OnboardingRequest} keeps its hard {@code @Min/@Max} band — every gate
+     * submission (re)writes the age, so there is no unchanged case there.
+     */
+    private static final int MIN_AGE = 18;
+
+    private static final int MAX_AGE = 99;
 
     /**
      * The stored-phone E.164 shape (TM-781/TM-880): mandatory {@code +}, 7–15 digits, separators
@@ -215,17 +229,34 @@ public class UserService {
             changes.add(change("lastName", user.getLastName(), update.lastName()));
             user.setLastName(update.lastName());
         }
-        if (update.city() != null && !Objects.equals(user.getCity(), update.city())) {
-            // TM-877: a NEW city must come from the allowed dropdown list. Reached only when the
-            // value actually differs from the stored one, so re-sending an already-saved off-list
-            // city ("Dubai") is a no-op above and stays preserved; "" keeps its clear semantics.
-            if (!update.city().isEmpty() && !ALLOWED_CITIES.contains(update.city())) {
-                throw new BadRequestException("Choose a city from the list");
+        if (update.city() != null) {
+            // TM-900: trim BEFORE the equality/allow-list checks. The client's fillCitySelect trims
+            // the saved value before re-selecting it, so a legacy row stored with padding
+            // (" Dubai ") comes back from a full-form save as "Dubai" — untrimmed comparison would
+            // read that as a NEW off-list value and 400 the whole save. New values are stored
+            // trimmed for the same reason (a padded "  London  " is the list value "London").
+            String city = update.city().trim();
+            if (!Objects.equals(trimmedOrNull(user.getCity()), city)) {
+                // TM-877: a NEW city must come from the allowed dropdown list. Reached only when the
+                // value actually differs from the stored one, so re-sending an already-saved
+                // off-list city ("Dubai") is a no-op above and stays preserved; "" keeps its clear
+                // semantics.
+                if (!city.isEmpty() && !ALLOWED_CITIES.contains(city)) {
+                    throw new BadRequestException("Choose a city from the list");
+                }
+                changes.add(change("city", user.getCity(), city));
+                user.setCity(city);
             }
-            changes.add(change("city", user.getCity(), update.city()));
-            user.setCity(update.city());
         }
         if (update.age() != null && !Objects.equals(user.getAge(), update.age())) {
+            // TM-900: the 18–99 band (TM-884) is enforced here, BEHIND the unchanged-guard above
+            // (mirroring the city pattern), so an API client re-sending an unchanged grandfathered
+            // age is a no-op rather than a 400 — only a NEW age value must be in-band. (The web
+            // client omits an unchanged age from the PATCH; this makes the server behave the same
+            // for clients that don't.)
+            if (update.age() < MIN_AGE || update.age() > MAX_AGE) {
+                throw new BadRequestException("Age must be between " + MIN_AGE + " and " + MAX_AGE);
+            }
             changes.add(change("age", user.getAge(), update.age()));
             user.setAge(update.age());
         }
@@ -430,11 +461,13 @@ public class UserService {
      * shell or without a phone.
      *
      * <p>Unlike {@link #updateProfile} (partial PATCH), this is all-or-nothing: all four values are
-     * required by the {@code OnboardingRequest} bean validation at the web boundary (age 18–99
-     * TM-884; phone E.164 TM-880); here we additionally reject blank/whitespace-only text values (a
-     * {@code @Size(min=1)} lets a single space through). The whole thing runs in one
-     * {@code @Transactional} unit, so the profile write and the onboarding-flag flip commit together
-     * or not at all — the gate never half-applies.
+     * required by the {@code OnboardingRequest} bean validation at the web boundary (name/location
+     * name-like TM-771/TM-898; age 18–99 TM-884; phone E.164 TM-880); here we additionally reject
+     * blank/whitespace-only text values (a {@code @Size(min=1)} lets a single space through) and
+     * enforce the TM-877 allowed-city list on {@code location} with the same saved-value allowance
+     * as {@code PATCH /me} (TM-898). The whole thing runs in one {@code @Transactional} unit, so
+     * the profile write and the onboarding-flag flip commit together or not at all — the gate never
+     * half-applies.
      *
      * <p>Reuses the existing onboarding-complete machinery (TM-163): completing onboarding here also
      * self-attests the supplied age ({@code ageVerified = true}), since an age is always on record by
@@ -460,11 +493,24 @@ public class UserService {
         if (seedNames) {
             // Whitespace-split, limit 2: "Ibn Battuta" → ("Ibn", "Battuta"), "Mary Jane Watson" →
             // ("Mary", "Jane Watson"), a single word → first name only (lastName stays null).
+            // The parts are name-like by construction (TM-898): OnboardingRequest.name carries the
+            // TM-771 NAME_LIKE pattern at the boundary, so a non-name-like name (the V47 backfill's
+            // skip case) can never reach this seed — it 400s before the transaction starts.
             String[] parts = fullName.split("\\s+", 2);
             user.setFirstName(parts[0]);
             user.setLastName(parts.length > 1 ? parts[1] : null);
         }
-        user.setCity(requireText(location, "location"));
+        String city = requireText(location, "location");
+        // TM-898: the gate enforces the TM-877 allowed-city list exactly as updateProfile does,
+        // INCLUDING the saved-value allowance — an account whose stored city is off-list (saved
+        // before the list existed) may pass back through the gate re-submitting that same value
+        // (the gate dropdown keeps it selectable), but any NEW off-list value is refused. The
+        // stored side is trimmed for the comparison (TM-900) so a legacy padded value still matches
+        // its trimmed re-submission.
+        if (!Objects.equals(trimmedOrNull(user.getCity()), city) && !ALLOWED_CITIES.contains(city)) {
+            throw new BadRequestException("Choose a city from the list");
+        }
+        user.setCity(city);
         user.setAge(age); // range already enforced (18–99) by bean validation at the boundary
         user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
 
@@ -503,6 +549,15 @@ public class UserService {
             throw new BadRequestException(field + " is required");
         }
         return value.trim();
+    }
+
+    /**
+     * The stored value's side of a trimmed comparison (TM-900): {@code null} stays {@code null},
+     * anything else is trimmed — so a legacy padded stored city (" Dubai ") compares equal to the
+     * trimmed value clients send back (fillCitySelect trims before re-selecting).
+     */
+    private static String trimmedOrNull(String value) {
+        return value == null ? null : value.trim();
     }
 
     /**

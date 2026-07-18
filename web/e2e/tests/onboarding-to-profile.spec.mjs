@@ -78,11 +78,14 @@ async function signInFreshUser(page, email, deepLink) {
 test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, and lands on their profile", async ({ page }) => {
   // Unique-per-run identity. The emulator is wiped each run so a fixed address would be clean too, but
   // a random suffix guarantees a never-seen (⇒ un-onboarded) account even across in-run retries — and
-  // avoids Date.now(). Location/name are unique so the DB + hub assertions can't match stale data.
+  // avoids Date.now(). The DB assertions key on the unique email; the NAME suffix is the run id with
+  // its digits mapped to letters, because the gate name is name-like since TM-898 (TM-771: digits
+  // rejected). Location is a TM-877 LIST city now (TM-898) — the gate is a dropdown, free text is gone.
   const run = randomUUID().slice(0, 8);
+  const nameSuffix = run.replace(/\d/g, (d) => "abcdefghij"[Number(d)]);
   const email = `e2e-onboard-profile-${run}@teammarhaba.test`;
-  const displayName = `Fresh User ${run}`;
-  const location = `Gateville-${run}`;
+  const displayName = `Fresh User ${nameSuffix}`;
+  const location = "Sharjah";
   const age = 27;
 
   // DEEP-LINK the Profile page as a brand-new user: the signed-out guard stashes #/profile as the
@@ -109,8 +112,9 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
 
   // Fill the four required fields and submit → POST /api/v1/me/onboarding. Phone is the national
   // number (TM-880); the country picker beside it defaults to GB, so it stores as E.164 +44….
+  // Location is the TM-898 allowed-cities <select> — selectOption, not fill.
   await page.fill("#onboarding-name", displayName);
-  await page.fill("#onboarding-location", location);
+  await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", String(age));
   await page.fill("#onboarding-phone", "7700 900789");
   const saved = page.waitForResponse(
@@ -166,7 +170,7 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
     expect(rows).toHaveLength(1);
     expect(rows[0].display_name).toBe(displayName);
     expect(rows[0].first_name).toBe("Fresh");
-    expect(rows[0].last_name).toBe(`User ${run}`);
+    expect(rows[0].last_name).toBe(`User ${nameSuffix}`);
     expect(rows[0].city).toBe(location);
     expect(rows[0].age).toBe(age);
     expect(rows[0].onboarding_completed).toBe(true);

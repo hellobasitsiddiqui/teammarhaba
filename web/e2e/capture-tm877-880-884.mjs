@@ -109,7 +109,8 @@ await gatePage.screenshot({ path: shotPath("TM-880", "phone-gate"), fullPage: tr
 // (Not run from main: there is no phone field there, so the same submit would complete onboarding.)
 if (LABEL !== "before") {
   await gatePage.fill("#onboarding-name", "Capture Tester");
-  await gatePage.fill("#onboarding-location", "London");
+  // TM-898: the gate location became the allowed-cities <select> — picked, not typed.
+  await gatePage.selectOption("#onboarding-location", "London");
   await gatePage.fill("#onboarding-age", "30");
   await gatePage.click("#onboarding-form button[type=submit]");
   await gatePage.waitForSelector("#onboarding-phone-error", { state: "visible", timeout: 10_000 });
