@@ -38,6 +38,21 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
 - **Branch e2e green is the merge gate** (e2e is off the PR gate — dispatch `e2e.yml --ref
   <branch>` yourself). An e2e red on your OWN new spec is often a real bug caught, not flake — the
   wave-login-1 red exposed a genuine mixed-code auto-submit defect. Diagnose before re-running.
+- **(wave-profile-1) Hot-file sprints get a resource-DAG, not one-agent-per-ticket.** When one
+  file owns most of the sprint (`profile.js` owned 11/14 tickets), batch same-file tickets into
+  serial multi-ticket PRs (A:3 → B:2 → C:2 → D:1) and run only disjoint-file tickets in parallel
+  lanes. Show the DAG before launching — fanning out per-ticket on a shared file just
+  manufactures conflicts.
+- **(wave-profile-1) Suspected-cause bug tickets: reproduce FIRST, and stopping honestly is a
+  valid outcome.** A ticket whose refinement says "root cause suspected / needs screenshot" gets
+  a reproduce-before-fixing instruction; if the symptom doesn't reproduce, the agent attaches
+  what it saw, pins the AC with a regression test, and reports — it does NOT invent a fix. The
+  "profile lost its bottom nav" ticket was really the phone completion gate working as designed.
+- **(wave-profile-1) A mid-sprint merge that changes a provisioning/API contract breaks sibling
+  in-flight branches' NEW tests on rebase.** When phone became mandatory, a sibling PR's 4
+  fresh tests 400'd post-rebase (written pre-contract). After rebasing over a contract change,
+  expect your own new tests to need the new contract — read the blackboard note before
+  re-running CI blind.
 
 ## Findings discipline
 
@@ -51,6 +66,10 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
   than the per-PR reviews (combined-state interactions, security/abuse, polish + test-integrity),
   and every finding is **adversarially verified** (refute-by-default) before it counts. Per-PR
   green does not imply the combination is green.
+- **(wave-profile-1) Enumerate the sprint's merged-PR set YOURSELF before signing review
+  coverage** — `gh pr list --state merged`, matched on title + headRefName against the sprint's
+  ticket keys. Review agents' own searches under-return; pass each reviewer an explicit PR list
+  and check the count adds up to the whole sprint.
 
 ## Deploy + live verification
 
@@ -71,5 +90,9 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
   behind your back.
 - Final sweep: open PRs (none left behind), merged branches deleted (ask first — ref deletion is
   gated), no ticket sitting To Do outside a sprint, follow-ups parked in Refinement with cards.
+- **(wave-profile-1) md5-check harvested evidence before attaching it.** Byte-identical
+  "different steps" means the spec captured the wrong frame — the golden-path "interests" shot
+  was the terms-gate screen in BOTH projects. Spot-check by actually rendering one shot per set
+  (that render is also how bad evidence gets caught before the human sees it).
 - Cross-lane observations found during your sprint get **ticketed and handed off, never claimed**
   — and never silently dropped.
