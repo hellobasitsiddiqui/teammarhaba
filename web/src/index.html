@@ -314,7 +314,8 @@
                 <p id="auth-error" class="auth-error" role="alert" hidden></p>
 
                 <!-- TM-866: polite status line for the resend-cooldown announcements ("You can request
-                     a new code in 30 seconds." / "…now."). Its OWN region — not the role="alert" error
+                     a new email code in 30 seconds." / "…SMS code now." — channel-specific, since both
+                     cooldowns share this ONE region). Its OWN region — not the role="alert" error
                      above (assertive, would interrupt) — and visually hidden: the sighted cue is the
                      ticking button label itself. In the markup from page load (never [hidden]) because
                      live regions only announce reliably when the region EXISTS before its first write;
@@ -374,6 +375,11 @@
                                          stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
                                          aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5" /></svg>
                                 </button>
+                                <!-- TM-866 review: the SMS resend lives HERE, on the step the user is
+                                     actually on — the phone step (send button included) hides the moment
+                                     a send succeeds, so the cooldown's countdown must tick on this link
+                                     to ever be visible. The SMS twin of #emailcode-resend-btn. -->
+                                <button id="sms-resend-btn" type="button" class="secondary auth-quiet-link">Text me another code</button>
                             </div>
                         </div>
                         <!-- Firebase renders the (invisible) reCAPTCHA abuse guard here. -->

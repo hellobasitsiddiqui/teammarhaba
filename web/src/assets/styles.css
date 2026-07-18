@@ -531,7 +531,10 @@ body {
 
 .auth button:disabled {
     opacity: 0.6;
-    cursor: progress;
+    /* not-allowed, not `progress` (TM-866 review): this rule also matches a button a cooldown is
+       holding for 30s, where an OS "working on it" spinner cursor would promise in-flight work
+       that isn't happening — and not-allowed is the truer cursor for the busy sweep's holds too. */
+    cursor: not-allowed;
 }
 
 /* TM-305: "Try another way" disclosure (#try-another-btn.linkish). It was never given its own rule,

@@ -48,7 +48,7 @@ async function labelSeconds(button) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-test("@auth the code step reveals a held Resend with a ticking countdown; expiry restores it; a failed resend does not restart it", async ({ page }) => {
+test("@auth the code step reveals a held Resend with a ticking countdown; expiry restores it; a failed resend does not restart it; an accepted resend does", async ({ page }) => {
   await page.clock.install(); // before goto, so the page's Date/interval are controllable
   const email = `e2e-cooldown-${Date.now()}@teammarhaba.test`;
   await reachCodeStep(page, email);
@@ -81,7 +81,9 @@ test("@auth the code step reveals a held Resend with a ticking countdown; expiry
   await page.clock.fastForward(31_000);
   await expect(resend).toBeEnabled();
   await expect(resend).toHaveText("Resend");
-  await expect(page.locator("#auth-status")).toHaveText("You can request a new code now.");
+  // Channel-specific copy ("email code", not just "code") — both flows share the ONE #auth-status
+  // region, so without the channel an email expiry could contradict a still-held SMS window.
+  await expect(page.locator("#auth-status")).toHaveText("You can request a new email code now.");
 
   // A REAL click now fires exactly one request. Only the BROWSER's clock jumped — the backend's
   // 60s per-address cooldown is still running in real time, so this send comes back 429. That is
@@ -96,6 +98,20 @@ test("@auth the code step reveals a held Resend with a ticking countdown; expiry
   await expect(page.locator("#auth-error")).toBeVisible();
   await expect(resend).toBeEnabled();
   await expect(resend).toHaveText("Resend");
+
+  // An ACCEPTED resend must RESTART the window (delete emailResendCooldown.start() from
+  // resendEmailCode and only this leg fails). The backend's real 60s per-address window is still
+  // open, so the accept is stubbed at the network layer: requestEmailCode treats any ok response
+  // as success, and a bodyless 204 is exactly what the real endpoint returns — this leg is
+  // deliberately decoupled from the server's timing.
+  await page.route("**/auth/email-code/request", (route) => route.fulfill({ status: 204 }));
+  await resend.click();
+  await expect(resend).toBeDisabled();
+  await expect(resend).toHaveText(/^Resend in \d:\d\d$/);
+  await expect(page.locator("#auth-status")).toHaveText("You can request a new email code in 30 seconds.");
+  // …and the accepted resend mirrors the initial send's recovery: focus queued back to box 1 for
+  // the fresh code (the busy sweep had dropped it to <body> — TM-866 review fix).
+  await expect(page.locator("#emailcode-code")).toBeFocused();
 });
 
 test("@auth leaving the code step resets the cooldown, and a fresh send opens a fresh full window", async ({ page }) => {
@@ -128,7 +144,7 @@ test("@auth leaving the code step resets the cooldown, and a fresh send opens a 
   await expect(resend).toHaveText(/^Resend in 0:(2\d|30)$/); // full-ish window, not a leftover
 });
 
-test("@auth SMS: a successful send holds 'Text me a code' with the countdown; expiry restores it", async ({ page }) => {
+test("@auth SMS: a successful send reveals the code step with a VISIBLE held resend link counting down; expiry restores it", async ({ page }) => {
   await page.clock.install();
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -142,15 +158,28 @@ test("@auth SMS: a successful send holds 'Text me a code' with the countdown; ex
   await send.click();
   await expect(page.locator("#sms-step-code")).toBeVisible();
 
-  // The send button hides with its phone step, but its STATE is pinned held + counting — any
-  // path that re-reveals the phone step inside the window must find it disabled, and the
-  // 30s-later restore below is what a re-revealed step would show after expiry.
-  await expect(send).toBeDisabled();
-  await expect(send).toHaveText(/^Resend in \d:\d\d$/);
-  await expect(page.locator("#auth-status")).toHaveText("You can request a new code in 30 seconds.");
+  // TM-866 review: the countdown must tick on the step the user is actually ON. The phone step
+  // (send button included) hid on success, so the cooldown holds the CODE step's resend link —
+  // visible, disabled, counting.
+  const resend = page.locator("#sms-resend-btn");
+  await expect(resend).toBeVisible();
+  await expect(resend).toBeDisabled();
+  await expect(resend).toHaveText(/^Resend in \d:\d\d$/);
+  await expect(page.locator("#auth-status")).toHaveText("You can request a new SMS code in 30 seconds.");
+
+  // A mid-window synthetic click must NOT fire a second SMS — dispatchEvent bypasses the disabled
+  // attribute, so this exercises the handler-level isActive() guard, exactly like the email test.
+  // sendVerificationCode is the Auth emulator's phone-send endpoint.
+  let sends = 0;
+  page.on("request", (r) => {
+    if (r.url().includes("sendVerificationCode")) sends++;
+  });
+  await resend.dispatchEvent("click");
+  await page.waitForTimeout(300); // real-time settle — page.clock does not affect test-side waits
+  expect(sends).toBe(0);
 
   await page.clock.fastForward(31_000);
-  await expect(send).toBeEnabled();
-  await expect(send).toHaveText("Text me a code"); // the SMS button's ORIGINAL label, not "Resend"
-  await expect(page.locator("#auth-status")).toHaveText("You can request a new code now.");
+  await expect(resend).toBeEnabled();
+  await expect(resend).toHaveText("Text me another code"); // the link's ORIGINAL label restored
+  await expect(page.locator("#auth-status")).toHaveText("You can request a new SMS code now.");
 });
