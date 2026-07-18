@@ -64,8 +64,8 @@ async function signInFreshUser(page, email) {
   await page.fill("#email", email);
   await page.click("#emailcode-send-btn");
   await page.waitForResponse((r) => r.url().includes("/auth/email-code/request"));
+  // Filling the full code auto-submits (TM-867 six-box OTP) — no verify click, same as the specs.
   await page.fill("#emailcode-code", await peekCode(email));
-  await page.click("#emailcode-verify-btn");
   // A brand-new user is routed straight to the completion gate (phone width hides #signout-btn).
   await page.waitForSelector("#onboarding-view", { state: "visible", timeout: 20_000 });
 }
