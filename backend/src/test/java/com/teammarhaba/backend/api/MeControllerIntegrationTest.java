@@ -594,7 +594,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Priya Sharma\",\"location\":\"London\",\"age\":28}"))
+                        .content("{\"name\":\"Priya Sharma\",\"location\":\"London\",\"age\":28,"
+                                + "\"phone\":\"+447700900001\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Priya Sharma"))
                 .andExpect(jsonPath("$.firstName").value("Priya"))
@@ -619,7 +620,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Sting\",\"location\":\"Newcastle\",\"age\":45}"))
+                        .content("{\"name\":\"Sting\",\"location\":\"Newcastle\",\"age\":45,"
+                                + "\"phone\":\"+447700900002\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Sting"))
                 .andExpect(jsonPath("$.lastName").doesNotExist());
@@ -631,7 +633,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-multiword", "mary@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Mary Jane Watson\",\"location\":\"York\",\"age\":31}"))
+                        .content("{\"name\":\"Mary Jane Watson\",\"location\":\"York\",\"age\":31,"
+                                + "\"phone\":\"+447700900003\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Mary"))
                 .andExpect(jsonPath("$.lastName").value("Jane Watson"));
@@ -652,7 +655,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Amelia Williams\",\"location\":\"Leadworth\",\"age\":26}"))
+                        .content("{\"name\":\"Amelia Williams\",\"location\":\"Leadworth\",\"age\":26,"
+                                + "\"phone\":\"+447700900004\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Amelia Williams"))
                 .andExpect(jsonPath("$.firstName").value("Amelia Rose"))
