@@ -49,6 +49,10 @@ import { enterNotifications } from "./notifications.js";
 import { enterOnboarding } from "./onboarding.js";
 import { enterTerms } from "./terms.js";
 import { needsTermsAcceptance } from "./terms-gate.js";
+// TM-880: phone is mandatory. The pure rule (no valid stored E.164 phone → route through the
+// first-use completion gate) lives in profile-core so it's unit-testable; it applies to ALL users,
+// existing phone-less accounts included, and fails open on a degraded /me like the other gates.
+import { needsPhoneNumber } from "./profile-core.js";
 import { shouldBounceNonAdmin } from "./admin-route-guard-core.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
@@ -1017,7 +1021,13 @@ async function resolveRoleThenGuard() {
   // The role is now resolved for this session (even a timeout resolves to the fail-safe non-admin
   // value): the admin gate may make its real decision from here on (TM-733).
   roleResolved = true;
-  isOnboarded = onboardedOutcome.value ? Boolean(onboardedOutcome.value.onboardingCompleted) : true;
+  // Gated when first-run onboarding is incomplete OR the account has no valid stored phone (TM-880:
+  // phone is mandatory, enforced as a first-use completion gate on ALL users — the same #/onboarding
+  // gate, which now collects the phone; needsPhoneNumber also catches a legacy country-ambiguous bare
+  // number, reusing the TM-781 confirm-country rule). Still fails OPEN (true) on a degraded /me.
+  isOnboarded = onboardedOutcome.value
+    ? Boolean(onboardedOutcome.value.onboardingCompleted) && !needsPhoneNumber(onboardedOutcome.value)
+    : true;
   // Terms gate (TM-170): the SAME /me result tells us whether the user still needs to accept the
   // current terms version. The pure rule (terms-gate.js) fails open (false) on a null/degraded /me,
   // so a backend hiccup never traps a user behind the terms gate.

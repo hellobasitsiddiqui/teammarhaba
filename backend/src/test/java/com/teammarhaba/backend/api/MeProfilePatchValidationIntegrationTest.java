@@ -180,15 +180,17 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
     @Test
     void patchMeAcceptsRealNamesIncludingPunctuationAndNonAscii() throws Exception {
         // The TM-771 negative must not over-reject: hyphens, apostrophes, periods, spaces and
-        // non-ASCII letters are all legitimate name/city characters and must round-trip.
+        // non-ASCII letters are all legitimate name characters and must round-trip. (City left out
+        // here since TM-877: it is now allowed-list constrained — "Milton Keynes" pins the
+        // list-value-with-a-space case instead of the old free-text "São Paulo".)
         mockMvc.perform(patch("/api/v1/me")
                         .with(caller("uid-real-name", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"firstName\":\"Jean-Luc\",\"lastName\":\"O'Brien\",\"city\":\"São Paulo\"}"))
+                        .content("{\"firstName\":\"Jean-Luc\",\"lastName\":\"O'Brien\",\"city\":\"Milton Keynes\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Jean-Luc"))
                 .andExpect(jsonPath("$.lastName").value("O'Brien"))
-                .andExpect(jsonPath("$.city").value("São Paulo"));
+                .andExpect(jsonPath("$.city").value("Milton Keynes"));
     }
 
     // ------------------------------------------------------------------

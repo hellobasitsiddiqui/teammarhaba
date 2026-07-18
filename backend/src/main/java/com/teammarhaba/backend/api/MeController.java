@@ -161,18 +161,19 @@ public class MeController {
     }
 
     /**
-     * Complete the first-login profile gate (TM-250): atomically persist the three required minimum
-     * fields — name (→ display name), location (→ city), age — and mark onboarding complete, in a
-     * single transaction. All three are required ({@link OnboardingRequest} bean validation): a
-     * missing/blank field or an out-of-range age is a uniform {@code 400}, so a new user can't slip
-     * into the app with an empty profile. Returns the updated profile carrying
+     * Complete the first-use profile gate (TM-250, extended in TM-880): atomically persist the four
+     * required minimum fields — name (→ display name), location (→ city), age, and a valid E.164
+     * phone — and mark onboarding complete, in a single transaction. All four are required
+     * ({@link OnboardingRequest} bean validation): a missing/blank field, an out-of-range age
+     * (18–99, TM-884) or a non-E.164 phone is a uniform {@code 400}, so a user can't slip into the
+     * app with an empty profile or without a phone. Returns the updated profile carrying
      * {@code onboardingCompleted = true} so the client can drop the gate and proceed.
      */
     @PostMapping("/me/onboarding")
     MeResponse onboarding(
             @AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid OnboardingRequest request) {
-        return toResponse(
-                userService.completeProfileOnboarding(caller, request.name(), request.location(), request.age()));
+        return toResponse(userService.completeProfileOnboarding(
+                caller, request.name(), request.location(), request.age(), request.phone()));
     }
 
     /**

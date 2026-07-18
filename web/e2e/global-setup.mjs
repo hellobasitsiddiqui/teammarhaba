@@ -65,6 +65,19 @@ async function provisionInBackend({ email, password }) {
   const me = await meRes.json();
   const currentTermsVersion = me.currentTermsVersion;
 
+  // Un-gate the seeded account (TM-880): phone is mandatory now — the backend refuses the
+  // onboarding-complete transition without a valid E.164 phone on record, and the client routes a
+  // phone-less account back through the completion gate. Seed one first so every seeded account
+  // stays a "returning, complete" fixture (mirrors the accounts' real-world state).
+  const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
+    method: "PATCH",
+    headers: { ...authed, "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: "+447700900123" }),
+  });
+  if (!phoneRes.ok) {
+    throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+  }
+
   // Un-gate the seeded account (TM-250): mark first-run onboarding complete so the gate is bypassed.
   const onboardRes = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, {
     method: "POST",

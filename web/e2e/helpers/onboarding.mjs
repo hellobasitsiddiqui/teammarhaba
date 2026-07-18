@@ -23,7 +23,8 @@
 // GROUNDING (all selectors verified against web/src/assets/onboarding.js):
 //   • `#onboarding-view`                 the single onboarding container (both steps render into it).
 //   • `#onboarding-form`                 the profile-gate form (step 1).
-//   • `#onboarding-name/-location/-age`  the three required profile inputs (buildField: id `onboarding-<field>`).
+//   • `#onboarding-name/-location/-age/-phone`  the four required profile inputs (buildField: id
+//     `onboarding-<field>`; phone became mandatory in TM-880 and pairs with `#onboarding-phone-country`).
 //   • `#onboarding-form button[type=submit]`  the profile "Continue" submit (buildShell: type:"submit").
 //   • `.tm-interests-chip[data-label]`   a toggle chip in the interests step (buildChip).
 //   • `.tm-interests-continue`           the interests "Continue" CTA (buildInterestsStep; disabled until canFinish).
@@ -116,11 +117,13 @@ export async function completeInterestsStep(page) {
  * is actually left (the view swaps to the interests step, or — on a catalogue-fetch skip — closes).
  *
  * @param {import('@playwright/test').Page} page
- * @param {{name?: string, location?: string, age?: (string|number)}} [profile] the three required
- *   fields (name / location / age). Sensible defaults are used for any omitted field.
+ * @param {{name?: string, location?: string, age?: (string|number), phone?: string}} [profile] the
+ *   four required fields (name / location / age / phone — phone became mandatory in TM-880; it is
+ *   the NATIONAL number, composed with the country picker's +dial, which defaults to GB). Sensible
+ *   defaults are used for any omitted field.
  */
 export async function completeOnboarding(page, profile = {}) {
-  const { name = "E2E Tester", location = `Testville-${Date.now()}`, age = 30 } = profile;
+  const { name = "E2E Tester", location = `Testville-${Date.now()}`, age = 30, phone = "7700 900123" } = profile;
 
   await expect(page.locator("#onboarding-form")).toBeVisible();
 
@@ -134,6 +137,9 @@ export async function completeOnboarding(page, profile = {}) {
     await page.fill("#onboarding-name", name);
     await page.fill("#onboarding-location", location);
     await page.fill("#onboarding-age", String(age));
+    // TM-880: the mandatory phone — national number only; the picker beside it carries the +dial
+    // (GB by default for a fresh user, so this composes to +44…).
+    await page.fill("#onboarding-phone", String(phone));
     await page.click("#onboarding-form button[type=submit]");
     // The profile form is replaced once the POST succeeds (→ interests step) — or the whole view closes on
     // a catalogue-fetch skip. If a late prefill wiped the fields the submit no-ops and the form stays, so

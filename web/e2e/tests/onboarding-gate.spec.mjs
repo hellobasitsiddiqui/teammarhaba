@@ -62,12 +62,17 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   // Validation: submitting empty surfaces required-field errors and does NOT let the user through.
   await page.click("#onboarding-form button[type=submit]");
   await expect(page.locator("#onboarding-name-error")).toBeVisible();
+  // TM-880: phone is REQUIRED at the gate too — the empty submit flags it like the other fields.
+  await expect(page.locator("#onboarding-phone-error")).toBeVisible();
+  await expect(page.locator("#onboarding-phone-error")).toContainText("required");
   await expect(page.locator("#onboarding-view")).toBeVisible();
 
-  // Fill all three required fields and submit.
+  // Fill all four required fields and submit (phone = national number; the country picker beside it
+  // defaults to GB for a fresh user, so it composes + stores as E.164 +44…, TM-880/TM-781).
   await page.fill("#onboarding-name", "Fresh User");
   await page.fill("#onboarding-location", location);
   await page.fill("#onboarding-age", "27");
+  await page.fill("#onboarding-phone", "7700 900456");
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );
@@ -96,18 +101,20 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await expect(page.locator("#terms-view")).toBeHidden();
   await expect(page.locator("#nav-profile")).toBeVisible();
 
-  // It persisted: name → display_name, location → city, age, and the onboarding flag are on the row.
+  // It persisted: name → display_name, location → city, age, the composed E.164 phone (TM-880),
+  // and the onboarding flag are on the row.
   const client = new pg.Client(dbConfig);
   await client.connect();
   try {
     const { rows } = await client.query(
-      "SELECT display_name, city, age, onboarding_completed FROM users WHERE lower(email) = lower($1)",
+      "SELECT display_name, city, age, phone, onboarding_completed FROM users WHERE lower(email) = lower($1)",
       [email],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].display_name).toBe("Fresh User");
     expect(rows[0].city).toBe(location);
     expect(rows[0].age).toBe(27);
+    expect(rows[0].phone).toBe("+447700900456"); // GB picker + national digits, trunk 0 absent
     expect(rows[0].onboarding_completed).toBe(true);
   } finally {
     await client.end();

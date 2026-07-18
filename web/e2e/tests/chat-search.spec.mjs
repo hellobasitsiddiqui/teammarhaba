@@ -105,13 +105,22 @@ async function createFreshUngatedAccount() {
   if (!meRes.ok) throw new Error(`provision (GET /me) failed for ${email}: ${meRes.status} ${await meRes.text()}`);
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
-  // 3) Clear the first-run onboarding gate (TM-250) so the browser sign-in lands straight in the app.
+  // 3) Seed a phone (TM-880: mandatory — the backend refuses onboarding-complete without a valid
+  // E.164 phone on record, and the client would re-gate a phone-less account).
+  const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
+    method: "PATCH",
+    headers: { ...authed, "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: "+447700900123" }),
+  });
+  if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+
+  // 4) Clear the first-run onboarding gate (TM-250) so the browser sign-in lands straight in the app.
   const onboardRes = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, { method: "POST", headers: authed });
   if (!onboardRes.ok) {
     throw new Error(`onboarding-complete failed for ${email}: ${onboardRes.status} ${await onboardRes.text()}`);
   }
 
-  // 4) Accept the current terms version (TM-170) so the terms gate is cleared too.
+  // 5) Accept the current terms version (TM-170) so the terms gate is cleared too.
   if (currentTermsVersion) {
     const termsRes = await fetch(`${API_BASE_URL}/api/v1/me/accept-terms`, {
       method: "POST",
