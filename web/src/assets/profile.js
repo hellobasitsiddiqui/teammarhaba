@@ -73,7 +73,7 @@ import {
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
 // and "Manage" links to the membership screen when the feature flag is on.
-import { profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE } from "./membership-tier.js";
+import { profileMembershipRow, profileManageAffordance, membershipEnabled } from "./membership-tier.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -1204,11 +1204,15 @@ function buildShell(view) {
   // subscriber sees their actual tier. It starts on the free-base default and is corrected once the
   // membership resolves. "Manage" is a live link to the membership screen (#/membership) when the
   // membership feature flag is ON; while the flag is OFF that route is inert (router.js gates it), so
-  // it stays a muted, non-interactive label rather than a dead link (the original wireframe affordance).
+  // the row shows an unambiguous "Coming soon" badge instead (TM-882) — a muted link-styled "Manage →"
+  // that did nothing read as a dead link. The pure profileManageAffordance() decides; this only paints
+  // (the badge reuses the tier cards' coming-soon pill from membership-tier.css, loaded globally).
   const membershipSub = el("div", { class: "tm-pf-sub", text: profileMembershipRow(null).text });
-  const membershipManage = membershipEnabled()
-    ? el("a", { class: "tm-pf-go", href: MEMBERSHIP_ROUTE, text: "Manage →" })
-    : el("span", { class: "tm-pf-go tm-muted", text: "Manage →" });
+  const manage = profileManageAffordance(membershipEnabled());
+  const membershipManage =
+    manage.kind === "link"
+      ? el("a", { class: "tm-pf-go", href: manage.href, text: manage.label })
+      : el("span", { class: "tm-tier-badge tm-tier-badge-soon", text: manage.label });
   const membershipCard = pfCard(
     null,
     [

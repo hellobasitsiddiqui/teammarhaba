@@ -160,6 +160,28 @@ export function profileMembershipRow(membership) {
   return { tier, text: "Pay as you go · first event free", paid: false };
 }
 
+/**
+ * The Manage affordance for the Profile membership row (profile.js), keyed off the membership feature
+ * flag (TM-882).
+ *
+ * THE PAPERCUT (TM-882): while `config.flags.membership` ships OFF, the row rendered a muted,
+ * non-interactive "Manage →" label — link-styled copy that does nothing reads as a DEAD link, not a
+ * deliberate gate. The OFF state is now unambiguous: a "Coming soon" status badge (the same copy the
+ * tier cards use for a future tier), with no href and none of the link's wording. The ON state is the
+ * unchanged live link to the membership screen.
+ *
+ * Pure + node-testable: the caller passes the flag state (membershipEnabled() at runtime) and gets
+ * back everything the DOM half needs:
+ *   • flag ON  → { kind: "link", href: MEMBERSHIP_ROUTE, label: "Manage →" }
+ *   • flag OFF → { kind: "coming-soon", label: "Coming soon" }
+ * @param {boolean} enabled the membership feature flag (config.flags.membership)
+ * @returns {{kind: "link", href: string, label: string}|{kind: "coming-soon", label: string}}
+ */
+export function profileManageAffordance(enabled) {
+  if (enabled) return { kind: "link", href: MEMBERSHIP_ROUTE, label: "Manage →" };
+  return { kind: "coming-soon", label: "Coming soon" };
+}
+
 // --- Switch availability (the heart of the AC) ---------------------------------------------------
 
 /**

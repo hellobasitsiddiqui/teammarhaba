@@ -6097,7 +6097,8 @@ button.tm-pf-chip[disabled] {
 }
 /* "Manage →" is a live link to #/membership when the membership flag is on (TM-643) — ink it with the
  * accent and drop the default browser underline so it matches the Paper affordances (a.tm-event-map et
- * al). The muted <span> variant, shown when the flag is off, keeps its .tm-muted look. */
+ * al). While the flag is off the row shows a "Coming soon" badge instead (TM-882), styled by the tier
+ * cards' .tm-tier-badge-soon pill (membership-tier.css, loaded globally) — no dead link-styled label. */
 a.tm-pf-go {
     color: var(--accent);
     text-decoration: none;
