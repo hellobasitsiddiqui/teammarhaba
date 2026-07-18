@@ -26,7 +26,10 @@ import {
 } from "./api.js";
 import { currentUser, signOut } from "./auth.js";
 import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES } from "./storage.js";
-import { paintNavAvatar as onAvatarChanged } from "./nav-avatar.js";
+// TM-846: avatar changes are BROADCAST, not hand-repainted per surface. The upload success path
+// announces once; every avatar surface subscribes (nav-avatar.js for the nav chip — loaded directly
+// by index.html — and this module for the control preview + the identity header / strength hub).
+import { announceAvatarChanged, onAvatarChangedEvent } from "./avatar-events.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
 import { clear, el, modal, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
@@ -406,7 +409,20 @@ function paintHub(profile) {
   const id = identitySummary(profile);
   hub.name.textContent = id.short;
   hub.meta.textContent = id.metaLine || "Add your city and age";
-  hub.initial.textContent = id.initial;
+  // TM-846: the identity avatar is a real avatar SURFACE — the photo when the Firebase user has one
+  // (photoURL, the single source of truth — read live, same as the avatar control), else the initial
+  // glyph. Exactly one of the pair is visible at a time.
+  const photoURL = currentUser()?.photoURL || "";
+  hub.glyph.textContent = id.initial;
+  if (photoURL) {
+    hub.photo.src = photoURL; // assigning .src is XSS-safe (no markup parse) — never innerHTML.
+    hub.photo.hidden = false;
+    hub.glyph.hidden = true;
+  } else {
+    hub.photo.removeAttribute("src");
+    hub.photo.hidden = true;
+    hub.glyph.hidden = false;
+  }
 
   // Account contact (TM-783): the email + phone this account is registered with.
   const contact = accountContact(profile);
@@ -416,14 +432,14 @@ function paintHub(profile) {
   hub.phone.classList.toggle("tm-pf-contact-empty", !contact.hasPhone);
   hub.email.classList.toggle("tm-pf-contact-empty", !contact.email);
 
-  // Completeness: the photo counts too, read live off the Firebase user's photoURL (the single source
-  // of truth, same as the avatar control) rather than anything persisted on our side.
-  const hasPhoto = Boolean(currentUser()?.photoURL);
-  const strength = profileStrength(profile, { hasPhoto });
+  // Completeness: the photo counts too, read live off the same photoURL as the identity avatar above
+  // (the single source of truth) rather than anything persisted on our side.
+  const strength = profileStrength(profile, { hasPhoto: Boolean(photoURL) });
   hub.bar.style.width = `${strength.percent}%`;
   hub.barPct.textContent = `${strength.percent}% complete`;
-  // The nudge points at the first gaps; at 100% it reads as a reassurance, and we drop the arrow.
-  hub.barNudge.textContent = strength.complete ? strength.nudge : `${strength.nudge} →`;
+  // The nudge points at the first gaps — each one a tappable jump to its field (TM-881); at 100% it
+  // reads as a reassurance and we drop the arrow.
+  paintStrengthNudge(hub.barNudge, strength);
 
   // Interests card (TM-778) — repaint the saved-interest chips from the same /me payload.
   paintInterests(profile);
@@ -445,6 +461,57 @@ function paintHub(profile) {
     // Stamp "shown today" so the same-day suppression fires on the next paint (don't nag twice a day).
     recordInterestsPromptShown(new Date().toISOString());
   }
+}
+
+/**
+ * The DOM id a strength-gap key (profile-core STRENGTH_FIELDS) jumps to when its "Add …" prompt is
+ * activated (TM-881). Name/city/age/phone map straight onto their `profile-<field>` controls (city
+ * is the TM-877 SELECT — focusable like any input). Photo has no form field: it targets the avatar
+ * control — the native capture button when the Capacitor shell built one (the web file input is
+ * hidden there, TM-281), else the file input itself. Resolved at CLICK time, not render time, so it
+ * follows whatever avatar control the current platform actually rendered.
+ *
+ * @param {string} key a `profileStrength().gaps[].key`
+ * @returns {string} the id to hand to focusOnPage.
+ */
+function strengthGapTarget(key) {
+  if (key === "photo") {
+    return document.getElementById("profile-avatar-camera") ? "profile-avatar-camera" : "profile-avatar-file";
+  }
+  return { name: "profile-firstName", city: "profile-city", age: "profile-age", phone: "profile-phone" }[key];
+}
+
+/**
+ * Render the strength card's "what's missing" nudge (TM-881). Keeps the shipped copy shape — at
+ * most the first two gaps, "Add <gap> + <gap> →" — but each named gap is now a REAL button (not the
+ * old inert span text) that scrolls to and focuses its field via the same focusOnPage the menu rows
+ * and the interests CTA use. Real <button>s give keyboard reach + Enter/Space activation for free;
+ * the aria-label restores the "Add" verb a screen reader would otherwise miss ("a phone" alone).
+ * At 100% the nudge is pure reassurance — text only, no controls, no arrow.
+ *
+ * @param {HTMLElement} node the nudge container (shell.hub.barNudge).
+ * @param {ReturnType<typeof profileStrength>} strength the current strength model.
+ */
+function paintStrengthNudge(node, strength) {
+  node.textContent = ""; // wipe the previous paint (text or buttons) before rebuilding
+  if (strength.complete) {
+    node.textContent = strength.nudge;
+    return;
+  }
+  const named = strength.gaps.slice(0, 2); // the nudge names at most two gaps (the profile-core rule)
+  node.append("Add ");
+  named.forEach((gap, i) => {
+    if (i > 0) node.append(" + ");
+    node.append(
+      el("button", {
+        type: "button",
+        class: "tm-pf-nudge-gap",
+        "aria-label": `Add ${gap.label}`,
+        onClick: () => focusOnPage(strengthGapTarget(gap.key)),
+      }, gap.label),
+    );
+  });
+  node.append(" →");
 }
 
 // ---- interests card (TM-778) -----------------------------------------------------------------
@@ -874,8 +941,10 @@ function buildAvatar() {
     setProgress(0);
     try {
       await uploadAvatar(file, setProgress);
-      refresh();
-      onAvatarChanged(); // repaint the nav avatar from the new photoURL.
+      // TM-846: ONE broadcast repaints EVERY avatar surface — the nav chip (nav-avatar.js
+      // subscribes), this control's own preview and the identity header + strength % (the
+      // module-level subscription below buildAvatar) — so no surface is left stale until reload.
+      announceAvatarChanged();
       toast("Avatar updated.", { type: "success" });
     } catch (err) {
       const msg = err?.message || "Couldn't upload your avatar.";
@@ -947,6 +1016,17 @@ function buildAvatar() {
   ]);
   return { wrapper, refresh };
 }
+
+// TM-846: this page's avatar surfaces repaint on the avatar-changed broadcast — the upload control's
+// own preview AND the identity header + strength % (paintHub reads photoURL live, so `hasPhoto` and
+// the "a photo" gap correct themselves the moment the upload lands, no reload). Registered ONCE at
+// module level (never per buildShell — that would stack a listener per page entry); the optional
+// chaining makes it a safe no-op when the profile screen isn't mounted, and the state.profile guard
+// keeps a load-error page from being repainted with blank identity data.
+onAvatarChangedEvent(() => {
+  shell?.avatar?.refresh();
+  if (shell?.hub && state.profile) paintHub(state.profile);
+});
 
 function buildField(field) {
   const id = `profile-${field.key}`;
@@ -1136,12 +1216,17 @@ function buildShell(view) {
 
   const status = el("div", { id: "profile-status" });
 
-  // ── Identity header (paper-profile) ── avatar glyph + name + "City · age". Painted by paintHub().
+  // ── Identity header (paper-profile) ── avatar + name + "City · age". Painted by paintHub().
   // The name/meta start BLANK (not the "Your profile" placeholder) so the pre-load render never shows
   // a concrete, misleading empty-profile identity for an established user (TM-663) — the CSS skeleton
   // (.tm-pf-loading) fills the gap until paintHub() lands the real values from /me. The 🙂 glyph is the
   // genuine no-avatar fallback (not a wrong value), and it's hidden behind the skeleton while loading.
-  const hubInitial = el("span", { class: "tm-pf-avatar", "aria-hidden": "true", text: "🙂" });
+  // TM-846: the circle holds a glyph AND a photo <img> (mirroring buildAvatar's initial+image pair);
+  // paintHub shows exactly one of them from the live photoURL, so this header is a real avatar surface
+  // that the avatar-changed broadcast keeps fresh.
+  const hubGlyph = el("span", { class: "tm-pf-avatar-glyph", "aria-hidden": "true", text: "🙂" });
+  const hubPhoto = el("img", { class: "tm-pf-avatar-photo", alt: "", hidden: true });
+  const hubAvatar = el("span", { class: "tm-pf-avatar", "aria-hidden": "true" }, [hubGlyph, hubPhoto]);
   const hubName = el("div", { class: "tm-pf-name", text: "" });
   const hubMeta = el("div", { class: "tm-pf-sub", text: "" });
   // ── Account contact (TM-783) ── the email + phone this account is registered with, painted by
@@ -1160,7 +1245,7 @@ function buildShell(view) {
     ]),
   ]);
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
-    hubInitial,
+    hubAvatar,
     el("div", {}, [hubName, hubMeta, hubContact]),
   ]);
 
@@ -1289,7 +1374,9 @@ function buildShell(view) {
     status,
     avatar,
     root,
-    hub: { name: hubName, meta: hubMeta, initial: hubInitial, email: hubEmail, phone: hubPhone, bar, barPct, barNudge, barInterestsCta },
+    // TM-846: `glyph` + `photo` are the identity avatar's two mutually-exclusive faces (paintHub
+    // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
+    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.

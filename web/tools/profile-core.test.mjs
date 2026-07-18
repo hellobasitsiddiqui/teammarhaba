@@ -190,6 +190,25 @@ test("profileStrength tolerates null input", () => {
   assert.equal(s.complete, false);
 });
 
+// TM-881: `gaps` is the keyed twin of `missing` — the renderer maps each gap's KEY onto the
+// `profile-<field>` control its "Add …" prompt must jump to, so the keys (not just the labels)
+// are part of the contract.
+test("profileStrength exposes keyed gaps (TM-881) — same order as missing, with the field keys", () => {
+  const s = profileStrength({ firstName: "A" }, { hasPhoto: false });
+  assert.deepEqual(s.gaps, [
+    { key: "city", label: "your city" },
+    { key: "age", label: "your age" },
+    { key: "phone", label: "a phone" },
+    { key: "photo", label: "a photo" },
+  ]);
+  // The label lists must never drift apart — gaps IS missing, keyed.
+  assert.deepEqual(s.gaps.map((g) => g.label), s.missing);
+});
+
+test("profileStrength gaps is empty when the profile is complete (TM-881)", () => {
+  assert.deepEqual(profileStrength(me(), { hasPhoto: true }).gaps, []);
+});
+
 // ---- publicSummary + formatJoined -------------------------------------------------------------
 
 test("publicSummary builds the public-preview model (name, avatar, city) from the real /me shape", () => {
