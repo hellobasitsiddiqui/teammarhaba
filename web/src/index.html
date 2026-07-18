@@ -256,7 +256,7 @@
 
                 <!-- Step 2 — enter the 6-digit code (revealed after a code is sent). -->
                 <!-- TM-867: true six-box OTP input (replaces the TM-683 single "evoke the boxes" field).
-                     On-screen keypad still deferred; the resend countdown is TM-866 (follow-up). -->
+                     On-screen keypad still deferred; the resend countdown landed in TM-866. -->
                 <div id="emailcode-step-code" class="auth-step auth-verify" hidden>
                     <div class="auth-verify-head">
                         <h2 class="auth-verify-title">Enter your code</h2>
@@ -313,6 +313,15 @@
                      ::before background so it survives login.js's textContent write; no nested node). -->
                 <p id="auth-error" class="auth-error" role="alert" hidden></p>
 
+                <!-- TM-866: polite status line for the resend-cooldown announcements ("You can request
+                     a new email code in 30 seconds." / "…SMS code now." — channel-specific, since both
+                     cooldowns share this ONE region). Its OWN region — not the role="alert" error
+                     above (assertive, would interrupt) — and visually hidden: the sighted cue is the
+                     ticking button label itself. In the markup from page load (never [hidden]) because
+                     live regions only announce reliably when the region EXISTS before its first write;
+                     login.js writes its textContent at cooldown start and expiry, never per tick. -->
+                <p id="auth-status" class="visually-hidden" aria-live="polite"></p>
+
                 <!-- "Try another way" disclosure: SMS + the existing email+password (TM-234). -->
                 <button id="try-another-btn" type="button" class="linkish" aria-expanded="false"
                         aria-controls="auth-alternatives">Try another way</button>
@@ -366,6 +375,11 @@
                                          stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
                                          aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5" /></svg>
                                 </button>
+                                <!-- TM-866 review: the SMS resend lives HERE, on the step the user is
+                                     actually on — the phone step (send button included) hides the moment
+                                     a send succeeds, so the cooldown's countdown must tick on this link
+                                     to ever be visible. The SMS twin of #emailcode-resend-btn. -->
+                                <button id="sms-resend-btn" type="button" class="secondary auth-quiet-link">Text me another code</button>
                             </div>
                         </div>
                         <!-- Firebase renders the (invisible) reCAPTCHA abuse guard here. -->

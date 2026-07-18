@@ -90,8 +90,10 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   );
   await page.click("#emailcode-send-btn");
   await requested;
+  // TM-867: #emailcode-code is the first of six boxes; filling it distributes the digits and
+  // AUTO-submits — no verify click (on success onAuthChanged hides the form before run() ever
+  // re-enables the button, so a click can never land; see email-code-login.spec.mjs).
   await page.fill("#emailcode-code", await peekCode(email));
-  await page.click("#emailcode-verify-btn");
   await expect(page.locator("#signout-btn")).toBeVisible();
 
   // 2. GATED: the completion gate intercepts, and it carries the phone pair (country picker + input).
