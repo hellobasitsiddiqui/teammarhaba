@@ -648,59 +648,90 @@ function openInterestPicker() {
   }
 
   // Pending selection seeded from the saved set; Save PATCHes it. `let` so the toggle handlers can swap
-  // it and re-render the picker body in place.
+  // it and refresh the picker's selection state in place.
   let selected = savedInterestLabels(state.profile?.interests);
   const bodyWrap = el("div", { class: "tm-pf-picker" });
   const dialog = modal("Add interests", bodyWrap);
 
-  const renderPicker = () => {
-    clear(bodyWrap);
-    const { groups, selectedCount, atMax } = catalogueGroups(catalogue, selected, { max });
-    bodyWrap.append(
-      el("p", { class: "tm-muted tm-pf-picker-count", text: `${selectedCount} of ${max} selected` }),
-    );
-    for (const group of groups) {
-      bodyWrap.append(el("h4", { class: "tm-pf-picker-cat", text: group.category }));
-      const row = el("div", { class: "tm-pf-chips" });
-      for (const opt of group.options) {
-        // Leading catalogue emoji (TM-805) on the picker chip, only when the row carries one.
-        const emojiSpan = opt.emoji
-          ? el("span", { class: "tm-pf-chip-emoji", "aria-hidden": "true", text: opt.emoji })
-          : null;
-        row.append(
-          el("button", {
-            type: "button",
-            class: `tm-pf-chip tm-pf-picker-opt${opt.selected ? " tm-pf-chip-on" : ""}`,
-            "aria-pressed": opt.selected ? "true" : "false",
-            disabled: opt.disabled,
-            onClick: () => {
-              selected = toggleInterest(selected, opt.label, { max });
-              renderPicker();
-            },
-          }, [emojiSpan, el("span", { text: opt.label })]),
-        );
-      }
-      bodyWrap.append(row);
+  // ── TM-860: the picker body is built ONCE; toggles repaint IN PLACE. ────────────────────────────
+  // The old renderPicker() clear(bodyWrap)-and-rebuilt every chip on each toggle. Wiping the scroll
+  // container's content collapses its height mid-frame, and real mobile engines (iOS Safari / Android
+  // WebView — NOT desktop Chromium, which rebuilds synchronously and keeps scrollTop) clamp
+  // .tm-modal-body's scrollTop to 0 — so selecting a chip near the bottom bounced the user back to the
+  // top of the list. Instead we keep handles to every selection-dependent node and mutate only those,
+  // mirroring onboarding.js's paintChip pattern (which is why onboarding never had this bug).
+  const chipHandles = []; // { label, button } for every catalogue chip, in render order
+  let countNode = null; //  the "N of max selected" line
+  let errorNode = null; //  the selection-error line (always present; hidden when the set is savable)
+  let saveBtn = null; //    the Save button (disabled while the selection violates min/max)
+
+  /**
+   * Repaint everything that depends on `selected`, WITHOUT touching the DOM structure: each chip's
+   * on/off modifier + aria-pressed, the at-max dimming of the *other* chips, the count line, and the
+   * error + Save-disabled pair. Same rules the initial build used (catalogueGroups/selectionError) —
+   * this is just those decisions re-applied to the existing nodes.
+   */
+  const refreshPicker = () => {
+    const chosen = new Set(selected);
+    const atMax = chosen.size >= max;
+    countNode.textContent = `${chosen.size} of ${max} selected`;
+    for (const { label, button } of chipHandles) {
+      const on = chosen.has(label);
+      // Like onboarding's paintChip: `.tm-pf-chip-on` is a MODIFIER layered on the base `.tm-pf-chip`
+      // (which carries the padding/border) — toggle only the modifier, never the base class.
+      button.classList.toggle("tm-pf-chip-on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+      // Disabled only at the cap AND not selected (deselecting to make room must always stay possible)
+      // — the same predicate catalogueGroups computes for its options' `disabled` flag.
+      button.disabled = atMax && !on;
     }
     const err = selectionError(selected, state.interestConfig);
-    bodyWrap.append(
-      el("div", { class: "tm-pf-picker-actions" }, [
-        err ? el("p", { class: "tm-field-error", role: "alert", text: err }) : null,
-        el("button", {
-          type: "button",
-          class: "tm-btn tm-btn-primary",
-          disabled: Boolean(err),
-          onClick: async () => {
-            dialog.close();
-            await saveInterests(selected);
-          },
-        }, "Save"),
-      ]),
-    );
-    // Keep the "atMax" state visible via the count line; the disabled options already reflect it.
-    void atMax;
+    errorNode.textContent = err;
+    errorNode.hidden = !err;
+    saveBtn.disabled = Boolean(err);
   };
-  renderPicker();
+
+  // Build the static structure once: the count line, the grouped chips, and the actions row. All
+  // selection-dependent state (on/off, disabled, count, error) is painted by refreshPicker() below —
+  // one source of truth, so the initial paint and every toggle repaint can never drift apart.
+  const { groups } = catalogueGroups(catalogue, selected, { max });
+  countNode = el("p", { class: "tm-muted tm-pf-picker-count" });
+  bodyWrap.append(countNode);
+  for (const group of groups) {
+    bodyWrap.append(el("h4", { class: "tm-pf-picker-cat", text: group.category }));
+    const row = el("div", { class: "tm-pf-chips" });
+    for (const opt of group.options) {
+      // Leading catalogue emoji (TM-805) on the picker chip, only when the row carries one.
+      const emojiSpan = opt.emoji
+        ? el("span", { class: "tm-pf-chip-emoji", "aria-hidden": "true", text: opt.emoji })
+        : null;
+      const button = el("button", {
+        type: "button",
+        class: "tm-pf-chip tm-pf-picker-opt",
+        onClick: () => {
+          selected = toggleInterest(selected, opt.label, { max });
+          refreshPicker(); // in place — never clear/rebuild, so the body's scroll position survives
+        },
+      }, [emojiSpan, el("span", { text: opt.label })]);
+      chipHandles.push({ label: opt.label, button });
+      row.append(button);
+    }
+    bodyWrap.append(row);
+  }
+  // The error line is ALWAYS in the tree (hidden when savable) so refreshPicker only flips text +
+  // hidden — inserting/removing it per toggle would be a structural change again. role="alert" makes
+  // a newly-revealed message announce itself to assistive tech.
+  errorNode = el("p", { class: "tm-field-error", role: "alert", hidden: true });
+  saveBtn = el("button", {
+    type: "button",
+    class: "tm-btn tm-btn-primary",
+    onClick: async () => {
+      dialog.close();
+      await saveInterests(selected);
+    },
+  }, "Save");
+  bodyWrap.append(el("div", { class: "tm-pf-picker-actions" }, [errorNode, saveBtn]));
+  refreshPicker();
 }
 
 /** Build the PATCH body: trimmed values, age coerced to a number; blank fields are omitted. */
