@@ -6169,7 +6169,12 @@ a.tm-pf-go:focus-visible {
  * a.tm-pf-go (there's no global button reset, so a bare button.tm-pf-go would render as default browser
  * button chrome — grey box + border). Strip that chrome so it reads as the quiet link the copy promises,
  * and mirror a.tm-pf-go's accent ink / hover-underline / focus-visible ring so it matches its sibling
- * links (and keeps the visible focus outline for keyboard a11y). Block-level under the strength label. */
+ * links (and keeps the visible focus outline for keyboard a11y). Block-level under the strength label.
+ *
+ * TM-901 (WCAG 1.4.1 Use of Color): the DEFAULT state carries a persistent DOTTED underline — accent
+ * ink alone marked the control, and the solid underline only appeared on :hover, which touch users
+ * never see. A colour-vision-deficient touch user couldn't tell the prompt was tappable (regressing
+ * to the inert-text bug for them). Dotted-by-default + solid-on-hover keeps the two states distinct. */
 .tm-pf-nudge-interests {
     display: block;
     margin-top: var(--space-2);
@@ -6179,7 +6184,7 @@ a.tm-pf-go:focus-visible {
     text-align: left;
     cursor: pointer;
     color: var(--accent);
-    text-decoration: none;
+    text-decoration: underline dotted;
 }
 .tm-pf-nudge-interests:hover {
     text-decoration: underline;
@@ -6193,8 +6198,9 @@ a.tm-pf-go:focus-visible {
 /* TM-881: the strength nudge's "Add …" gap prompts are REAL <button>s (each jumps to + focuses its
  * field) rendered INLINE inside the "Add a phone + a photo →" line. Like .tm-pf-nudge-interests
  * above, strip the default button chrome; `font: inherit` matches the surrounding .tm-pf-barnudge
- * line (buttons don't inherit font), so the line looks exactly as it did when it was inert text —
- * now with a hover underline + a visible focus ring for keyboard users. */
+ * line (buttons don't inherit font). A persistent DOTTED underline (TM-901, WCAG 1.4.1 — see the
+ * .tm-pf-nudge-interests comment) marks each prompt as tappable without relying on colour alone;
+ * :hover swaps it for the solid underline, and keyboard users get the visible focus ring. */
 .tm-pf-nudge-gap {
     padding: 0;
     border: none;
@@ -6202,7 +6208,7 @@ a.tm-pf-go:focus-visible {
     font: inherit;
     color: var(--accent);
     cursor: pointer;
-    text-decoration: none;
+    text-decoration: underline dotted;
 }
 .tm-pf-nudge-gap:hover {
     text-decoration: underline;
