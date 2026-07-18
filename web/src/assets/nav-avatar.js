@@ -8,6 +8,7 @@
 // `textContent` — never innerHTML.
 
 import { onAuthChanged, currentUser } from "./auth.js";
+import { onAvatarChangedEvent } from "./avatar-events.js";
 
 const ID = "nav-avatar";
 
@@ -46,6 +47,11 @@ export function paintNavAvatar() {
 // Repaint whenever auth state changes (sign-in/out, reload restore, and after an avatar upload which
 // updates the in-memory Firebase user's photoURL — onAuthChanged also fires on profile updates).
 onAuthChanged(() => paintNavAvatar());
+
+// TM-846: also repaint on the avatar-changed broadcast — the upload success path announces once and
+// every avatar surface (this nav chip, the profile preview, the identity header) repaints itself,
+// instead of the uploader having to know about and hand-repaint each surface.
+onAvatarChangedEvent(() => paintNavAvatar());
 
 if (typeof window !== "undefined") {
   window.tmNavAvatar = { paintNavAvatar };

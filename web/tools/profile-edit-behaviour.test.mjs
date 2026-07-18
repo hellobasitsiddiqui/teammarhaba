@@ -166,7 +166,11 @@ function loadProfileModule(deps) {
     "  getMe, updateMe, getMembership, getInterestCatalogue, getInterestConfig, ApiError,\n" +
     "  currentUser, signOut,\n" +
     "  isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES,\n" +
-    "  onAvatarChanged, isNativeCameraAvailable, captureAvatarImage,\n" +
+    // `onAvatarChanged` is the pre-TM-846 direct nav repaint; `announceAvatarChanged`/`onAvatarChangedEvent`
+    // are the TM-846 broadcast pair. Both stay in the destructure so this harness loads the source from
+    // either side of that change (the fail-before proof evals main's copy) — unused names are harmless.
+    "  onAvatarChanged, announceAvatarChanged, onAvatarChangedEvent,\n" +
+    "  isNativeCameraAvailable, captureAvatarImage,\n" +
     "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
@@ -181,7 +185,7 @@ function loadProfileModule(deps) {
   // A test seam appended to the eval copy only: reach the module-private shell/state + internals.
   const seam = "\nexport function __setShell(s){ shell = s; }\n" +
     "export function __getState(){ return state; }\n" +
-    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField };\n";
+    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField, buildAvatar };\n";
 
   const stripped = withoutImports.replace(/gstatic\.com|from ["']\.\//, "");
   assert.doesNotMatch(preamble + stripped, /^import[\s\S]*?from/m, "all top-level imports must be replaced before eval");
@@ -206,6 +210,10 @@ const membershipTierUrl = new URL("../src/assets/membership-tier.js", import.met
 // degrade path) so paintInterests/loadInterestsMeta run without a network.
 const interestsCoreUrl = new URL("../src/assets/interests-core.js", import.meta.url);
 const interestsCore = await import(interestsCoreUrl);
+// The TM-846 avatar-changed broadcast — dependency-free by design, so the REAL pub/sub is injected
+// and the upload-success test proves the shipped announce → subscribers → repaint chain end-to-end.
+const avatarEventsUrl = new URL("../src/assets/avatar-events.js", import.meta.url);
+const avatarEvents = await import(avatarEventsUrl);
 
 let getMeImpl = async () => ({});
 let updateMeImpl = async () => ({});
@@ -217,6 +225,10 @@ let getMembershipImpl = async () => ({});
 let getInterestCatalogueImpl = async () => null;
 let getInterestConfigImpl = async () => null;
 let currentUserImpl = () => null;
+// Avatar-control seams (TM-846): mutable so the upload-success test can enable the control and make
+// the fake upload "land" a photoURL (the default stays the disabled/no-op state every other test had).
+let isStorageConfiguredImpl = () => false;
+let uploadAvatarImpl = async () => "";
 
 const deps = {
   getMe: (...a) => getMeImpl(...a),
@@ -227,11 +239,14 @@ const deps = {
   ApiError,
   currentUser: (...a) => currentUserImpl(...a),
   signOut: async () => {},
-  isStorageConfigured: () => false,
-  uploadAvatar: async () => "",
+  isStorageConfigured: (...a) => isStorageConfiguredImpl(...a),
+  uploadAvatar: (...a) => uploadAvatarImpl(...a),
   validateAvatarFile: () => "",
   MAX_AVATAR_BYTES: 5 * 1024 * 1024,
   onAvatarChanged: () => {},
+  // The REAL TM-846 broadcast pair — so announce → subscriber → repaint is the shipped chain.
+  announceAvatarChanged: avatarEvents.announceAvatarChanged,
+  onAvatarChangedEvent: avatarEvents.onAvatarChangedEvent,
   isNativeCameraAvailable: () => false,
   captureAvatarImage: async () => null,
   clear: (node) => {
@@ -330,7 +345,12 @@ function makeShell(values = {}) {
   const hub = {
     name: wireClassList(fakeEl("div")),
     meta: wireClassList(fakeEl("div")),
+    // `initial` is the pre-TM-846 single identity glyph node; kept alongside the TM-846 glyph/photo
+    // pair so this harness drives BOTH sides of that change (the fail-before proof evals main's
+    // paintHub, which still writes hub.initial) — the extra node is inert for whichever side ignores it.
     initial: wireClassList(fakeEl("span")),
+    glyph: wireClassList(fakeEl("span")),
+    photo: wireClassList(fakeEl("img")),
     email: wireClassList(fakeEl("div")),
     phone: wireClassList(fakeEl("div")),
     bar: wireClassList(fakeEl("i")),
@@ -883,6 +903,186 @@ test("collectPatch composes the E.164 phone from picker + national — blank sta
   profile.__setShell(shell);
   patch = profile.collectPatch();
   assert.ok(!("phone" in patch), "a blank national number is omitted — never a dial-code-only '+971'");
+});
+
+// ---- TM-881: the strength "Add …" gap prompts are real jump-to-field controls ------------------
+// paintHub used to render the nudge as inert <span> text ("Add a phone + a photo →" that did nothing
+// on click/tap); it must now render each named gap as a keyboard-reachable <button> wired to
+// focusOnPage(<the gap's field id>). These tests drive the shipped paintHub + click handlers.
+
+/** The BUTTON children of a fake node (the gap prompts among the nudge's text pieces). */
+function nudgeButtons(node) {
+  return node._children.filter((c) => c && c.tagName === "BUTTON");
+}
+
+/** A fake node's visible label — textContent, or its appended text-node children joined. */
+function nodeLabel(node) {
+  return node._textContent || node._children.filter((c) => c && c.nodeType === 3).map((c) => c.data).join("");
+}
+
+test("paintHub renders each named strength gap as a focusable button that jumps to its field (TM-881)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+    // Name + city present; age, phone, photo missing → the nudge names the first two gaps (age, phone).
+    profile.paintHub({ firstName: "Ada", lastName: "L", city: "London" });
+
+    const buttons = nudgeButtons(shell.hub.barNudge);
+    assert.equal(buttons.length, 2, "each NAMED gap is a real button (the nudge caps at two)");
+    assert.deepEqual(buttons.map(nodeLabel), ["your age", "a phone"], "labels keep the shipped copy");
+    for (const b of buttons) {
+      // type=button so activating one can never submit the surrounding form; the aria-label restores
+      // the "Add" verb a screen reader would miss from the bare "a phone" fragment.
+      assert.equal(b.getAttribute("type"), "button");
+    }
+    assert.equal(buttons[0].getAttribute("aria-label"), "Add your age");
+    assert.equal(buttons[1].getAttribute("aria-label"), "Add a phone");
+
+    // Activating a prompt scrolls to AND focuses the matching profile-<field> control (focusOnPage).
+    const focused = [];
+    globalThis.document.getElementById = (id) => ({
+      scrollIntoView: () => {},
+      focus: () => focused.push(id),
+    });
+    buttons[1].onClick();
+    assert.deepEqual(focused, ["profile-phone"], "'a phone' focuses the phone field");
+    buttons[0].onClick();
+    assert.deepEqual(focused, ["profile-phone", "profile-age"], "'your age' focuses the age field");
+  });
+});
+
+test("the photo gap targets the avatar control — file input on web, camera button when native (TM-881)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ uid: "u1", photoURL: null });
+
+    // Everything but the photo present → exactly one gap, "a photo".
+    profile.paintHub({ firstName: "Ada", lastName: "L", city: "London", age: 30, phone: "+447700900123" });
+    const buttons = nudgeButtons(shell.hub.barNudge);
+    assert.equal(buttons.length, 1);
+    assert.equal(nodeLabel(buttons[0]), "a photo");
+
+    // Web: no #profile-avatar-camera in the DOM → the prompt focuses the file input.
+    const focused = [];
+    globalThis.document.getElementById = (id) =>
+      id === "profile-avatar-camera" ? null : { scrollIntoView: () => {}, focus: () => focused.push(id) };
+    buttons[0].onClick();
+    assert.deepEqual(focused, ["profile-avatar-file"]);
+
+    // Native shell (TM-281): the camera button exists (the file input is hidden there) → it wins.
+    const focusedNative = [];
+    globalThis.document.getElementById = (id) => ({ scrollIntoView: () => {}, focus: () => focusedNative.push(id) });
+    buttons[0].onClick();
+    assert.deepEqual(focusedNative, ["profile-avatar-camera"]);
+  });
+});
+
+test("at 100% the nudge is reassurance text only — no controls, no arrow (TM-881)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ uid: "u1", photoURL: "https://cdn.test/avatar.png" });
+
+    profile.paintHub({ firstName: "Ada", lastName: "L", city: "London", age: 30, phone: "+447700900123" });
+
+    assert.equal(nudgeButtons(shell.hub.barNudge).length, 0, "nothing left to add → nothing to click");
+    assert.equal(shell.hub.barNudge._textContent, "Your profile is all set");
+  });
+});
+
+// ---- TM-846: avatar upload repaints EVERY avatar surface (identity header + strength included) ---
+
+test("paintHub shows the identity PHOTO when the user has a photoURL, the glyph when not (TM-846)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+
+    currentUserImpl = () => ({ uid: "u1", photoURL: "https://cdn.test/avatar.png" });
+    profile.paintHub({ firstName: "Ada", lastName: "Lovelace" });
+    assert.equal(shell.hub.photo.src, "https://cdn.test/avatar.png", "the photo face carries the photoURL");
+    assert.equal(shell.hub.photo.hidden, false);
+    assert.equal(shell.hub.glyph.hidden, true, "exactly one face shows — the glyph hides behind the photo");
+
+    // Photo gone (e.g. a different account) → back to the initial glyph.
+    currentUserImpl = () => ({ uid: "u1", photoURL: null });
+    profile.paintHub({ firstName: "Ada", lastName: "Lovelace" });
+    assert.equal(shell.hub.photo.hidden, true);
+    assert.equal(shell.hub.glyph.hidden, false);
+    assert.equal(shell.hub.glyph._textContent, "A", "the glyph is the identity initial");
+  });
+});
+
+test("avatar-events: announce fires every subscriber; unsubscribe + a throwing subscriber are isolated", () => {
+  const calls = [];
+  const offA = avatarEvents.onAvatarChangedEvent(() => calls.push("a"));
+  const offBoom = avatarEvents.onAvatarChangedEvent(() => {
+    throw new Error("boom");
+  });
+  const offB = avatarEvents.onAvatarChangedEvent(() => calls.push("b"));
+  avatarEvents.announceAvatarChanged();
+  assert.deepEqual(calls, ["a", "b"], "all subscribers fire; the thrower doesn't stop the later one");
+  offA();
+  offBoom();
+  avatarEvents.announceAvatarChanged();
+  assert.deepEqual(calls, ["a", "b", "b"], "an unsubscribed listener stays silent");
+  offB();
+});
+
+/** Depth-first search of a fake-node tree for the node carrying the given id attribute. */
+function findById(node, id) {
+  if (!node || typeof node !== "object") return null;
+  if (node.getAttribute && node.getAttribute("id") === id) return node;
+  for (const child of node._children || []) {
+    const hit = findById(child, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+test("avatar upload success repaints the identity header + strength via the broadcast — no reload (TM-846)", async () => {
+  await withFakeDocumentAsync(async () => {
+    TOASTS = [];
+    const shell = makeShell();
+    // A profile complete except the photo → 80%. The upload landing must lift it to 100% and swap
+    // the identity glyph for the new photo IMMEDIATELY (the bug: both stayed stale until reload).
+    const me = { firstName: "Ada", lastName: "L", city: "London", age: 30, phone: "+447700900123" };
+    let photo = null; // the Firebase user's photoURL — null until the fake upload "lands" it
+    currentUserImpl = () => ({ uid: "u1", photoURL: photo });
+    isStorageConfiguredImpl = () => true;
+    uploadAvatarImpl = async () => {
+      photo = "https://cdn.test/new-avatar.png";
+    };
+
+    // The REAL avatar control (shipped buildAvatar), mounted into the shell like buildShell does.
+    const avatar = profile.buildAvatar();
+    shell.avatar = avatar;
+    profile.__setShell(shell);
+    profile.__getState().profile = me;
+
+    profile.paintHub(me);
+    assert.equal(shell.hub.barPct._textContent, "80% complete", "photo-less baseline");
+    assert.equal(shell.hub.photo.hidden, true);
+
+    // Drive a picked file through the shipped change handler (validate → upload → announce).
+    const fileInput = findById(avatar.wrapper, "profile-avatar-file");
+    assert.ok(fileInput, "the avatar control renders its file input");
+    fileInput.files = [{ name: "a.png", type: "image/png", size: 1000 }];
+    await fileInput._listeners.change();
+
+    // Every avatar surface on the page is fresh, with NO reload and NO extra paintHub call here:
+    assert.equal(shell.hub.photo.src, "https://cdn.test/new-avatar.png", "identity header photo updated");
+    assert.equal(shell.hub.photo.hidden, false);
+    assert.equal(shell.hub.glyph.hidden, true);
+    assert.equal(shell.hub.barPct._textContent, "100% complete", "the hasPhoto strength % updated");
+    // The upload control's own preview repainted too (no regression from the broadcast refactor).
+    const preview = avatar.wrapper._children[0]._children.find((c) => c && c.tagName === "IMG");
+    assert.equal(preview.src, "https://cdn.test/new-avatar.png");
+    assert.equal(preview.hidden, false);
+    assert.ok(TOASTS.some((t) => /avatar updated/i.test(t.msg)), "the success toast still shows");
+  });
 });
 
 // An async variant of withFakeDocument.

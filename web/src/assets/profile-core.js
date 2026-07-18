@@ -116,10 +116,15 @@ const STRENGTH_FIELDS = [
  * filled/total counts, the ordered list of what's still missing, and a short call-to-action nudge —
  * the restyled continuation of the shipped completeness prompt (TM-514 AC: preserved + restyled).
  *
+ * `gaps` (TM-881) is the keyed twin of `missing`: the same ordered list but as `{key, label}`
+ * objects, so the renderer can turn each named gap into a REAL control that jumps to the matching
+ * field (the key is what maps onto a `profile-<field>` DOM id). `missing` (labels only) stays —
+ * the nudge copy and existing consumers read it.
+ *
  * @param {object|null|undefined} me a `/me`-shaped object
  * @param {{ hasPhoto?: boolean }} [opts] whether the Firebase user currently has a photoURL
- * @returns {{ percent: number, filled: number, total: number, missing: string[], complete: boolean,
- *   nudge: string }}
+ * @returns {{ percent: number, filled: number, total: number, missing: string[],
+ *   gaps: {key: string, label: string}[], complete: boolean, nudge: string }}
  */
 export function profileStrength(me, { hasPhoto = false } = {}) {
   const m = me || {};
@@ -131,13 +136,14 @@ export function profileStrength(me, { hasPhoto = false } = {}) {
     photo: Boolean(hasPhoto),
   };
   const total = STRENGTH_FIELDS.length;
-  const missing = STRENGTH_FIELDS.filter((f) => !present[f.key]).map((f) => f.label);
+  const gaps = STRENGTH_FIELDS.filter((f) => !present[f.key]).map((f) => ({ key: f.key, label: f.label }));
+  const missing = gaps.map((g) => g.label);
   const filled = total - missing.length;
   const percent = Math.round((filled / total) * 100);
   const complete = missing.length === 0;
   // The nudge names at most the first two gaps so it stays a short line (e.g. "Add a photo + your city").
   const nudge = complete ? "Your profile is all set" : `Add ${missing.slice(0, 2).join(" + ")}`;
-  return { percent, filled, total, missing, complete, nudge };
+  return { percent, filled, total, missing, gaps, complete, nudge };
 }
 
 /**

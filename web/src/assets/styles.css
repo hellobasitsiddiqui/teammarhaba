@@ -5918,6 +5918,17 @@ button.tm-c-reaction {
     background: var(--surface-2);
     border: var(--border-width) solid var(--border);
     border-radius: 50%;
+    /* TM-846: the circle can now hold a real photo — clip it to the round frame. */
+    overflow: hidden;
+}
+/* TM-846: the identity avatar's photo face — fills the circle when a photoURL exists. paintHub shows
+ * exactly one of the glyph/photo pair; the hidden one is display:none via the [hidden] attribute, so
+ * the visible one is the circle's only grid item and centres/fills cleanly. */
+.tm-pf-avatar-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
 }
 .tm-pf-name {
     font-size: var(--fs-5);
@@ -6154,6 +6165,29 @@ a.tm-pf-go:focus-visible {
     text-decoration: underline;
 }
 .tm-pf-nudge-interests:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* TM-881: the strength nudge's "Add …" gap prompts are REAL <button>s (each jumps to + focuses its
+ * field) rendered INLINE inside the "Add a phone + a photo →" line. Like .tm-pf-nudge-interests
+ * above, strip the default button chrome; `font: inherit` matches the surrounding .tm-pf-barnudge
+ * line (buttons don't inherit font), so the line looks exactly as it did when it was inert text —
+ * now with a hover underline + a visible focus ring for keyboard users. */
+.tm-pf-nudge-gap {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: none;
+}
+.tm-pf-nudge-gap:hover {
+    text-decoration: underline;
+}
+.tm-pf-nudge-gap:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 4px;
