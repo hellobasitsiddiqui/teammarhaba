@@ -7,7 +7,8 @@ import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "../fixtures.mjs";
 // Email-code happy path: enter email → "Email me a code" → the backend emails a 6-digit code; the
 // emulator-only peek endpoint (registered ONLY when FIREBASE_AUTH_EMULATOR_HOST is set — inert in
 // dev/prod) hands the test that code → enter it → the backend verifies + mints a custom token → the
-// client signs in → the signed-in panel appears. We also exercise Resend and the SMS path.
+// client signs in → the signed-in panel appears. We also exercise the SMS path; Resend + its
+// cooldown are pinned in tm866-resend-cooldown.spec.mjs.
 //
 // Suppress the first-run product tour (TM-147) so its modal/backdrop can't overlay the controls.
 test.beforeEach(async ({ page }) => {

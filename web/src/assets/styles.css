@@ -820,7 +820,6 @@ body {
     text-align: center;
     font-size: 1.5rem;
     font-weight: 600;
-    font-variant-numeric: tabular-nums; /* equal-width digits — boxes don't wobble as you type */
     background: var(--accent-light);
     border-color: var(--fg-line-strong);
     box-shadow: var(--shadow-sm);
