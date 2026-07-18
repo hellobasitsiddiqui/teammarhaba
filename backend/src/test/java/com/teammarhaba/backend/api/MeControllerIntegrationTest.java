@@ -585,6 +585,85 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void onboardingGateSeedsFirstAndLastNameFromTheCapturedName() throws Exception {
+        // TM-883: onboarding only ever wrote displayName, so firstName/lastName stayed null and the
+        // profile identity header had nothing but fallbacks to show. The captured full name now also
+        // seeds both parts (first word → firstName, remainder → lastName) and GET /me carries them.
+        var who = caller("uid-gate-names", "priya@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Priya Sharma\",\"location\":\"London\",\"age\":28,"
+                                + "\"phone\":\"+447700900001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Priya Sharma"))
+                .andExpect(jsonPath("$.firstName").value("Priya"))
+                .andExpect(jsonPath("$.lastName").value("Sharma"));
+
+        // A named account's GET /me carries the names — the identity header's actual data source.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Priya"))
+                .andExpect(jsonPath("$.lastName").value("Sharma"));
+
+        var saved = users.findByFirebaseUid("uid-gate-names").orElseThrow();
+        assertThat(saved.getFirstName()).isEqualTo("Priya");
+        assertThat(saved.getLastName()).isEqualTo("Sharma");
+    }
+
+    @Test
+    void onboardingGateSeedsFirstNameOnlyForASingleWordName() throws Exception {
+        // TM-883: a single-word name is all first name — no fabricated last name.
+        var who = caller("uid-gate-oneword", "sting@example.com");
+
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Sting\",\"location\":\"Newcastle\",\"age\":45,"
+                                + "\"phone\":\"+447700900002\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Sting"))
+                .andExpect(jsonPath("$.lastName").doesNotExist());
+    }
+
+    @Test
+    void onboardingGateSplitsOnTheFirstSpaceOnly() throws Exception {
+        // TM-883: multi-word names keep everything after the first word as the last name.
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-multiword", "mary@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Mary Jane Watson\",\"location\":\"York\",\"age\":31,"
+                                + "\"phone\":\"+447700900003\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Mary"))
+                .andExpect(jsonPath("$.lastName").value("Jane Watson"));
+    }
+
+    @Test
+    void onboardingGateNeverOverwritesAnExplicitFirstOrLastName() throws Exception {
+        // TM-883: the split is a seed for accounts with NO first/last name — a name the user set
+        // explicitly (PATCH /me) is their own correction and survives an onboarding re-submit.
+        var who = caller("uid-gate-keepnames", "amelia@example.com");
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Amelia Rose\",\"lastName\":\"Pond\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Amelia Williams\",\"location\":\"Leadworth\",\"age\":26,"
+                                + "\"phone\":\"+447700900004\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("Amelia Williams"))
+                .andExpect(jsonPath("$.firstName").value("Amelia Rose"))
+                .andExpect(jsonPath("$.lastName").value("Pond"));
+    }
+
+    @Test
     void onboardingGateTrimsNameAndLocation() throws Exception {
         var who = caller("uid-gate-trim", "trim@example.com");
         mockMvc.perform(post("/api/v1/me/onboarding")

@@ -133,6 +133,22 @@ test("identitySummary omits a missing city or age from the meta line", () => {
   assert.equal(identitySummary({ firstName: "A", age: 40 }).metaLine, "40");
 });
 
+// TM-883: the identity header (and public preview) for a NAMED account — a /me carrying
+// firstName/lastName renders the real name, preferred over displayName. The bug was upstream (the
+// backend never seeded first/last name at onboarding, so /me carried null and the header fell back);
+// this pins the render contract the fix feeds: named data in → name shown, both on the hub header
+// (paintHub → id.short) and the public preview.
+test("identity header and public preview show the name for a named account (TM-883)", () => {
+  const named = me({ firstName: "Priya", lastName: "Sharma", displayName: "someone else" });
+  const id = identitySummary(named);
+  assert.equal(id.full, "Priya Sharma"); // first/last win over displayName
+  assert.equal(id.short, "Priya S."); // what paintHub puts in the header's name slot
+  assert.equal(id.initial, "P");
+  const pub = publicSummary(named);
+  assert.equal(pub.short, "Priya S.");
+  assert.equal(pub.initial, "P");
+});
+
 // ---- profileStrength --------------------------------------------------------------------------
 
 test("profileStrength is 100% with a nudge of 'all set' when every field + a photo are present", () => {
