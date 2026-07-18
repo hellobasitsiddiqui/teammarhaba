@@ -78,6 +78,11 @@ import { toast } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
 import { updateTabbar } from "./tabbar.js";
 import { updateFooter } from "./footer.js";
+// App-shell brand block (TM-885/TM-886): the walking-skeleton wordmark + tagline + #status line at
+// the top of <main class="app">. Router-driven like the tab bar / footer so it hides on the screens
+// that own their full-page header (Profile + the first-run gates) — the pure rule lives in
+// shell-brand-core.js (unit-tested); this is its DOM bridge.
+import { updateShellBrand } from "./shell-brand.js";
 import { updateChatTabBadge } from "./chat-tab-badge.js";
 import { updateNotificationBell } from "./notification-bell.js";
 
@@ -566,6 +571,14 @@ function render() {
   // the RAW signedIn/route (not the `gated` flag): the byline showing on Home/Profile is a cosmetic
   // credit, unrelated to the onboarding/terms gate, and a gated user only ever sees the gate route.
   updateFooter({ signedIn, route });
+
+  // App-shell brand block (TM-885/TM-886): hide the walking-skeleton wordmark/tagline/#status on the
+  // screens that render their OWN full-page header — the Profile hub/preview and the first-run gates
+  // — so e.g. #/profile tops with "Profile", not a stray "Find your people — complete your circle" +
+  // "Ready when you are." above it (the leak the tickets reported as the auth brand / boot splash not
+  // being dismissed; the splash + auth card were in fact fine — this block was the leak). Router-
+  // driven for the same single-source-of-truth reason as the tab bar / footer above.
+  updateShellBrand({ route });
 }
 
 /**
