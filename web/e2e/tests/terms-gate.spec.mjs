@@ -58,7 +58,9 @@ test("@terms a brand-new user is terms-gated, accepts, and then enters the app",
   await signInFreshUser(page, email);
   await completeOnboarding(page, {
     name: "Terms Tester",
-    location: `Termsville-${Date.now()}`,
+    // TM-898: the gate location is the TM-877 allowed-cities dropdown now — a LIST city, picked
+    // via selectOption in the helper (the old unique `Termsville-…` free text can't be selected).
+    location: "Karachi",
     age: 30,
   });
 
