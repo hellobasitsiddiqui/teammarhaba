@@ -4380,6 +4380,13 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Five-column variant for the injected Admin tab (TM-915) — admins only. tabbar.js sets
+   `data-tabs="5"` on the nav when it appends #tab-admin; the base bar stays 4-up for everyone else.
+   Higher specificity than the base `.app-tabbar` rule, so it wins with no !important. */
+.app-tabbar[data-tabs="5"] {
+    grid-template-columns: repeat(5, 1fr);
+}
+
 /* Each tab: an equal column, hand-drawn glyph over a text label, a ≥44px tap target, centred. */
 .app-tab {
     position: relative;

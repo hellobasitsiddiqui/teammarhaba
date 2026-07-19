@@ -30,19 +30,43 @@ export const TABS = Object.freeze([
 export const TAB_IDS = Object.freeze(TABS.map((t) => t.id));
 
 /**
+ * The Admin tab (TM-915) — appended to the bar ONLY for a verified admin. Kept OUT of the locked
+ * `TABS` table (TM-434) on purpose, so the four user tabs stay frozen: `tabsFor()` composes it in
+ * per role, and `activeTab()` matches its `#/admin*` routes. Its visibility is UX-only — every
+ * #/admin route and API stays server-gated (TM-133 role claim / TM-111 RBAC), so surfacing this
+ * entry grants nothing; it just saves an admin the URL-dive to a page they already reach.
+ */
+export const ADMIN_TAB = Object.freeze({ id: "admin", route: "#/admin", prefix: "#/admin" });
+
+/**
+ * The tabs to render for a session, in order: the locked four (TM-434), plus the Admin tab appended
+ * for a verified admin (TM-915). A normal user gets EXACTLY the four — the admin entry is never even
+ * composed in, so it can't leak into their DOM. The DOM half (tabbar.js) injects/removes the
+ * `#tab-admin` link to match, and drives the 4-vs-5 column grid off this list's length.
+ *
+ * @param {{isAdmin?: boolean}} [state] the verified-role flag (defaults to non-admin / fail-safe)
+ * @returns {ReadonlyArray<{id: string, route: string, prefix: string}>}
+ */
+export function tabsFor({ isAdmin = false } = {}) {
+  return isAdmin ? [...TABS, ADMIN_TAB] : TABS;
+}
+
+/**
  * Which tab is "active" for a hash route, or `null` when the current route isn't one of the tabs
- * (e.g. `#/admin`, `#/help`, `#/login`, `#/diagnostics` — no tab is highlighted there).
+ * (e.g. `#/help`, `#/login`, `#/diagnostics` — no tab is highlighted there). Every `#/admin*` route
+ * lights the Admin tab (TM-915) — a pure route→id map, independent of role: a non-admin has no
+ * `#tab-admin` link in the DOM, so nothing lights for them even though this returns "admin".
  *
  * A tab matches when the route equals its route exactly OR is a sub-path of it (`#/events/{id}` →
- * Events; a future `#/chat/{eventId}` → Chat), so a detail deep-link still reflects the right tab.
+ * Events; `#/admin/venues/new` → Admin), so a detail deep-link still reflects the right tab.
  * Order matters only in that each prefix is distinct, so the first match is the only match.
  *
  * @param {string} hash the current `window.location.hash` (e.g. "#/events/42")
- * @returns {("home"|"events"|"chat"|"profile"|null)}
+ * @returns {("home"|"events"|"chat"|"profile"|"admin"|null)}
  */
 export function activeTab(hash) {
   if (typeof hash !== "string" || !hash) return null;
-  for (const tab of TABS) {
+  for (const tab of [...TABS, ADMIN_TAB]) {
     if (hash === tab.prefix || hash.startsWith(`${tab.prefix}/`)) return tab.id;
   }
   return null;
