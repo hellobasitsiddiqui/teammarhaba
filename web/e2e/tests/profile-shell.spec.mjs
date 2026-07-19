@@ -31,7 +31,7 @@ async function signIn(page) {
   await expect(page.locator("#auth-signed-in")).toBeVisible({ timeout: 20_000 });
 }
 
-test("@profile-shell #/profile renders inside the app shell: 4-tab bar present, brand/boot chrome absent (TM-885/TM-886)", async ({ page }) => {
+test("@profile-shell #/profile renders inside the app shell: tab bar present, brand/boot chrome absent (TM-885/TM-886)", async ({ page }) => {
   await signIn(page);
 
   // Enter the profile the everyday way — the bottom Profile tab.
@@ -40,9 +40,10 @@ test("@profile-shell #/profile renders inside the app shell: 4-tab bar present, 
   await expect(page.locator("#profile-view")).toBeVisible();
   await expect(page.locator(".tm-pf-title")).toBeVisible(); // the screen's own "Profile" header
 
-  // TM-885 — the four-tab bottom navigation is present, complete, and Profile-active.
+  // TM-885 — the bottom navigation is present and Profile-active. This test signs in as the seeded
+  // ADMIN, so the bar shows the locked four user tabs plus the injected Admin tab (TM-915) = 5.
   await expect(page.locator("#app-tabbar")).toBeVisible();
-  await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(4);
+  await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(5);
   await expect(page.locator("#tab-profile")).toHaveAttribute("aria-current", "page");
 
   // TM-886 — the pre-login/boot surfaces are fully gone: the boot splash overlay has been REMOVED

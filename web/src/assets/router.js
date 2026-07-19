@@ -548,8 +548,10 @@ function render() {
   // nav — show it only for a signed-in, un-gated user (the CSS breakpoint restricts it to mobile), and
   // light the tab matching the current route. Driven from here so the tab bar shares router's single
   // source of truth (no second hashchange/auth listener). Hidden while EITHER first-run gate is up, so
-  // a gated user can't side-step the gate via a tab.
-  updateTabbar({ signedIn, gated, route });
+  // a gated user can't side-step the gate via a tab. `isAdmin` (the verified TM-110 role claim, the
+  // same flag the top-nav Admin link uses) adds the admin-only fifth tab (TM-915) — it fails safe to
+  // false until resolveRoleThenGuard settles, so no admin tab flashes for a non-admin.
+  updateTabbar({ signedIn, gated, route, isAdmin });
 
   // Chat-tab unread badge (TM-439): the unread pill over the bottom-nav Chat tab, gated to the SAME
   // signed-in, un-gated user as the bar. Driven from here so it shares router's single source of truth

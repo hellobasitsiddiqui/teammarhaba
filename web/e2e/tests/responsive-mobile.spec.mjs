@@ -191,12 +191,13 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     const tabbar = page.locator("#app-tabbar");
     await expect(tabbar).toBeVisible();
 
-    // Four tabs in the LOCKED order: Home · Events · Chat · Profile.
-    await expect(tabbar.locator(".app-tab")).toHaveCount(4);
-    await expect(tabbar.locator(".app-tab-label")).toHaveText(["Home", "Events", "Chat", "Profile"]);
+    // The LOCKED four (Home · Events · Chat · Profile) plus the injected Admin tab (TM-915) — this
+    // suite signs in as the seeded ADMIN, so the bar carries the admin-only fifth tab last.
+    await expect(tabbar.locator(".app-tab")).toHaveCount(5);
+    await expect(tabbar.locator(".app-tab-label")).toHaveText(["Home", "Events", "Chat", "Profile", "Admin"]);
 
-    // Each tab is a real ≥44px tap target.
-    for (const id of ["#tab-home", "#tab-events", "#tab-chat", "#tab-profile"]) {
+    // Each tab is a real ≥44px tap target (incl. the injected Admin tab).
+    for (const id of ["#tab-home", "#tab-events", "#tab-chat", "#tab-profile", "#tab-admin"]) {
       const box = await page.locator(id).boundingBox();
       expect(box.height, `${id} tap target`).toBeGreaterThanOrEqual(44);
     }

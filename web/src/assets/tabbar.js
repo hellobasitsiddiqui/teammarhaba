@@ -11,9 +11,39 @@
 // visibility depends on the SAME signedIn/gated/route values router already computes each render, so
 // piggy-backing on render() keeps one source of truth and avoids a second, drifting state machine.
 
-import { activeTab, shouldShowTabbar } from "./tabbar-core.js";
+import { activeTab, shouldShowTabbar, tabsFor } from "./tabbar-core.js";
 
 const TABBAR_ID = "app-tabbar";
+const ADMIN_TAB_LINK_ID = "tab-admin";
+// The Admin tab's hand-drawn cog, in the SAME stroke voice as the four static tab icons in
+// index.html (viewBox 24, stroke-width 1.9, round caps, currentColor) so it reads as one family.
+const ADMIN_TAB_MARKUP = `<svg class="app-tab-icon" viewBox="0 0 24 24" width="24" height="24" fill="none"
+     stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+     aria-hidden="true" focusable="false">
+    <!-- a little hand-drawn cog — the admin console -->
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M12 3.4v2.5M12 18.1v2.5M3.4 12h2.5M18.1 12h2.5M6 6l1.8 1.8M16.2 16.2 18 18M18 6l-1.8 1.8M6 18l1.8-1.8" />
+  </svg>
+  <span class="app-tab-label">Admin</span>`;
+
+// The Admin tab (TM-915) is NOT in index.html — it is injected here ONLY for a verified admin, so a
+// normal user's DOM never contains any admin affordance (visibility is UX-only; the route + API stay
+// server-gated, TM-133/TM-111). Built on first need and reused; idempotent under render() re-entry —
+// present === false removes it (e.g. an admin signing out, or the bar going hidden on a gate).
+function syncAdminTab(nav, present) {
+  const existing = nav.querySelector(`#${ADMIN_TAB_LINK_ID}`);
+  if (!present) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) return;
+  const link = document.createElement("a");
+  link.id = ADMIN_TAB_LINK_ID;
+  link.className = "app-tab";
+  link.href = "#/admin";
+  link.innerHTML = ADMIN_TAB_MARKUP;
+  nav.append(link); // last slot, after Profile — keeps the locked four in place
+}
 // Body classes: one toggles the content bottom-padding that keeps page content clear of the fixed bar
 // (only when the bar is actually shown); the other hides the bar while a text field is focused so the
 // on-screen keyboard opening can't leave the fixed bar overlapping the input / causing a layout jump.
@@ -37,14 +67,22 @@ function tabbarEl() {
  *  - active tab: mark the tab matching the route with aria-current="page" + an .is-active class, and
  *    clear it from the others, so the selected tab is always in sync with the hash (incl. deep links).
  *
- * @param {{signedIn: boolean, gated: boolean, route: string}} state
+ * @param {{signedIn: boolean, gated: boolean, route: string, isAdmin?: boolean}} state
  */
-export function updateTabbar({ signedIn, gated, route } = {}) {
+export function updateTabbar({ signedIn, gated, route, isAdmin = false } = {}) {
   const nav = tabbarEl();
   if (!nav) return;
 
   const visible = shouldShowTabbar({ signedIn, gated });
   nav.hidden = !visible;
+
+  // Admin tab (TM-915): shown only for a signed-in, un-gated admin — the SAME visibility gate as the
+  // bar (`visible`), so a gated/onboarding admin doesn't get it either. Inject/remove to match, and
+  // drive the grid's column count off tabsFor() so the 4-vs-5 layout has one source of truth.
+  const showAdmin = visible && Boolean(isAdmin);
+  syncAdminTab(nav, showAdmin);
+  nav.dataset.tabs = String(tabsFor({ isAdmin: showAdmin }).length);
+
   // Only pad the page for the bar when it's actually shown (and only matters at the mobile
   // breakpoint, which the CSS scopes). Keeping this off the <body> when hidden means the desktop /
   // signed-out layout is unaffected.
