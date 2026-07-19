@@ -7,19 +7,19 @@ import { ADMIN, TARGET } from "../fixtures.mjs";
 // The bug (router.js:541-546 with 857-869): the router navigates FIRST on an auth change and resolves
 // the role in the BACKGROUND (the TM-307 navigate-first design). The admin-route guard used `!isAdmin`
 // directly, but `isAdmin` fails safe to `false` until that background lookup resolves — so a real admin
-// who DEEP-LINKED or RELOADED straight to `#/admin` was ALWAYS bounced to Home with a spurious
+// who DEEP-LINKED or RELOADED straight to `#/admin/users` was ALWAYS bounced to Home with a spurious
 // "Admins only." error toast, and (worse) never returned even once the role resolved. The fix gates the
 // bounce on a new `roleResolved` flag (shouldBounceNonAdmin: bounce only once the role is KNOWN and it
 // is not admin), so a reload/deep-link to an admin route is HELD until the role settles, then the
 // console mounts for the confirmed admin.
 //
-// Why a RELOAD is the faithful trigger: an in-app hash nav (`location.hash = "#/admin"`) reuses the
+// Why a RELOAD is the faithful trigger: an in-app hash nav (`location.hash = "#/admin/users"`) reuses the
 // already-resolved session where `isAdmin`/`roleResolved` are true — that never hit the bug. The bug
 // lives on the COLD path where the router re-resolves the role from scratch: Firebase restores the
 // persisted session (browserLocalPersistence, as avatar-upload.spec relies on) and `resolveRoleThenGuard`
 // runs afresh with `roleResolved=false` + `isAdmin=false` while the role lookup is in flight — exactly a
-// reload onto `#/admin`. Pre-fix that reload bounced to `#/home` + toasted "Admins only."; post-fix the
-// admin users console (#admin-view / #admin-table) mounts, the hash stays `#/admin`, and NO error toast
+// reload onto `#/admin/users`. Pre-fix that reload bounced to `#/home` + toasted "Admins only."; post-fix the
+// admin users console (#admin-view / #admin-table) mounts, the hash stays `#/admin/users`, and NO error toast
 // appears.
 //
 // This is deterministic (not a race the test must "win"): the fix makes the outcome correct regardless
@@ -69,7 +69,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("@nav-races admin deep-link / reload bounce race (TM-733)", () => {
-  test("reloading straight onto #/admin holds the route and mounts the console for a real admin — no 'Admins only.' bounce", async ({
+  test("reloading straight onto #/admin/users holds the route and mounts the console for a real admin — no 'Admins only.' bounce", async ({
     page,
   }) => {
     // 1. Sign in as ADMIN and let the FIRST (warm) session fully resolve the role.
@@ -78,13 +78,13 @@ test.describe("@nav-races admin deep-link / reload bounce race (TM-733)", () => 
     // 2. Warm hash nav to the console works (this path never hit the bug — the role is already
     //    resolved here). Establishes the console DOES mount for this admin, so the reload assertion
     //    below is about the COLD path specifically, not a broken account.
-    await page.evaluate(() => (window.location.hash = "#/admin"));
+    await page.evaluate(() => (window.location.hash = "#/admin/users"));
     await expect(page.locator("#admin-view")).toBeVisible();
     await expect(page.locator("#admin-table")).toBeVisible();
     // The seeded target row is present — the console actually populated, not an empty shell.
     await expect(page.locator("#admin-table tr", { hasText: TARGET.email })).toBeVisible();
 
-    // 3. THE CRUX — reload while the hash is #/admin. Firebase restores the persisted session and the
+    // 3. THE CRUX — reload while the hash is #/admin/users. Firebase restores the persisted session and the
     //    router re-resolves the role FROM SCRATCH (roleResolved=false, isAdmin=false while the /me
     //    lookup is in flight) straight onto an admin route. This is exactly the deep-link/reload path
     //    the guard used to bounce.
@@ -96,9 +96,9 @@ test.describe("@nav-races admin deep-link / reload bounce race (TM-733)", () => 
     await expect(page.locator("#admin-table")).toBeVisible();
     await expect(page.locator("#admin-table tr", { hasText: TARGET.email })).toBeVisible();
 
-    // ...and the URL stayed on #/admin (pre-fix the guard did `go(HOME)`, landing the reload on
+    // ...and the URL stayed on #/admin/users (pre-fix the guard did `go(HOME)`, landing the reload on
     //    #/home). Asserts the guard did NOT bounce.
-    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/admin");
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/admin/users");
     await expect(page.locator("#admin-view")).toBeVisible();
 
     // ...and NO spurious "Admins only." error toast was raised. That toast is the exact papercut the fix

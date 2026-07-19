@@ -328,7 +328,7 @@ test.describe("@responsive admin users console at a phone viewport", () => {
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
 
-    await page.evaluate(() => (window.location.hash = "#/admin"));
+    await page.evaluate(() => (window.location.hash = "#/admin/users"));
     await expect(page.locator("#admin-view")).toBeVisible();
     await expect(page.locator("#admin-table")).toBeVisible();
 

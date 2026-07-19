@@ -41,7 +41,9 @@ export const SITE_HIGHLIGHTS = [
  * @type {Readonly<Record<string, ReadonlyArray<{target?: string, title: string, body: string}>>>}
  */
 export const PAGE_HIGHLIGHTS = {
-  "#/admin": [
+  // TM-917: the users console moved off #/admin (now the admin hub) to #/admin/users — this tour
+  // describes that console (its .tm-stats / .tm-toolbar / .tm-table), so it is keyed to the new route.
+  "#/admin/users": [
     { title: "Admin users console", body: "Everything you need to manage who can access the app." },
     { target: ".tm-stats", title: "At a glance", body: "Live totals: users, admins, enabled and disabled accounts." },
     { target: ".tm-toolbar", title: "Find anyone", body: "Search by email or name, filter by role/status, and sort." },

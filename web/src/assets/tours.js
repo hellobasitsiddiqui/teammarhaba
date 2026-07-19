@@ -86,7 +86,7 @@ const SITE_TOUR = {
 // Per-page tours, keyed by hash route — auto-started once on first visit to that page. Built from the
 // same shared highlight points (tour-highlights.js / TM-178); we just stamp each route's tour id on.
 const PAGE_TOURS = {
-  "#/admin": { id: "admin", steps: [...PAGE_HIGHLIGHTS["#/admin"]] },
+  "#/admin/users": { id: "admin", steps: [...PAGE_HIGHLIGHTS["#/admin/users"]] }, // TM-917: users console moved off #/admin
   "#/home": { id: "home", steps: [...PAGE_HIGHLIGHTS["#/home"]] },
 };
 

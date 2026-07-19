@@ -26,7 +26,7 @@ test("highlightFor resolves a site-tour highlight by its target selector", () =>
 test("highlightFor also resolves a per-page highlight (e.g. an admin one)", () => {
   const hit = highlightFor(".tm-stats");
   assert.ok(hit);
-  assert.equal(hit.title, PAGE_HIGHLIGHTS["#/admin"].find((h) => h.target === ".tm-stats").title);
+  assert.equal(hit.title, PAGE_HIGHLIGHTS["#/admin/users"].find((h) => h.target === ".tm-stats").title); // TM-917: users console moved to #/admin/users
 });
 
 test("highlightFor returns null for a selector no highlight targets", () => {
