@@ -133,8 +133,10 @@ test("@admin suspending a user via the console blocks their API access (200 → 
   await expect(page.locator("#signout-btn")).toBeVisible();
   await expect(page.locator("#nav-admin")).toBeVisible();
 
-  // 4. Open the admin users console; TARGET is listed and currently Enabled (we reset it in beforeAll).
+  // 4. Open the admin layer, then the users console via the hub (TM-917: #nav-admin opens the #/admin
+  //    hub; the users console moved to #/admin/users). TARGET is listed + Enabled (reset in beforeAll).
   await page.click("#nav-admin");
+  await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
   await expect(targetRow).toBeVisible();

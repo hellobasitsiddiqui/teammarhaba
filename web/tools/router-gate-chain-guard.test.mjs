@@ -101,11 +101,12 @@ test("the onboarding and terms gates each early-return (redirect wins over every
 // --- EVERY admin route is gated via shouldBounceNonAdmin (no admin view is ungated) -----------------
 
 test("every admin route in guard() is protected by shouldBounceNonAdmin (roleResolved-aware)", () => {
-  // The nine ADMIN-only routes: console, events console, event form, venues console, venue form,
-  // interests console, interest form (TM-779), message compose, sent-history. Each must sit in an
-  // `if (<admin-route> && shouldBounceNonAdmin(...))`.
+  // The ten ADMIN-only routes: hub (TM-917), users console (TM-917, moved to #/admin/users), events
+  // console, event form, venues console, venue form, interests console, interest form (TM-779),
+  // message compose, sent-history. Each must sit in an `if (<admin-route> && shouldBounceNonAdmin(...))`.
   const adminRouteConditions = [
     /route\s*===\s*ADMIN\s*&&\s*shouldBounceNonAdmin\(/,
+    /route\s*===\s*ADMIN_USERS\s*&&\s*shouldBounceNonAdmin\(/, // TM-917: users console moved off #/admin
     /route\s*===\s*ADMIN_EVENTS\s*&&\s*shouldBounceNonAdmin\(/,
     /isAdminEventFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_VENUES\s*&&\s*shouldBounceNonAdmin\(/,
@@ -119,8 +120,11 @@ test("every admin route in guard() is protected by shouldBounceNonAdmin (roleRes
     assert.match(ROUTER_SRC, cond, `admin route ${cond} must be guarded by shouldBounceNonAdmin`);
   }
 
-  // Belt-and-braces: the number of admin bounces equals the number of shouldBounceNonAdmin calls — so a
-  // NEW admin route can't ship without wiring the gate (the counts would diverge and this fails).
+  // Belt-and-braces: the count of shouldBounceNonAdmin calls equals the count of ENUMERATED admin
+  // routes above. NOTE the real scope: this catches dropping a gate off a listed route, or adding a
+  // gate without listing it — it does NOT catch a brand-new admin route that ships with NO gate at all
+  // (it would be in neither list, so the counts still match). The per-route assertions above are the
+  // real guard; keep this as a divergence tripwire, not a completeness proof.
   const bounceCalls = ROUTER_SRC.match(/shouldBounceNonAdmin\(\{\s*isAdmin,\s*roleResolved\s*\}\)/g) || [];
   assert.equal(
     bounceCalls.length,
@@ -134,6 +138,18 @@ test("every admin route in guard() is protected by shouldBounceNonAdmin (roleRes
     ROUTER_SRC,
     /shouldBounceNonAdmin\(\{\s*isAdmin\s*\}\)/,
     "no admin bounce may drop roleResolved — the guard must stay race-aware (TM-733)",
+  );
+});
+
+test("the moved users console (#/admin/users) is in the PROTECTED set (TM-917 auth-gate regression)", () => {
+  // The users console moved off #/admin (still PROTECTED) to #/admin/users. If ADMIN_USERS is NOT in
+  // PROTECTED, a SIGNED-OUT deep-link to #/admin/users skips the auth gate (router line ~607): the
+  // intended route isn't remembered and the role-bounce later fires "Admins only." + go(HOME) instead
+  // of remember-then-#/login. This asserts the route joined the set — fails on the pre-fix source.
+  assert.match(
+    ROUTER_SRC,
+    /const PROTECTED = new Set\(\[[^\]]*\bADMIN_USERS\b[^\]]*\]\)/,
+    "ADMIN_USERS must be in the PROTECTED set so a signed-out #/admin/users deep-link is remembered + bounced to login",
   );
 });
 

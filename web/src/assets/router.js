@@ -4,7 +4,8 @@
 //   #/login → the sign-in form  (#auth-signed-out) — public
 //   #/home  → authenticated home (#auth-signed-in)  — protected; renders identity from
 //             GET /api/v1/me (wired by me.js / TM-108)
-//   #/admin → admin users console (#admin-view)     — protected + ADMIN-only (TM-133)
+//   #/admin       → admin hub (#admin-hub-view)      — protected + ADMIN-only (TM-133/TM-917)
+//   #/admin/users → admin users console (#admin-view) — protected + ADMIN-only (TM-133; moved TM-917)
 //
 // The ADMIN gate reads the verified ID-token `role` claim (TM-110); the backend (TM-111) is the
 // real authority — this just hides an unusable page from non-admins.
@@ -17,6 +18,10 @@
 
 import { onAuthChanged, currentUser, getRole } from "./auth.js";
 import { enterAdmin } from "./admin.js";
+// Admin hub (TM-917) — the #/admin second-level nav over the five consoles, opened by the bottom-bar
+// Admin tab (TM-916). admin-hub.js mounts it into #admin-hub-view; the users console moved to
+// #/admin/users. ADMIN-only, same server gate as every other admin route (TM-133).
+import { enterAdminHub } from "./admin-hub.js";
 import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
 import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
 // Admin venues console + create/edit form (TM-519) — ADMIN-only, same gate as #/admin/events. The
@@ -89,6 +94,9 @@ import { updateNotificationBell } from "./notification-bell.js";
 const LOGIN = "#/login";
 const HOME = "#/home";
 const ADMIN = "#/admin";
+// Admin users console route (TM-917) — moved off #/admin (now the hub) to its own hash. Same
+// ADMIN-only gate as #/admin; admin.js mounts it into #admin-view (unchanged container).
+const ADMIN_USERS = "#/admin/users";
 // Admin events console (TM-395) — protected + ADMIN-only, the same gate as #/admin. Its own hash so
 // it's a distinct exact-match route; admin-events.js mounts into #admin-events-view.
 const ADMIN_EVENTS = "#/admin/events";
@@ -161,7 +169,7 @@ const MEMBERSHIP = "#/membership";
 // PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
 // the membership tier route.
 const RECEIPTS = "#/receipts";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_USERS, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS (the moved users console must stay auth-gated like the old #/admin — a signed-out deep-link is remembered + bounced to login, not flashed then home-bounced)
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
@@ -270,6 +278,9 @@ let isOnboarded = true;
 let needsTerms = false;
 // Whether the admin console is currently mounted/loaded, so we (re)load it only on entry.
 let adminActive = false;
+// Hub (#/admin) entry flag — separate from the users console (#/admin/users) so each mounts/reloads
+// on its own entry (TM-917).
+let adminHubActive = false;
 // Same lifecycle for the admin events console (TM-395): mount once, (re)load on entry.
 let adminEventsActive = false;
 // Admin event form (TM-426): the last form route we entered (#/admin/events/new or …/{id}/edit), so a
@@ -378,7 +389,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
@@ -422,6 +433,7 @@ function render() {
 
   const loginView = $("auth-signed-out");
   const homeView = $("auth-signed-in");
+  const adminHubView = $("admin-hub-view");
   const adminView = $("admin-view");
   const adminEventsView = $("admin-events-view");
   const adminEventFormView = $("admin-event-form-view");
@@ -439,7 +451,8 @@ function render() {
   const notificationsView = $("notifications-view");
   if (loginView) loginView.hidden = route !== LOGIN;
   if (homeView) homeView.hidden = route !== HOME;
-  if (adminView) adminView.hidden = route !== ADMIN;
+  if (adminHubView) adminHubView.hidden = route !== ADMIN;
+  if (adminView) adminView.hidden = route !== ADMIN_USERS;
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   // Admin event form (TM-426) — shown for the create route and any {id} edit route.
   if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
@@ -648,6 +661,14 @@ function guard() {
   // the backend (TM-111) is the real gate, this just avoids showing an unusable page.
   if (route === ADMIN && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
     toast("Admins only.", { type: "error" });
+    adminHubActive = false;
+    go(HOME);
+    return;
+  }
+  // Admin users console (TM-917) — moved off #/admin to #/admin/users; same ADMIN-only gate as the
+  // hub above. The backend (TM-111) is the real authority; this just avoids an unusable page.
+  if (route === ADMIN_USERS && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
+    toast("Admins only.", { type: "error" });
     adminActive = false;
     go(HOME);
     return;
@@ -713,8 +734,19 @@ function guard() {
     return;
   }
   render();
-  // Load the console on entry into the admin route (and reset on leaving so re-entry reloads).
+  // Admin hub (TM-917): mount the #/admin second-level nav on entry, reset on leaving so re-entry
+  // rebuilds if needed. The hub is static, so enterAdminHub() is itself idempotent.
   if (route === ADMIN && isAdmin) {
+    if (!adminHubActive) {
+      adminHubActive = true;
+      enterAdminHub();
+    }
+  } else {
+    adminHubActive = false;
+  }
+  // Admin users console (TM-917): the users console moved to #/admin/users — mount + (re)load its
+  // list on entry, reset on leaving so a future entry reloads (unchanged lifecycle, new route).
+  if (route === ADMIN_USERS && isAdmin) {
     if (!adminActive) {
       adminActive = true;
       enterAdmin();

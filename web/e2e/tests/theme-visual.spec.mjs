@@ -99,7 +99,7 @@ test.describe("@theme authenticated pages render under Paper", () => {
     await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
 
     // ADMIN — navigate by hash; assert the table populated with the target user's row.
-    await page.evaluate(() => (window.location.hash = "#/admin"));
+    await page.evaluate(() => (window.location.hash = "#/admin/users"));
     await expect(page.locator("#admin-view")).toBeVisible();
     await expect(page.locator("#admin-table")).toBeVisible();
     const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });

@@ -1129,6 +1129,58 @@ h3,
     text-align: left;
 }
 
+/* Admin hub (TM-917) — the #/admin second-level nav: a heading over a paper list of console rows.
+   Token-only so it restyles with the accent + sketchy toggle like the rest of the admin surface. */
+.admin-hub-title {
+    font-family: var(--font-display);
+    margin: 0 0 var(--space-4);
+}
+.admin-hub-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+.admin-hub-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface-card);
+    border: var(--border-width) solid var(--border);
+    border-radius: 12px 14px 11px 15px;   /* uneven = hand-drawn Paper card */
+    color: inherit;
+    text-decoration: none;
+}
+.admin-hub-row:hover {
+    border-color: var(--accent);
+}
+/* Keyboard focus gets a DRAWN ring (not just the hover border) — matches the app-wide accent-outline
+   focus convention so a keyboard user can see where they are. */
+.admin-hub-row:focus-visible {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.admin-hub-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;   /* keeps the text column from pushing the chevron off-row; the desc may wrap */
+}
+.admin-hub-row-label {
+    font-family: var(--font-display);
+    font-size: var(--fs-3);
+}
+.admin-hub-row-desc {
+    font-size: var(--fs-2);
+    color: var(--muted);
+}
+.admin-hub-row-chevron {
+    margin-left: auto;
+    font-size: var(--fs-4);
+    color: var(--accent);
+}
+
 .tm-admin-head {
     display: flex;
     align-items: center;
