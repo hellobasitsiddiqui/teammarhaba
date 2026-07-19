@@ -26,6 +26,7 @@ import { confirmSensitiveAction } from "./biometric-confirm.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
 import { clampPage } from "./admin-paging-core.js";
+import { statsCards } from "./admin-stats-core.js";
 // TM-847: the pure role→friendly-label mapping (TM-612), extracted so it's unit-testable.
 import { roleLabel } from "./admin-role-label-core.js";
 import {
@@ -872,12 +873,17 @@ function renderStats() {
   const total = Math.max(state.totalAccounts, state.users.length);
   const admins = state.users.filter((u) => u.role === "ADMIN").length;
   const enabled = state.users.filter((u) => u.enabled).length;
-  const cards = [
+  // TM-756: loadUsers() renders BEFORE the account walk resolves, so these derive from EMPTY state
+  // and would paint "Total 0 / Admins 0 / …" on a populated system as if that were data. Route the
+  // cards through the pure loading mask (admin-stats-core.js) — while loading every value shows "—"
+  // (labels/markup unchanged, so the grid keeps its shape and the tour's ".tm-stats" target still
+  // matches); once loaded the cards pass through untouched. Mirrors the table's state.loading gate.
+  const cards = statsCards([
     ["Total", total],
     ["Admins", admins],
     ["Enabled", enabled],
     ["Disabled", state.users.length - enabled],
-  ];
+  ], state.loading);
   clear(shell.stats).append(...cards.map(([label, value]) =>
     el("div", { class: "tm-stat" }, [
       el("span", { class: "tm-stat-value", text: String(value) }),
