@@ -40,6 +40,7 @@ import {
 } from "./admin-interests-core.js";
 import { ADMIN_INTERESTS_ROUTE, adminInterestNewHash, adminInterestEditHash } from "./admin-interests-route.js";
 import { clampPage } from "./admin-paging-core.js";
+import { statsCards } from "./admin-stats-core.js";
 import { interestEmoji } from "./interests-core.js"; // shared emoji normaliser (TM-805)
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-catalogue walk — matches the server max page size (TM-115)
@@ -221,12 +222,16 @@ function renderStats() {
   const active = state.interests.filter((i) => i.active).length;
   const retired = state.interests.filter((i) => i.retired).length;
   const featured = state.interests.filter((i) => i.highlighted).length;
-  const cards = [
+  // TM-756 (4th instance, found in grounding — the ticket body lists only users/events/venues):
+  // loadInterests() renders BEFORE the page walk resolves, so these counts derive from EMPTY state —
+  // the mask (admin-stats-core.js) shows "—" per card while loading instead of a false "Total 0",
+  // mirroring the table's state.loading gate; loaded cards pass through untouched.
+  const cards = statsCards([
     ["Total", total],
     ["Active", active],
     ["Retired", retired],
     ["Featured", featured],
-  ];
+  ], state.loading);
   clear(shell.stats).append(
     ...cards.map(([label, value]) =>
       el("div", { class: "tm-stat" }, [

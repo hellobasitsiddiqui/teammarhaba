@@ -57,6 +57,7 @@ import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./adm
 import { venueSummaryLabel } from "./admin-venues-core.js";
 import { adminVenueNewHash } from "./admin-venues-route.js";
 import { clampPage } from "./admin-paging-core.js";
+import { statsCards } from "./admin-stats-core.js";
 
 const FETCH_SIZE = 100; // page size PER REQUEST of the full-inventory walk — matches the server max page size (TM-115)
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 events)
@@ -218,11 +219,14 @@ function renderStats(now) {
   const total = Math.max(state.totalEvents, state.events.length);
   const visible = state.events.filter((e) => eventLifecycle(e, now).label === "Visible").length;
   const cancelled = state.events.filter((e) => String(e.status).toUpperCase() === "CANCELLED").length;
-  const cards = [
+  // TM-756: loadEvents() renders BEFORE the page walk resolves, so these counts derive from EMPTY
+  // state — the mask (admin-stats-core.js) shows "—" per card while loading instead of a false
+  // "Total 0", mirroring the table's state.loading gate below; loaded cards pass through untouched.
+  const cards = statsCards([
     ["Total", total],
     ["Visible now", visible],
     ["Cancelled", cancelled],
-  ];
+  ], state.loading);
   clear(shell.stats).append(
     ...cards.map(([label, value]) =>
       el("div", { class: "tm-stat" }, [
