@@ -28,6 +28,13 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
   blockers — before any human saw them.
 - **Sequence conflict-pairs.** Two tickets on the same files = build the second only after the
   first MERGES (not after its PR is raised). A dependent build starts from fresh main.
+- **Poll for the merge on a backoff — never block on it.** You never merge; merges are human and
+  asynchronous. After a PR is raised (ticket → In Review), don't sit and watch it — re-check for the
+  merge first at **~5 min, then ~10 min** (then keep widening), and get on with other lane work in
+  between. On each check, reconcile: a merged ticket → Testing, and if it was a blocker, start the
+  now-unblocked dependent from fresh main. A timed re-check keeps the wave moving with no human ping;
+  watching a merge that hasn't happened just burns the turn. (Pairs with the conflict-pair + the
+  "unblocked only when the blocker MERGES" rules above.)
 - **Reshaping shared UI = migrate ALL its consumers**: every spec in the e2e testDir AND
   standalone scripts outside it (capture/evidence scripts are the classic miss — we shipped a
   repo-wide guard test after one slipped through). When you retire an interaction, grep the whole
