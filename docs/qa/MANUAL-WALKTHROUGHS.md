@@ -102,7 +102,9 @@ the token.
 
 ### 2.4 RBAC + admin users console (TM-110/111/133/115)
 Sign in as the **ADMIN** account:
-1. The **Admin** nav link (and "Open admin console →") appear → open **`#/admin`**.
+1. The **Admin** nav link (and "Open the admin users console →") appear → open **`#/admin`**, which
+   lands on the **admin hub** (TM-917): a list of the five consoles (Users / Manage events / Venues /
+   Interests / Send a message). Click the **Users** row → **`#/admin/users`** (the users console).
 2. **Stats bar**: Total / Admins / Enabled / Disabled.
 3. **Table** (Email, Name, Role, Status, ID, Actions): try **search**, the **Role** + **Status**
    filters, click a **sortable** column header, change **rows/page**, use **Prev/Next** (TM-115).

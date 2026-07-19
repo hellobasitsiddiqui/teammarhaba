@@ -4,7 +4,8 @@
 //   #/login → the sign-in form  (#auth-signed-out) — public
 //   #/home  → authenticated home (#auth-signed-in)  — protected; renders identity from
 //             GET /api/v1/me (wired by me.js / TM-108)
-//   #/admin → admin users console (#admin-view)     — protected + ADMIN-only (TM-133)
+//   #/admin       → admin hub (#admin-hub-view)      — protected + ADMIN-only (TM-133/TM-917)
+//   #/admin/users → admin users console (#admin-view) — protected + ADMIN-only (TM-133; moved TM-917)
 //
 // The ADMIN gate reads the verified ID-token `role` claim (TM-110); the backend (TM-111) is the
 // real authority — this just hides an unusable page from non-admins.
@@ -168,7 +169,7 @@ const MEMBERSHIP = "#/membership";
 // PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
 // the membership tier route.
 const RECEIPTS = "#/receipts";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_USERS, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS (the moved users console must stay auth-gated like the old #/admin — a signed-out deep-link is remembered + bounced to login, not flashed then home-bounced)
 
 /** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {

@@ -29,8 +29,10 @@ test("@admin admin signs in, disables a user via the console, and the change per
   // sets must really hide it (a class `display` rule used to override `[hidden]`, leaving it shown).
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
-  // 4. Open the admin users console; the target user is listed and currently enabled.
+  // 4. Open the admin layer, then the users console via the hub (TM-917: #nav-admin now opens the
+  //    #/admin hub; the users console moved to #/admin/users, reached by the hub's Users row).
   await page.click("#nav-admin");
+  await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });
   await expect(targetRow).toBeVisible();

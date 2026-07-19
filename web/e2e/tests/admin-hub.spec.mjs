@@ -5,7 +5,7 @@
 // TM-133/TM-111 is the real authority). Runs at 390px, where the bottom tab bar is the primary nav.
 
 import { test, expect } from "@playwright/test";
-import { ADMIN, TARGET } from "./fixtures.mjs";
+import { ADMIN, TARGET } from "../fixtures.mjs";
 
 test.use({ viewport: { width: 390, height: 844 } });
 

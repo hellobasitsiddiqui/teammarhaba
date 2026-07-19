@@ -104,8 +104,10 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await expect(page.locator("#nav-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
-  // ── STEP 2: open the users console; the compose panel (TM-365) is present. ──────────────────────
+  // ── STEP 2: open the admin layer, then the users console via the hub (TM-917: #nav-admin opens the
+  //    #/admin hub; the users console + its compose panel moved to #/admin/users). ─────────────────
   await clickNav(page, "#nav-admin");
+  await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   await expect(page.locator("#admin-table")).toBeVisible();
   const compose = page.locator("#admin-broadcast");
