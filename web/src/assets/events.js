@@ -350,14 +350,17 @@ async function renderDetail(view, id) {
   // browse-by non-member pays no extra request and still gets the correct disabled-with-hint entry.
   // Best-effort: a failure just degrades to the "chat isn't ready yet" hint rather than blocking the
   // detail. Re-guard after the await so a slow response can't paint over a newer navigation.
+  // TM-853: pages through the WHOLE list (not just the first ~20) — a member with 20+ threads used to
+  // lose the deep-link because the event's thread sat beyond page 0. The loop lives in events-core.js.
   let conversations = [];
   if (core.isEventChatMember(detail, me)) {
-    const conv = await listMyConversations().catch((err) => {
-      console.warn("[events] conversations load failed (chat entry degrades):", err?.message ?? err);
-      return null;
-    });
+    conversations = await core
+      .collectConversationsForEvent((page) => listMyConversations({ page }), detail.id)
+      .catch((err) => {
+        console.warn("[events] conversations load failed (chat entry degrades):", err?.message ?? err);
+        return [];
+      });
     if (mine !== renderToken) return;
-    conversations = conv?.items ?? [];
   }
 
   paintDetail(view, detail, me, conversations);

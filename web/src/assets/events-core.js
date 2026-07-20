@@ -904,6 +904,41 @@ export function findEventConversation(conversations, eventId) {
 }
 
 /**
+ * Page through the caller's conversations until THIS event's thread turns up, or the list is exhausted
+ * (TM-853). The old single-shot fetch only ever saw the first page (~20 summaries), so a chatty member
+ * with 20+ threads silently lost the "Open chat" deep-link — the thread existed but was never scanned.
+ * There is still no event→conversation endpoint (GET /me/conversations takes only page/size), so paging
+ * the list is the bridge; this stays pure by taking the page-fetcher as an argument (the view injects
+ * `(page) => listMyConversations({ page })`), keeping the whole loop unit-testable without a fetch.
+ *
+ * Walks zero-based pages, accumulating `items`, and stops as soon as {@link findEventConversation}
+ * matches within a page (no over-fetching), or when the envelope says it's out of pages, or a page
+ * comes back empty, or the defensive `maxPages` cap trips (never trusts a misbehaving `totalPages`
+ * into an endless loop). Returns everything scanned — the accumulated summaries feed straight into
+ * {@link eventChatEntryModel} unchanged, so "found" renders the live link and "exhausted" renders the
+ * honest not-ready hint.
+ *
+ * @param {(page: number) => Promise<{items?: Array, page?: number, totalPages?: number}>} fetchPage
+ *   fetches one zero-based page of the caller's conversations (the shared page envelope).
+ * @param {number|string} eventId  the event's id (EventDetail.id)
+ * @param {{maxPages?: number}} [opts]  defensive upper bound on pages walked (default 25)
+ * @returns {Promise<Array>} every conversation summary scanned, in list order.
+ */
+export async function collectConversationsForEvent(fetchPage, eventId, { maxPages = 25 } = {}) {
+  const all = [];
+  for (let page = 0; page < maxPages; page++) {
+    const data = await fetchPage(page);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    all.push(...items);
+    if (findEventConversation(items, eventId)) break; // found — stop paging
+    if (!items.length) break; // empty page — nothing further to scan
+    const totalPages = Number(data?.totalPages);
+    if (Number.isFinite(totalPages) && page + 1 >= totalPages) break; // exhausted
+  }
+  return all;
+}
+
+/**
  * The "Open chat" entry model for the event detail (TM-450) — the single source of truth the view
  * renders verbatim, so the whole gating decision is unit-testable without a DOM. Composes the two
  * gates: eligibility ({@link isEventChatMember}) and thread existence ({@link findEventConversation}).
