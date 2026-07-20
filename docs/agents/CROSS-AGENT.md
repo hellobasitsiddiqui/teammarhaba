@@ -35,6 +35,33 @@ name is your agent name.
    To Do. The **deploy gate is the sprint's real Definition-of-Done** — the sprint is not closable
    until it is shipped and serving-asserted, so it must exist from day one, never bolted on at close.
 
+
+## Jira REST mechanics + sprint-opening ritual (wave-chat-1)
+
+- **Creds**: `~/.config/teammarhaba/jira.env` — load with `set -a; source …; set +a` (a plain
+  `source` does NOT export them). Board id **1**, project **TM**, site `10xai.atlassian.net`.
+- **⚠️ Attribution**: the token authenticates as **Basit's own account** — every Jira write
+  (create/comment/transition/assign) is recorded as "Basit Siddiqui". Take NO Jira action he
+  didn't ask for; surface what you'd do and let him decide. When he says go, it still shows as him.
+- **Search**: use `POST/GET /rest/api/3/search/jql` (the legacy `/rest/api/3/search` path is
+  deprecated and under-returns).
+- **Transitions: always match by `to.name`, never hardcode ids** — `GET
+  /rest/api/3/issue/{key}/transitions`, pick the transition whose `to.name` equals the target
+  status, POST its id. Ids differ per source status.
+- **ADF, no tables**: v3 descriptions/comments take ADF; tables render BLANK in the UI — use
+  headings + bullets + bold. For a quick plain-text comment,
+  `POST /rest/api/2/issue/{key}/comment` with `{"body":"…"}` still works and needs no ADF.
+- **Sprint-opening ritual** (executed clean for wave-chat-1, sprint 971) — the order matters:
+  1. Groom every candidate into **Refinement** with a grounded card (real `file:line`) + estimate
+     (`customfield_10016`) + wave label.
+  2. Create the **three gate tickets** born-groomed (manual-test `human`, closure review, deploy).
+  3. `POST /rest/agile/1.0/sprint` (`originBoardId: 1`, name = the wave, goal set).
+  4. `POST /rest/agile/1.0/sprint/{id}/issue` to move the full set in, then transition everything
+     to **To Do** (by `to.name`).
+  5. Start: `POST /rest/agile/1.0/sprint/{id}` with `state: "active"` + explicit
+     `startDate`/`endDate`.
+  6. Claim the lane-first tickets only: Start date (`customfield_10015` = today) + `duedate`
+     (sprint end), then flip **In Progress** — before any build launches.
 ## Build pattern per ticket (what worked)
 
 - **Implement → 3-lens adversarial review → fix**, one workflow per ticket. Lenses that earn their
