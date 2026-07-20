@@ -95,7 +95,7 @@ async function signInAsAdmin(page) {
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin-events")).toBeVisible();
+  await expect(page.locator("#nav-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
@@ -118,8 +118,9 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   // ── STEP 1: sign in as the seeded ADMIN. ──────────────────────────────────────────────────────────
   await signInAsAdmin(page);
 
-  // ── STEP 2: open the events console, then the New-event full-page form (TM-426). ─────────────────
-  await clickNav(page, "#nav-admin-events");
+  // ── STEP 2: open the events console via the hub (TM-937), then the New-event form (TM-426). ──────
+  await clickNav(page, "#nav-admin");
+  await page.click('.admin-hub-row[href="#/admin/events"]');
   await expect(page.locator("#admin-events-view")).toBeVisible();
   await page.click("#admin-events-new");
   await expect(page).toHaveURL(/#\/admin\/events\/new$/);
