@@ -52,8 +52,14 @@ playbook exists for you, its name is your agent name.
   blockers — before any human saw them.
 - **Sequence conflict-pairs.** Two tickets on the same files = build the second only after the
   first MERGES (not after its PR is raised). A dependent build starts from fresh main.
-- **Poll for the merge on a backoff — never block on it.** You never merge; merges are human and
-  asynchronous. After a PR is raised (ticket → In Review), don't sit and watch it — re-check for the
+- **Docs-only PRs (`.md`/docs only): you MAY merge them yourself** once CI is green — Basit's
+  standing authorization, to cut turnaround on process-doc changes. **Verify it's docs-only first**
+  (`gh pr view <n> --json files` → every path ends `.md` or lives under `docs/`); if a single
+  non-doc file is touched, it reverts to human-merge. Everything with code/config/CI changes stays
+  human-merge. After a self-merge, still reconcile the ticket (→ Testing/Done) like any merge.
+- **Poll for the merge on a backoff — never block on it.** You never merge **code PRs**; those
+  merges are human and asynchronous (docs-only exception above). After a PR is raised (ticket → In
+  Review), don't sit and watch it — re-check for the
   merge first at **~5 min, then ~10 min** (then keep widening), and get on with other lane work in
   between. On each check, reconcile: a merged ticket → Testing, and if it was a blocker, start the
   now-unblocked dependent from fresh main. A timed re-check keeps the wave moving with no human ping;
