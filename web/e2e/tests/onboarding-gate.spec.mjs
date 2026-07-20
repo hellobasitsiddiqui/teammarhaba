@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
 import { completeInterestsStep } from "../helpers/onboarding.mjs";
@@ -42,8 +43,8 @@ async function signInFreshUser(page, email) {
   const code = await peekCode(email);
   // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  // Signed in (the nav sign-out control appears regardless of where the guard then routes us).
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // Signed in (the router flips body[data-auth] to signed-in regardless of where the guard then routes us).
+  await expectSignedIn(page);
 }
 
 test("@onboarding a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
@@ -143,7 +144,7 @@ test("@onboarding a returning, already-onboarded user is NOT gated and lands str
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
 
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   // Not gated: the onboarding view never shows; the app (admin nav, signed-in home) is reachable.
   await expect(page.locator("#onboarding-view")).toBeHidden();
   await expect(page.locator("#nav-admin")).toBeVisible();

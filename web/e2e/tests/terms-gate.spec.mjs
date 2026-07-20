@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
 import { completeOnboarding } from "../helpers/onboarding.mjs";
@@ -43,7 +44,7 @@ async function signInFreshUser(page, email) {
   const code = await peekCode(email);
   // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 }
 
 // The first-login profile gate + the interests picker are now walked by the shared
@@ -109,7 +110,7 @@ test("@terms a returning user who already accepted the current terms is NOT term
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
 
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   // Not gated: the terms view never shows; the app (admin nav) is reachable.
   await expect(page.locator("#terms-view")).toBeHidden();
   await expect(page.locator("#nav-admin")).toBeVisible();

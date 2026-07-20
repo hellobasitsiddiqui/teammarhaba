@@ -32,7 +32,11 @@ export const SITE_HIGHLIGHTS = [
     body: "Admins start here — one place linking every admin console: users, events, venues, interests, messages.",
   },
   { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from here." },
-  { target: "#signout-btn", title: "That's it!", body: "Sign out here when you're done. Welcome aboard 🎉" },
+  // TM-906: the closing step used to spotlight the top-nav sign-out button, which no longer exists —
+  // sign-out moved to the Profile hub's menu (behind a confirm). The closer is re-anchored to the
+  // Profile nav entry (the way TO the sign-out row from this screen); the literal row only exists on
+  // #/profile, so anchoring the site tour to it would always be auto-skipped as off-screen.
+  { target: "#nav-profile", title: "That's it!", body: "Your profile lives here — including Sign out when you're done. Welcome aboard 🎉" },
 ];
 
 /**

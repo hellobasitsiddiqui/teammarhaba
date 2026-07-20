@@ -17,6 +17,7 @@
 // the event package — confirm against the live migration when wiring this up.
 
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, EVENT_GOER, EVENT_WAITER, EVENT_FILLER, dbConfig } from "../fixtures.mjs";
 
@@ -29,7 +30,7 @@ async function signIn(page, acct) {
   await page.click("#try-another-btn");
   await page.fill("#password", acct.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 }
 
 /** Run a query against the same Postgres the stack uses; always closes the client. */

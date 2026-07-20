@@ -65,20 +65,21 @@ export const SCREENS = [
     id: "home",
     title: "Home — your signed-in screen",
     alt:
-      "A mock of the Circle home screen: a top navigation bar with Help, Profile, an Admin link, " +
-      "an avatar and a Sign out button, above a card showing your signed-in identity.",
+      "A mock of the Circle home screen: a top navigation bar with Help, Profile, an Admin link " +
+      "and an avatar, above a card showing your signed-in identity. Sign out lives on the Profile screen.",
     regions: [
       { label: "Circle", box: { x: 4, y: 6, w: 40, h: 12 }, kind: "brand" },
       { label: "Help", box: { x: 50, y: 7, w: 9, h: 10 }, kind: "nav" },
-      { label: "Profile", box: { x: 60, y: 7, w: 11, h: 10 }, kind: "nav" },
+      // TM-906: the top-nav Sign out button is gone (sign-out moved to the Profile hub, behind a
+      // confirm), so the Profile region now anchors the tour's re-homed closing step (#nav-profile).
+      { label: "Profile", box: { x: 60, y: 7, w: 11, h: 10 }, kind: "nav", anchor: "#nav-profile" },
       { label: "Admin", box: { x: 72, y: 7, w: 10, h: 10 }, kind: "nav", anchor: "#nav-admin" },
-      { label: "Sign out", box: { x: 83, y: 7, w: 13, h: 10 }, kind: "nav", anchor: "#signout-btn" },
       { label: "Signed in as you@example.com", box: { x: 6, y: 34, w: 88, h: 30 }, kind: "card", anchor: "#me" },
     ],
     callouts: [
       { at: { x: 50, y: 49 }, side: "bottom", fromHighlight: "#me" },
       { at: { x: 77, y: 12 }, side: "bottom", fromHighlight: "#nav-admin" },
-      { at: { x: 89, y: 12 }, side: "bottom", fromHighlight: "#signout-btn" },
+      { at: { x: 66, y: 12 }, side: "bottom", fromHighlight: "#nav-profile" },
     ],
   },
 ];

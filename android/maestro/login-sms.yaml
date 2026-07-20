@@ -53,17 +53,27 @@ env:
 - takeScreenshot: 01-launch
 
 # Reach a clean signed-out state without clearing app data: if a previous flow (or warm session) left
-# us signed in, sign out first. Both steps are optional so a fresh, already-signed-out launch skips
-# them. (We must NOT clearState here — see the header note.)
+# us signed in, sign out first. Since TM-906 the ONLY sign-out entry is the Profile hub's "Sign out"
+# row behind the styled confirm dialog (the old top-nav control is gone): Profile tab → scroll the
+# hub menu → "Sign out" row → confirm. The whole block is conditional on the signed-in home marker,
+# so a fresh, already-signed-out launch skips it. (We must NOT clearState here — see the header note.)
 - runFlow:
     when:
       visible:
         id: "auth-signed-in"
     commands:
       - tapOn:
-          id: "nav-toggle"
+          id: "tab-profile" # bottom tab bar (TM-434) — shown whenever the signed-in home is
+      - scrollUntilVisible:
+          element:
+            id: "profile-signout-row" # the hub menu's "Sign out" row sits at the bottom of the hub
+          direction: DOWN
       - tapOn:
-          id: "signout-btn"
+          id: "profile-signout-row"
+      # The styled ui.js confirmDialog gates the destructive action (TM-906). Target the confirm
+      # button by its stable DOM id — its visible text ("Sign out") also matches the row behind it.
+      - tapOn:
+          id: "tm-dialog-confirm"
 
 # Signed-out front door. SMS lives behind the "Try another way" disclosure (TM-234).
 - assertVisible: "Sign in"
@@ -112,8 +122,8 @@ env:
     text: "Skip"
     optional: true
 
-# Signed-in end state. NB: signout-btn is inside the collapsed mobile nav menu (nav-toggle), so it
-# is NOT directly visible — assert the home "signed in" marker that is.
+# Signed-in end state. NB: since TM-906 there is no top-nav sign-out control at all (sign-out lives
+# on the Profile hub row behind a confirm) — assert the home "signed in" marker that IS visible.
 - assertVisible:
     id: "auth-signed-in"
 - assertNotVisible:

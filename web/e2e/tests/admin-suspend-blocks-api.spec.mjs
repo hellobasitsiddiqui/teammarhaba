@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, TARGET, API_BASE_URL, dbConfig } from "../fixtures.mjs";
 import { authHeadersFor } from "../events-api.mjs";
@@ -130,7 +131,7 @@ test("@admin suspending a user via the console blocks their API access (200 → 
   await page.click("#signin-btn");
 
   // 3. Authenticated: the admin nav appears (ROLE_ADMIN only).
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#nav-admin")).toBeVisible();
 
   // 4. Open the admin layer, then the users console via the hub (TM-917: #nav-admin opens the #/admin

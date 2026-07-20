@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { ADMIN } from "../fixtures.mjs";
 
 // Avatar upload round-trip (TM-166): sign in → open #/profile → pick an image for the avatar control →
@@ -21,7 +22,7 @@ async function signIn(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 }
 
 test("@avatar a user uploads an avatar; photoURL is set and shown, and survives a reload", async ({ page }) => {
@@ -60,7 +61,7 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
   // Persistence: reload, re-enter the profile page, and the avatar still renders from the stored
   // photoURL (Firebase persists the user across reloads — browserLocalPersistence).
   await page.reload();
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await page.click("#nav-profile");
   await expect(page.locator(".tm-profile-avatar .tm-avatar-img")).toBeVisible();
   const afterReload = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);

@@ -27,17 +27,25 @@ env:
 - launchApp:
     clearState: false
 - takeScreenshot: 01-launch
-# If a previous flow left a session, sign out via the nav menu (signout-btn lives inside nav-toggle
-# on the mobile layout). Conditional so a fresh signed-out launch skips it.
+# If a previous flow left a session, sign out first. Since TM-906 the ONLY sign-out entry is the
+# Profile hub's "Sign out" row behind the styled confirm dialog (the old top-nav control is gone):
+# Profile tab → scroll the hub menu → "Sign out" row → confirm. Conditional so a fresh signed-out
+# launch skips it.
 - runFlow:
     when:
       visible:
         id: "auth-signed-in"
     commands:
       - tapOn:
-          id: "nav-toggle"
+          id: "tab-profile" # bottom tab bar (TM-434)
+      - scrollUntilVisible:
+          element:
+            id: "profile-signout-row"
+          direction: DOWN
       - tapOn:
-          id: "signout-btn"
+          id: "profile-signout-row"
+      - tapOn:
+          id: "tm-dialog-confirm" # the styled confirmDialog's confirm button (stable DOM id)
 
 # The SPA boots into the signed-out auth card. "Email me a code" is the DEFAULT front door (TM-234);
 # the password field is hidden until "Try another way".
@@ -69,10 +77,11 @@ env:
 - tapOn:
     id: "emailcode-verify-btn" # "Sign in"
 
-# Signed-in end state: the signed-out form is gone and the sign-out control + signed-in panel show.
-# (#signout-btn becomes visible; #auth-signed-in shows "You are signed in as ...".)
+# Signed-in end state: the signed-out form is gone and the signed-in panel shows ("You are signed
+# in as ..."). NB: since TM-906 there is no top-nav sign-out control to assert on — sign-out lives
+# on the Profile hub row behind a confirm.
 - assertVisible:
-    id: "signout-btn"
+    id: "auth-signed-in"
 - assertNotVisible:
     id: "auth-signed-out"
 - assertVisible:

@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 import { completeInterestsStep } from "../helpers/onboarding.mjs";
+import { signOutViaProfile } from "../helpers/auth-state.mjs";
 
 // Golden-path end-to-end journey (TM-341) — ONE long happy-path run that walks the whole core
 // experience in a single test, as living evidence the product works front-to-back:
@@ -63,8 +64,8 @@ async function peekCode(email) {
 
 /** Sign in a fresh email-code user (a never-seen address ⇒ a brand-new, un-onboarded account).
  *  Same flow as the onboarding-gate / terms-gate specs. Waits only for the viewport-independent
- *  "signed in" signal: the signed-OUT login panel disappearing (#signout-btn lives inside the
- *  collapsed hamburger at a phone width, so its visibility can't be the gate — see the mobile spec). */
+ *  "signed in" signal: the signed-OUT login panel disappearing (equivalently body[data-auth] —
+ *  auth-state.mjs / TM-906; nav-element visibility can't be the gate at a phone width). */
 async function signInFreshUser(page, email) {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -330,17 +331,13 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await shot("help-visual-guide");
 
   // ── STEP 10: SIGN OUT. ───────────────────────────────────────────────────────────────────────
-  // We're on the PUBLIC #/help route here, so — unlike the admin-walkthrough spec, which signs out
-  // from the protected #/admin and is therefore bounced to #/login — signing out does NOT force a
-  // route change: #/help stays shown, just signed-out. So assert the sign-out took effect via the
-  // route-independent nav state (the sign-in link returns, the sign-out control is gone), THEN visit
-  // #/login and confirm the signed-out login panel renders — the true "fully signed out" end state.
-  await clickNav(page, "#signout-btn");
-  // Route- AND viewport-independent "signed out" signal: the router flips the nav's `hidden`
-  // ATTRIBUTES (the sign-in link gains visibility, the sign-out control is hidden). We assert on the
-  // attribute rather than CSS visibility because at a phone width these live inside the just-closed
-  // hamburger, so toBeVisible()/toBeHidden() (which reflect the CSS collapse) wouldn't hold.
-  await expect(page.locator("#signout-btn")).toHaveAttribute("hidden", /.*/);
+  // TM-906: sign-out lives ONLY on the Profile hub's "Sign out" row, behind the styled confirm
+  // dialog — there is no top-nav control any more. The helper walks Profile → row → confirm and
+  // waits for the router's viewport-independent body[data-auth]="signed-out" signal (signing out on
+  // the protected #/profile also bounces us to #/login, same as the admin-walkthrough used to see).
+  await signOutViaProfile(page);
+  // The nav reflects it too: the sign-in link's `hidden` attribute is dropped (attribute, not CSS
+  // visibility — at a phone width the link lives inside the collapsed hamburger).
   await expect(page.locator("#nav-signin")).not.toHaveAttribute("hidden", /.*/);
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();

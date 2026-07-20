@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { ADMIN } from "../fixtures.mjs";
 
 // Profile refresh (TM-514): the Profile screen was brought in line with the approved paper wireframes
@@ -16,7 +17,7 @@ async function signIn(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 }
 
 test("@profile the refreshed Profile hub shows the completeness bar, badges and the edit form", async ({ page }) => {

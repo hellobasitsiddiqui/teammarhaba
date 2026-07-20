@@ -102,6 +102,16 @@ export function toast(message, { type = "info", action = null, timeout = 5000, o
 /**
  * A styled, accessible confirm dialog (never the native `confirm()`). Resolves `true` on confirm,
  * `false` on cancel / Escape / backdrop click.
+ *
+ * Honours the `aria-modal="true"` contract for real (TM-906 review): while the dialog is open the
+ * rest of the page is `inert` + `aria-hidden` (background controls can't be tabbed to, clicked via
+ * keyboard, or reached by a screen reader), Tab/Shift+Tab cycle WITHIN the dialog, and on close
+ * focus returns to the element that opened it. Without this, a keyboard user could Tab out from
+ * under the backdrop and activate background controls while the (destructive) confirm was up.
+ *
+ * The two buttons carry stable DOM ids (#tm-dialog-confirm / #tm-dialog-cancel) — the automation
+ * hooks the Maestro mobile flows use, since both the trigger row and the confirm button can share
+ * visible text (e.g. "Sign out") and Maestro matches text as an anchored regex.
  * @param {{title?: string, message?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean}} [opts]
  * @returns {Promise<boolean>}
  */
@@ -113,26 +123,61 @@ export function confirmDialog({
   danger = false,
 } = {}) {
   return new Promise((resolve) => {
+    const opener = document.activeElement;
+    // Background siblings we inerted (only ones WE set, so a pre-hidden node isn't un-hidden on close).
+    const inerted = [];
     const onKey = (e) => {
-      if (e.key === "Escape") close(false);
+      if (e.key === "Escape") {
+        close(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // Focus trap: the dialog's tab ring is exactly [cancelBtn, confirmBtn] (DOM order). Wrap at
+      // the ends, and pull focus back in if it somehow left the dialog (e.g. was on <body>).
+      const ring = [cancelBtn, confirmBtn];
+      const active = document.activeElement;
+      const inside = dialog.contains(active);
+      if (e.shiftKey) {
+        if (!inside || active === ring[0]) {
+          e.preventDefault();
+          ring[ring.length - 1].focus();
+        }
+      } else if (!inside || active === ring[ring.length - 1]) {
+        e.preventDefault();
+        ring[0].focus();
+      }
     };
     const close = (result) => {
+      for (const node of inerted) {
+        node.inert = false;
+        node.removeAttribute("aria-hidden");
+      }
       backdrop.remove();
       document.removeEventListener("keydown", onKey);
+      // Hand focus back to the opener (if it's still in the document — a confirmed destructive
+      // action may have removed it, e.g. sign-out tearing down the Profile hub).
+      if (opener && typeof opener.focus === "function" && document.contains(opener)) opener.focus();
       resolve(result);
     };
+    const cancelBtn = el(
+      "button",
+      { class: "tm-btn", id: "tm-dialog-cancel", type: "button", onClick: () => close(false) },
+      cancelLabel,
+    );
     const confirmBtn = el(
       "button",
-      { class: `tm-btn ${danger ? "tm-btn-danger" : "tm-btn-primary"}`, type: "button", onClick: () => close(true) },
+      {
+        class: `tm-btn ${danger ? "tm-btn-danger" : "tm-btn-primary"}`,
+        id: "tm-dialog-confirm",
+        type: "button",
+        onClick: () => close(true),
+      },
       confirmLabel,
     );
     const dialog = el("div", { class: "tm-dialog", role: "dialog", "aria-modal": "true", "aria-label": title }, [
       el("h2", { class: "tm-dialog-title", text: title }),
       message ? el("p", { class: "tm-dialog-msg", text: message }) : null,
-      el("div", { class: "tm-dialog-actions" }, [
-        el("button", { class: "tm-btn", type: "button", onClick: () => close(false) }, cancelLabel),
-        confirmBtn,
-      ]),
+      el("div", { class: "tm-dialog-actions" }, [cancelBtn, confirmBtn]),
     ]);
     const backdrop = el(
       "div",
@@ -145,6 +190,15 @@ export function confirmDialog({
       [dialog],
     );
     document.body.append(backdrop);
+    // Make aria-modal true in fact, not just in name: everything behind the backdrop is inert
+    // (unfocusable + untabbable + click-dead) and aria-hidden for screen readers.
+    for (const node of document.body.children) {
+      if (node === backdrop) continue;
+      if (node.inert || node.getAttribute("aria-hidden") === "true") continue;
+      node.inert = true;
+      node.setAttribute("aria-hidden", "true");
+      inerted.push(node);
+    }
     document.addEventListener("keydown", onKey);
     confirmBtn.focus();
   });

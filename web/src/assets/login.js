@@ -12,7 +12,6 @@ import {
   signIn,
   signUp,
   signInWithGoogle,
-  signOut,
   signInWithEmailCodeToken,
   startPhoneSignIn,
   awaitRedirectResult,
@@ -61,7 +60,8 @@ const els = {
   status: $("auth-status"), // TM-866: polite live region for cooldown start/expiry announcements
   signedIn: $("auth-signed-in"),
   userEmail: $("user-email"),
-  signOut: $("signout-btn"),
+  // NB (TM-906): no top-nav sign-out control here any more — sign-out lives ONLY on the Profile
+  // hub's menu row (profile.js), behind a confirm dialog.
 };
 
 // TM-867: the six-box OTP widgets (otp-input.js) over the static boxes in index.html. Typing the
@@ -323,7 +323,7 @@ els.smsVerify?.addEventListener("click", () => run(verifySms));
 els.signIn?.addEventListener("click", () => run(() => signIn(els.email.value.trim(), els.password.value)));
 els.signUp?.addEventListener("click", () => run(() => signUp(els.email.value.trim(), els.password.value)));
 els.google?.addEventListener("click", () => run(() => signInWithGoogle()));
-els.signOut?.addEventListener("click", () => run(() => signOut()));
+// (TM-906) The old top-nav sign-out listener is gone: the Profile hub row is the only sign-out.
 
 // Hide Google sign-in inside the Android WebView (TM-275). Google deliberately BLOCKS its OAuth
 // flow inside embedded WebViews ("disallowed_useragent"), so the button can only ever error there —

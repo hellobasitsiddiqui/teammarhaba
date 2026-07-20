@@ -31,7 +31,7 @@ import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES
 // by index.html — and this module for the control preview + the identity header / strength hub).
 import { announceAvatarChanged, onAvatarChangedEvent } from "./avatar-events.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
-import { clear, el, modal, toast } from "./ui.js";
+import { clear, confirmDialog, el, modal, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
@@ -1185,12 +1185,15 @@ function pfCard(title, children, extraClass = "") {
   ]);
 }
 
-/** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action. */
-function menuRow(label, { to = null, onClick = null, muted = false } = {}) {
+/** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action.
+ *  `id` (optional) stamps a stable DOM id on the row — the sign-out row carries one (TM-906) so the
+ *  e2e suite can drive the ONLY sign-out entry without coupling to label text. */
+function menuRow(label, { to = null, onClick = null, muted = false, id = null } = {}) {
   const chev = el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" });
   const cls = `tm-pf-menu-row${muted ? " tm-pf-menu-muted" : ""}`;
-  if (to) return el("a", { class: cls, href: to }, [el("span", { text: label }), chev]);
-  return el("button", { class: cls, type: "button", onClick }, [el("span", { text: label }), chev]);
+  const props = id ? { class: cls, id } : { class: cls };
+  if (to) return el("a", { ...props, href: to }, [el("span", { text: label }), chev]);
+  return el("button", { ...props, type: "button", onClick }, [el("span", { text: label }), chev]);
 }
 
 /** Scroll a same-page element into view and focus it (Notifications / Privacy menu rows). */
@@ -1201,8 +1204,18 @@ function focusOnPage(id) {
   if (typeof node.focus === "function") node.focus({ preventScroll: true });
 }
 
-/** Sign the user out (reused by the hub menu's "Sign out" row — same effect as the top-nav control). */
+/** Sign the user out — the hub menu's "Sign out" row is the ONLY sign-out entry in the app (TM-906;
+ *  the old top-nav control is gone). Always confirm first via the styled ui.js confirmDialog (never
+ *  native confirm()): cancel/Escape/backdrop = no-op, session intact; confirm calls auth signOut(),
+ *  which fires onAuthChanged(null) → the TM-720 onSignedOut reset chain, untouched and unreordered. */
 async function doSignOut() {
+  const confirmed = await confirmDialog({
+    title: "Sign out?",
+    message: "You'll need your code to sign back in.",
+    confirmLabel: "Sign out",
+    danger: true,
+  });
+  if (!confirmed) return;
   try {
     await signOut();
   } catch (err) {
@@ -1369,7 +1382,7 @@ function buildShell(view) {
         menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
         menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
         menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
-        menuRow("Sign out", { onClick: doSignOut, muted: true }),
+        menuRow("Sign out", { onClick: doSignOut, muted: true, id: "profile-signout-row" }),
       ]),
     ],
     "tm-pf-menu-card",

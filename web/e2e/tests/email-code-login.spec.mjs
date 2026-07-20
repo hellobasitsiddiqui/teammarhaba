@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn, expectSignedOut } from "../helpers/auth-state.mjs";
 import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "../fixtures.mjs";
 
 // Passwordless email-code login (TM-234) — the new DEFAULT front door — plus the SMS "try another
@@ -59,8 +60,8 @@ test("@auth email-code is the default and a user signs in with the emailed code"
   expect(code).toMatch(/^\d{6}$/);
   await page.fill("#emailcode-code", code);
 
-  // Signed in: the sign-out control appears and the signed-out form is gone.
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // Signed in: the router marks body[data-auth] signed-in and the signed-out form is gone.
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
@@ -79,7 +80,7 @@ test("@auth a wrong code shows an error and does not sign the user in", async ({
 
   // The error surfaces and the user stays on the signed-out form.
   await expect(page.locator("#auth-error")).toBeVisible();
-  await expect(page.locator("#signout-btn")).toBeHidden();
+  await expectSignedOut(page);
 });
 
 test('@auth "Try another way" reveals SMS and email+password, and SMS reaches the code step', async ({ page }) => {

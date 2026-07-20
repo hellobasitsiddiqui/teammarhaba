@@ -160,7 +160,12 @@
                 <button id="nav-help" type="button" hidden aria-label="Take a tour">Take a tour</button>
                 <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
                 <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
-                <button id="signout-btn" type="button" hidden>Sign out</button>
+                <!-- Sign out (TM-906): removed from the top nav entirely — the ONLY sign-out entry is
+                     now the Profile hub's "Sign out" menu row (profile.js), behind a styled confirm
+                     dialog. No overflow menu, no admin shortcut. The old top-nav sign-out button id is
+                     BANNED repo-wide (web/tools/tm906-signout-ban.test.mjs pins this); e2e specs
+                     read the signed-in state from body[data-auth] (router.js) instead. -->
+
             </div>
             <!-- Notification bell (TM-455): the top-right header bell + unread badge, shown by
                  router.js for any signed-in, onboarded user (hidden signed-out and on the onboarding /

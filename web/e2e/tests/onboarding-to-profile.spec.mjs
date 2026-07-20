@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
@@ -71,8 +72,8 @@ async function signInFreshUser(page, email, deepLink) {
   const code = await peekCode(email);
   // TM-867: filling the first OTP box with the whole code distributes + AUTO-submits (no verify click).
   await page.fill("#emailcode-code", code);
-  // Signed in (the nav sign-out control appears regardless of where the guard then routes us).
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // Signed in (the router flips body[data-auth] to signed-in regardless of where the guard then routes us).
+  await expectSignedIn(page);
 }
 
 test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, and lands on their profile", async ({ page }) => {
