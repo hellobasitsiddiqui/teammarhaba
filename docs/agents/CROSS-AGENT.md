@@ -4,6 +4,13 @@ Load this when you pick up a work-stream sprint. Distilled from sprint **wave-lo
 (sprint 871, closed 2026-07-18), which ran the full lifecycle cleanly end to end.
 Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT.md)).
 
+## Say which agent you are (every response)
+
+Basit runs several fleet agents in parallel (Admin, Login, Profile, Design, …) and can't tell them
+apart unless you say so. **Name your lane when you pick up a sprint, and sign off EVERY response with
+your agent name** — a trailing line like `— Admin Agent` (or surface it in the status bar). Never
+leave him guessing who's replying. If a lane playbook exists for you, its name is your agent name.
+
 ## Ticket lifecycle (hard rules)
 
 1. **Backlog → Refinement → To Do → In Progress → In Review → Testing → Done.** New tickets go to
@@ -17,8 +24,12 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
    needs no backend). PR + green e2e alone is NOT enough. Non-visual changes: state the exemption
    rationale on the ticket instead.
 4. **Gate tickets are created AT SPRINT START, not at the end** (we were prompted for them — don't
-   repeat that): a `human`-labelled manual-test sign-off, a sprint code-review gate, and a deploy
-   gate. Gate tickets are "born groomed" (complete scope + AC) and go straight to sprint To Do.
+   repeat that). **EVERY wave/sprint gets all THREE gate tickets, no exceptions:** (1) a
+   `human`-labelled manual-test sign-off, (2) a sprint code-review gate, and (3) a **deploy gate**
+   (ship `main` HEAD via `deploy.yml`, then assert the serving revision — see *Deploy + live
+   verification*). Gate tickets are "born groomed" (complete scope + AC) and go straight to sprint
+   To Do. The **deploy gate is the sprint's real Definition-of-Done** — the sprint is not closable
+   until it is shipped and serving-asserted, so it must exist from day one, never bolted on at close.
 
 ## Build pattern per ticket (what worked)
 
