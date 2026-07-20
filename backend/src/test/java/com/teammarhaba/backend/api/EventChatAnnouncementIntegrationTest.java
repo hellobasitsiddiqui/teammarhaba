@@ -139,6 +139,27 @@ class EventChatAnnouncementIntegrationTest extends AbstractIntegrationTest {
                 .isEmpty();
     }
 
+    // ── conversation type gate (TM-856) ─────────────────────────────────────────────────────────────
+
+    @Test
+    void announcementToAnAdminBroadcastChannelIsRejected() throws Exception {
+        // TM-856: an ANNOUNCEMENT belongs only in an EVENT_GROUP thread. An admin must NOT be able to
+        // inject a human-sender announcement into a user's private ADMIN_BROADCAST channel (whose
+        // messages are system-sent) — the type gate rejects it as a 400 and nothing is persisted.
+        long ownerId = provision("ann-broadcast-owner");
+        Conversation channel = conversations.save(Conversation.adminBroadcast(ownerId));
+        provisionAdmin("ann-admin-broadcast");
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/announcements", channel.getId())
+                        .with(admin("ann-admin-broadcast"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"sneaking into your inbox\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(channel.getId()))
+                .isEmpty();
+    }
+
     // ── closed / unknown thread ─────────────────────────────────────────────────────────────────────
 
     @Test
