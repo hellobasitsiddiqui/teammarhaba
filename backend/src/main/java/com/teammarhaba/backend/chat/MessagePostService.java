@@ -243,6 +243,8 @@ public class MessagePostService {
      * announcement reaches the thread's members exactly like an ordinary post.
      *
      * @throws com.teammarhaba.backend.web.ResourceNotFoundException {@code 404} if the thread does not exist
+     * @throws BadRequestException {@code 400} if the thread is not an {@link ConversationType#EVENT_GROUP}
+     *     — an announcement never lands in a (system-sent) {@code ADMIN_BROADCAST} channel (TM-856)
      * @throws ConflictException {@code 409} if the thread is closed / read-only
      */
     @Transactional
@@ -257,6 +259,13 @@ public class MessagePostService {
         Conversation conversation = conversations
                 .findById(conversationId)
                 .orElseThrow(() -> new com.teammarhaba.backend.web.ResourceNotFoundException("Thread not found."));
+
+        // Type gate (TM-856): an ANNOUNCEMENT belongs only in an event's group thread. Without this, an
+        // admin could inject a human-sender announcement into a user's private ADMIN_BROADCAST channel —
+        // whose messages are system-sent by contract — so any non-EVENT_GROUP thread is a plain 400.
+        if (conversation.getType() != ConversationType.EVENT_GROUP) {
+            throw new BadRequestException("Announcements can only be posted to an event's group thread.");
+        }
 
         requireOpenThread(conversation);
 
