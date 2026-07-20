@@ -28,8 +28,8 @@ export const SITE_HIGHLIGHTS = [
   { target: "#me", title: "This is you", body: "Your identity, verified by the backend. Your profile lives here." },
   {
     target: "#nav-admin",
-    title: "Admin console",
-    body: "Admins manage user accounts here — roles, access, enable/disable.",
+    title: "Admin hub",
+    body: "Admins start here — one place linking every admin console: users, events, venues, interests, messages.",
   },
   { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from here." },
   { target: "#signout-btn", title: "That's it!", body: "Sign out here when you're done. Welcome aboard 🎉" },

@@ -63,3 +63,29 @@ for (const file of ["admin.js", "admin-messages.js"]) {
     assert.ok(!source.includes('"Admin console"'), `${file} must not label any route "Admin console"`);
   });
 }
+
+// ── 3. Review-pass extensions: the two remaining "Admin console" stragglers (same stale-label class) ─
+
+test('index.html: the #admin-hub-view region announces "Admin hub" to assistive tech', () => {
+  const html = readFileSync(join(HERE, "../src/index.html"), "utf8");
+  assert.match(
+    html,
+    /id="admin-hub-view"[^>]*aria-label="Admin hub"/,
+    'the hub region must carry aria-label="Admin hub" — "Admin console" collides with the real console regions',
+  );
+});
+
+test('tour-highlights.js: the #nav-admin site-tour coachmark describes the hub, not the users console', () => {
+  const source = readFileSync(join(HERE, "../src/assets/tour-highlights.js"), "utf8");
+  assert.ok(
+    !source.includes('"Admin console"'),
+    "tour-highlights.js must not title any coachmark \"Admin console\" — #nav-admin opens the hub now",
+  );
+  // The #nav-admin step exists and is titled for the hub.
+  const step = source.indexOf('target: "#nav-admin"');
+  assert.ok(step !== -1, "the site tour must still include a #nav-admin step");
+  assert.ok(
+    source.slice(step, step + 200).includes('"Admin hub"'),
+    'the #nav-admin coachmark must be titled "Admin hub"',
+  );
+});
