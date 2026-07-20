@@ -7,9 +7,13 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
 ## Say which agent you are (every response)
 
 Basit runs several fleet agents in parallel (Admin, Login, Profile, Design, …) and can't tell them
-apart unless you say so. **Name your lane when you pick up a sprint, and sign off EVERY response with
-your agent name** — a trailing line like `— Admin Agent` (or surface it in the status bar). Never
-leave him guessing who's replying. If a lane playbook exists for you, its name is your agent name.
+apart unless you say so. **Sign off EVERY response with a one-line status footer** — your agent
+name + the wave you're on + what (if anything) awaits Basit, e.g.
+`— Profile Agent · wave-profile-2 · Actions for you: merge PR #605` (or `· Actions for you: none`).
+Keep it to **one line**; only very rarely spill onto a second line when the action genuinely needs
+it. Never make him hunt for whether the ball is in his court — state it every response, even to say
+there isn't one. Name your lane when you pick up a sprint; if a lane playbook exists for you, its
+name is your agent name.
 
 ## Ticket lifecycle (hard rules)
 
@@ -114,3 +118,23 @@ leave him guessing who's replying. If a lane playbook exists for you, its name i
   (that render is also how bad evidence gets caught before the human sees it).
 - Cross-lane observations found during your sprint get **ticketed and handed off, never claimed**
   — and never silently dropped.
+
+## Handing off to the next agent — write it into `docs/**`
+
+When you close a sprint or pass your lane on, **write a `docs/agents/HANDOFF-<LANE>.md`** (in
+`docs/**`, next to CROSS-AGENT.md and your lane playbook) in the **same shape you were onboarded
+with** — so the next agent reads one file and knows its lane, the rules, and its first moves. Mirror
+the structure you read yours in:
+
+- **Read first (in this order)** — the docs to load and their order: CROSS-AGENT.md, your lane
+  playbook, root `CLAUDE.md` + the blackboard, the `jira-*` skills. Name the lane **hot file(s)**.
+- **How you operate** — Jira creds/board id, git/PR conventions, and the **never-merge /
+  never-deploy** rules.
+- **Non-negotiable rules** — the hard gates that cost real time when skipped.
+- **Current state** — a point-in-time board snapshot, explicitly stamped **"RE-QUERY before
+  trusting"** (automations move tickets behind you).
+- **Your first actions** — read the docs, re-query the board yourself, and **don't build** until the
+  started-sprint + grooming gates are satisfied.
+
+It's a Markdown file under `docs/` — a small, low-risk change. Keep the durable lane knowledge in the
+lane playbook; the handoff is the point-in-time "start here" that points at it.
