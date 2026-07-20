@@ -7,22 +7,13 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
 ## Say which agent you are (every response)
 
 Basit runs several fleet agents in parallel (Admin, Login, Profile, Design, …) and can't tell them
-apart unless you say so. Do BOTH, every response:
-
-1. **Set the shell/terminal title to your agent name** and keep it set on every response, so the
-   window/tab itself always shows who's replying — e.g. emit the OSC escape
-   `printf '\033]0;Profile Agent\007'` (swap in your own lane name). Re-emit it each turn; some
-   shells reset the title after a command runs.
-2. **Sign off EVERY response with a status footer** — so Basit knows who's replying, what they're
-   working, and whether the ball is in his court. Two lines:
-   - your agent name + the wave/sprint you're on — e.g. `— Profile Agent · working wave-profile-2`;
-   - an explicit **Actions for you:** line naming the concrete thing awaiting Basit (e.g.
-     `merge PR #605`, `approve the sprint start`, `authenticate the MCP`), or **`none`** when nothing
-     is blocked on him. Never make him hunt for whether there's a ball in his court — state it every
-     response, even to say there isn't one.
-
-Also name your lane when you pick up a sprint. Never leave him guessing who's replying. If a lane
-playbook exists for you, its name is your agent name.
+apart unless you say so. **Sign off EVERY response with a one-line status footer** — your agent
+name + the wave you're on + what (if anything) awaits Basit, e.g.
+`— Profile Agent · wave-profile-2 · Actions for you: merge PR #605` (or `· Actions for you: none`).
+Keep it to **one line**; only very rarely spill onto a second line when the action genuinely needs
+it. Never make him hunt for whether the ball is in his court — state it every response, even to say
+there isn't one. Name your lane when you pick up a sprint; if a lane playbook exists for you, its
+name is your agent name.
 
 ## Ticket lifecycle (hard rules)
 
@@ -52,14 +43,8 @@ playbook exists for you, its name is your agent name.
   blockers — before any human saw them.
 - **Sequence conflict-pairs.** Two tickets on the same files = build the second only after the
   first MERGES (not after its PR is raised). A dependent build starts from fresh main.
-- **Docs-only PRs (`.md`/docs only): you MAY merge them yourself** once CI is green — Basit's
-  standing authorization, to cut turnaround on process-doc changes. **Verify it's docs-only first**
-  (`gh pr view <n> --json files` → every path ends `.md` or lives under `docs/`); if a single
-  non-doc file is touched, it reverts to human-merge. Everything with code/config/CI changes stays
-  human-merge. After a self-merge, still reconcile the ticket (→ Testing/Done) like any merge.
-- **Poll for the merge on a backoff — never block on it.** You never merge **code PRs**; those
-  merges are human and asynchronous (docs-only exception above). After a PR is raised (ticket → In
-  Review), don't sit and watch it — re-check for the
+- **Poll for the merge on a backoff — never block on it.** You never merge; merges are human and
+  asynchronous. After a PR is raised (ticket → In Review), don't sit and watch it — re-check for the
   merge first at **~5 min, then ~10 min** (then keep widening), and get on with other lane work in
   between. On each check, reconcile: a merged ticket → Testing, and if it was a blocker, start the
   now-unblocked dependent from fresh main. A timed re-check keeps the wave moving with no human ping;
@@ -144,13 +129,12 @@ the structure you read yours in:
 - **Read first (in this order)** — the docs to load and their order: CROSS-AGENT.md, your lane
   playbook, root `CLAUDE.md` + the blackboard, the `jira-*` skills. Name the lane **hot file(s)**.
 - **How you operate** — Jira creds/board id, git/PR conventions, and the **never-merge /
-  never-deploy** rules (with the docs-only self-merge carve-out).
+  never-deploy** rules.
 - **Non-negotiable rules** — the hard gates that cost real time when skipped.
 - **Current state** — a point-in-time board snapshot, explicitly stamped **"RE-QUERY before
   trusting"** (automations move tickets behind you).
 - **Your first actions** — read the docs, re-query the board yourself, and **don't build** until the
   started-sprint + grooming gates are satisfied.
 
-It's a Markdown file under `docs/`, so it ships via the **docs-only self-merge** path above — no code
-review bottleneck on a handoff. Keep the durable lane knowledge in the lane playbook; the handoff is
-the point-in-time "start here" that points at it.
+It's a Markdown file under `docs/` — a small, low-risk change. Keep the durable lane knowledge in the
+lane playbook; the handoff is the point-in-time "start here" that points at it.
