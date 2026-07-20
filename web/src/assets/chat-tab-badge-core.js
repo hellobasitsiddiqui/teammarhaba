@@ -78,6 +78,41 @@ export function decrementUnreadTotal(total, threadUnread) {
 }
 
 /**
+ * The just-loaded thread's own unread, read from the mark-read POST's MarkReadResponse (TM-855). Opening
+ * a thread POSTs `/conversations/{id}/read`, which returns `{ conversationId, lastReadAt, unreadCount }`
+ * where `unreadCount` is the thread's server-authoritative unread AT THE MOMENT it was marked read (the
+ * PRE-mark count — the endpoint is idempotent, so a second open returns 0). This is the FETCHED-THREAD
+ * source the deep-link path needs: on a push / notification-center open the paged conversation LIST was
+ * never rendered, so the `state.rows` cache is empty and the list-row unread is 0 — the optimistic drop
+ * would no-op and the badge would linger (TM-855). Tolerates a missing/malformed response (→ 0) so a
+ * fire-and-forget mark-read that returns junk never throws into the drop.
+ * @param {{unreadCount?: number}|null|undefined} markReadResponse the MarkReadResponse envelope.
+ * @returns {number} a non-negative integer — the thread's pre-mark unread.
+ */
+export function markReadThreadUnread(markReadResponse) {
+  return safeCount(markReadResponse && markReadResponse.unreadCount);
+}
+
+/**
+ * The ADDITIONAL unread to drop from the tab total once a thread's mark-read POST resolves (TM-855),
+ * over and above whatever the on-open optimistic decrement already dropped from the `state.rows` cache.
+ *
+ * The on-open drop subtracts the thread's CACHED list-row unread (`cachedUnread`). On the list-tap path
+ * that cache is warm and already correct, so the POST's authoritative `unreadCount` equals what we
+ * dropped and there is nothing left to do (→ 0 — no double-drop). On the DEEP-LINK path the list was
+ * never loaded, so `cachedUnread` is 0 and the on-open drop no-op'd; the POST's `unreadCount` is then
+ * the real unread this returns so the caller can drop it (belatedly but before the 60s poll). Computed
+ * as `authoritative − alreadyDropped`, clamped at zero, so it can only ever TOP UP the drop, never add
+ * back or over-subtract. The server aggregate (`unread-total`) still reconciles afterward regardless.
+ * @param {number} cachedUnread the list-row unread already dropped optimistically on open (0 on deep-link).
+ * @param {{unreadCount?: number}|null|undefined} markReadResponse the MarkReadResponse envelope.
+ * @returns {number} the extra unread to drop now (0 when the on-open drop already covered it).
+ */
+export function deepLinkUnreadTopUp(cachedUnread, markReadResponse) {
+  return Math.max(0, markReadThreadUnread(markReadResponse) - safeCount(cachedUnread));
+}
+
+/**
  * The Chat tab's accessible label. The tab already has a visible "Chat" text label, so at zero unread
  * we return just "Chat" (let the natural label stand — the DOM half removes the aria-label override);
  * when there IS unread we announce the EXACT (uncapped) count — "Chat, 12 unread" — so a screen-reader

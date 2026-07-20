@@ -75,6 +75,10 @@ import { searchMessages, queryTokens, highlightSegments, snippet } from "./chat-
 // it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
 // so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
 import { noteThreadRead, refreshChatTabBadge } from "./chat-tab-badge.js";
+// TM-855: the deep-link (push / notification-center) open has no cached list row, so the on-open
+// optimistic drop reads 0 and no-ops; the mark-read POST response carries the thread's authoritative
+// pre-mark unread, so we top the drop up from there once it resolves. Pure decision in the badge core.
+import { deepLinkUnreadTopUp } from "./chat-tab-badge-core.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1255,10 +1259,17 @@ function markThreadRead(id) {
   // concurrent unread-total GET re-reads the pre-mark total (the GET/POST race) and the badge doesn't drop.
   noteThreadRead(wasUnread);
   Promise.resolve(markConversationRead(id))
-    // Once the mark-read has COMMITTED, reconcile the badge with the authoritative server total (this GET
-    // now reflects the drop, unlike the router's concurrent pre-mark one) — this also self-corrects any
-    // local decrement drift over repeated open/close, so the total never double-counts or goes negative.
-    .then(() => refreshChatTabBadge())
+    // TM-855: on a DEEP-LINK open (push / notification-center) the list was never rendered, so `wasUnread`
+    // above was 0 and the on-open optimistic drop no-op'd — the badge would linger. The MarkReadResponse
+    // carries the thread's authoritative pre-mark unread, so top the drop up by whatever the on-open
+    // decrement missed (0 on the list-tap path, where `wasUnread` already covered it — no double-drop).
+    .then((res) => {
+      const topUp = deepLinkUnreadTopUp(wasUnread, res);
+      if (topUp > 0) noteThreadRead(topUp);
+      // Then reconcile with the authoritative server total (this GET now reflects the committed drop,
+      // unlike the router's concurrent pre-mark one) — self-correcting any local drift over open/close.
+      refreshChatTabBadge();
+    })
     .catch((err) => {
       // Non-fatal: the optimistic drop stands and the next poll reconciles. Never surfaces to the user.
       console.warn("[chat] mark-read failed:", err?.message ?? err);
