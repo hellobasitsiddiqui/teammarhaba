@@ -152,13 +152,22 @@ appId: app.teammarhaba.webview
     text: "Visual guide"
 - takeScreenshot: 11-help-visual-guide
 
-# ── STEP 8: SIGN OUT. On the public #/help route, sign-out doesn't force a route change (matches the
-#    web spec) — assert the signed-out state via the nav returning the sign-in control. ─────────────
+# ── STEP 8: SIGN OUT. Since TM-906 the ONLY sign-out entry is the Profile hub's "Sign out" row
+#    behind the styled confirm dialog (the old top-nav control is gone): Profile tab → scroll the hub
+#    menu → "Sign out" row → confirm. Signing out on the protected #/profile route bounces the router
+#    to the login front door — assert the signed-out state via the sign-in control returning. ───────
 - tapOn:
-    id: "nav-toggle"
-    optional: true
+    id: "tab-profile" # bottom tab bar (TM-434)
+- scrollUntilVisible:
+    element:
+      id: "profile-signout-row" # the hub menu's "Sign out" row sits at the bottom of the hub
+    direction: DOWN
 - tapOn:
-    id: "signout-btn"
+    id: "profile-signout-row"
+# The styled ui.js confirmDialog gates the destructive action (TM-906). Target the confirm button by
+# its stable DOM id — its visible text ("Sign out") also matches the row behind it.
+- tapOn:
+    id: "tm-dialog-confirm"
 # signOut() is async (Firebase) → router re-renders the nav; wait for the sign-in control to return
 # with an extended timeout rather than the default 7s so the core sign-out step passes reliably.
 - extendedWaitUntil:

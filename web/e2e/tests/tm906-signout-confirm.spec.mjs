@@ -89,6 +89,48 @@ test("@auth TM-906: cancelling the confirm keeps the session intact", async ({ p
   await expect(page.locator(".tm-pf-menu-row", { hasText: "Sign out" })).toBeVisible();
 });
 
+test("@auth TM-906: the confirm dialog traps focus and inerts the background (aria-modal for real)", async ({ page }) => {
+  const row = await openProfileSignedIn(page);
+  await row.click();
+  await expect(page.locator(CONFIRM_DIALOG)).toBeVisible();
+
+  // Initial focus lands on the (destructive) confirm button.
+  await expect(page.locator(CONFIRM_BUTTON)).toBeFocused();
+
+  // THE CRUX (review finding): Tab must CYCLE within the dialog — before the trap, one Tab moved
+  // focus to <body> and the next onto page content behind the backdrop, where Enter could activate
+  // a background control while the destructive confirm was still up.
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press(i % 2 === 0 ? "Tab" : "Shift+Tab");
+    const insideDialog = await page.evaluate(
+      () => !!(document.activeElement && document.activeElement.closest(".tm-dialog")),
+    );
+    expect(insideDialog, `focus escaped the dialog on key press ${i + 1}`).toBe(true);
+  }
+
+  // The page behind the backdrop is inert + aria-hidden while the dialog is open, so background
+  // controls are unreachable by keyboard AND correctly absent for screen readers (aria-modal).
+  expect(
+    await page.evaluate(() => {
+      const main = document.querySelector("main.app");
+      return main.inert === true && main.getAttribute("aria-hidden") === "true";
+    }),
+  ).toBe(true);
+
+  // Escape closes the dialog, restores the background, and hands focus back to the opening row.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(CONFIRM_DIALOG)).toBeHidden();
+  expect(
+    await page.evaluate(() => {
+      const main = document.querySelector("main.app");
+      return main.inert === false && !main.hasAttribute("aria-hidden");
+    }),
+  ).toBe(true);
+  await expect(page.locator("#profile-signout-row")).toBeFocused();
+  // And the cancel path stayed a genuine no-op: session intact.
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+});
+
 test("@auth TM-906: confirming really signs out", async ({ page }) => {
   const row = await openProfileSignedIn(page);
   await row.click();

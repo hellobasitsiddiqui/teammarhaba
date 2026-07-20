@@ -8,10 +8,14 @@
 // and the whole point of the migration (body[data-auth] via e2e/helpers/auth-state.mjs) is that the
 // next nav reshuffle is a one-file fix, not a 21-file one.
 //
-// THE GUARD: walk web/src, web/e2e and web/tools and assert NO file mentions the banned id. This
-// file is the single allowlisted exception (it must name the token to ban it — assembled from parts
-// below anyway, so even this file never contains the literal). Per the reshaping-shared-UI rule:
-// when a shared UI seam is retired, pin the retirement with a guard so it can't silently regrow.
+// THE GUARD: walk web/src, web/e2e, web/tools AND the mobile Maestro flow dirs (android/maestro,
+// ios/maestro) and assert NO file mentions the banned id. The Maestro dirs are in scope because the
+// flows drive the SAME hosted SPA by DOM id — the original migration missed them precisely because
+// this guard only walked web/ (the warm-session sign-out blocks in login-sms.yaml / journey.yaml
+// kept tapping the deleted element). This file is the single allowlisted exception (it must name
+// the token to ban it — assembled from parts below anyway, so even this file never contains the
+// literal). Per the reshaping-shared-UI rule: when a shared UI seam is retired, pin the retirement
+// with a guard so it can't silently regrow.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -21,6 +25,7 @@ import { basename, dirname, join, relative } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = join(HERE, "..");
+const REPO_ROOT = join(WEB_ROOT, "..");
 
 // The banned DOM id, assembled so this guard file itself never contains the literal token.
 const BANNED = ["signout", "btn"].join("-");
@@ -43,8 +48,12 @@ function walk(dir, out = []) {
   return out;
 }
 
-test(`no file in web/src, web/e2e or web/tools references the retired top-nav sign-out id (TM-906)`, () => {
-  const roots = ["src", "e2e", "tools"].map((d) => join(WEB_ROOT, d));
+test(`no file in web/src, web/e2e, web/tools, android/maestro or ios/maestro references the retired top-nav sign-out id (TM-906)`, () => {
+  const roots = [
+    ...["src", "e2e", "tools"].map((d) => join(WEB_ROOT, d)),
+    join(REPO_ROOT, "android", "maestro"),
+    join(REPO_ROOT, "ios", "maestro"),
+  ];
   const offenders = [];
   for (const root of roots) {
     for (const file of walk(root)) {
@@ -55,13 +64,14 @@ test(`no file in web/src, web/e2e or web/tools references the retired top-nav si
       } catch {
         continue; // unreadable/binary — nothing a selector could hide in
       }
-      if (text.includes(BANNED)) offenders.push(relative(WEB_ROOT, file));
+      if (text.includes(BANNED)) offenders.push(relative(REPO_ROOT, file));
     }
   }
   assert.deepEqual(
     offenders,
     [],
     `the retired '#${BANNED}' id is referenced again in: ${offenders.join(", ")} — ` +
-      "sign-out lives ONLY on the Profile hub row (TM-906); e2e specs must use helpers/auth-state.mjs",
+      "sign-out lives ONLY on the Profile hub row behind the confirm dialog (TM-906); " +
+      "e2e specs must use helpers/auth-state.mjs and Maestro flows the profile-row + confirm path",
   );
 });

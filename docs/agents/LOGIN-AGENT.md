@@ -57,8 +57,10 @@ top to bottom — then honour these contracts:
   appear in Sent regardless of recipient). File-poll pattern: a background Playwright script polls
   a scratch file for the code while the orchestrator fetches it from Gmail.
 - e2e: the emulator-only `peek` endpoint hands specs the code (inert in prod); countdown specs use
-  Playwright fake-clock rather than 30s sleeps; sign-in success assert = route/shell state, **not**
-  `#signout-btn`, which hides at phone width and on the onboarding gate (a live-QA false-FAIL).
+  Playwright fake-clock rather than 30s sleeps; sign-in success assert = route/shell state
+  (`body[data-auth]` via `web/e2e/helpers/auth-state.mjs`), **never** a nav control — the old
+  top-nav sign-out button hid at phone width and on the onboarding gate (a live-QA false-FAIL) and
+  TM-906 removed it entirely; sign-out now lives on the Profile hub row behind a confirm dialog.
 - Unit suites: `web/tools/otp-input-*.test.mjs`, `resend-cooldown-*.test.mjs` run on the PR gate.
 
 ## Lane map (as of sprint close)

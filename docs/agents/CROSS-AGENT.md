@@ -101,7 +101,8 @@ name is your agent name.
   Run traffic 100% on the just-built revision. Green run ≠ new code live.
 - **Live-QA the core action for real** (cold path, phone width, real generated code/data — not a
   warm session). Beware assert-too-narrow false FAILs: pick a signed-in signal that survives
-  routing variations (the onboarding gate hides `#signout-btn`; our live QA "failed" while the
+  routing variations — use `body[data-auth]` (TM-906), never a nav control (the onboarding gate
+  hid the old top-nav sign-out button, since removed by TM-906; our live QA "failed" while the
   login actually worked).
 
 ## Closing the sprint
