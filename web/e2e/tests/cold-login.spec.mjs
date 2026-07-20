@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn, expectSignedOut } from "../helpers/auth-state.mjs";
 import { API_BASE_URL, EVENT_GOER } from "../fixtures.mjs";
 
 // COLD email-code login (TM-738) — the gold-standard auth journey: sign in from a FULLY SIGNED-OUT
@@ -104,7 +105,7 @@ test("@auth cold login: from a fully signed-out state, an emailed code signs the
   // (A warm/restored session would have routed us to #auth-signed-in instead — this proves it didn't.)
   await expect(page.locator("#auth-signed-out")).toBeVisible();
   await expect(page.locator("#auth-signed-in")).toBeHidden();
-  await expect(page.locator("#signout-btn")).toBeHidden();
+  await expectSignedOut(page);
   // The email-code front door is the default (password field hidden until "try another way").
   await expect(page.locator("#emailcode-send-btn")).toBeVisible();
 
@@ -127,8 +128,8 @@ test("@auth cold login: from a fully signed-out state, an emailed code signs the
   expect(code).toMatch(/^\d{6}$/);
   await page.fill("#emailcode-code", code);
 
-  // ── Boots into the app: the sign-out control appears and the signed-out form is gone. ────────
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // ── Boots into the app: the router marks body[data-auth] signed-in; the signed-out form is gone. ──
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // ── The crux: HOME, not a gate. EVENT_GOER is already onboarded + terms-accepted, so the guard

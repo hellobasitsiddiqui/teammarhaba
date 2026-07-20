@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, dbConfig } from "../fixtures.mjs";
 
@@ -26,7 +27,7 @@ async function openProfile(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 
   // Arm the wait BEFORE the click that triggers the profile-mount GET /me.
   const meLoaded = page.waitForResponse(

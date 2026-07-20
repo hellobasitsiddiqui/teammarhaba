@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn, expectSignedOut } from "../helpers/auth-state.mjs";
 import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "../fixtures.mjs";
 
 // Six-box OTP input with auto-submit (TM-867) — the email-code verify step now renders six
@@ -59,7 +60,7 @@ test("@auth typing the 6th digit auto-submits — no verify click — and signs 
   await box(page, 1).pressSequentially(code, { delay: 40 });
 
   // The crux: NO #emailcode-verify-btn click — the 6th digit fired the verify itself.
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
@@ -79,7 +80,7 @@ test("@auth pasting a space-formatted code into a MIDDLE box fills every box and
   }, formatted);
 
   // Auto-submitted straight from the paste: signed in without any verify click.
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // And the paste genuinely DISTRIBUTED (not just submitted): each box holds its own digit.
@@ -121,7 +122,7 @@ test("@auth backspace walks back through the boxes and non-digits are rejected",
 
   // Nothing auto-submitted along the way — still on the code step, still signed out.
   await expect(page.locator("#emailcode-step-code")).toBeVisible();
-  await expect(page.locator("#signout-btn")).toBeHidden();
+  await expectSignedOut(page);
 });
 
 test("@auth a failed auto-submit re-focuses box 1 so the code can be retyped straight away", async ({ page }) => {
@@ -138,7 +139,7 @@ test("@auth a failed auto-submit re-focuses box 1 so the code can be retyped str
   // The auto-submitted verify fails: error banner up, still signed out, and — the fix — focus is
   // back on the first box rather than lost to the document body.
   await expect(page.locator("#auth-error")).toBeVisible();
-  await expect(page.locator("#signout-btn")).toBeHidden();
+  await expectSignedOut(page);
   await expect(box(page, 1)).toBeFocused();
 
   // Standard OTP recovery: the rejected code is CLEARED, ready for a fresh entry. (Load-bearing:
@@ -149,7 +150,7 @@ test("@auth a failed auto-submit re-focuses box 1 so the code can be retyped str
 
   // The recovery is immediate: retyping the CORRECT code from the restored focus signs in.
   await box(page, 1).pressSequentially(code, { delay: 40 });
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
@@ -183,6 +184,6 @@ test("@auth SMS: the texted code auto-submits from the six boxes — sign-in wit
   // The crux: filling box 1 fans the code out and AUTO-submits — no #sms-verify-btn click. If the
   // SMS auto-submit wiring regresses, this stays signed out and fails loudly.
   await page.fill("#sms-code", session.code);
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });

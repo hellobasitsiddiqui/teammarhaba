@@ -42,10 +42,10 @@ async function signInAsAdmin(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  // Wait for auth to ACTUALLY resolve before the caller navigates. #signout-btn lives in the
-  // collapsed nav at a phone viewport, so toBeVisible() never holds; the viewport-independent
-  // "signed in" signal is the signed-OUT login panel disappearing. (Asserting too early would let
-  // the caller's hash navigation race the guard back to #/login.)
+  // Wait for auth to ACTUALLY resolve before the caller navigates. The viewport-independent
+  // "signed in" signal is the signed-OUT login panel disappearing (equivalently: body[data-auth]
+  // flipping — auth-state.mjs / TM-906; the top-nav sign-out control no longer exists). Asserting
+  // too early would let the caller's hash navigation race the guard back to #/login.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // ...BUT signed-in alone isn't enough to navigate to a protected view yet (TM-325). The router

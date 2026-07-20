@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn, signOutViaProfile } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, TARGET, dbConfig } from "../fixtures.mjs";
 
@@ -22,8 +23,8 @@ test("@admin admin signs in, disables a user via the console, and the change per
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
 
-  // 3. Authenticated: sign-out + admin nav appear (admin nav only shows for ROLE_ADMIN).
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // 3. Authenticated: body[data-auth] flips + admin nav appears (admin nav only shows for ROLE_ADMIN).
+  await expectSignedIn(page);
   await expect(page.locator("#nav-admin")).toBeVisible();
   // ...and the sign-in form is actually gone — guards TM-141: the `hidden` attribute the router
   // sets must really hide it (a class `display` rule used to override `[hidden]`, leaving it shown).
@@ -66,7 +67,8 @@ test("@admin admin signs in, disables a user via the console, and the change per
     await client.end();
   }
 
-  // 8. Sign out → back to the login view.
-  await page.click("#signout-btn");
+  // 8. Sign out the way a real user now must (TM-906: Profile hub row + confirm dialog — the admin
+  //    console has NO faster path, deliberately) → back to the login view.
+  await signOutViaProfile(page);
   await expect(page.locator("#auth-signed-out")).toBeVisible();
 });

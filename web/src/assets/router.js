@@ -503,20 +503,28 @@ function render() {
   if (receiptsView) receiptsView.hidden = route !== RECEIPTS;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
-  // suppress the in-app nav links so the user can't side-step the gate; only the sign-out control
-  // (and the public Help link, so they can read the terms) stays. Never trap a user.
+  // suppress the in-app nav links so the user can't side-step the gate; only the public Help link
+  // stays (so they can read the terms). NB (TM-906): sign-out moved to the Profile hub, which a
+  // GATED user cannot reach — so while gated there is currently no sign-out affordance at all
+  // (deliberate per TM-906's "profile is the only entry"; revisit if the gates need an escape).
   const gated = signedIn && (!isOnboarded || needsTerms);
 
-  // Nav reflects auth state: a sign-in link when signed out, the sign-out control when in.
+  // Canonical auth-state signal (TM-906): a `data-auth` attribute on <body>, flipped on every render
+  // (render() runs on each hashchange + auth change). This replaced the old top-nav sign-out control
+  // as THE stable "signed in" signal the e2e suite waits on — unlike any nav element it is immune to
+  // viewport collapse (the hamburger), the first-run gates (which hide most nav), and future nav
+  // reshuffles. Values: "signed-in" | "signed-out"; absent only before the first render.
+  document.body.dataset.auth = signedIn ? "signed-in" : "signed-out";
+
+  // Nav reflects auth state: a sign-in link when signed out. (The top-nav sign-out control was
+  // REMOVED in TM-906 — sign-out now lives ONLY on the Profile hub's menu row, behind a confirm.)
   const navSignIn = $("nav-signin");
-  const navSignOut = $("signout-btn");
   const navAdmin = $("nav-admin");
   const navAdminEvents = $("nav-admin-events");
   const navAdminVenues = $("nav-admin-venues");
   const navAdminInterests = $("nav-admin-interests"); // TM-779
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
-  if (navSignOut) navSignOut.hidden = !signedIn;
   // The Help-page link (TM-255) is normally always shown (public, signed-in or out), but is hidden
   // while the first-login gate is up so a gated user can't side-step it via the nav (the guard also
   // bounces them back to the gate, but hiding the link keeps the gated nav clean).

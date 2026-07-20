@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { ADMIN, TARGET } from "../fixtures.mjs";
 
 // Paper appearance guard (TM-216 origin; rewritten for the single Paper theme in TM-529). The
@@ -12,7 +13,8 @@ import { ADMIN, TARGET } from "../fixtures.mjs";
 // the existing E2E workflow (main + manual dispatch), never the PR gate.
 //
 // Waits mirror the existing specs (TM-198 lesson — always wait for the async load to settle before
-// asserting): we wait for each view's container, and for signed-in pages we wait for `#signout-btn`.
+// asserting): we wait for each view's container, and for signed-in pages we wait for the
+// router's body[data-auth] signed-in signal (auth-state.mjs, TM-906).
 
 /** Read <html data-sketchy> (the wavy/sketchy state applied by appearance.js / appearance-sync.js). */
 async function sketchyState(page) {
@@ -38,7 +40,7 @@ async function signInAsAdmin(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 }
 
 // Suppress the first-run product tour (TM-147): its modal + backdrop would overlay the pages under

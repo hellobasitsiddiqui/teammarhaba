@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 import { completeInterestsStep } from "../helpers/onboarding.mjs";
@@ -38,7 +39,7 @@ test("@profile saving with a blank phone input PRESERVES the stored phone (TM-88
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 
   // 2. Open the self-service profile form (wait for the mount GET /me so the prefill has landed).
   const meLoaded = page.waitForResponse(
@@ -94,7 +95,7 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   // AUTO-submits — no verify click (on success onAuthChanged hides the form before run() ever
   // re-enables the button, so a click can never land; see email-code-login.spec.mjs).
   await page.fill("#emailcode-code", await peekCode(email));
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
 
   // 2. GATED: the completion gate intercepts, and it carries the phone pair (country picker + input).
   await expect(page.locator("#onboarding-view")).toBeVisible();

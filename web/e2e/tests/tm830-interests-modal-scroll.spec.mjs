@@ -47,8 +47,8 @@ async function signIn(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", EVENT_GOER.password);
   await page.click("#signin-btn");
-  // The viewport-independent "signed in" signal: the signed-OUT login panel disappears. (#signout-btn
-  // lives in the collapsed hamburger nav at a phone width, so toBeVisible() never holds there.)
+  // The viewport-independent "signed in" signal: the signed-OUT login panel disappears (the top-nav
+  // sign-out control was removed in TM-906; body[data-auth] from auth-state.mjs is the modern form).
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 

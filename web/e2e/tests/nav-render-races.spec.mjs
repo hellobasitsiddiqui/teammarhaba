@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { ADMIN, TARGET } from "../fixtures.mjs";
 
 // Nav/render races + deep links (TM-733) — a browser walkthrough for one of the three MEDIUM findings
@@ -50,7 +51,7 @@ async function signInAsAdmin(page) {
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   // Signed in AND ADMIN role resolved (admin nav only un-hides for ROLE_ADMIN once /me has resolved).
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  await expectSignedIn(page);
   await expect(page.locator("#nav-admin")).toBeVisible();
 }
 

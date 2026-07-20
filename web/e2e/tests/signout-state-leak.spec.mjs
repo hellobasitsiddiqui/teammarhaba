@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { EVENT_GOER } from "../fixtures.mjs";
+import { expectSignedIn, signOutViaProfile } from "../helpers/auth-state.mjs";
 
 // Sign-out state-leak guard (TM-720) — a shared-device cross-user leak: one user's persisted
 // per-user state must NOT survive their sign-out, or it re-surfaces for the NEXT user who signs in
@@ -16,7 +17,8 @@ import { EVENT_GOER } from "../fixtures.mjs";
 // We drive the inbox through the SAME QA seam production/QA uses (no FCM, no native shell needed):
 // `window.tmNotifications.record({...})` is the exact `pushNotificationReceived` entry point, so it
 // exercises the real record → addEntry → saveEntries → localStorage path (notification-center.js).
-// Then we sign out via the real `#signout-btn` (Firebase signOut → onAuthChanged(null)) and assert
+// Then we sign out the way a real user now must (TM-906: the Profile hub's "Sign out" row + its
+// confirm dialog — Firebase signOut → onAuthChanged(null)) and assert
 // the store is CLEARED — the thing that would FAIL before the fix (the store survived) and PASSES
 // after — and stays empty across a fresh reload (the "next user boots" boundary).
 //
@@ -76,8 +78,8 @@ test("@auth sign-out clears the foreground-push inbox so it can't leak to the ne
   await page.fill("#password", EVENT_GOER.password);
   await page.click("#signin-btn");
 
-  // Authenticated: the sign-out control appears and the signed-out form is gone.
-  await expect(page.locator("#signout-btn")).toBeVisible();
+  // Authenticated: the router marks body[data-auth] signed-in and the signed-out form is gone.
+  await expectSignedIn(page);
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // ── Populate this user's foreground-push inbox via the QA seam (the real record path). ──────────
@@ -97,10 +99,10 @@ test("@auth sign-out clears the foreground-push inbox so it can't leak to the ne
   expect(before.map((e) => e.title)).toEqual(["New message", "Ride reminder"]); // newest-first
   expect(before.every((e) => e.read === false)).toBe(true); // both unread — the leaking badge state
 
-  // ── Sign out via the real control (Firebase signOut → onAuthChanged(null) → onSignedOut fires). ──
-  await page.click("#signout-btn");
+  // ── Sign out the real way (TM-906): Profile hub → "Sign out" row → styled confirm → confirm.
+  // (Firebase signOut → onAuthChanged(null) → the TM-720 onSignedOut reset chain fires, unchanged.)
+  await signOutViaProfile(page);
   await expect(page.locator("#auth-signed-out")).toBeVisible();
-  await expect(page.locator("#signout-btn")).toBeHidden();
 
   // ── THE CRUX (TM-720): the inbox store is CLEARED on sign-out. ───────────────────────────────────
   // Before the fix, notification-center.js never cleared it on sign-out, so this store survived and
