@@ -1669,7 +1669,10 @@ function openReactionPicker(m) {
  * Toggle the caller's `emoji` reaction on message `m`: apply the optimistic chip math immediately, call
  * the react / un-react endpoint (TM-461), then RECONCILE with the server's authoritative summary — or
  * ROLL BACK to the prior chips on failure. Guards a rapid double-tap on the same chip via `thread.reacting`,
- * and drops the reconcile if the caller navigated to another thread mid-flight.
+ * and drops the reconcile if the caller navigated to another thread mid-flight. The rollback is itself
+ * guarded (TM-854, `core.shouldRollbackReaction`): it only restores the prior chips while the message
+ * still shows this toggle's optimistic paint, so a concurrent poll/SSE update that landed during the
+ * request is never clobbered — and the failure toast stays inside the thread guard.
  * @param {Object} m the message view-model (lives in `thread.messages`, so mutating its reactions there
  *   is what `repaintBody` re-reads).
  * @param {string} emoji the reaction glyph.
@@ -1695,10 +1698,16 @@ async function toggleReaction(m, emoji) {
     repaintBody();
   } catch (err) {
     if (thread.id === threadId) {
-      setReactionsOnMessage(id, prev); // roll the optimistic change back
-      repaintBody();
+      // TM-854: only roll back while the chips are still the optimistic paint this toggle wrote — a
+      // concurrent poll/SSE reconcile that landed mid-flight is newer server truth, not ours to clobber.
+      const msg = thread.messages.find((x) => x.id === id);
+      if (msg && core.shouldRollbackReaction(msg.reactions, optimistic)) {
+        setReactionsOnMessage(id, prev); // roll the optimistic change back
+        repaintBody();
+      }
+      // TM-854: the toast lives inside the thread guard so it can't fire after a navigate-away.
+      toast("Couldn't update your reaction. Please try again.", { type: "error" });
     }
-    toast("Couldn't update your reaction. Please try again.", { type: "error" });
     console.warn("[chat] reaction toggle failed:", err?.status ?? "", err?.message ?? err);
   } finally {
     thread.reacting.delete(key);

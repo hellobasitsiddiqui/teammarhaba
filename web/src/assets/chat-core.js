@@ -117,6 +117,25 @@ export function applyReactionToggle(reactions, emoji) {
 }
 
 /**
+ * Should a FAILED reaction toggle roll its optimistic paint back? (TM-854.) Only when the message's
+ * CURRENT chips are still exactly the optimistic value that toggle wrote — if a concurrent poll/SSE
+ * reconcile replaced them while the request was in flight, that newer server truth must NOT be
+ * clobbered by the toggle's stale pre-request snapshot. Note the poll applies a whole fresh page
+ * without bumping `thread.rev` (rev only tracks live/SSE mutations — TM-721), so this is a VALUE
+ * comparison (emoji/count/mine, in order), not a rev check: a wholesale array replace with identical
+ * content still counts as "untouched by anyone else".
+ * @param {Array<{emoji, count, mine}>} current the message's reaction chips at failure time.
+ * @param {Array<{emoji, count, mine}>} optimistic the chips the toggle wrote before its request.
+ * @returns {boolean} true → safe to restore the pre-toggle chips; false → leave the newer state alone.
+ */
+export function shouldRollbackReaction(current, optimistic) {
+  const now = normaliseReactions(current);
+  const wrote = normaliseReactions(optimistic);
+  if (now.length !== wrote.length) return false;
+  return now.every((r, i) => r.emoji === wrote[i].emoji && r.count === wrote[i].count && r.mine === wrote[i].mine);
+}
+
+/**
  * Derive the read-receipt tick state for an out-going message from how many group members have read
  * it (the delivery ladder, kept as a pure util for a future ticket that surfaces receipts once the
  * API carries read counts):
