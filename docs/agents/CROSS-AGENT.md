@@ -7,9 +7,16 @@ Lane-specific playbooks sit next to this file (e.g. [LOGIN-AGENT.md](LOGIN-AGENT
 ## Say which agent you are (every response)
 
 Basit runs several fleet agents in parallel (Admin, Login, Profile, Design, …) and can't tell them
-apart unless you say so. **Name your lane when you pick up a sprint, and sign off EVERY response with
-your agent name** — a trailing line like `— Admin Agent` (or surface it in the status bar). Never
-leave him guessing who's replying. If a lane playbook exists for you, its name is your agent name.
+apart unless you say so. Do BOTH, every response:
+
+1. **Set the shell/terminal title to your agent name** and keep it set on every response, so the
+   window/tab itself always shows who's replying — e.g. emit the OSC escape
+   `printf '\033]0;Profile Agent\007'` (swap in your own lane name). Re-emit it each turn; some
+   shells reset the title after a command runs.
+2. **Sign off EVERY response with your agent name** — a trailing line like `— Admin Agent`.
+
+Also name your lane when you pick up a sprint. Never leave him guessing who's replying. If a lane
+playbook exists for you, its name is your agent name.
 
 ## Ticket lifecycle (hard rules)
 
