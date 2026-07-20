@@ -16,6 +16,7 @@ import {
   EVENT_CHAT_ENTRY_LABEL,
   isEventChatMember,
   findEventConversation,
+  collectConversationsForEvent,
   eventChatEntryModel,
 } from "../src/assets/events-core.js";
 
@@ -83,6 +84,83 @@ test("findEventConversation: degrades safely (empty / null / no eventId)", () =>
   assert.equal(findEventConversation(undefined, 42), null);
   assert.equal(findEventConversation([eventThread], null), null);
   assert.equal(findEventConversation([{ id: 1, type: "EVENT_GROUP" }], 42), null); // no eventId
+});
+
+// ---------------------------------------------------------------- collectConversationsForEvent (TM-853)
+
+// A fake paged GET /me/conversations: serves `all` in fixed windows of `pageSize` (the server caps the
+// page size, so a caller can't sidestep paging by asking for a huge page) in the shared page envelope,
+// recording which pages were requested.
+function pagedServer(all, { pageSize = 20 } = {}) {
+  const calls = [];
+  return {
+    calls,
+    fetchPage: async (page) => {
+      calls.push(page);
+      const start = page * pageSize;
+      return {
+        items: all.slice(start, start + pageSize),
+        page,
+        size: pageSize,
+        totalElements: all.length,
+        totalPages: Math.ceil(all.length / pageSize),
+      };
+    },
+  };
+}
+
+// 24 EVENT_GROUP threads for OTHER events — enough that, at the server's page size of 20, anything
+// appended after them lands beyond the first page (the TM-853 regression shape: a chatty user).
+const otherThreads = Array.from({ length: 24 }, (_, i) => ({
+  id: 100 + i,
+  eventId: 1000 + i,
+  type: "EVENT_GROUP",
+}));
+
+test("collect: TM-853 — resolves a thread that is NOT in the first page (25 conversations, target last)", async () => {
+  const server = pagedServer([...otherThreads, eventThread]); // 25 items; event 42's thread is #25, on page 1
+  const conversations = await collectConversationsForEvent(server.fetchPage, 42);
+  assert.equal(findEventConversation(conversations, 42), eventThread);
+  assert.deepEqual(server.calls, [0, 1]); // it actually paged past the first window
+  // And the composed model — what the detail renders — now carries the live deep-link.
+  const model = eventChatEntryModel({ detail: goingDetail, me: memberUser, conversations });
+  assert.equal(model.enabled, true);
+  assert.equal(model.href, "#/chat/900");
+});
+
+test("collect: stops after the first page when the thread is already there (no over-fetching)", async () => {
+  const server = pagedServer([eventThread, ...otherThreads]);
+  const conversations = await collectConversationsForEvent(server.fetchPage, 42);
+  assert.equal(findEventConversation(conversations, 42), eventThread);
+  assert.deepEqual(server.calls, [0]);
+});
+
+test("collect: exhausts every page when no thread matches, so the not-ready hint is honest", async () => {
+  const server = pagedServer([...otherThreads, ...otherThreads.map((t) => ({ ...t, id: t.id + 50, eventId: t.eventId + 50 }))]); // 48 items, 3 pages, no event-42 thread
+  const conversations = await collectConversationsForEvent(server.fetchPage, 42);
+  assert.equal(conversations.length, 48);
+  assert.deepEqual(server.calls, [0, 1, 2]);
+  const model = eventChatEntryModel({ detail: goingDetail, me: memberUser, conversations });
+  assert.equal(model.enabled, false);
+  assert.match(model.reason, /ready/i);
+});
+
+test("collect: degrades safely on an empty list (single request, empty result)", async () => {
+  const server = pagedServer([]);
+  const conversations = await collectConversationsForEvent(server.fetchPage, 42);
+  assert.deepEqual(conversations, []);
+  assert.deepEqual(server.calls, [0]);
+});
+
+test("collect: the maxPages cap halts a misbehaving envelope (never loops forever)", async () => {
+  let calls = 0;
+  // A pathological server: always claims more pages and keeps returning items.
+  const fetchPage = async (page) => {
+    calls++;
+    return { items: [{ id: page, eventId: 9999, type: "EVENT_GROUP" }], page, size: 1, totalElements: 999999, totalPages: 999999 };
+  };
+  await collectConversationsForEvent(fetchPage, 42, { maxPages: 3 });
+  assert.equal(calls, 3);
 });
 
 // ---------------------------------------------------------------- eventChatEntryModel (composed)
