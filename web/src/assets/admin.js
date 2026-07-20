@@ -525,7 +525,7 @@ async function loadActivity(user) {
 const ROUTE_LABELS = Object.freeze({
   "#/home": "Home",
   "#/profile": "Profile",
-  "#/admin": "Admin console",
+  "#/admin": "Admin hub",
   "#/help": "Help",
   "#/onboarding": "Onboarding",
   "#/login": "Sign in",

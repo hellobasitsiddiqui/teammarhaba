@@ -74,7 +74,7 @@ const ROUTE_LABELS = Object.freeze({
   "#/events": "Events",
   "#/chat": "Chat",
   "#/notifications": "Notifications",
-  "#/admin": "Admin console",
+  "#/admin": "Admin hub",
   "#/help": "Help",
 });
 

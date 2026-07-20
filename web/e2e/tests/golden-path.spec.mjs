@@ -281,6 +281,10 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   const adminHidden = await navAdmin.getAttribute("hidden");
   if (adminHidden === null) {
     await clickNav(page, "#nav-admin");
+    // TM-917: #nav-admin opens the #/admin HUB; the users console moved to #/admin/users, reached
+    // via the hub's Users row (same routing as admin-walkthrough / broadcast-admin).
+    await expect(page.locator("#admin-hub-view")).toBeVisible();
+    await page.click('.admin-hub-row[href="#/admin/users"]');
     await expect(page.locator("#admin-view")).toBeVisible();
     await expect(page.locator("#admin-table")).toBeVisible();
     await shot("admin-console");
