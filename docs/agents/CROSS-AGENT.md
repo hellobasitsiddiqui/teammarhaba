@@ -13,7 +13,13 @@ apart unless you say so. Do BOTH, every response:
    window/tab itself always shows who's replying — e.g. emit the OSC escape
    `printf '\033]0;Profile Agent\007'` (swap in your own lane name). Re-emit it each turn; some
    shells reset the title after a command runs.
-2. **Sign off EVERY response with your agent name** — a trailing line like `— Admin Agent`.
+2. **Sign off EVERY response with a status footer** — so Basit knows who's replying, what they're
+   working, and whether the ball is in his court. Two lines:
+   - your agent name + the wave/sprint you're on — e.g. `— Profile Agent · working wave-profile-2`;
+   - an explicit **Actions for you:** line naming the concrete thing awaiting Basit (e.g.
+     `merge PR #605`, `approve the sprint start`, `authenticate the MCP`), or **`none`** when nothing
+     is blocked on him. Never make him hunt for whether there's a ball in his court — state it every
+     response, even to say there isn't one.
 
 Also name your lane when you pick up a sprint. Never leave him guessing who's replying. If a lane
 playbook exists for you, its name is your agent name.
