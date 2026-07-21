@@ -131,8 +131,11 @@ test("@admin @admin-interests the console shows a 'Selected by' count+percent fo
   await expect(yogaRow).toBeVisible();
   const selectedByCell = yogaRow.locator('td[data-label="Selected by"]');
   await expect(selectedByCell).toBeVisible();
-  // Format "<count> (<pct>%)" with a count of at least 1 (the seeded selection).
-  await expect(selectedByCell).toHaveText(/^\d+ \(\d+%\)$/);
-  await expect(selectedByCell).not.toHaveText("0 (0%)");
+  // The cell's textContent is prefixed by the TM-935 visually-hidden data-label span
+  // ("Selected by: ") that stackableTable injects into every td[data-label] for screen readers; the
+  // visible value is the "<count> (<pct>%)" that follows. Assert that value is present at the end
+  // (count ≥ 1 for the seeded selection) rather than anchoring on the whole cell text.
+  await expect(selectedByCell).toContainText(/\d+ \(\d+%\)$/);
+  await expect(selectedByCell).not.toContainText("0 (0%)");
   await shot("selected-by-populated");
 });
