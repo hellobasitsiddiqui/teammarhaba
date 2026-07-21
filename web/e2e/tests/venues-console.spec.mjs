@@ -12,7 +12,7 @@ import { authHeadersFor } from "../events-api.mjs";
 //      create → see it in the list → edit a field → deactivate → confirm it drops from the active list.
 //
 // Both reuse the harness's seeded ADMIN (global-setup.mjs, which grants the role=ADMIN custom claim so
-// #nav-admin-venues appears and the /api/v1/admin/venues routes authorize). `screenshot: "on"` is set
+// #nav-admin appears and the /api/v1/admin/venues routes authorize). `screenshot: "on"` is set
 // globally (playwright.config.mjs); each spec also takes explicit named shots for the evidence trail.
 
 // Suppress the first-run product tour so its dimmed overlay/backdrop can't cover the controls under
@@ -50,14 +50,16 @@ async function signInAsAdmin(page) {
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin-venues")).toBeVisible();
+  await expect(page.locator("#nav-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
-/** Open the venues console from the nav and wait for the list panel + a row to render. */
+/** Open the venues console via the #/admin hub's Venues row (TM-937: the per-console top-nav link
+ *  is gone; #nav-admin opens the hub) and wait for the list panel + a row to render. */
 async function openVenuesConsole(page) {
   await openNav(page);
-  await page.locator("#nav-admin-venues").click();
+  await page.locator("#nav-admin").click();
+  await page.click('.admin-hub-row[href="#/admin/venues"]');
   await expect(page).toHaveURL(/#\/admin\/venues$/);
   await expect(page.locator("#admin-venues-view")).toBeVisible();
 }

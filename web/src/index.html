@@ -137,24 +137,11 @@
                      of membership-receipts.js's old self-managed listener into the app router (the same
                      TM-606 move done for the Membership link), so it now respects the signed-out/gated states. -->
                 <a id="nav-receipts" href="#/receipts" hidden>My tickets</a>
-                <!-- Admin console link (TM-133): shown by router.js only for a signed-in ADMIN. -->
+                <!-- Admin link (TM-133): shown by router.js only for a signed-in ADMIN. Opens the
+                     #/admin hub (TM-917), the single nav entry to all five consoles — the per-console
+                     top-nav links (events/venues/interests/messages) were removed in TM-937 since the
+                     hub's rows now cover them. The console ROUTES themselves are unchanged. -->
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
-                <!-- Admin events console link (TM-395): shown by router.js only for a signed-in ADMIN.
-                     Labelled "Manage events" (not "Events") to disambiguate from the user events-browse
-                     link (#nav-events) above — both are revealed for an admin, so a bare "Events" appeared
-                     twice in the nav (TM-766). -->
-                <a id="nav-admin-events" href="#/admin/events" hidden>Manage events</a>
-                <!-- Admin venues console link (TM-519): shown by router.js only for a signed-in ADMIN. -->
-                <a id="nav-admin-venues" href="#/admin/venues" hidden>Venues</a>
-                <!-- Admin interests console link (TM-779): shown by router.js only for a signed-in ADMIN.
-                     Bare noun "Interests" (mirrors "Venues"); unique among nav labels so the account-nav
-                     dedup guard (nav-admin-events-label.test.mjs) stays green. -->
-                <a id="nav-admin-interests" href="#/admin/interests" hidden>Interests</a>
-                <!-- Admin messaging link (TM-443 compose → TM-444 sent-history). Now that the sent-history
-                     list exists (TM-444), this lands admins on the messages hub (#/admin/messages), from
-                     which "New message" opens the compose form. Shown by router.js only for a signed-in
-                     ADMIN (hidden while gated). -->
-                <a id="nav-admin-messages" href="#/admin/messages" hidden>Messages</a>
                 <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
                      to re-run the whole-site walkthrough or the current page's tour. -->
                 <button id="nav-help" type="button" hidden aria-label="Take a tour">Take a tour</button>

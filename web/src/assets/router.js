@@ -520,9 +520,6 @@ function render() {
   // REMOVED in TM-906 — sign-out now lives ONLY on the Profile hub's menu row, behind a confirm.)
   const navSignIn = $("nav-signin");
   const navAdmin = $("nav-admin");
-  const navAdminEvents = $("nav-admin-events");
-  const navAdminVenues = $("nav-admin-venues");
-  const navAdminInterests = $("nav-admin-interests"); // TM-779
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
   // The Help-page link (TM-255) is normally always shown (public, signed-in or out), but is hidden
@@ -549,19 +546,10 @@ function render() {
   if (navReceipts) navReceipts.hidden = !(signedIn && membershipEnabled()) || gated;
   // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
   if (navProfile) navProfile.hidden = !signedIn || gated;
-  // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated).
+  // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated). It
+  // opens the #/admin hub (TM-917) — the single top-nav admin entry since TM-937 removed the
+  // per-console links (events/venues/interests/messages); consoles are reached via the hub's rows.
   if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
-  // The admin events console link (TM-395) follows the same ADMIN-only, hidden-while-gated rule.
-  if (navAdminEvents) navAdminEvents.hidden = !(signedIn && isAdmin) || gated;
-  // The admin venues console link (TM-519) follows the same ADMIN-only, hidden-while-gated rule.
-  if (navAdminVenues) navAdminVenues.hidden = !(signedIn && isAdmin) || gated;
-  // The admin interests console link (TM-779) follows the same ADMIN-only, hidden-while-gated rule.
-  if (navAdminInterests) navAdminInterests.hidden = !(signedIn && isAdmin) || gated; // TM-779
-  // The admin "Messages" link (TM-443) — the entry point to the compose page — follows the same
-  // ADMIN-only, hidden-while-gated rule. It targets compose directly since the sent-history list
-  // (#/admin/messages) is TM-444 (a later wave) and doesn't exist yet.
-  const navAdminMessages = $("nav-admin-messages");
-  if (navAdminMessages) navAdminMessages.hidden = !(signedIn && isAdmin) || gated;
   const homeAdminLink = $("home-admin-link");
   if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
 
