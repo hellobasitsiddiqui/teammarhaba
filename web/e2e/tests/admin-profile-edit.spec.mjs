@@ -38,8 +38,12 @@ test("@admin admin edits another user's profile fields via the console, and it p
   await dialog.getByRole("button", { name: "Edit profile", exact: true }).click();
 
   // 4. Edit the profile fields — a unique first name (so the assertion is unambiguous across reruns)
-  //    and an allow-list city (TM-877). The form reuses the shared self-edit validation.
-  const stamp = String(Date.now()).slice(-6);
+  //    and an allow-list city (TM-877). The form reuses the shared self-edit validation, which
+  //    enforces the name-like rule (NAME_LIKE / validateProfileField): letters, marks, spaces, dots,
+  //    apostrophes, hyphens — NO DIGITS. So the unique suffix must be letters-only; mapping the
+  //    Date.now() digits to a–j keeps it unique across reruns without tripping that rule (a numeric
+  //    suffix like "Edited837401" is correctly rejected by both the client and the server → 400).
+  const stamp = String(Date.now()).slice(-6).replace(/[0-9]/g, (d) => "abcdefghij"[Number(d)]);
   const newFirst = `Edited${stamp}`;
   await dialog.locator("#admin-profile-firstName-" + targetId).fill(newFirst);
   await dialog.locator("#admin-profile-city-" + targetId).selectOption("Milton Keynes");
