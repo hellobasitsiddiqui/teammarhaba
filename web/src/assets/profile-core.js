@@ -147,6 +147,26 @@ export function profileStrength(me, { hasPhoto = false } = {}) {
 }
 
 /**
+ * The profile-strength progress-ring geometry (TM-913). Pure math so the ring the profile screen paints
+ * (an SVG circle whose stroke-dasharray/-dashoffset clip the fill arc to the strength percent) is
+ * unit-testable without a DOM. `profile.js` builds the <circle> with `dasharray = circumference` and
+ * sets `dashoffset = strengthRingOffset(percent)` — the length of circle to LEAVE UNDRAWN, so a higher
+ * percent leaves less undrawn (a fuller arc): offset(0) = full circumference (empty), offset(100) = 0
+ * (full). Percent is clamped to 0..100 so a degraded/out-of-range value can't produce a negative or
+ * over-full arc.
+ *
+ * @param {number} percent the strength percentage (0..100)
+ * @param {number} [radius] the ring radius in the SVG's own units (default 42, the profile ring)
+ * @returns {{ radius: number, circumference: number, dashoffset: number }}
+ */
+export function strengthRingGeometry(percent, radius = 42) {
+  const circumference = 2 * Math.PI * radius;
+  const pct = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
+  const dashoffset = circumference * (1 - pct / 100);
+  return { radius, circumference, dashoffset };
+}
+
+/**
  * The public-profile preview model (paper-public-profile: avatar + name + city).
  *
  * Renders how OTHERS see the signed-in user; a real other-user endpoint (`GET /users/{id}`) doesn't

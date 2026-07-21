@@ -44,6 +44,7 @@ import {
   identitySummary,
   accountContact,
   profileStrength,
+  strengthRingGeometry,
   publicSummary,
   validateProfileField,
   NOTIFICATION_PREFS,
@@ -435,8 +436,14 @@ function paintHub(profile) {
   // Completeness: the photo counts too, read live off the same photoURL as the identity avatar above
   // (the single source of truth) rather than anything persisted on our side.
   const strength = profileStrength(profile, { hasPhoto: Boolean(photoURL) });
-  hub.bar.style.width = `${strength.percent}%`;
-  hub.barPct.textContent = `${strength.percent}% complete`;
+  // TM-913: drive the progress RING. The fill arc's dash-offset = C · (1 − percent/100) so the visible
+  // arc is exactly `percent` of the circle; the centre label shows the bare percent (the word "complete"
+  // stays in the nudge line below, per the agreed default). The aria progressbar semantics live on the
+  // ring container — set valuenow + a spoken valuetext so a screen reader announces the live strength.
+  hub.ringArc.style.strokeDashoffset = String(strengthRingGeometry(strength.percent, RING_R).dashoffset);
+  hub.barPct.textContent = `${strength.percent}%`;
+  hub.ring.setAttribute("aria-valuenow", String(strength.percent));
+  hub.ring.setAttribute("aria-valuetext", `${strength.percent}% complete`);
   // The nudge points at the first gaps — each one a tappable jump to its field (TM-881); at 100% it
   // reads as a reassurance and we drop the arrow.
   paintStrengthNudge(hub.barNudge, strength);
@@ -1177,6 +1184,66 @@ function gearIcon() {
   return svg;
 }
 
+// ── Profile-strength progress ring (TM-913) ──────────────────────────────────────────────────────
+// The completeness ring's geometry. A 0..100 viewBox with a generous radius keeps the stroke crisp at
+// any DPI (SVG is resolution-independent) and gives room for the border-width stroke without clipping.
+// The circumference is the dasharray total; paintHub() sets dashoffset = C · (1 − percent/100) so the
+// visible arc is exactly `percent` of the circle (dashoffset C = empty, 0 = full).
+const RING_R = 42;
+const RING_C = strengthRingGeometry(0, RING_R).circumference; // ≈ 263.894 (dasharray total)
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** SVG-namespaced element (createElement can't make real SVG). setAttribute-only → XSS-safe like el(). */
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
+    node.setAttribute(k, String(v));
+  }
+  return node;
+}
+
+/**
+ * Build the profile-strength progress ring (TM-913). Returns the ring container (a labelled
+ * role="progressbar"), the fill `arc` (a <circle> whose stroke-dashoffset paintHub() drives to the
+ * percent) and the centred `pct` <span> (the visible label paintHub() fills, e.g. "87%").
+ *
+ * a11y: the container is the progressbar — aria-valuemin/max are fixed (0..100); paintHub() sets
+ * aria-valuenow + aria-valuetext to the live percent. The centre percent IS the visible label, so the
+ * bar carries no separate visible caption. Decorative SVG is aria-hidden (the semantics live on the
+ * container), so a screen reader announces one "N%, progressbar" node, not the raw circles.
+ *
+ * @returns {{ ring: HTMLElement, arc: SVGCircleElement, pct: HTMLElement }}
+ */
+function strengthRing() {
+  // The track (full faint circle) + the fill arc (accent, dash-clipped to `percent`). Rotated −90° so
+  // the arc starts at 12 o'clock and fills clockwise (the familiar completeness-donut direction).
+  const track = svgEl("circle", { class: "tm-pf-ring-track", cx: 50, cy: 50, r: RING_R });
+  const arc = svgEl("circle", {
+    class: "tm-pf-ring-arc",
+    cx: 50, cy: 50, r: RING_R,
+    "stroke-dasharray": RING_C,
+    // Start fully offset (0% fill) so nothing paints before paintHub() lands the real strength — the
+    // skeleton overlays it while loading, and the fill then animates from 0 to the percent.
+    "stroke-dashoffset": RING_C,
+  });
+  const svg = svgEl("svg", { class: "tm-pf-ring-svg", viewBox: "0 0 100 100", "aria-hidden": "true", focusable: "false" });
+  svg.append(track, arc);
+
+  // The centred percent — the visible label. Starts BLANK (TM-663: no misleading concrete "0%" before
+  // /me resolves); paintHub() fills it once real strength lands.
+  const pct = el("span", { class: "tm-pf-ring-pct", text: "" });
+
+  const ring = el("div", {
+    class: "tm-pf-ring",
+    role: "progressbar",
+    "aria-label": "Profile strength",
+    "aria-valuemin": "0",
+    "aria-valuemax": "100",
+  }, [svg, pct]);
+  return { ring, arc, pct };
+}
+
 /** A titled card matching the paper-profile card (border + offset shadow via tokens). */
 function pfCard(title, children, extraClass = "") {
   return el("section", { class: `tm-pf-card ${extraClass}`.trim() }, [
@@ -1294,11 +1361,14 @@ function buildShell(view) {
   ]);
 
   // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
-  // The percentage starts BLANK (not "0% complete") so a loaded user never sees a misleading concrete
-  // 0% for a heartbeat before /me resolves (TM-663) — the skeleton bar shows until paintHub() lands the
-  // real strength; the bar fill starts at 0 width and the skeleton class overlays it while loading.
-  const bar = el("i");
-  const barPct = el("span", { text: "" });
+  // TM-913: the completeness reads as a circular progress RING (SVG circle + stroke-dasharray/-dashoffset)
+  // instead of a horizontal bar — the familiar fitness-ring/donut pattern, in the paper hand-drawn style.
+  // `bar` (the ring's fill arc) + `barPct` (the centred percent) are STILL the paintHub() targets, so the
+  // strength data source (profileStrength().percent) and the nudge/gap-link path are untouched.
+  // The percentage starts BLANK (not "0%") so a loaded user never sees a misleading concrete 0% for a
+  // heartbeat before /me resolves (TM-663) — the skeleton (.tm-pf-loading) overlays the ring until
+  // paintHub() lands the real strength; the fill arc starts fully offset (0%) while loading.
+  const { ring, arc: bar, pct: barPct } = strengthRing();
   const barNudge = el("span", { class: "tm-pf-barnudge", text: "" });
   // ── Next-day interests CTA (TM-777 / I5) ── a quiet, link-styled button under the strength label
   // (reuses the muted tm-pf-barnudge/tm-pf-go idiom — NOT a loud primary button). A real <button> so it's
@@ -1312,8 +1382,11 @@ function buildShell(view) {
     onClick: () => focusOnPage("profile-interests"),
   });
   const strengthCard = pfCard("Profile strength", [
-    el("div", { class: "tm-pf-bar" }, [bar]),
-    el("div", { class: "tm-pf-barlbl" }, [barPct, barNudge]),
+    ring,
+    // The nudge/"all set" line keeps its own row BELOW the ring (TM-913 agreed default: ring only, the
+    // percent lives in the ring centre; the "complete"/gap copy stays here). barPct is the ring's centre
+    // label, so the label row now carries only the nudge (which still wraps on a narrow phone).
+    el("div", { class: "tm-pf-barlbl" }, [barNudge]),
     barInterestsCta,
   ]);
 
@@ -1426,7 +1499,9 @@ function buildShell(view) {
     root,
     // TM-846: `glyph` + `photo` are the identity avatar's two mutually-exclusive faces (paintHub
     // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
-    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, bar, barPct, barNudge, barInterestsCta },
+    // TM-913: the strength ring — `ring` is the progressbar container (aria lives here), `ringArc` the
+    // fill <circle> paintHub() dash-offsets to the percent, `barPct` the centred percent label.
+    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.
