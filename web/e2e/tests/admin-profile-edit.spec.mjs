@@ -84,6 +84,12 @@ test("@admin admin edits another user's profile fields via the console, and it p
     await auditClient.end();
   }
 
+  // Close the user-detail modal before signing out. After a successful save the modal stays open by
+  // design (the admin reviews the updated read-only summary), and it's a persistent overlay with a
+  // backdrop — leaving it open makes the backdrop intercept the sign-out click (60s click timeout).
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+
   await signOutViaProfile(page);
   await expect(page.locator("#auth-signed-out")).toBeVisible();
 });
