@@ -1426,6 +1426,21 @@
         },
         "type" : "object"
       },
+      "InterestSelectionStatsResponse" : {
+        "properties" : {
+          "activeUsers" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "stats" : {
+            "items" : {
+              "$ref" : "#/components/schemas/UserInterestStat"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "LinkPreviewResponse" : {
         "properties" : {
           "description" : {
@@ -2576,6 +2591,22 @@
         },
         "type" : "object"
       },
+      "UserInterestStat" : {
+        "properties" : {
+          "label" : {
+            "type" : "string"
+          },
+          "percent" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "selectorCount" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "UserResponse" : {
         "properties" : {
           "age" : {
@@ -3145,6 +3176,24 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/InterestConfigResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "interest-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/interests/stats" : {
+      "get" : {
+        "operationId" : "stats",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InterestSelectionStatsResponse"
                 }
               }
             },
