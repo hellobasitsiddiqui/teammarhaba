@@ -221,3 +221,60 @@ export function interestSummaryLabel(interest = {}) {
   const category = cleanText(interest.category);
   return category ? `${label} — ${category}` : label;
 }
+
+// --- selection analytics: "Selected by" column (TM-832) ---------------------------------------
+
+/**
+ * Index a selection-stats response (GET /api/v1/admin/interests/stats, TM-832) by label, so a catalogue
+ * row can look up its tally in O(1). The response shape is `{ activeUsers, stats: [{ label, selectorCount,
+ * percent }] }`; a label nobody selected is simply absent. Tolerant of a null/garbage response (→ empty
+ * Map) so a failed stats fetch degrades to "0 (0%)" on every row rather than throwing.
+ *
+ * @param {object} statsResponse the stats endpoint body (or null/undefined on a failed fetch).
+ * @returns {Map<string, {selectorCount: number, percent: number}>} label → tally.
+ */
+export function indexSelectionStats(statsResponse) {
+  const byLabel = new Map();
+  const stats = statsResponse && Array.isArray(statsResponse.stats) ? statsResponse.stats : [];
+  for (const s of stats) {
+    if (!s || typeof s.label !== "string") continue;
+    byLabel.set(s.label, {
+      selectorCount: Number(s.selectorCount) || 0,
+      percent: Number(s.percent) || 0,
+    });
+  }
+  return byLabel;
+}
+
+/**
+ * The "Selected by" cell text for one catalogue row, joined to the stats index by LABEL (TM-832):
+ * "<count> (<pct>%)", e.g. "42 (7%)". A label with no stat entry — nobody has selected it (yet) — renders
+ * as "0 (0%)" rather than blank, so an unselected interest reads as an explicit zero. Pure and framework-
+ * free so it's unit-testable and every surface formats identically.
+ *
+ * @param {object} interest an AdminInterestResponse (its `label` is the join key).
+ * @param {Map<string, {selectorCount: number, percent: number}>} statsByLabel from {@link indexSelectionStats}.
+ * @returns {string} the formatted "<count> (<pct>%)" cell.
+ */
+export function selectedByLabel(interest, statsByLabel) {
+  const label = interest && typeof interest.label === "string" ? interest.label : "";
+  const stat = statsByLabel instanceof Map ? statsByLabel.get(label) : undefined;
+  const count = stat ? Number(stat.selectorCount) || 0 : 0;
+  const percent = stat ? Number(stat.percent) || 0 : 0;
+  return `${count} (${percent}%)`;
+}
+
+/**
+ * The numeric selector count for a catalogue row (its stat's count, or 0 when unselected) — the sort key
+ * behind the optional sort-by-popularity on the "Selected by" column (TM-832). Kept separate from the
+ * display formatter so the sort compares numbers, not the "N (P%)" string.
+ *
+ * @param {object} interest an AdminInterestResponse.
+ * @param {Map<string, {selectorCount: number, percent: number}>} statsByLabel from {@link indexSelectionStats}.
+ * @returns {number} the selector count (0 when there is no stat for the label).
+ */
+export function selectorCountOf(interest, statsByLabel) {
+  const label = interest && typeof interest.label === "string" ? interest.label : "";
+  const stat = statsByLabel instanceof Map ? statsByLabel.get(label) : undefined;
+  return stat ? Number(stat.selectorCount) || 0 : 0;
+}

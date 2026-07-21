@@ -3,6 +3,7 @@ package com.teammarhaba.backend.interests;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 /**
  * Data access for {@link UserInterest} (TM-773) — the per-user free-text snapshot log.
@@ -29,4 +30,29 @@ public interface UserInterestRepository extends JpaRepository<UserInterest, Long
      * count stays put because {@code source_interest_id} is a soft pointer, not a cascading FK.
      */
     long countBySourceInterestId(Long sourceInterestId);
+
+    /**
+     * Per-LABEL selection tallies across the WHOLE snapshot log (TM-832) — {@code COUNT(*) GROUP BY
+     * label} — the aggregate behind the admin interests console's "Selected by" analytics. ONE query
+     * (never an N+1): every label's selector count comes back in a single grouped scan, and the caller
+     * joins it to the catalogue rows by label.
+     *
+     * <p>Keyed on the snapshot's FREE-TEXT {@code label} (TM-773), deliberately NOT on
+     * {@code source_interest_id}: a selection of a since-renamed or since-retired interest is still
+     * counted under the label it was picked as, which is exactly the label the catalogue row is matched
+     * by. That means a retired catalogue interest still shows its historical selection count, and it is
+     * why the count "correctly includes selections of a since-retired interest" (the ticket contract).
+     *
+     * <p>Returned as a lightweight {@link LabelCount} projection (label + count) rather than entities;
+     * a label with zero selections is simply absent (the caller treats a missing label as 0).
+     */
+    @Query("select ui.label as label, count(ui) as count from UserInterest ui group by ui.label")
+    List<LabelCount> selectionCountsByLabel();
+
+    /** A single {@code (label, count)} tally row from {@link #selectionCountsByLabel()} (TM-832). */
+    interface LabelCount {
+        String getLabel();
+
+        long getCount();
+    }
 }

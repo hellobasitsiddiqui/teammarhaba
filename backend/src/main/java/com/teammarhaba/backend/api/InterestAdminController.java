@@ -109,6 +109,24 @@ public class InterestAdminController {
         return AdminInterestResponse.from(adminService.get(id));
     }
 
+    /**
+     * Per-interest selection analytics for the console's "Selected by" column (TM-832): each selected
+     * label's selector count + its percentage of the active user base, plus the {@code activeUsers}
+     * denominator. Count + percent only — the gender split is deferred (TM-955). ADMIN-gated like the rest
+     * of the controller (non-admin → 403). A fixed literal sub-resource under {@code /stats}; it can't
+     * collide with the numeric {@code {id}} path (typed {@code long}), exactly like {@code /config}.
+     */
+    @GetMapping("/stats")
+    public InterestSelectionStatsResponse stats() {
+        InterestAdminService.SelectionStats result = adminService.selectionStats();
+        return new InterestSelectionStatsResponse(
+                result.activeUsers(),
+                result.stats().stream()
+                        .map(s -> new InterestSelectionStatsResponse.UserInterestStat(
+                                s.label(), s.selectorCount(), s.percent()))
+                        .toList());
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public AdminInterestResponse create(

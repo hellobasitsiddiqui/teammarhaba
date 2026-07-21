@@ -37,6 +37,9 @@ import {
   buildInterestPayload,
   toInterestFormModel,
   validateConfigDraft,
+  indexSelectionStats,
+  selectedByLabel,
+  selectorCountOf,
 } from "./admin-interests-core.js";
 import { ADMIN_INTERESTS_ROUTE, adminInterestNewHash, adminInterestEditHash } from "./admin-interests-route.js";
 import { clampPage } from "./admin-paging-core.js";
@@ -67,6 +70,9 @@ const COLUMNS = [
   { key: "sortWeight", label: "Weight", sortable: true },
   { key: "highlighted", label: "Featured", sortable: true },
   { key: "active", label: "Status", sortable: true },
+  // TM-832: per-interest selection analytics — "<count> (<pct>%)", joined to the catalogue by label.
+  // Sortable-by-popularity (the selector count is the sort key; see sortInterests).
+  { key: "selectorCount", label: "Selected by", sortable: true },
 ];
 
 const state = {
@@ -86,6 +92,9 @@ const state = {
   page: 0,
   pageSize: 25,
   config: null, // { minSelections, maxSelections } once loaded; null until then / on load failure
+  // TM-832: per-label selection stats, indexed label → { selectorCount, percent }. Empty Map until loaded
+  // OR on a failed stats fetch — a missing label then renders as "0 (0%)", so the table works regardless.
+  selectionStats: new Map(),
 };
 
 let shell = null; // { config, stats, table, pager } persistent containers
@@ -129,10 +138,16 @@ export async function loadInterests() {
   state.loading = true;
   state.error = null;
   render();
-  const result = await walkPages(
-    (page) => interestApi(`/api/v1/admin/interests?page=${page}&size=${FETCH_SIZE}&sort=sortWeight,desc`),
-    { pageSize: FETCH_SIZE, maxPages: MAX_FETCH_PAGES },
-  );
+  // TM-832: fetch the per-interest selection stats ALONGSIDE the catalogue walk (parallel — the stats are a
+  // single aggregate call, independent of the paged walk). Non-fatal: a failed stats fetch leaves the index
+  // empty so every row falls back to "0 (0%)"; the catalogue still loads.
+  const [result] = await Promise.all([
+    walkPages(
+      (page) => interestApi(`/api/v1/admin/interests?page=${page}&size=${FETCH_SIZE}&sort=sortWeight,desc`),
+      { pageSize: FETCH_SIZE, maxPages: MAX_FETCH_PAGES },
+    ),
+    loadSelectionStats(),
+  ]);
   if (result.error) {
     state.error = result.error instanceof ApiError ? result.error.message : "Could not load interests.";
     state.interests = [];
@@ -167,6 +182,20 @@ async function loadConfig() {
   if (shell) renderConfigPanel();
 }
 
+/**
+ * Load the per-interest selection stats (TM-832) — the "Selected by" column data — and index them by label
+ * (indexSelectionStats). Non-fatal: on any error we leave an EMPTY index so every row renders "0 (0%)"; the
+ * catalogue must still work without stats. Called from loadInterests (parallel with the catalogue walk).
+ */
+async function loadSelectionStats() {
+  try {
+    const stats = await interestApi("/api/v1/admin/interests/stats");
+    state.selectionStats = indexSelectionStats(stats);
+  } catch {
+    state.selectionStats = new Map();
+  }
+}
+
 // ---- derived view -------------------------------------------------------------------------
 
 function filteredInterests() {
@@ -190,6 +219,8 @@ function sortInterests(list) {
     if (sortKey === "active") return i.active ? 1 : 0;
     if (sortKey === "highlighted") return i.highlighted ? 1 : 0;
     if (sortKey === "sortWeight") return Number(i.sortWeight) || 0;
+    // TM-832: sort-by-popularity — the numeric selector count (0 when unselected), joined by label.
+    if (sortKey === "selectorCount") return selectorCountOf(i, state.selectionStats);
     return String(i[sortKey] ?? "").toLowerCase();
   };
   return [...list].sort((a, b) => {
@@ -409,6 +440,8 @@ function renderTable() {
         el("td", { "data-label": "Weight", class: "tm-muted", text: interest.sortWeight == null ? "—" : String(interest.sortWeight) }),
         el("td", { "data-label": "Featured" }, [featuredCell(interest)]),
         el("td", { "data-label": "Status" }, [statusPill(interest)]),
+        // TM-832: "Selected by" — "<count> (<pct>%)" joined to the stats index by label ("0 (0%)" if none).
+        el("td", { "data-label": "Selected by", class: "tm-muted", text: selectedByLabel(interest, state.selectionStats) }),
         el("td", { class: "tm-actions" }, rowActions(interest)),
       ]),
     ),
