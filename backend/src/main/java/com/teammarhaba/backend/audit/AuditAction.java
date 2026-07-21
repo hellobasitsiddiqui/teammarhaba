@@ -90,6 +90,27 @@ public enum AuditAction {
      */
     EVENT_CANCELLED,
 
+    /**
+     * An admin evicted a specific attendee from an event via {@code POST
+     * /api/v1/admin/events/{id}/attendees/{userId}/evict} (TM-592): their {@code GOING}/{@code WAITLISTED}
+     * attendance row is removed (freeing a {@code GOING} spot for the waitlist cascade) and they are
+     * dropped from the event group chat ({@code REMOVED}). One row per eviction carrying the event id as
+     * the target and the evicted {@code userId} (+ the state they held) in its metadata. The evicted user
+     * is NOT banned — they may re-RSVP. Idempotent: evicting someone with no attendance is a clean no-op
+     * that still records the admin's attempt (the log is append-only).
+     */
+    EVENT_ATTENDEE_EVICTED,
+
+    /**
+     * An admin force-added a specific existing user as {@code GOING} to an event via {@code POST
+     * /api/v1/admin/events/{id}/attendees} (TM-592): the target lands {@code GOING} and joins the event
+     * group chat. By default this respects capacity + age/eligibility + the one-active-GOING guard; an
+     * explicit audited {@code override} flag bypasses those guards (never oversell-unsafe — it is still
+     * taken under the event {@code SELECT … FOR UPDATE} lock). One row per add carrying the event id as
+     * the target and the added {@code userId} + the {@code override} flag in its metadata.
+     */
+    EVENT_ATTENDEE_ADDED,
+
     /** An admin created a reusable venue via {@code POST /api/v1/admin/venues} (TM-519). */
     VENUE_CREATED,
 

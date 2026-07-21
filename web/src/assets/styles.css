@@ -4260,6 +4260,103 @@ button.tm-notif-item:hover {
     opacity: 0.72;
 }
 
+/* Admin roster + capacity panel (TM-592) — the inline full-width row under an event in the console. */
+.tm-event-roster-row > td {
+    padding: 0;
+    background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+    border-top: none;
+}
+
+.tm-roster-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 0.9rem 1rem;
+    border-left: 3px solid var(--accent);
+}
+
+.tm-roster-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.9rem;
+    align-items: baseline;
+}
+
+.tm-roster-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.tm-roster-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.tm-roster-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tm-roster-capacity-input,
+.tm-roster-adduser-input {
+    max-width: 8rem;
+}
+
+.tm-roster-override {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+}
+
+/* The over-capacity warning banner (TM-592) — attention colour, never a hard error (it's an allowed state). */
+.tm-roster-overcap {
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+    border: var(--border-width) solid color-mix(in srgb, var(--danger) 35%, var(--border));
+    border-left: 4px solid var(--danger);
+    border-radius: var(--radius);
+}
+
+.tm-roster-attendees {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.tm-roster-attendee {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius);
+}
+
+.tm-roster-attendee-name {
+    font-weight: 600;
+    margin-right: auto;
+}
+
+/* An admin over-cap warning toast (TM-592) — same left-accent shape, danger tone. */
+.tm-toast-warning {
+    border-left-color: var(--danger);
+}
+
 /* My-state chip on the detail action area (✓ Going / Waitlisted) — .tm-badge shape via own colours. */
 .tm-event-chip {
     display: inline-block;

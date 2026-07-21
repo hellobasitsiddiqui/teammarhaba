@@ -48,6 +48,8 @@ import {
   eventLifecycle,
   capacityLabel,
   attendanceCounts,
+  overCapacityState,
+  overCapacityWarning,
   revealSummary,
   formatEventWhen,
   isPastEvent,
@@ -103,6 +105,12 @@ const state = {
   sortDir: "desc",
   page: 0,
   pageSize: 25,
+  // TM-592 roster panel: the id of the event whose inline roster/capacity panel is open (null = none),
+  // plus the last-loaded roster payload and its load/error status, so re-renders keep the panel open.
+  openRosterId: null,
+  roster: null, // the { eventId, capacity, going, waitlist, entries } payload for the open panel
+  rosterLoading: false,
+  rosterError: null,
 };
 
 let shell = null; // { head, stats, toolbar, table, pager } persistent containers
@@ -307,6 +315,8 @@ function renderTable() {
     const globalIndex = start + i;
     if (past.length && globalIndex === pastStart) bodyRows.push(pastSectionRow());
     bodyRows.push(eventRow(event, now));
+    // TM-592: the inline roster/capacity panel drops in as a full-width row directly under its event.
+    if (state.openRosterId === event.id) bodyRows.push(rosterPanelRow(event));
   });
   const body = el("tbody", {}, bodyRows);
 
@@ -403,7 +413,20 @@ function rowActions(event, now = Date.now()) {
     // A cancelled event keeps its history (cancel ≠ delete) — nothing left to cancel, so only Edit.
     return [edit];
   }
+  // Roster + capacity control (TM-592): opens an inline panel below the row with the attendee list
+  // (evict), a force-add form and a first-class capacity adjust that surfaces the over-cap warning.
+  const roster = el(
+    "button",
+    {
+      class: "tm-btn tm-btn-sm",
+      type: "button",
+      "aria-label": `Manage roster for ${event.heading}`,
+      onClick: () => toggleRoster(event),
+    },
+    "Roster",
+  );
   return [
+    roster,
     edit,
     el(
       "button",
@@ -480,6 +503,266 @@ async function cancelEvent(event) {
     toast("Event cancelled. Attendees will be notified.", { type: "success" });
   } catch (err) {
     toast(err instanceof ApiError ? err.message : "Couldn't cancel the event.", { type: "error" });
+  }
+}
+
+// ---- roster + capacity control (TM-592) ---------------------------------------------------
+
+/**
+ * Toggle the inline roster/capacity panel for an event. Opening loads the roster (GET .../roster);
+ * clicking Roster again on the open event closes it. Only one panel is open at a time (a fresh open
+ * replaces any other), keeping the table compact.
+ */
+async function toggleRoster(event) {
+  if (state.openRosterId === event.id) {
+    state.openRosterId = null;
+    state.roster = null;
+    state.rosterError = null;
+    renderTable();
+    return;
+  }
+  state.openRosterId = event.id;
+  state.roster = null;
+  state.rosterError = null;
+  state.rosterLoading = true;
+  renderTable();
+  await reloadRoster(event.id);
+}
+
+/** (Re)load the open event's roster into state and repaint the panel. */
+async function reloadRoster(eventId) {
+  if (state.openRosterId !== eventId) return; // panel closed / switched while we were away
+  state.rosterLoading = true;
+  state.rosterError = null;
+  renderTable();
+  try {
+    const roster = await eventApi(`/api/v1/admin/events/${eventId}/roster`);
+    if (state.openRosterId !== eventId) return;
+    state.roster = roster;
+  } catch (err) {
+    if (state.openRosterId !== eventId) return;
+    state.rosterError = err instanceof ApiError ? err.message : "Couldn't load the roster.";
+  } finally {
+    state.rosterLoading = false;
+    renderTable();
+  }
+}
+
+/** The full-width table row hosting the open roster panel for `event`. */
+function rosterPanelRow(event) {
+  return el(
+    "tr",
+    { class: "tm-event-roster-row", "data-testid": "admin-event-roster-row", dataset: { eventId: String(event.id) } },
+    [el("td", { colspan: String(COLUMNS.length + 1) }, [rosterPanel(event)])],
+  );
+}
+
+/** The roster panel body: capacity control + over-cap warning, force-add form, and the attendee list. */
+function rosterPanel(event) {
+  const panel = el("div", { class: "tm-roster-panel", "data-testid": "admin-event-roster-panel" });
+
+  if (state.rosterLoading && !state.roster) {
+    panel.append(el("p", { class: "tm-muted", text: "Loading roster…" }));
+    return panel;
+  }
+  if (state.rosterError && !state.roster) {
+    panel.append(
+      el("div", { class: "tm-error" }, [
+        el("p", { text: state.rosterError }),
+        el("button", { class: "tm-btn tm-btn-sm", type: "button", onClick: () => reloadRoster(event.id) }, "Retry"),
+      ]),
+    );
+    return panel;
+  }
+  const roster = state.roster || { capacity: event.capacity, going: 0, waitlist: 0, entries: [] };
+  panel.append(
+    el("div", { class: "tm-roster-head" }, [
+      el("strong", { text: `Roster · ${event.heading || "event"}` }),
+      el("span", {
+        class: "tm-muted",
+        text: `${roster.going} going / ${roster.waitlist} waitlist · capacity ${capacityLabel(roster.capacity)}`,
+      }),
+    ]),
+    capacityControl(event, roster),
+    forceAddForm(event),
+    attendeeList(event, roster),
+  );
+  return panel;
+}
+
+/**
+ * The first-class capacity adjust control (TM-592): a number input pre-filled with the current cap and a
+ * Save button. Below it, a live over-cap warning derived on the client (overCapacityState/Warning) that
+ * mirrors what the server returns — shown the moment the typed value would leave the event over cap, so
+ * the admin sees the consequence BEFORE saving. Blank = unlimited.
+ */
+function capacityControl(event, roster) {
+  const input = el("input", {
+    id: `roster-capacity-${event.id}`,
+    class: "tm-input tm-roster-capacity-input",
+    type: "number",
+    min: "0",
+    value: roster.capacity == null ? "" : String(roster.capacity),
+    "aria-label": "Capacity (blank = unlimited)",
+  });
+  const warn = el("p", {
+    class: "tm-notice tm-roster-overcap",
+    "data-testid": "admin-event-overcap-warning",
+    hidden: true,
+  });
+  const paintWarning = (capValue) => {
+    const cap = capValue === "" ? null : Number(capValue);
+    const s = overCapacityState(cap, roster.going);
+    const msg = overCapacityWarning(s);
+    warn.textContent = msg;
+    warn.hidden = !msg;
+  };
+  input.addEventListener("input", () => paintWarning(input.value.trim()));
+  paintWarning(input.value.trim());
+
+  const save = el(
+    "button",
+    { class: "tm-btn tm-btn-sm", type: "button", onClick: () => saveCapacity(event, input.value.trim()) },
+    "Save capacity",
+  );
+  return el("div", { class: "tm-roster-section" }, [
+    el("label", { class: "tm-roster-label", for: `roster-capacity-${event.id}`, text: "Capacity" }),
+    el("div", { class: "tm-roster-row" }, [input, save, el("span", { class: "tm-muted", text: "Blank = unlimited" })]),
+    warn,
+  ]);
+}
+
+/** The force-add form (TM-592): a user-id field + an audited override checkbox + Add. */
+function forceAddForm(event) {
+  const userInput = el("input", {
+    id: `roster-add-user-${event.id}`,
+    class: "tm-input tm-roster-adduser-input",
+    type: "number",
+    min: "1",
+    placeholder: "User ID",
+    "aria-label": "User ID to add as going",
+  });
+  const override = el("input", { id: `roster-add-override-${event.id}`, type: "checkbox" });
+  const add = el(
+    "button",
+    {
+      class: "tm-btn tm-btn-sm",
+      type: "button",
+      onClick: () => forceAddAttendee(event, userInput.value.trim(), override.checked),
+    },
+    "Add as going",
+  );
+  return el("div", { class: "tm-roster-section" }, [
+    el("label", { class: "tm-roster-label", for: `roster-add-user-${event.id}`, text: "Force-add a user" }),
+    el("div", { class: "tm-roster-row" }, [
+      userInput,
+      add,
+      el("label", { class: "tm-roster-override" }, [
+        override,
+        el("span", { text: " Override capacity / age / one-active (audited)" }),
+      ]),
+    ]),
+  ]);
+}
+
+/** The attendee list (TM-592): GOING (with over-cap flag) then WAITLISTED, each with an Evict button. */
+function attendeeList(event, roster) {
+  const entries = Array.isArray(roster.entries) ? roster.entries : [];
+  if (!entries.length) {
+    return el("div", { class: "tm-roster-section" }, [
+      el("p", { class: "tm-muted", text: "No attendees yet." }),
+    ]);
+  }
+  const rows = entries.map((entry) => {
+    const isGoing = String(entry.state).toUpperCase() === "GOING";
+    const badgeCls = isGoing ? "tm-badge-ok" : "tm-badge-info";
+    return el("li", { class: "tm-roster-attendee", dataset: { userId: String(entry.userId) } }, [
+      el("span", { class: "tm-roster-attendee-name", text: entry.displayName || `User ${entry.userId}` }),
+      el("span", { class: `tm-badge ${badgeCls}`, text: isGoing ? "Going" : "Waitlist" }),
+      entry.overCapacity
+        ? el("span", { class: "tm-badge tm-badge-off", "data-testid": "admin-roster-overcap-tag", text: "Over cap" })
+        : null,
+      el(
+        "button",
+        {
+          class: "tm-btn tm-btn-sm tm-btn-danger",
+          type: "button",
+          "aria-label": `Evict ${entry.displayName || "user " + entry.userId}`,
+          onClick: () => evictAttendee(event, entry),
+        },
+        "Evict",
+      ),
+    ]);
+  });
+  return el("div", { class: "tm-roster-section" }, [
+    el("label", { class: "tm-roster-label", text: "Attendees" }),
+    el("ul", { class: "tm-roster-attendees" }, rows),
+  ]);
+}
+
+/** Save a first-class capacity adjust (TM-592); toasts the over-cap warning when the server flags it. */
+async function saveCapacity(event, rawValue) {
+  const capacity = rawValue === "" ? null : Number(rawValue);
+  if (capacity != null && (!Number.isInteger(capacity) || capacity < 0)) {
+    toast("Capacity must be a whole number of 0 or more (blank = unlimited).", { type: "error" });
+    return;
+  }
+  try {
+    const result = await eventApi(`/api/v1/admin/events/${event.id}/capacity`, {
+      method: "POST",
+      body: { capacity },
+    });
+    // Reflect the new capacity into the in-memory list row so the Capacity column updates.
+    const idx = state.events.findIndex((e) => e.id === event.id);
+    if (idx >= 0) state.events[idx] = { ...state.events[idx], capacity };
+    const warning = overCapacityWarning(result || {});
+    if (warning) {
+      toast(warning, { type: "warning" });
+    } else {
+      toast("Capacity updated.", { type: "success" });
+    }
+    await reloadRoster(event.id);
+  } catch (err) {
+    toast(err instanceof ApiError ? err.message : "Couldn't update capacity.", { type: "error" });
+  }
+}
+
+/** Force-add an existing user as GOING (TM-592). Override bypasses the guards (audited server-side). */
+async function forceAddAttendee(event, rawUserId, override) {
+  const userId = Number(rawUserId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    toast("Enter a valid user ID to add.", { type: "error" });
+    return;
+  }
+  try {
+    await eventApi(`/api/v1/admin/events/${event.id}/attendees`, {
+      method: "POST",
+      body: { userId, override: !!override },
+    });
+    toast(`Added user ${userId} as going.`, { type: "success" });
+    await reloadRoster(event.id);
+  } catch (err) {
+    toast(err instanceof ApiError ? err.message : "Couldn't add the user.", { type: "error" });
+  }
+}
+
+/** Evict a specific attendee behind a danger confirm (TM-592). Frees a GOING spot; user may re-RSVP. */
+async function evictAttendee(event, entry) {
+  const who = entry.displayName || `user ${entry.userId}`;
+  const ok = await confirmDialog({
+    title: "Remove this attendee?",
+    message: `${who} will be removed from “${event.heading}” and notified. A freed spot is offered to the waitlist. They can request to join again — this isn't a ban.`,
+    confirmLabel: "Remove attendee",
+    cancelLabel: "Keep",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await eventApi(`/api/v1/admin/events/${event.id}/attendees/${entry.userId}/evict`, { method: "POST" });
+    toast(`${who} removed. The freed spot is offered to the waitlist.`, { type: "success" });
+    await reloadRoster(event.id);
+  } catch (err) {
+    toast(err instanceof ApiError ? err.message : "Couldn't remove the attendee.", { type: "error" });
   }
 }
 

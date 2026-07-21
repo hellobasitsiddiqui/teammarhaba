@@ -9,6 +9,7 @@ import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventAdminService;
 import com.teammarhaba.backend.event.EventAdminService.EventCounts;
 import com.teammarhaba.backend.event.EventPhasePolicy;
+import com.teammarhaba.backend.event.EventRosterAdminService;
 import com.teammarhaba.backend.event.LocationRevealPolicy;
 import jakarta.validation.Valid;
 import java.time.Instant;
@@ -69,6 +70,7 @@ public class EventAdminController {
     private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.DESC, "startAt");
 
     private final EventAdminService adminService;
+    private final EventRosterAdminService rosterService;
     private final LocationRevealPolicy reveal;
     private final BookingCutoffPolicy cutoff;
     private final CancellationPolicy cancellation;
@@ -76,11 +78,13 @@ public class EventAdminController {
 
     public EventAdminController(
             EventAdminService adminService,
+            EventRosterAdminService rosterService,
             LocationRevealPolicy reveal,
             BookingCutoffPolicy cutoff,
             CancellationPolicy cancellation,
             EventPhasePolicy phase) {
         this.adminService = adminService;
+        this.rosterService = rosterService;
         this.reveal = reveal;
         this.cutoff = cutoff;
         this.cancellation = cancellation;
@@ -142,5 +146,54 @@ public class EventAdminController {
     public EventResponse cancel(@PathVariable long id, @AuthenticationPrincipal VerifiedUser caller) {
         Event cancelled = adminService.cancel(caller, id);
         return EventResponse.from(cancelled, reveal, cutoff, cancellation, phase.isFinished(cancelled, Instant.now()));
+    }
+
+    // --------------------------------------------------------------- roster + capacity (TM-592)
+
+    /**
+     * The admin roster for one event — GOING (join order) then WAITLISTED (FIFO), each with its over-cap
+     * flag, plus the capacity and counts. Backs the console's roster view + its evict/add controls.
+     */
+    @GetMapping("/{id}/roster")
+    public RosterViewResponse roster(@PathVariable long id) {
+        return RosterViewResponse.from(rosterService.roster(id));
+    }
+
+    /**
+     * Adjust capacity as a first-class increase/decrease (TM-592). An increase frees spots the waitlist
+     * offer cascade then offers; a decrease below the current GOING count is allowed (the event sits
+     * over-cap — no attendee is auto-evicted) and the response carries the over-capacity warning.
+     * Capacity-locked in the service (same {@code SELECT … FOR UPDATE} lock as the RSVP verbs).
+     */
+    @PostMapping("/{id}/capacity")
+    public CapacityAdjustResponse adjustCapacity(
+            @PathVariable long id,
+            @RequestBody @Valid AdjustCapacityRequest request,
+            @AuthenticationPrincipal VerifiedUser caller) {
+        return CapacityAdjustResponse.from(rosterService.adjustCapacity(caller, id, request.capacity()));
+    }
+
+    /**
+     * Force-add a specific existing user as GOING (TM-592). Respects capacity + age/eligibility + the
+     * one-active-GOING guard by default; an explicit audited {@code override} bypasses them. Capacity-locked.
+     */
+    @PostMapping("/{id}/attendees")
+    public RosterActionResponse forceAddAttendee(
+            @PathVariable long id,
+            @RequestBody @Valid ForceAddAttendeeRequest request,
+            @AuthenticationPrincipal VerifiedUser caller) {
+        return RosterActionResponse.from(
+                rosterService.forceAddAttendee(caller, id, request.userId(), request.override()));
+    }
+
+    /**
+     * Evict a specific attendee (TM-592): removes their GOING/WAITLISTED row (a freed GOING spot is
+     * cascade eligible), drops them from the event chat, notifies them and audits it. The evicted user is
+     * not banned and may re-RSVP. Idempotent. Capacity-locked.
+     */
+    @PostMapping("/{id}/attendees/{userId}/evict")
+    public RosterActionResponse evictAttendee(
+            @PathVariable long id, @PathVariable long userId, @AuthenticationPrincipal VerifiedUser caller) {
+        return RosterActionResponse.from(rosterService.evictAttendee(caller, id, userId));
     }
 }
