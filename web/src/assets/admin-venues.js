@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, toast } from "./ui.js";
+import { clear, confirmDialog, el, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadVenueImage, validateVenueImageFile, MAX_VENUE_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import {
@@ -318,7 +318,9 @@ function renderTable() {
     {},
     pageRows.map((venue) =>
       el("tr", { dataset: { venueId: String(venue.id) } }, [
-        el("td", {}, [
+        // TM-935: data-label on every body td drives the CSS stacked-card layout at ≤30rem (the label
+        // is painted via td::before once the header row is hidden). The trailing Actions cell has none.
+        el("td", { "data-label": "Venue" }, [
           el("div", { class: "tm-venue-cell" }, [
             venueThumb(venue),
             el("div", { class: "tm-venue-cell-text" }, [
@@ -327,9 +329,9 @@ function renderTable() {
             ]),
           ]),
         ]),
-        el("td", { class: "tm-muted", text: venue.city || "—" }),
-        el("td", { class: "tm-muted", text: venue.capacity == null ? "—" : String(venue.capacity) }),
-        el("td", {}, [statusPill(venue)]),
+        el("td", { "data-label": "City / area", class: "tm-muted", text: venue.city || "—" }),
+        el("td", { "data-label": "Capacity", class: "tm-muted", text: venue.capacity == null ? "—" : String(venue.capacity) }),
+        el("td", { "data-label": "Status" }, [statusPill(venue)]),
         el("td", { class: "tm-actions" }, rowActions(venue)),
       ]),
     ),
@@ -337,7 +339,7 @@ function renderTable() {
 
   const notice = fetchIncompleteNotice();
   if (notice) shell.table.append(notice);
-  shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
+  shell.table.append(stackableTable(el("thead", {}, head), body));
   renderPager(rows.length);
 }
 

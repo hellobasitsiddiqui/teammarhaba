@@ -1315,6 +1315,14 @@ h3,
     user-select: none;
 }
 
+/* TM-935: the per-cell field label the console injects into every labelled <td> for screen readers
+   (stackableTable in ui.js). On desktop the real <thead> already associates each cell with its column
+   header, so this is display:none — out of the a11y tree, no redundant "Status:" read. The ≤30rem block
+   turns it into a visually-hidden but AT-readable node, since block-display strips the thead association. */
+.tm-cell-label {
+    display: none;
+}
+
 .tm-table th.tm-sortable {
     cursor: pointer;
 }
@@ -2405,88 +2413,6 @@ h3,
     cursor: not-allowed;
 }
 
-/* TM-930: the gate phone VERIFY-AND-LINK controls — Send code button, the revealed six-box OTP
-   group, a resend link, the "Verified ✓" status line, and the hidden reCAPTCHA host. The six boxes
-   reuse the .auth-otp-box markup but the auth styles are scoped to #auth-signed-out, so we restyle
-   them here for the onboarding surface (same paper/tinted look). */
-#onboarding-view .tm-phone-send {
-    margin-top: 0.55rem;
-    align-self: flex-start;
-    padding: 0.5rem 1rem;
-}
-
-#onboarding-view .tm-phone-status {
-    margin-top: 0.4rem;
-    font-weight: 600;
-}
-
-#onboarding-view .tm-phone-status.tm-phone-verified {
-    color: var(--accent);
-}
-
-#onboarding-view .tm-phone-otp-wrap {
-    margin-top: 0.6rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-}
-
-#onboarding-view .tm-phone-otp {
-    display: flex;
-    gap: 0.4rem;
-}
-
-#onboarding-view .tm-phone-otp .auth-otp-box {
-    flex: 1 1 0;
-    min-width: 0;
-    max-width: 3.1rem;
-    padding: 0.55rem 0;
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: 600;
-    background: var(--accent-light);
-    border-color: var(--fg-line-strong);
-    box-shadow: var(--shadow-sm);
-}
-
-#onboarding-view .tm-phone-otp .auth-otp-box:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-    background: var(--surface-card);
-}
-
-#onboarding-view .tm-phone-resend {
-    align-self: flex-start;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    text-decoration: underline;
-    box-shadow: none;
-    padding: 0.25rem 0;
-    font-size: 0.9rem;
-}
-
-/* TM-930: the "Change number" affordance — the only exit from the verified/locked state (the input is
-   readOnly + picker disabled + Send hidden). Understated text button, same look as the resend link. */
-#onboarding-view .tm-phone-change {
-    margin-top: 0.4rem;
-    align-self: flex-start;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    text-decoration: underline;
-    box-shadow: none;
-    padding: 0.25rem 0;
-    font-size: 0.9rem;
-}
-
-/* The locked (verified) national input reads as read-only, not editable. */
-#onboarding-view .tm-input.tm-field-locked {
-    background: var(--surface-2);
-    color: var(--muted);
-    cursor: not-allowed;
-}
-
 /* A multi-line message input — the textarea sibling of .tm-input (TM-365). Inherits .tm-input's
    colours/border/focus; adds vertical resize + a sensible min height. */
 .tm-textarea {
@@ -3157,12 +3083,93 @@ html {
         min-height: 5rem;
     }
 
-    /* The admin table stays a horizontally-scrollable wrapper (.tm-table-wrap already has
-       overflow-x:auto) — the ticket's accepted option. Hint the scroll with momentum on iOS and
-       stop a wide table forcing the whole page sideways. */
+    /* TM-935: the admin console tables stack into labelled cards on a phone instead of scrolling
+       sideways (supersedes the earlier "keep a horizontal-scroll wrapper" option, which clipped
+       columns on narrow screens). The header row is hidden and each row becomes a bordered card whose
+       cells lay out one-per-line; each td shows its column name via `td::before { content:
+       attr(data-label) }` (the JS sets data-label on every body td), so a field reads "Role: Admin"
+       with the value pushed to the opposite edge. No horizontal page scroll, nothing clipped.
+       Desktop (>30rem) is untouched — the real <table> renders exactly as before. */
     .tm-table-wrap {
-        -webkit-overflow-scrolling: touch;
+        overflow-x: visible;
         max-width: 100%;
+    }
+
+    .tm-table thead {
+        display: none;
+    }
+
+    .tm-table,
+    .tm-table tbody,
+    .tm-table tr,
+    .tm-table td {
+        display: block;
+        width: 100%;
+    }
+
+    /* Each row is a stacked card: bordered, with breathing room between rows. */
+    .tm-table tbody tr {
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 0.75rem;
+        padding: 0.25rem 0.6rem;
+        background: var(--surface-card);
+    }
+
+    .tm-table tbody tr:last-child {
+        margin-bottom: 0;
+    }
+
+    /* Each cell is a label/value row: the data-label on the left, the value pushed to the right. */
+    .tm-table td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.45rem 0;
+        border-bottom: var(--border-width) solid var(--border);
+        text-align: right;
+    }
+
+    .tm-table tbody tr td:last-child {
+        border-bottom: none;
+    }
+
+    .tm-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: var(--muted);
+        margin-right: auto;
+        text-align: left;
+    }
+
+    /* Expose the injected field label to assistive tech now that block-display has stripped the <thead>
+       association. Visually hidden (the ::before paints the sighted label) but present in the a11y tree,
+       so a badge cell reads "Status: Deactivated" rather than a bare "Deactivated". Mirrors
+       `.visually-hidden`; kept inline here since the base rule is display:none. */
+    .tm-cell-label {
+        display: inline;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    /* Control cells (checkbox, Actions) have no data-label — drop the empty ::before so they don't
+       leave a blank gutter, and let their buttons take the full card width. */
+    .tm-table td:not([data-label])::before {
+        content: none;
+    }
+
+    .tm-table td.tm-actions {
+        justify-content: stretch;
+        flex-wrap: wrap;
     }
 
     /* Per-row action buttons: ≥44px tall and allowed to wrap so they never overflow the cell. */

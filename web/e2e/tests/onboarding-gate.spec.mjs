@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
-import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // First-login profile gate (TM-250): a brand-new passwordless user is routed to a blocking
 // "complete your profile" form (Name, Location, Age) and cannot enter the app until it's filled +
@@ -88,9 +88,6 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", "27");
   await page.fill("#onboarding-phone", "7700 900456");
-  // TM-930: the phone must be OTP-VERIFIED (Firebase phone verify + link) before the gate submits —
-  // send the code, peek it from the Auth emulator, auto-submit the six boxes → "Verified ✓".
-  await verifyGatePhone(page, "+447700900456");
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

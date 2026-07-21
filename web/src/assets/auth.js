@@ -29,9 +29,6 @@ import {
   getRedirectResult,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  PhoneAuthProvider,
-  linkWithCredential,
-  updatePhoneNumber,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { shouldUseRedirect } from "./auth-env.js";
@@ -219,66 +216,6 @@ export async function startPhoneSignIn(phoneNumber, containerEl) {
 let recaptchaVerifier = null;
 
 /**
- * Begin a phone VERIFY-AND-LINK (TM-930, the #/onboarding completion gate) — the verify half. Mirrors
- * {@link startPhoneSignIn} exactly (fresh invisible reCAPTCHA per attempt, previous one cleared so a
- * retry can't reuse a solved/expired widget), but instead of signing a NEW session in, it drives
- * `PhoneAuthProvider.verifyPhoneNumber` so the resulting credential can be LINKED to the ALREADY
- * signed-in account (see {@link confirmPhoneLink}). The user is already authenticated on the gate —
- * we are proving they own the number and binding it to that account, not starting a session.
- *
- * <p>Shares the module-level `recaptchaVerifier` with the SMS sign-in path on purpose: both are
- * fresh-verifier-per-attempt, and the two flows are never in flight at the same time (the gate only
- * shows post sign-in; the login SMS flow only shows signed-out). Reusing the one slot keeps the
- * clearing contract (`auth.js:196-197`) intact — a new attempt on EITHER path clears whatever verifier
- * was left behind.
- *
- * @param {string} phoneE164 the E.164 number to text the code to (e.g. "+447700900456").
- * @param {HTMLElement} containerEl element to host the invisible reCAPTCHA.
- * @returns {Promise<string>} the Firebase `verificationId` — pass it to {@link confirmPhoneLink}.
- */
-export async function startPhoneVerify(phoneE164, containerEl) {
-  if (recaptchaVerifier) {
-    try {
-      recaptchaVerifier.clear();
-    } catch {
-      /* already cleared/never rendered — non-fatal. */
-    }
-  }
-  recaptchaVerifier = new RecaptchaVerifier(auth, containerEl, { size: "invisible" });
-  const provider = new PhoneAuthProvider(auth);
-  return provider.verifyPhoneNumber(phoneE164, recaptchaVerifier);
-}
-
-/**
- * Finish a phone VERIFY-AND-LINK (TM-930) — the confirm half. Builds the phone credential from the
- * `verificationId` ({@link startPhoneVerify}) + the SMS `code`, then binds it to the CURRENT user:
- *
- *   • no phone linked yet (`currentUser.phoneNumber == null`) → `linkWithCredential` (the common
- *     email/Google-signed-in gate case);
- *   • a DIFFERENT phone already linked (e.g. the user signed in via SMS, TM-867, and is now
- *     completing the gate with the same or another number) → `updatePhoneNumber`.
- *
- * <p>Strict 1:1 number↔account is enforced by Firebase itself: if the number is already linked to
- * ANOTHER account the SDK rejects with `auth/credential-already-in-use` — the caller surfaces the
- * hard-block copy. No self-built uniqueness check.
- *
- * @param {string} verificationId the id from {@link startPhoneVerify}.
- * @param {string} code the 6-digit SMS code the user entered.
- * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").UserCredential|void>}
- * @throws a Firebase auth error — notably `auth/credential-already-in-use` (collision),
- *   `auth/invalid-verification-code`, `auth/code-expired`, `auth/too-many-requests`.
- */
-export async function confirmPhoneLink(verificationId, code) {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in — cannot link a phone number.");
-  const cred = PhoneAuthProvider.credential(verificationId, code);
-  if (user.phoneNumber == null) {
-    return linkWithCredential(user, cred);
-  }
-  return updatePhoneNumber(user, cred);
-}
-
-/**
  * Sign in with Google (TM-230). Uses `signInWithRedirect` on mobile browsers and inside the Android
  * WebView — a popup is blocked/mis-handled on phones and impossible inside a WebView — and keeps the
  * snappier `signInWithPopup` on desktop. The redirect path navigates away to the Firebase auth
@@ -333,8 +270,6 @@ if (typeof window !== "undefined") {
     signIn,
     signInWithEmailCodeToken,
     startPhoneSignIn,
-    startPhoneVerify,
-    confirmPhoneLink,
     signInWithGoogle,
     awaitRedirectResult,
     signOut,
