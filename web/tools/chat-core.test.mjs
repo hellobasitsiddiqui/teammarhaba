@@ -974,15 +974,21 @@ test("createAdminFlagCache: resolves role case-insensitively and only for ADMIN"
   assert.equal(await createAdminFlagCache(async () => null).resolve(), false);
 });
 
-test("createAdminFlagCache: a failed /me caches false (affordance hidden), and invalidate() allows recovery", async () => {
+test("createAdminFlagCache: a failed /me is NOT cached — the next resolve() retries (TM-736)", async () => {
+  // TM-736 residual: a transient /me failure during boot used to CACHE false, so the admin announce
+  // toggle stayed hidden for the whole session (until an auth change that may never come). The failure
+  // must not stick — it returns false for that call (affordance hidden, server still gates) but the
+  // next resolve() re-fetches. FAILS on the old cache-false shape (second resolve answers false, no
+  // re-fetch); passes now.
   let fail = true;
+  let fetches = 0;
   const cache = createAdminFlagCache(async () => {
+    fetches += 1;
     if (fail) throw new Error("boom");
     return { role: "ADMIN" };
   });
-  assert.equal(await cache.resolve(), false); // failure → non-admin, never throws to the caller
+  assert.equal(await cache.resolve(), false); // transient failure → hidden this call, never throws
   fail = false;
-  assert.equal(await cache.resolve(), false); // the failure result is cached like any other
-  cache.invalidate();
-  assert.equal(await cache.resolve(), true); // …until an auth change resets it
+  assert.equal(await cache.resolve(), true); // NOT cached → re-fetches, sees the live ADMIN role
+  assert.equal(fetches, 2); // proves the retry actually happened (old code would be 1)
 });

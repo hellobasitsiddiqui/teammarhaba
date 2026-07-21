@@ -1041,8 +1041,10 @@ export function typingLabel(typists, now) {
 /**
  * A resettable cache of the viewer's admin flag (TM-736) — drives whether the event-chat composer
  * offers the "Send as announcement" affordance (TM-710). `resolve()` returns the cached flag, or
- * awaits `fetchMe()` once and caches `role === "ADMIN"` (case-insensitive); a fetch failure caches
- * `false` — the affordance simply stays hidden and the server gate remains authoritative.
+ * awaits `fetchMe()` once and caches `role === "ADMIN"` (case-insensitive). A fetch failure returns
+ * `false` for that call (affordance hidden, server gate still authoritative) but is NOT cached, so the
+ * next `resolve()` re-fetches — a transient boot-time failure can't hide the toggle for the session
+ * (TM-736). A resolved USER/ADMIN result IS cached until `invalidate()`.
  *
  * `invalidate()` resets the cache to unresolved. The TM-736 bug was a cache WITHOUT this: chat.js
  * held the flag in a module-level variable resolved once and never reset, so a value captured before
@@ -1062,10 +1064,14 @@ export function createAdminFlagCache(fetchMe) {
       try {
         const me = await fetchMe();
         cached = String(me?.role ?? "").toUpperCase() === "ADMIN";
+        return cached;
       } catch {
-        cached = false; // can't tell → treat as non-admin (the server still gates the endpoint)
+        // TM-736: a transient /me failure must NOT stick as non-admin for the whole session — leave
+        // the cache UNRESOLVED (cached stays null) so the next resolve() re-fetches. Fail safe to
+        // hidden for THIS call (the server still gates the endpoint), but a boot-time blip no longer
+        // hides the admin announce toggle until an auth change that may never come.
+        return false;
       }
-      return cached;
     },
     invalidate() {
       cached = null;
