@@ -48,22 +48,29 @@ test("@profile the refreshed Profile hub shows the completeness ring, badges and
   await expect(ring).toBeVisible();
   await expect(ring).toHaveAttribute("aria-valuemin", "0");
   await expect(ring).toHaveAttribute("aria-valuemax", "100");
-  // The ring is driven off profileStrength().percent — a seeded ADMIN has name/city/age/phone (4 of the
-  // 5 fields; no photo), so the strength is a concrete value in [0,100]. aria-valuenow must be present
-  // and numeric, and the visible centre label must echo it as "N%".
-  await expect(ring).toHaveAttribute("aria-valuenow", /^\d+$/);
-  const now = await ring.getAttribute("aria-valuenow");
-  await expect(page.locator(".tm-pf-ring-pct")).toHaveText(`${now}%`);
-  // The fill arc reflects the percent via its dash-offset (0% → full circumference undrawn; 100% → 0).
-  // A non-empty (>0) strength must leave the arc partially/fully drawn (offset < circumference).
-  const arcDrawn = await page.locator(".tm-pf-ring-arc").evaluate((el) => {
-    const offset = parseFloat(getComputedStyle(el).strokeDashoffset) || 0;
-    const total = parseFloat(getComputedStyle(el).strokeDasharray) || 0;
-    return { offset, total, valuenow: Number(el.closest(".tm-pf-ring")?.getAttribute("aria-valuenow")) };
-  });
-  if (arcDrawn.valuenow > 0) {
-    expect(arcDrawn.offset).toBeLessThan(arcDrawn.total);
-  }
+  // The ring is driven off profileStrength().percent. A seeded ADMIN has name/city/age/phone but no
+  // photo — 4 of the 5 STRENGTH_FIELDS — so the percent is a KNOWN value: round(4/5 * 100) = 80. Pin it
+  // (not just /^\d+$/) so a regression that mis-counts the fields — e.g. 3 → 60 — fails here, and the
+  // visible centre label must echo the same number.
+  await expect(ring).toHaveAttribute("aria-valuenow", "80");
+  await expect(page.locator(".tm-pf-ring-pct")).toHaveText("80%");
+  // The fill arc reflects the percent via its dash-offset: offset = circumference * (1 - percent/100)
+  // (0% → full circumference undrawn; 100% → 0). Bind the RENDERED geometry to the percent — assert the
+  // offset SETTLES at that exact value (poll past the fill animation), so an arc wired to a
+  // wrong-but-nonzero constant offset (drawn, but not tracking the strength) fails here, not just
+  // "some arc is drawn".
+  await expect
+    .poll(
+      async () =>
+        page.locator(".tm-pf-ring-arc").evaluate((el) => {
+          const offset = parseFloat(getComputedStyle(el).strokeDashoffset) || 0;
+          const total = parseFloat(getComputedStyle(el).strokeDasharray) || 0;
+          const valuenow = Number(el.closest(".tm-pf-ring")?.getAttribute("aria-valuenow"));
+          return Math.abs(offset - total * (1 - valuenow / 100));
+        }),
+      { timeout: 5_000 },
+    )
+    .toBeLessThanOrEqual(1);
 
   // The paper-profile menu is present with a real "My events" destination and a public-profile entry.
   await expect(page.getByRole("link", { name: /My events/ })).toBeVisible();
