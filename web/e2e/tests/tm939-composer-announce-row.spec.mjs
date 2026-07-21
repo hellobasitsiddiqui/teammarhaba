@@ -1,5 +1,5 @@
 // TM-939 — the event-chat composer's "Send as announcement" toggle must sit on its OWN full-width row
-// ABOVE the message input, not share the input's flex row and squeeze it to a "Mes:" sliver at 390px.
+// BELOW the message input, not share the input's flex row and squeeze it to a "Mes:" sliver at 390px.
 //
 // DOM-GEOMETRY guard, MOCK-DRIVEN (no backend/Postgres): serve.mjs (the config webServer) serves the
 // real SPA; this spec mocks GET /api/v1/me (role ADMIN — the toggle is admin-only, TM-710) plus the
@@ -8,8 +8,8 @@
 // onto an EVENT_GROUP thread (typeKey "event") so maybeMountAnnounceToggle mounts the bar.
 //
 // The load-bearing assertion is pure layout geometry, independent of copy/theme:
-//   • the announce bar and the input are on SEPARATE rows — the input's bounding-box TOP is at or below
-//     the announce bar's BOTTOM (they don't overlap vertically), and
+//   • the announce bar and the input are on SEPARATE rows — the announce bar's bounding-box TOP is at or
+//     below the input's BOTTOM (the toggle sits under the input, no vertical overlap), and
 //   • the input keeps most of the composer width — its width is ≥ 70% of the composer's inner width
 //     (BEFORE the fix it was roughly halved by the inline toggle → this fails on origin/main styles).
 //
@@ -92,7 +92,7 @@ async function openThread(page) {
   await expect(page.locator('[data-testid="chat-announce-toggle"]')).toBeAttached();
 }
 
-test("announce toggle sits on its own row above a full-width input (390px)", async ({ page }) => {
+test("announce toggle sits on its own row below a full-width input (390px)", async ({ page }) => {
   await mockApi(page);
   await openThread(page);
 
@@ -104,12 +104,13 @@ test("announce toggle sits on its own row above a full-width input (390px)", asy
   expect(announceBox, "announce bar must be laid out").not.toBeNull();
   expect(inputBox, "input must be laid out").not.toBeNull();
 
-  // 1 — separate rows: the input starts at or below the announce bar's bottom (no vertical overlap).
-  //     A tiny sub-pixel fudge (1px) absorbs rounding; the real BEFORE overlap is tens of px.
+  // 1 — separate rows: the announce bar starts at or below the input's bottom (toggle sits UNDER the
+  //     input, no vertical overlap). A tiny sub-pixel fudge (1px) absorbs rounding; the real BEFORE
+  //     overlap (inline toggle sharing the input's row) is tens of px.
   expect(
-    inputBox.y,
-    `input top (${inputBox.y}) must be at/below the announce bar bottom (${announceBox.y + announceBox.height})`,
-  ).toBeGreaterThanOrEqual(announceBox.y + announceBox.height - 1);
+    announceBox.y,
+    `announce bar top (${announceBox.y}) must be at/below the input bottom (${inputBox.y + inputBox.height})`,
+  ).toBeGreaterThanOrEqual(inputBox.y + inputBox.height - 1);
 
   // 2 — the input keeps most of the composer's width (BEFORE the fix the inline toggle roughly halved it).
   const ratio = inputBox.width / composerBox.width;

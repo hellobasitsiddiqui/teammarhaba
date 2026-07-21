@@ -5139,7 +5139,7 @@ button.tm-chat-receipt:hover .tm-chat-receipt-text { text-decoration: underline;
 /* The admin "Send as announcement" toggle above the composer input (TM-710). Hidden for non-admins /
    admin-broadcast threads (the `hidden` attribute), a compact labelled checkbox otherwise. */
 .tm-chat-announce-bar {
-    flex: 0 0 100%; /* TM-939: own full-width row above the input+send row (mirror .tm-chat-reply-bar) so the 390px input isn't squeezed to a sliver */
+    flex: 0 0 100%; /* TM-939: own full-width row BELOW the input+send row (announceBar is last in the composer DOM) so the 390px input isn't squeezed to a sliver */
     display: flex;
     align-items: center;
     padding: var(--space-1) var(--space-2) 0;

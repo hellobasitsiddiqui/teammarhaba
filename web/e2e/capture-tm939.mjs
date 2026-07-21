@@ -10,7 +10,8 @@
 //   • BEFORE (styles.css swapped to origin/main): .tm-chat-announce-bar has no full-width basis → it wraps
 //     INLINE to the left of the input on the same flex row, squeezing the input to a "Mes:" sliver.
 //   • AFTER  (this branch): .tm-chat-announce-bar gets `flex: 0 0 100%` (mirroring .tm-chat-reply-bar) →
-//     the toggle drops to its OWN full-width row above a full-width input + send button.
+//     the toggle drops to its OWN full-width row BELOW a full-width input + send button (announceBar
+//     is last in the composer DOM).
 //
 // Usage:  PHASE=after  node capture-tm939.mjs   (writes capture-out-tm939/TM-939-after.png)
 //         PHASE=before node capture-tm939.mjs   (caller must have swapped styles.css to main first)
