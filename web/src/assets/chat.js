@@ -1342,9 +1342,16 @@ function messageRow(m, mine = false, runStart = false) {
   // avatar (photo circle, or an initial-in-circle fallback) + display-name label once, above the bubble.
   // Own (out-going) bubbles never get it; a run continuation (runStart false) shows the bubble alone so
   // the identity isn't repeated on every consecutive line.
+  // TM-940: the run-start header carries the sender name AND the time on ONE compact line (WhatsApp/Slack
+  // style), so we don't repeat the time in a detached stamp below the first bubble of the run. `headerHasTime`
+  // records whether the header showed it, so the per-message stamp below can suppress the duplicate.
+  let headerHasTime = false;
   if (!mine && runStart) {
-    const identity = senderIdentity(m);
-    if (identity) row.append(identity);
+    const identity = senderIdentity(m, m.pending ? "" : m.timeLabel);
+    if (identity) {
+      row.append(identity);
+      headerHasTime = Boolean(!m.pending && m.timeLabel);
+    }
   }
   // Reply / quote (TM-466): render the quoted parent above the body — tap it to scroll to the original;
   // a removed original shows "message unavailable" (core already substitutes the copy) and isn't tappable.
@@ -1371,10 +1378,15 @@ function messageRow(m, mine = false, runStart = false) {
   if (m.pending) {
     row.append(el("div", { class: "tm-chat-stamp" }, [el("span", { text: "Sending…" })]));
   } else if (m.timeLabel || m.edited) {
-    row.append(el("div", { class: "tm-chat-stamp", "data-testid": "chat-stamp" }, [
-      m.timeLabel ? el("span", { text: m.timeLabel }) : null,
-      m.edited ? el("span", { class: "tm-chat-edited", "data-testid": "chat-edited", title: "Edited", text: core.EDITED_TAG }) : null,
-    ]));
+    // TM-940: when the run-start header already carried this message's time, drop it from the stamp so it's
+    // not shown twice — but still render the stamp if the message is edited (the "edited" tag lives here).
+    const showTime = m.timeLabel && !headerHasTime;
+    if (showTime || m.edited) {
+      row.append(el("div", { class: "tm-chat-stamp", "data-testid": "chat-stamp" }, [
+        showTime ? el("span", { text: m.timeLabel }) : null,
+        m.edited ? el("span", { class: "tm-chat-edited", "data-testid": "chat-edited", title: "Edited", text: core.EDITED_TAG }) : null,
+      ]));
+    }
   }
   if (m.cta) row.append(messageCta(m.cta)); // an in-app deep-link on a normal message → same CTA affordance
   /* === TM-470 link preview === */
@@ -1394,21 +1406,16 @@ function messageRow(m, mine = false, runStart = false) {
   // Read receipt (TM-463): a "read by N" indicator (not a tick) on the caller's OWN messages — the
   // server sends `readReceipt` only for those, so its presence gates this. Tap it to see who's read it.
   if (m.readReceipt && !m.pending) row.append(readReceiptIndicator(m.readReceipt));
-  // Reply affordance (TM-466): a tap target on a confirmed message that starts a reply quoting it.
-  // Not on a pending echo (no server id yet), and only where the caller can actually post (an
-  // admin-broadcast/announcement thread is read-only, so replying there is pointless).
-  if (!m.pending && m.id && thread.canCompose) {
-    row.append(el("button", {
-      class: "tm-chat-reply-btn", type: "button", "aria-label": "Reply",
-      "data-testid": "chat-reply", onClick: () => beginReply(m),
-    }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]));
-  }
-  // Edit / delete affordances (TM-467): only on the caller's OWN confirmed, non-system message. Delete is
-  // offered anytime (an author can always take a message back); edit only while still inside the ~5-minute
-  // window (a best-effort client hint via core.canEditWithinWindow — the backend re-checks and returns a
-  // 409 if it's actually past the window, so the gate is never trusted from the client alone).
-  if (mine && !m.pending && m.id && !m.system) {
-    row.append(ownMessageActions(m));
+  // Message actions (TM-940): reply / edit / delete now live behind a tap-to-reveal overflow ("⋯") instead
+  // of a permanently-visible icon column. `messageActionMenu` builds the trigger + a hidden menu; the menu
+  // is empty (returns null) when nothing applies (a pending echo, a read-only thread, someone else's
+  // message we can't act on), so the row stays clean. All three actions stay real, focusable, aria-labelled
+  // <button>s — revealed on tap/long-press, keyboard- and screen-reader-reachable once open.
+  if (!m.pending && m.id) {
+    const canReply = thread.canCompose;
+    const canOwn = mine && !m.system;
+    const menu = messageActionMenu(m, { canReply, canOwn });
+    if (menu) row.append(menu);
   }
   return row;
 }
@@ -1425,9 +1432,11 @@ function messageRow(m, mine = false, runStart = false) {
  * <p>All text goes through el()'s textContent (never innerHTML) and the photo src is set as a plain
  * attribute, so a hostile display name / URL can't inject markup.
  * @param {{senderName?: string, senderPhotoUrl?: (string|null)}} m the message view-model (chat-core).
+ * @param {string} [timeLabel] the run-start message's time — TM-940 puts the name + time on one compact
+ *   line (WhatsApp/Slack style) instead of a bare name above a detached bubble. Omitted / blank = name only.
  * @returns {?HTMLElement} the header node, or null when there's no name to show.
  */
-function senderIdentity(m) {
+function senderIdentity(m, timeLabel = "") {
   const name = String(m.senderName ?? "").trim();
   if (!name) return null; // no author identity to show (e.g. an unresolvable account) — omit the header
   const avatarNode = m.senderPhotoUrl
@@ -1449,30 +1458,99 @@ function senderIdentity(m) {
         node.classList.add("tm-chat-avatar", "tm-chat-avatar--fallback");
         return node;
       })();
+  const time = String(timeLabel ?? "").trim();
   return el("div", { class: "tm-chat-identity", "data-testid": "chat-identity" }, [
     avatarNode,
-    el("span", { class: "tm-chat-sender-name", "data-testid": "chat-sender-name", text: name }),
+    el("div", { class: "tm-chat-identity-line" }, [
+      el("span", { class: "tm-chat-sender-name", "data-testid": "chat-sender-name", text: name }),
+      // TM-940: the run-start time sits on the SAME line as the name (not a detached stamp under the bubble).
+      time ? el("span", { class: "tm-chat-identity-time", "data-testid": "chat-identity-time", text: time }) : null,
+    ]),
   ]);
 }
 
 /**
- * The edit + delete controls for the caller's OWN message (TM-467). Edit opens the inline editor and is
- * shown only within the edit window (client hint); delete confirms then soft-deletes. Both are real
- * buttons (keyboard + screen-reader accessible).
+ * The per-message action menu (TM-940): reply / edit / delete behind a tap-to-reveal overflow ("⋯")
+ * instead of a permanently-visible icon column. Returns a wrapper holding the trigger button + a hidden
+ * menu; the menu is populated from the same gates the old always-visible affordances used:
+ *   • reply  — when the caller can post to the thread (TM-466);
+ *   • edit   — the caller's OWN message, still inside the ~5-minute window (client hint; TM-467);
+ *   • delete — the caller's OWN message, anytime (TM-467).
+ * Returns null when NO action applies, so the row stays clean (nothing to reveal).
+ *
+ * Accessibility: the trigger is a real <button aria-haspopup aria-expanded>; each action is a real,
+ * focusable, aria-labelled <button>. The menu is `hidden` (so its buttons are removed from the tab order +
+ * a11y tree) until revealed — tapping the trigger toggles `hidden` and moves focus to the first action, so
+ * the actions are keyboard- and screen-reader-reachable once open. Escape or a tap on the trigger re-hides
+ * it. The behaviour of each action (beginReply / beginEdit / deleteOwnMessage) is unchanged — this is a
+ * reveal wrapper, not a behaviour change.
+ *
+ * @param {Object} m the message view-model.
+ * @param {{canReply: boolean, canOwn: boolean}} gates which actions are permitted here.
+ * @returns {?HTMLElement} the action-menu wrapper, or null when nothing applies.
  */
-function ownMessageActions(m) {
-  const actions = el("div", { class: "tm-chat-own-actions", "data-testid": "chat-own-actions" });
-  if (core.canEditWithinWindow(m.sortAt)) {
-    actions.append(el("button", {
-      class: "tm-chat-edit-btn", type: "button", "aria-label": "Edit message",
-      title: "Edit", "data-testid": "chat-edit", onClick: () => beginEdit(m),
-    }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "✎" })]));
+function messageActionMenu(m, { canReply, canOwn } = {}) {
+  const items = [];
+  if (canReply) {
+    items.push(el("button", {
+      class: "tm-chat-action-item tm-chat-reply-btn", type: "button", role: "menuitem",
+      "aria-label": "Reply", "data-testid": "chat-reply", onClick: () => beginReply(m),
+    }, [
+      el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true" }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]),
+      el("span", { class: "tm-chat-action-label", text: "Reply" }),
+    ]));
   }
-  actions.append(el("button", {
-    class: "tm-chat-delete-btn", type: "button", "aria-label": "Delete message",
-    title: "Delete", "data-testid": "chat-delete", onClick: () => deleteOwnMessage(m),
-  }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "🗑" })]));
-  return actions;
+  if (canOwn && core.canEditWithinWindow(m.sortAt)) {
+    items.push(el("button", {
+      class: "tm-chat-action-item tm-chat-edit-btn", type: "button", role: "menuitem",
+      "aria-label": "Edit message", "data-testid": "chat-edit", onClick: () => beginEdit(m),
+    }, [
+      el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "✎" }),
+      el("span", { class: "tm-chat-action-label", text: "Edit" }),
+    ]));
+  }
+  if (canOwn) {
+    items.push(el("button", {
+      class: "tm-chat-action-item tm-chat-delete-btn", type: "button", role: "menuitem",
+      "aria-label": "Delete message", "data-testid": "chat-delete", onClick: () => deleteOwnMessage(m),
+    }, [
+      el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "🗑" }),
+      el("span", { class: "tm-chat-action-label", text: "Delete" }),
+    ]));
+  }
+  if (items.length === 0) return null; // nothing to reveal → no overflow trigger at all
+
+  const menu = el("div", {
+    class: "tm-chat-actions-menu", role: "menu", "data-testid": "chat-actions-menu",
+    "aria-label": "Message actions", hidden: true,
+  }, items);
+
+  const trigger = el("button", {
+    class: "tm-chat-actions-trigger", type: "button",
+    "aria-label": "Message actions", title: "More", "aria-haspopup": "menu",
+    "aria-expanded": "false", "data-testid": "chat-actions-trigger",
+  }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "⋯" })]);
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    wrap.classList.toggle("tm-chat-actions--open", open);
+  };
+  trigger.addEventListener("click", () => {
+    const willOpen = menu.hidden;
+    setOpen(willOpen);
+    if (willOpen) items[0].focus(); // reveal → land focus on the first action (keyboard reachable)
+  });
+  // Escape from anywhere inside the menu re-hides it and returns focus to the trigger.
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); }
+  });
+
+  const wrap = el("div", { class: "tm-chat-actions", "data-testid": "chat-actions" }, [trigger, menu]);
+  // Long-press on the bubble region also reveals it (touch affordance) — but only opens, never toggles shut,
+  // so a long-press can't accidentally close a menu the user just opened by tap.
+  wrap.addEventListener("contextmenu", (e) => { e.preventDefault(); setOpen(true); items[0].focus(); });
+  return wrap;
 }
 
 /**
@@ -1928,7 +2006,7 @@ function previewHost(url) {
  * @param {{count: number, readerIds: string[]}} receipt a normalised receipt (chat-core).
  */
 function readReceiptIndicator(receipt) {
-  // TM-829: friendly buckets ("Read by none" / "Read by few" / "Read by everyone", or an exact "Read by N"
+  // TM-829/TM-940: friendly buckets ("Sent" / "Read by few" / "Read by everyone", or an exact "Read by N"
   // in a small group) instead of always "Read by N". The denominator = OTHER thread members, taken from
   // the roster the mentions feature already loads (getConversationMembers returns everyone EXCEPT the
   // caller, so its length IS the other-member count); 0 when the roster hasn't loaded → readByLabel stays

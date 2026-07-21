@@ -381,7 +381,7 @@ export function readReceiptLabel(receipt) {
  * The FRIENDLY read-by bucket label for one of the caller's own messages (TM-829) — still TEXT, never a
  * ✓/✓✓/✓✓✓ tick (the AC is explicit). Buckets how many OTHER thread members have read it against how many
  * there are:
- *   • 0 readers               → "Read by none"      (delivered, nobody's opened it)
+ *   • 0 readers               → "Sent"               (delivered, nobody's opened it — TM-940)
  *   • all other members       → "Read by everyone"  (whole-group-read)
  *   • some but not all        → "Read by few"        in a larger group, or the exact "Read by N" in a
  *                                small group (2–3 others) where a specific count reads more naturally than
@@ -395,13 +395,13 @@ export function readReceiptLabel(receipt) {
  * @param {number} readerCount how many OTHER members have read the message.
  * @param {number} [otherMemberCount] how many OTHER members the thread has (roster size minus the caller);
  *        0 / negative / omitted = unknown denominator.
- * @returns {string} the friendly label ("" is never returned — a receipt always has at least "Read by none").
+ * @returns {string} the friendly label ("" is never returned — a receipt always has at least "Sent").
  */
 export function readByLabel(readerCount, otherMemberCount) {
   const total = Math.trunc(Number(otherMemberCount) || 0);
   let read = Math.max(0, Math.trunc(Number(readerCount) || 0));
   if (total > 0) read = Math.min(read, total); // clamp: a stale roster can't exceed the known denominator
-  if (read <= 0) return "Read by none";
+  if (read <= 0) return "Sent"; // TM-940: industry-standard receipt — "Sent", not "Read by none"
   if (total <= 0) return `Read by ${read}`; // unknown denominator → can't claim "everyone"; be exact
   if (read >= total) return "Read by everyone";
   // Some-but-not-all. In a small group (2–3 others) an exact count reads better than the vague "few".
