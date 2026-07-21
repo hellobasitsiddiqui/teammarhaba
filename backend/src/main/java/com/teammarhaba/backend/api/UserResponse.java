@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.event.ReliabilityStatus;
+import com.teammarhaba.backend.user.NotificationPref;
 import com.teammarhaba.backend.user.User;
 
 /**
@@ -43,7 +44,19 @@ public record UserResponse(
         String phoneNumber,
         boolean pushEligible,
         int lateCancelCount,
-        ReliabilityStatus reliabilityStatus) {
+        ReliabilityStatus reliabilityStatus,
+        // The admin-editable profile fields (TM-162 set), surfaced so the admin console can DISPLAY
+        // them and PREFILL the admin edit form (TM-172). Distinct from {@code phoneNumber} above, which
+        // is the read-only verified AUTH phone from Firebase (TM-372); {@code phone} here is the
+        // user-editable profile phone the admin edit writes via {@code PATCH .../{id}/profile}.
+        String firstName,
+        String lastName,
+        String city,
+        Integer age,
+        String phone,
+        NotificationPref notificationPref,
+        String timezone,
+        String locale) {
 
     /** Projection without enrichment — no auth phone, push-eligibility unknown, standing defaulted to OK. */
     public static UserResponse from(User user) {
@@ -73,6 +86,14 @@ public record UserResponse(
                 authPhone,
                 pushEligible,
                 user.getLateCancelCount(),
-                reliabilityStatus);
+                reliabilityStatus,
+                user.getFirstName(),
+                user.getLastName(),
+                user.getCity(),
+                user.getAge(),
+                user.getPhone(),
+                user.getNotificationPref(),
+                user.getTimezone(),
+                user.getLocale());
     }
 }
