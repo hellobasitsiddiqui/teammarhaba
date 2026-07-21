@@ -89,9 +89,7 @@ public record UpdateMeRequest(
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).
         // @Size(max = 32) still bounds the overall separator-padded length.
         @Size(max = 32)
-                @Pattern(
-                        regexp = "^$|^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
-                        message = "must be a valid phone number")
+                @Pattern(regexp = PHONE_PATTERN, message = PHONE_MESSAGE)
                 String phone,
         NotificationPref notificationPref,
         @Size(max = 64) String timezone,
@@ -110,4 +108,14 @@ public record UpdateMeRequest(
 
     static final String NAME_LIKE_MESSAGE =
             "must contain letters (spaces, hyphens, apostrophes and periods are allowed)";
+
+    /**
+     * The TM-781 E.164 stored-shape rule shared with {@link AdminUpdateProfileRequest#phone} so the
+     * admin edit can never fork a weaker/older phone rule: {@code "^$|"} keeps the empty-string clear
+     * alternative; then a MANDATORY {@code "+"}, a first digit, and 6–14 further digits each optionally
+     * preceded by separator chars — i.e. 7–15 digits total with separators only BETWEEN digits.
+     */
+    static final String PHONE_PATTERN = "^$|^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$";
+
+    static final String PHONE_MESSAGE = "must be a valid phone number";
 }

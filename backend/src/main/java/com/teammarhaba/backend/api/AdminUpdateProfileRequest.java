@@ -48,13 +48,11 @@ public record AdminUpdateProfileRequest(
         // No @Min/@Max here — the 18–99 band (TM-884) is enforced in UserService behind the
         // unchanged-guard (TM-900), exactly as for the self-edit, so a grandfathered value re-sends fine.
         Integer age,
-        // The SAME E.164 stored-shape pattern as UpdateMeRequest.phone (TM-781): "^$|" keeps the
-        // empty-string clear alternative; then a mandatory "+" and 7–15 digits with separators only
-        // between digits. @Size(max = 32) bounds the separator-padded overall length.
+        // The SAME E.164 stored-shape pattern as UpdateMeRequest.phone (TM-781), referenced as a
+        // SHARED constant (like NAME_LIKE) so the two paths can never drift: a future tweak to the
+        // self-edit phone rule moves both. @Size(max = 32) bounds the separator-padded overall length.
         @Size(max = 32)
-                @Pattern(
-                        regexp = "^$|^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
-                        message = "must be a valid phone number")
+                @Pattern(regexp = UpdateMeRequest.PHONE_PATTERN, message = UpdateMeRequest.PHONE_MESSAGE)
                 String phone,
         NotificationPref notificationPref,
         @Size(max = 64) String timezone,

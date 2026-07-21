@@ -491,6 +491,10 @@ function profileSection(user) {
     for (const field of ADMIN_PROFILE_FIELDS) {
       const fieldId = `admin-profile-${field.key}-${current.id}`;
       const errorId = `${fieldId}-error`;
+      // Describe the control by BOTH hint and error (like buildField in profile.js) so a screen
+      // reader hears the constraint hint, not just the error after a failed submit.
+      const hintId = field.hint ? `${fieldId}-hint` : null;
+      const describedBy = [hintId, errorId].filter(Boolean).join(" ");
       let input;
       if (field.type === "select") {
         // Keep an already-saved OFF-LIST city selectable (TM-877 allowance) so editing another field
@@ -501,7 +505,7 @@ function profileSection(user) {
         }
         input = el(
           "select",
-          { id: fieldId, class: "tm-input", "aria-describedby": errorId },
+          { id: fieldId, class: "tm-input", "aria-describedby": describedBy },
           options.map(([value, label]) =>
             el("option", { value, selected: String(current[field.key] ?? "") === String(value) }, label)),
         );
@@ -514,7 +518,7 @@ function profileSection(user) {
           maxlength: field.maxLength || null,
           min: field.min ?? null,
           max: field.max ?? null,
-          "aria-describedby": errorId,
+          "aria-describedby": describedBy,
         });
       }
       const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
@@ -522,11 +526,14 @@ function profileSection(user) {
       input.addEventListener("input", () => setControlError(field.key, validateAdminField(field, input.value, current)));
       input.addEventListener("change", () => setControlError(field.key, validateAdminField(field, input.value, current)));
       controls.set(field.key, { input, error });
+      // Reuse the SHARED self-edit markup (.tm-form-field / .tm-field-label / .tm-field-hint /
+      // .tm-field-error) so the admin form inherits the exact same column stack + spacing + the
+      // min-width:0 clip guard (TM-665). A bare ".tm-field" has no CSS rule and falls back to inline flow.
       form.append(
-        el("div", { class: "tm-field" }, [
-          el("label", { for: fieldId, text: field.label }),
+        el("div", { class: "tm-form-field" }, [
+          el("label", { class: "tm-field-label", for: fieldId, text: field.label }),
           input,
-          field.hint ? el("p", { class: "tm-field-hint", text: field.hint }) : null,
+          field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null,
           error,
         ]),
       );
@@ -542,8 +549,11 @@ function profileSection(user) {
     if (!c) return;
     c.error.textContent = message || "";
     c.error.hidden = !message;
+    // aria-invalid for AT + the tm-field-invalid ring for sighted users — mirror setControlInvalid
+    // in profile.js so an off-band/off-list value flags the input itself, not just the error text.
     if (message) c.input.setAttribute("aria-invalid", "true");
     else c.input.removeAttribute("aria-invalid");
+    c.input.classList.toggle("tm-field-invalid", !!message);
   }
 
   function showForm(on) {
@@ -551,6 +561,15 @@ function profileSection(user) {
     form.hidden = !on;
     editBtn.hidden = on;
     summary.hidden = on;
+    // Keep keyboard/AT focus inside this in-modal disclosure: on reveal the just-clicked editBtn
+    // becomes hidden (out of tab order), so move focus into the first field; on hide, return it to
+    // the now-visible editBtn. The shared modal() has no focus trap, so without this focus falls to <body>.
+    if (on) {
+      const first = controls.get(ADMIN_PROFILE_FIELDS[0].key);
+      first?.input?.focus();
+    } else {
+      editBtn.focus();
+    }
   }
 
   form.addEventListener("submit", async (event) => {

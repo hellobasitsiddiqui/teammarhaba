@@ -94,6 +94,23 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         tokens.saveAndFlush(new DeviceToken(userId, token, DevicePlatform.ANDROID, Instant.now()));
     }
 
+    /**
+     * Soft-delete (tombstone) an account so the entity's {@code @SQLRestriction} hides it. {@code
+     * markDeleted} is package-private (this test is in a different package), so set the field directly
+     * by reflection — the same approach {@code PushAdminControllerIntegrationTest} uses.
+     */
+    private void softDelete(long userId) {
+        User u = users.findById(userId).orElseThrow();
+        try {
+            var field = User.class.getDeclaredField("deletedAt");
+            field.setAccessible(true);
+            field.set(u, Instant.now());
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Could not tombstone user " + userId, e);
+        }
+        users.saveAndFlush(u);
+    }
+
     @Test
     void anonymousGetsUniform401() throws Exception {
         mockMvc.perform(get("/api/v1/admin/users"))
@@ -477,6 +494,25 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
     void adminProfileEditMissingTargetIs404NotLeaking() throws Exception {
         mockMvc.perform(patch(PROFILE_PATH, 999_999L)
                         .with(admin("admin-missing"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Ghost\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("Resource not found"));
+    }
+
+    @Test
+    void adminProfileEditSoftDeletedTargetIs404NotLeaking() throws Exception {
+        // The spec calls out a "missing/soft-deleted target" 404. A never-existed id (above) is one
+        // half; this asserts the OTHER half — a tombstoned account must be indistinguishable from a
+        // never-existed one (no existence leak). Guaranteed by @SQLRestriction("deleted_at is null")
+        // making findById skip tombstoned rows; assert it so a future lookup that ignores the soft-delete
+        // restriction (e.g. a native findByIdIncludingDeleted) would go red instead of silently
+        // resurrecting the row as editable.
+        long id = seed("profile-tombstoned");
+        softDelete(id);
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-tombstoned"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"firstName\":\"Ghost\"}"))
                 .andExpect(status().isNotFound())
