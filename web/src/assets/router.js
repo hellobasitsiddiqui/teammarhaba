@@ -88,6 +88,12 @@ import { updateFooter } from "./footer.js";
 // that own their full-page header (Profile + the first-run gates) — the pure rule lives in
 // shell-brand-core.js (unit-tested); this is its DOM bridge.
 import { updateShellBrand } from "./shell-brand.js";
+// Corner-bell chrome (TM-910): on the self-headed surfaces (Profile now; Home/Events add their route
+// in their own lanes) remove the floating hamburger + nav-items row and pin the notification bell to
+// the top-right corner, so the screen's own heading is the first content. Router-driven like the
+// shell-brand block above; the pure route rule lives in corner-bell-core.js (unit-tested), this is
+// its DOM bridge.
+import { updateCornerBell } from "./corner-bell.js";
 import { updateChatTabBadge } from "./chat-tab-badge.js";
 import { updateNotificationBell } from "./notification-bell.js";
 
@@ -602,6 +608,13 @@ function render() {
   // being dismissed; the splash + auth card were in fact fine — this block was the leak). Router-
   // driven for the same single-source-of-truth reason as the tab bar / footer above.
   updateShellBrand({ route });
+
+  // Corner-bell chrome (TM-910): on the self-headed surfaces (Profile) drop the floating hamburger +
+  // nav-items row and pin the bell top-right, so the screen's own heading ("Profile") is the first
+  // content. Same single-source-of-truth reason as updateShellBrand above (render() reruns on every
+  // hashchange + auth change). The bell's own signed-in/gated visibility stays owned by
+  // updateNotificationBell() — this only relocates the already-visible bell.
+  updateCornerBell({ route });
 }
 
 /**

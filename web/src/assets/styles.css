@@ -3801,6 +3801,24 @@ html {
     line-height: 1;
 }
 
+/* --- Corner-bell chrome (TM-910) --------------------------------------------------------------
+ * On the self-headed surfaces (Profile now; Home/Events via their own lanes) corner-bell.js hides
+ * the floating hamburger + #nav-items row and adds `.app-nav--corner-bell` here, leaving just the
+ * notification bell. Pin that lone bell to the top-right corner and collapse the row's height so the
+ * screen's own heading ("Profile") is the first content — the bell sits in the corner above the
+ * heading row, NOT overlapping the heading's top-right control (the Profile diagnostics gear,
+ * .tm-pf-gear, which lives in the profile-view below). All CSS, no per-screen markup.
+ *
+ * The centred multi-item .app-nav (default) becomes a right-aligned, zero-min-height strip: the row
+ * takes only the bell's height and hugs the right edge, so removing the hamburger doesn't leave a
+ * tall empty band. Reusable across the corner-bell routes (the class is route-agnostic). */
+.app-nav.app-nav--corner-bell {
+    justify-content: flex-end;
+    gap: 0;
+    min-height: 0;
+    margin: 0;
+}
+
 /* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
    to a corner pill. The --page-bg ring separates it from whatever sits behind the nav. */
 .tm-notif-badge {
