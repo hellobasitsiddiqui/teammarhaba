@@ -11,13 +11,12 @@ import { test } from "node:test";
 import {
   unreadTotalOf,
   decrementUnreadTotal,
-  markReadThreadUnread,
-  deepLinkUnreadTopUp,
   chatTabAriaLabel,
   badgeText,
   hasBadge,
   BADGE_CAP,
 } from "../src/assets/chat-tab-badge-core.js";
+import { conversationUnreadInList } from "../src/assets/chat-core.js";
 
 test("unreadTotalOf: reads the aggregate `total` from the unread-total endpoint envelope", () => {
   // The server sums over ALL the caller's threads (TM-582), so this is already the whole-account total
@@ -67,78 +66,64 @@ test("decrementUnreadTotal: tolerant of malformed inputs (coerces to safe non-ne
   assert.equal(decrementUnreadTotal("nope", "nope"), 0); // total junk → 0
 });
 
-test("markReadThreadUnread: reads the pre-mark `unreadCount` from the MarkReadResponse (TM-855)", () => {
-  // POST /conversations/{id}/read returns { conversationId, lastReadAt, unreadCount } where unreadCount
-  // is the thread's server-authoritative unread at the moment it was marked read — the deep-link source.
-  assert.equal(markReadThreadUnread({ conversationId: 5, lastReadAt: "2026-07-20T00:00:00Z", unreadCount: 4 }), 4);
-  assert.equal(markReadThreadUnread({ unreadCount: 0 }), 0); // idempotent re-open → already read → 0
+test("conversationUnreadInList: reads a thread's per-caller unread from the fetched list (TM-855)", () => {
+  // On a DEEP-LINK open state.rows is empty, so the thread's pre-mark unread is resolved from the
+  // conversation LIST summary's server-computed `unreadCount` (fetched BEFORE the mark-read POST advances
+  // the cursor — the mark-read response returns the POST-mark count, ~0, so it can't be the source).
+  const items = [
+    { id: 5, unreadCount: 3 },
+    { id: 9, unreadCount: 0 },
+    { id: 12, unreadCount: 7 },
+  ];
+  assert.equal(conversationUnreadInList(items, 5), 3);
+  assert.equal(conversationUnreadInList(items, 12), 7);
+  assert.equal(conversationUnreadInList(items, 9), 0); // already-read thread → 0
 });
 
-test("markReadThreadUnread: tolerant of a missing / malformed response (never throws, never negative)", () => {
-  assert.equal(markReadThreadUnread(null), 0);
-  assert.equal(markReadThreadUnread(undefined), 0);
-  assert.equal(markReadThreadUnread({}), 0); // no unreadCount field
-  assert.equal(markReadThreadUnread({ unreadCount: null }), 0);
-  assert.equal(markReadThreadUnread({ unreadCount: -3 }), 0); // negative → 0
-  assert.equal(markReadThreadUnread({ unreadCount: "6" }), 6); // numeric string coerces
-  assert.equal(markReadThreadUnread({ unreadCount: 2.9 }), 2); // fractional floors
-  assert.equal(markReadThreadUnread("nope"), 0);
+test("conversationUnreadInList: matches on string id (router hands a string, summaries carry a number)", () => {
+  const items = [{ id: 42, unreadCount: 4 }];
+  assert.equal(conversationUnreadInList(items, "42"), 4); // string id from the deep-link route
+  assert.equal(conversationUnreadInList(items, 42), 4); // numeric id
 });
 
-test("deepLinkUnreadTopUp: deep-link open (empty cache) tops the drop up by the full pre-mark unread", () => {
-  // The TM-855 bug: on a push / notification-center open state.rows is empty, so the on-open optimistic
-  // drop saw cachedUnread=0 and no-op'd. The mark-read response's unreadCount is the real unread, so the
-  // whole of it must be dropped once the POST resolves — the badge finally falls.
-  assert.equal(deepLinkUnreadTopUp(0, { unreadCount: 3 }), 3);
-  assert.equal(deepLinkUnreadTopUp(0, { unreadCount: 1 }), 1);
+test("conversationUnreadInList: a thread not in the fetched page → 0 (degrades, never throws)", () => {
+  // A miss (thread beyond the first page, or a wrong id) yields 0: the optimistic drop no-ops and the
+  // post-commit refreshChatTabBadge() reconcile still corrects the total — never worse than before.
+  assert.equal(conversationUnreadInList([{ id: 1, unreadCount: 2 }], 99), 0);
+  assert.equal(conversationUnreadInList([], 1), 0);
 });
 
-test("deepLinkUnreadTopUp: list-tap open (warm cache) is a no-op — no double-drop", () => {
-  // On the list-tap path the on-open drop already subtracted the cached unread; the POST returns the same
-  // authoritative count, so there is nothing left to top up (dropping again would double-count, AC: no
-  // negative / no double-count under repeated open/close).
-  assert.equal(deepLinkUnreadTopUp(3, { unreadCount: 3 }), 0); // cache matched authoritative exactly
-  assert.equal(deepLinkUnreadTopUp(5, { unreadCount: 5 }), 0);
-});
-
-test("deepLinkUnreadTopUp: only ever tops UP — a stale-high cache never adds back or over-subtracts", () => {
-  // If the cached unread was somehow HIGHER than the authoritative pre-mark count (stale row), the top-up
-  // clamps at 0 — it can only add the missing delta, never re-inflate the badge the on-open drop lowered.
-  assert.equal(deepLinkUnreadTopUp(5, { unreadCount: 3 }), 0); // cache over-counted → nothing to add
-  assert.equal(deepLinkUnreadTopUp(2, { unreadCount: 6 }), 4); // cache under-counted → top up by the gap
-});
-
-test("deepLinkUnreadTopUp: tolerant of malformed inputs (coerces to safe non-negative integers)", () => {
-  assert.equal(deepLinkUnreadTopUp(undefined, { unreadCount: 4 }), 4); // no cache base → full drop
-  assert.equal(deepLinkUnreadTopUp(0, null), 0); // no response → nothing to drop, never NaN
-  assert.equal(deepLinkUnreadTopUp("nope", "nope"), 0); // total junk → 0
-  assert.equal(deepLinkUnreadTopUp(1.9, { unreadCount: 5.9 }), 4); // fractional floor: 5 - 1 = 4
+test("conversationUnreadInList: tolerant of malformed inputs (never throws, never negative)", () => {
+  assert.equal(conversationUnreadInList(null, 1), 0);
+  assert.equal(conversationUnreadInList(undefined, 1), 0);
+  assert.equal(conversationUnreadInList("nope", 1), 0);
+  assert.equal(conversationUnreadInList([{ id: 1 }], 1), 0); // no unreadCount field
+  assert.equal(conversationUnreadInList([{ id: 1, unreadCount: null }], 1), 0);
+  assert.equal(conversationUnreadInList([{ id: 1, unreadCount: -3 }], 1), 0); // negative → 0
+  assert.equal(conversationUnreadInList([{ id: 1, unreadCount: "6" }], 1), 6); // numeric string coerces
+  assert.equal(conversationUnreadInList([{ id: 1, unreadCount: 2.9 }], 1), 2); // fractional floors
+  assert.equal(conversationUnreadInList([null, { id: 1, unreadCount: 4 }], 1), 4); // skips a null row
 });
 
 test("end-to-end deep-link drop: TM-855 — a push-opened thread with unread>0 drops the badge", () => {
-  // The failing scenario: deep-link open, empty list cache. On-open drop = decrementUnreadTotal(total, 0)
-  // = no change (the bug). The POST resolves with unreadCount=3 → topUp = 3 → the tab total finally falls.
+  // The failing scenario: deep-link open, empty list cache. Pre-TM-855 the on-open drop used a cached
+  // unread of 0 (cache miss) = decrementUnreadTotal(total, 0) = no change (the bug). The fix resolves the
+  // thread's unread from the fetched LIST summary before the POST, so the optimistic drop finally fires.
   const totalBefore = unreadTotalOf({ total: 8 });
-  const cachedUnread = 0; // state.rows empty on a deep-link
-  const onOpen = decrementUnreadTotal(totalBefore, cachedUnread);
-  assert.equal(onOpen, 8, "on-open drop no-ops on a deep-link (the bug this ticket fixes)");
-  const topUp = deepLinkUnreadTopUp(cachedUnread, { unreadCount: 3 });
-  assert.equal(topUp, 3, "the mark-read response supplies the real unread the cache lacked");
-  const totalAfter = decrementUnreadTotal(onOpen, topUp);
-  assert.equal(totalAfter, 5, "the badge finally drops by the deep-linked thread's unread");
+  const listItems = [{ id: 5, unreadCount: 3 }]; // the fetched conversation list carries the real unread
+  const wasUnread = conversationUnreadInList(listItems, "5"); // deep-link resolves from the list, not the empty cache
+  assert.equal(wasUnread, 3, "the fetched list supplies the real unread the empty cache lacked");
+  const totalAfter = decrementUnreadTotal(totalBefore, wasUnread);
+  assert.equal(totalAfter, 5, "the badge drops optimistically by the deep-linked thread's unread");
   assert.equal(badgeText(totalAfter), "5");
 });
 
-test("end-to-end list-tap drop: the warm-cache path is unchanged (drops on open, no double-drop)", () => {
-  // Regression guard: the existing list-tap path must keep working exactly as before — drop on open from
-  // the cache, then the POST top-up is 0 so we don't drop twice.
+test("end-to-end list-tap drop: the warm-cache path is unchanged (drops on open from the cache)", () => {
+  // Regression guard: the list-tap path keeps working exactly as before — the cached row's unread drives
+  // the on-open drop directly, with no extra list fetch (resolveThreadUnread returns the cached value).
   const totalBefore = unreadTotalOf({ total: 8 });
-  const cachedUnread = 3;
-  const onOpen = decrementUnreadTotal(totalBefore, cachedUnread);
-  assert.equal(onOpen, 5, "list-tap drops on open from the warm cache");
-  const topUp = deepLinkUnreadTopUp(cachedUnread, { unreadCount: 3 });
-  assert.equal(topUp, 0, "POST top-up is 0 on the list-tap path — no double-drop");
-  assert.equal(decrementUnreadTotal(onOpen, topUp), 5, "total stays at the single drop");
+  const cachedUnread = 3; // warm row.unread from a rendered list
+  assert.equal(decrementUnreadTotal(totalBefore, cachedUnread), 5, "list-tap drops on open from the warm cache");
 });
 
 test("badgeText (re-exported): empty at zero, exact up to the cap, then '9+'", () => {

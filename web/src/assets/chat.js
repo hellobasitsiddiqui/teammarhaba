@@ -75,10 +75,6 @@ import { searchMessages, queryTokens, highlightSegments, snippet } from "./chat-
 // it read, but the router's concurrent unread-total GET races that POST and re-reads the pre-mark total,
 // so we drop the badge optimistically the moment a thread is read, then reconcile once the POST commits.
 import { noteThreadRead, refreshChatTabBadge } from "./chat-tab-badge.js";
-// TM-855: the deep-link (push / notification-center) open has no cached list row, so the on-open
-// optimistic drop reads 0 and no-ops; the mark-read POST response carries the thread's authoritative
-// pre-mark unread, so we top the drop up from there once it resolves. Pure decision in the badge core.
-import { deepLinkUnreadTopUp } from "./chat-tab-badge-core.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1252,28 +1248,53 @@ function threadMeta(id) {
 /** Mark the opened thread read (fire-and-forget) and clear its cached unread so back-nav reflects it. */
 function markThreadRead(id) {
   const row = state.rows.find((r) => r.id === String(id));
-  const wasUnread = row ? row.unread : 0; // this thread's contribution to the Chat-tab total (TM-585)
-  if (row) row.unread = 0;
-  // TM-585: drop the Chat-tab badge straight away by this thread's own unread (optimistic), so it falls on
-  // THIS navigation instead of waiting for the POST to commit + the next 60s poll. Without it the router's
-  // concurrent unread-total GET re-reads the pre-mark total (the GET/POST race) and the badge doesn't drop.
-  noteThreadRead(wasUnread);
-  Promise.resolve(markConversationRead(id))
-    // TM-855: on a DEEP-LINK open (push / notification-center) the list was never rendered, so `wasUnread`
-    // above was 0 and the on-open optimistic drop no-op'd — the badge would linger. The MarkReadResponse
-    // carries the thread's authoritative pre-mark unread, so top the drop up by whatever the on-open
-    // decrement missed (0 on the list-tap path, where `wasUnread` already covered it — no double-drop).
-    .then((res) => {
-      const topUp = deepLinkUnreadTopUp(wasUnread, res);
-      if (topUp > 0) noteThreadRead(topUp);
-      // Then reconcile with the authoritative server total (this GET now reflects the committed drop,
-      // unlike the router's concurrent pre-mark one) — self-correcting any local drift over open/close.
-      refreshChatTabBadge();
+  const cachedUnread = row ? row.unread : null; // capture BEFORE clearing; null = cache miss (deep-link)
+  if (row) row.unread = 0; // clear the cached row so back-nav / re-render reflects it as read
+  // TM-855: resolve THIS thread's pre-mark unread for the optimistic drop. On the list-tap path the
+  // cached row carries it; on a DEEP-LINK open (push / notification-center) `state.rows` is empty, so we
+  // fetch it from the conversation list's server-computed, per-caller `unreadCount` BEFORE the mark-read
+  // POST advances the cursor. The mark-read response can't supply it: that endpoint marks the thread
+  // read first, then recomputes unread against the fresh cursor (→ 0 here; see MarkReadResponse).
+  resolveThreadUnread(id, cachedUnread)
+    .then((wasUnread) => {
+      // TM-585: drop the Chat-tab badge straight away by this thread's own unread (optimistic), so it falls
+      // on THIS navigation instead of waiting for the POST to commit + the next 60s poll. Without it the
+      // router's concurrent unread-total GET re-reads the pre-mark total (the GET/POST race) and the badge
+      // doesn't drop. On a deep-link `wasUnread` now comes from the fetched list, not the empty cache.
+      noteThreadRead(wasUnread);
+      return Promise.resolve(markConversationRead(id));
     })
+    // Once the mark-read has COMMITTED, reconcile the badge with the authoritative server total (this GET
+    // now reflects the drop, unlike the router's concurrent pre-mark one) — this also self-corrects any
+    // local decrement drift over repeated open/close, so the total never double-counts or goes negative.
+    .then(() => refreshChatTabBadge())
     .catch((err) => {
       // Non-fatal: the optimistic drop stands and the next poll reconciles. Never surfaces to the user.
       console.warn("[chat] mark-read failed:", err?.message ?? err);
     });
+}
+
+/**
+ * Resolve a just-opened thread's pre-mark unread for the optimistic Chat-tab badge drop (TM-855). The
+ * warm list-tap path already has the row, so we return its cached `unread` with no extra request. The
+ * DEEP-LINK path (empty `state.rows`) fetches the caller's conversation list once and reads the thread's
+ * server-computed, per-caller `unreadCount` from the matching summary — the correct pre-mark source,
+ * fetched before the mark-read POST advances the read cursor. Best-effort: any fetch failure (or a
+ * thread beyond the first page) degrades to 0, so the optimistic drop simply no-ops and the post-commit
+ * `refreshChatTabBadge()` reconcile still corrects the total — never worse than the pre-TM-855 behaviour.
+ * @param {number|string} id the conversation id being opened.
+ * @param {number|null} cachedUnread the cached row's pre-clear unread, or null on a cache miss (deep-link).
+ * @returns {Promise<number>} the thread's pre-mark unread for the optimistic drop.
+ */
+async function resolveThreadUnread(id, cachedUnread) {
+  if (cachedUnread != null) return cachedUnread;
+  try {
+    const data = await listMyConversations();
+    return core.conversationUnreadInList(data?.items, id);
+  } catch (err) {
+    console.warn("[chat] deep-link unread lookup failed (badge reconciles on next refresh):", err?.message ?? err);
+    return 0;
+  }
 }
 
 /** The "no messages yet" empty thread state. */
