@@ -3838,6 +3838,17 @@ html {
         margin: 0;
     }
 
+    /* The screen normally leaves a 1.5rem top margin below the nav row (.profile-view margin-top).
+       With the nav lifted out of flow and pinned to the app's content-top band, that margin no longer
+       clears a nav row — it just drops the heading a whole 1.5rem BELOW the corner bell, so the bell
+       reads as a band ABOVE the heading (AC1's exact failure: titleTop > bellTop). Collapse it under
+       the corner-bell so the heading rises to the app's content top and shares the bell's band — the
+       heading is then genuinely the FIRST content, with the bell riding its top-right. Scoped to the
+       corner-bell state so desktop / wide (normal nav row) keep the breathing margin. */
+    .app:has(.app-nav--corner-bell) #profile-view.profile-view {
+        margin-top: 0;
+    }
+
     .app:has(.app-nav--corner-bell) #profile-view .tm-pf-topbar {
         padding-right: calc(44px + var(--space-2));
     }
