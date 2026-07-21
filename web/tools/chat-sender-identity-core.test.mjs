@@ -74,9 +74,9 @@ test("startsSenderRun: id match wins over a differing name", () => {
 
 /* ─────────────────────────────── TM-829: friendly read-by bucket label ───────────────────────────── */
 
-test("readByLabel: zero readers → 'Read by none'", () => {
-  assert.equal(readByLabel(0, 5), "Read by none");
-  assert.equal(readByLabel(0, 0), "Read by none");
+test("readByLabel: zero readers → 'Sent' (TM-940 — industry-standard receipt, was 'Read by none')", () => {
+  assert.equal(readByLabel(0, 5), "Sent");
+  assert.equal(readByLabel(0, 0), "Sent");
 });
 
 test("readByLabel: all other members read → 'Read by everyone'", () => {
@@ -108,7 +108,7 @@ test("readByLabel: a stale roster can't push the read count past 'everyone'", ()
 
 test("readByLabel: coerces junk to a non-negative integer", () => {
   assert.equal(readByLabel("2", "10"), "Read by few");
-  assert.equal(readByLabel(-4, 5), "Read by none");
+  assert.equal(readByLabel(-4, 5), "Sent"); // TM-940: clamped to 0 readers → "Sent"
   assert.equal(readByLabel(1.9, 3), "Read by 1"); // 1.9 truncates to 1; small group (3 others) → exact
 });
 
