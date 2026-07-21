@@ -24,6 +24,12 @@ name is your agent name.
    (see *Findings discipline → Model policy*).
 2. **No work without the ticket visibly In Progress in the active sprint** — flip it yourself
    BEFORE launching any agent/workflow, even for tickets you just created.
+   **Every ticket you create OR claim gets an assignee — the operating account (Basit,
+   `accountId 712020:66e23906-b54c-4181-b77a-e591d42be2ee`).** `createJiraIssue` does NOT auto-assign
+   (pass it, or `editJiraIssue {"assignee":{"accountId":…}}` right after); claiming means setting
+   assignee, not just the status flip. **Never leave a sprint ticket unassigned, and never let it
+   carry an app/bot actor** (the Atlassian connector's own identity) as assignee — every ticket has
+   a human owner on the board.
 3. **In Review requires evidence attached to the ticket**: before/after screenshots at 390px for
    any UI change (before = live prod, after = branch build; static-serve + DOM-reveal staging
    needs no backend). PR + green e2e alone is NOT enough. Non-visual changes: state the exemption
