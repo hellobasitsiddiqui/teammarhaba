@@ -197,6 +197,12 @@ function markPhoneVerified(e164) {
   phoneVerify.verifiedE164 = e164;
   phoneVerify.verificationId = null;
   phoneVerify.pendingE164 = "";
+  // The verified lock on the national input is `readOnly` (still focusable/submittable), NOT `disabled`.
+  // Clear any `disabled` left over from the in-flight `setPhoneControlsBusy(true)` (which fires while the
+  // number is still unverified) — otherwise the input stays `disabled` after verify, and the later
+  // `setPhoneControlsBusy(false)` skips re-enabling it (its guard only runs while unverified), so the
+  // "Change number" un-lock can't re-open a still-`disabled` field (TM-930).
+  entry.input.disabled = false;
   entry.input.readOnly = true;
   entry.input.classList.add("tm-field-locked");
   if (entry.country) entry.country.disabled = true;
@@ -238,6 +244,10 @@ function unverifyPhone() {
   phoneVerify.verificationId = null;
   phoneVerify.pendingE164 = "";
   if (entry) {
+    // Clear BOTH lock forms: `readOnly` (the verified lock) AND `disabled` (a leftover from an in-flight
+    // `setPhoneControlsBusy(true)`), so the field is genuinely editable again — otherwise the
+    // "Change number" click re-opens a field the browser still refuses to fill (TM-930).
+    entry.input.disabled = false;
     entry.input.readOnly = false;
     entry.input.classList.remove("tm-field-locked");
     if (entry.country) entry.country.disabled = false;
