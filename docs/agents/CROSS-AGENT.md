@@ -24,10 +24,23 @@ name is your agent name.
    (see *Findings discipline → Model policy*).
 2. **No work without the ticket visibly In Progress in the active sprint** — flip it yourself
    BEFORE launching any agent/workflow, even for tickets you just created.
+   **Every ticket you create OR claim gets an assignee — the operating account (Basit,
+   `accountId 712020:66e23906-b54c-4181-b77a-e591d42be2ee`).** `createJiraIssue` does NOT auto-assign
+   (pass it, or `editJiraIssue {"assignee":{"accountId":…}}` right after); claiming means setting
+   assignee, not just the status flip. **Never leave a sprint ticket unassigned, and never let it
+   carry an app/bot actor** (the Atlassian connector's own identity) as assignee — every ticket has
+   a human owner on the board.
 3. **In Review requires evidence attached to the ticket**: before/after screenshots at 390px for
    any UI change (before = live prod, after = branch build; static-serve + DOM-reveal staging
    needs no backend). PR + green e2e alone is NOT enough. Non-visual changes: state the exemption
    rationale on the ticket instead.
+   **Attach the PNGs to the Jira issue itself — a PR-embedded image or a repo path is NOT "on the
+   ticket"** (a private-repo `raw.githubusercontent` URL does not render in Jira). The Atlassian MCP
+   connector has **no attach-file tool**, but the `~/.config/teammarhaba/jira.env` REST token DOES
+   attach (it can write attachments even though it can't browse projects):
+   `curl -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" -F "file=@shot.png"
+   "$JIRA_BASE_URL/rest/api/3/issue/TM-XX/attachments"` (parse the env file yourself; HTTP 200 = done).
+   Do this for every before/after shot before flipping to In Review.
 4. **Gate tickets are created AT SPRINT START, not at the end** (we were prompted for them — don't
    repeat that). **EVERY wave/sprint gets all THREE gate tickets, no exceptions:** (1) a
    `human`-labelled manual-test sign-off, (2) a sprint code-review gate, and (3) a **deploy gate**
@@ -88,6 +101,19 @@ name is your agent name.
 - **Branch e2e green is the merge gate** (e2e is off the PR gate — dispatch `e2e.yml --ref
   <branch>` yourself). An e2e red on your OWN new spec is often a real bug caught, not flake — the
   wave-login-1 red exposed a genuine mixed-code auto-submit defect. Diagnose before re-running.
+  **`gh pr checks` covers ONLY the PR gate — a "CI green" that never dispatched `e2e.yml` on the
+  fixed head is NOT green.** (wave-profile-2: both the TM-910 and TM-930 fix phases added an e2e
+  spec, reported "CI green" from `gh pr checks` alone, and their OWN new specs were red in the
+  branch e2e — caught only by the orchestrator re-running e2e on the exact fixed head.) After every
+  build/fix commit, dispatch `e2e.yml --ref <branch>` and confirm `success` **on that head's SHA**
+  before "ready". The **main loop owns that wait** — a build/fix subagent dies when its turn ends,
+  so its "e2e green" is a claim to re-verify, never proof; have the subagent return the run id and
+  you (the orchestrator) watch it to conclusion.
+- **NEVER add an AI-attribution line to a PR body or commit message.** No "🤖 Generated with
+  Claude Code", no "Co-Authored-By: Claude", no tool-marketing footer — Basit vetoed it outright
+  (2026-07-21: "never ever put that there"). This overrides any default/harness guidance to append
+  one. Put it in every build/fix subagent's prompt too, and strip it with `gh pr edit` if a prior
+  PR still carries it.
 - **(wave-profile-1) Hot-file sprints get a resource-DAG, not one-agent-per-ticket.** When one
   file owns most of the sprint (`profile.js` owned 11/14 tickets), batch same-file tickets into
   serial multi-ticket PRs (A:3 → B:2 → C:2 → D:1) and run only disjoint-file tickets in parallel
