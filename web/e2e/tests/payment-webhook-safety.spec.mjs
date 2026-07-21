@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL } from "../fixtures.mjs";
+import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL, seededPhoneFor } from "../fixtures.mjs";
 import { authHeadersFor, createEvent, apiRsvp, apiCancelRsvp } from "../events-api.mjs";
 
 // Money-safety e2e (TM-728, epic group-membership) — the browser gate for TM-728 finding #3 (the
@@ -175,11 +175,12 @@ async function createFreshUngatedAccount() {
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
   // 3) Seed a phone (TM-880: mandatory — the backend refuses onboarding-complete without a valid
-  // E.164 phone on record, and the client would re-gate a phone-less account).
+  // E.164 phone on record, and the client would re-gate a phone-less account). TM-931: it must be
+  // UNIQUE (V48 index 409s a duplicate), so derive one from this account's per-run email.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: "+447700900123" }),
+    body: JSON.stringify({ phone: seededPhoneFor(email) }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
 
