@@ -93,16 +93,18 @@ function fakeDoc({ withToggle = true, withItems = true, withNav = true } = {}) {
   };
 }
 
-test("updateCornerBell hides the floating row + pins the class on #/profile and restores on #/home", () => {
+test("updateCornerBell hides the hamburger + pins the class on #/profile and restores on #/home", () => {
   const doc = fakeDoc();
   updateCornerBell({ route: "#/profile" }, doc);
   assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Profile");
-  assert.equal(doc.items.hidden, true, "the collapsible menu group hidden on Profile");
+  // #nav-items is deliberately LEFT ALONE — the desktop inline nav (and #nav-profile within it) must
+  // stay visible on #/profile at wide widths (onboarding-to-profile e2e asserts it); on mobile it's
+  // already the collapsed display:none dropdown, so hiding only the toggle removes the floating row.
+  assert.equal(doc.items.hidden, false, "the account-links group is untouched (stays visible on desktop)");
   assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned");
 
-  // Navigating away restores the row (render() reruns this on every hashchange/auth change) — the
-  // per-link visibility router computes for #nav-items' children is untouched (we only gate the
-  // container), so leaving the corner route returns exactly to the normal nav.
+  // Navigating away un-hides the toggle + drops the class (render() reruns this on every hashchange/
+  // auth change), so leaving the corner route returns to the normal nav.
   updateCornerBell({ route: "#/home" }, doc);
   assert.equal(doc.toggle.hidden, false);
   assert.equal(doc.items.hidden, false);

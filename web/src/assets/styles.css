@@ -3803,20 +3803,25 @@ html {
 
 /* --- Corner-bell chrome (TM-910) --------------------------------------------------------------
  * On the self-headed surfaces (Profile now; Home/Events via their own lanes) corner-bell.js hides
- * the floating hamburger + #nav-items row and adds `.app-nav--corner-bell` here, leaving just the
- * notification bell. Pin that lone bell to the top-right corner and collapse the row's height so the
- * screen's own heading ("Profile") is the first content — the bell sits in the corner above the
- * heading row, NOT overlapping the heading's top-right control (the Profile diagnostics gear,
- * .tm-pf-gear, which lives in the profile-view below). All CSS, no per-screen markup.
+ * the floating hamburger (#nav-toggle) and adds `.app-nav--corner-bell` here, leaving just the
+ * notification bell in the account-nav row.
  *
- * The centred multi-item .app-nav (default) becomes a right-aligned, zero-min-height strip: the row
- * takes only the bell's height and hugs the right edge, so removing the hamburger doesn't leave a
- * tall empty band. Reusable across the corner-bell routes (the class is route-agnostic). */
-.app-nav.app-nav--corner-bell {
-    justify-content: flex-end;
-    gap: 0;
-    min-height: 0;
-    margin: 0;
+ * MOBILE-SCOPED (≤ 33rem — the SAME breakpoint the hamburger + collapsed nav use): the floating row
+ * only exists on the phone viewport (above it the nav is a normal inline row and #nav-items carries
+ * the account links — kept intact so a desktop user, and e2e like onboarding-to-profile, still see
+ * #nav-profile on #/profile). Below the breakpoint #nav-items is the COLLAPSED dropdown (display:none
+ * until the — now hidden — toggle opens it), so the row is just the lone bell: pin it to the top-
+ * right corner and collapse the row height so the screen's own heading ("Profile") is the first
+ * content. The bell sits in the corner above the heading row, NOT overlapping the heading's top-right
+ * control (the Profile diagnostics gear, .tm-pf-gear, in the profile-view below). All CSS, no
+ * per-screen markup; route-agnostic so the TM-908/909 lanes reuse it by adding their route. */
+@media (max-width: 33rem) {
+    .app-nav.app-nav--corner-bell {
+        justify-content: flex-end;
+        gap: 0;
+        min-height: 0;
+        margin: 0;
+    }
 }
 
 /* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
