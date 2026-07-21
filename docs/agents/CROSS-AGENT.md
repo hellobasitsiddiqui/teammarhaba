@@ -20,7 +20,8 @@ name is your agent name.
 1. **Backlog → Refinement → To Do → In Progress → In Review → Testing → Done.** New tickets go to
    **Refinement first** and get a grounded refinement card (Context/what-exists with real
    `file:line`, Goal, Scope, Acceptance criteria, Dependencies + dup flags, Open decisions,
-   Estimate). Never drop a raw ticket into a started sprint.
+   Estimate). Never drop a raw ticket into a started sprint. **Run refinement on the Fable model**
+   (see *Findings discipline → Model policy*).
 2. **No work without the ticket visibly In Progress in the active sprint** — flip it yourself
    BEFORE launching any agent/workflow, even for tickets you just created.
 3. **In Review requires evidence attached to the ticket**: before/after screenshots at 390px for
@@ -105,6 +106,11 @@ name is your agent name.
 
 ## Findings discipline
 
+- **Model policy — use Fable for refinement + gate reviews (only).** The two high-stakes reasoning
+  passes — grooming tickets into grounded refinement cards, and the sprint code-review / closure
+  gate — run on the **Fable** model specifically. Reserve Fable for exactly these; routine build /
+  mechanical work uses a cheaper/faster model. Never run a refinement pass or a gate review on a
+  smaller default model — that's where grounding and adversarial rigour matter most.
 - **Every review finding gets a ticket** (any severity). Triage: mechanical hygiene → fix
   in-sprint under one chore ticket; anything needing a product/architecture decision → Refinement
   follow-up with the options listed, undecided.
