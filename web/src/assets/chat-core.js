@@ -285,6 +285,31 @@ export function toConversationRows(items, now = new Date()) {
   return sortConversations((Array.isArray(items) ? items : []).map((s) => toConversationRow(s, now)));
 }
 
+/**
+ * One thread's per-caller unread, read straight from the raw conversation-list summaries (TM-855). On a
+ * DEEP-LINK open (push / notification-center) the paged list was never rendered, so `state.rows` is
+ * empty and the on-open optimistic badge-drop reads a stale 0 and no-ops — the badge lingers until the
+ * next server refresh. The fix resolves the thread's unread from the fetched list summary (the SAME
+ * server-computed, per-caller `unreadCount` the list rows carry) BEFORE the mark-read POST advances the
+ * cursor — the mark-read response can't supply it, since that endpoint marks the thread read first and
+ * then recomputes unread against the fresh cursor (→ 0 on this path; see MarkReadResponse).
+ *
+ * Matches on the string id (summaries carry a numeric/string `id`; the router hands us a string). A
+ * miss (thread not in the fetched page, or a malformed payload) yields 0 — the optimistic drop simply
+ * no-ops and the post-commit `refreshChatTabBadge()` reconcile still corrects the total, so this is
+ * never worse than before.
+ * @param {Array<{id?: number|string, unreadCount?: number}>} items the raw list summaries (`data.items`).
+ * @param {number|string} id the conversation id to look up.
+ * @returns {number} the thread's non-negative per-caller unread, or 0 if not found.
+ */
+export function conversationUnreadInList(items, id) {
+  const target = String(id);
+  const row = (Array.isArray(items) ? items : []).find((s) => s && String(s.id) === target);
+  if (!row) return 0;
+  const n = Number(row.unreadCount);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 /* ─────────────────────────────── Thread message adapters ──────────────────────────────────────── */
 
 /**
