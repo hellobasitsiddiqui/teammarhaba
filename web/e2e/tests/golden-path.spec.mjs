@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
-import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 import { signOutViaProfile } from "../helpers/auth-state.mjs";
 
 // Golden-path end-to-end journey (TM-341) — ONE long happy-path run that walks the whole core
@@ -159,15 +159,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await page.selectOption("#onboarding-location", location); // TM-898: the gate city is picked, not typed
   await page.fill("#onboarding-age", "29");
   // TM-880: phone is mandatory at the gate — national number; the GB-default picker composes +44….
-  // TM-930: the number must be OTP-verified + LINKED to a Firebase account, and Firebase enforces
-  // strict 1:1 number↔account. golden-path runs on BOTH the chromium and mobile-chromium projects in
-  // one suite (one emulator), so a FIXED number would make the second project collide with the first.
-  // Derive a per-project-run-unique GB number from the stamp + the project name so each run links a
-  // fresh number (mirrors the tm930 spec's uniqueGbNumber helper).
-  const phoneSeed = String(stamp).slice(-4) + (testInfo.project.name === "mobile-chromium" ? "1" : "0");
-  const nationalPhone = `7700 9${phoneSeed}`;
-  await page.fill("#onboarding-phone", nationalPhone);
-  await verifyGatePhone(page, `+4477009${phoneSeed}`);
+  await page.fill("#onboarding-phone", "7700 900321");
   const onboarded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

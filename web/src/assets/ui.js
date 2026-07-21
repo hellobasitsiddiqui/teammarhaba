@@ -43,6 +43,40 @@ export function clear(node) {
   return node;
 }
 
+// TM-935: the admin consoles all build the same `<table class="tm-table">` (a <thead> row + a <tbody>)
+// and the ≤30rem media block flips every table element to `display: block` to paint each row as a
+// labelled card. That block-display is what STRIPS the implicit ARIA table semantics: once a <td>/<tr>/
+// <table> is display:block the browser no longer exposes it as a cell/row/table, so a screen-reader user
+// loses table navigation AND the <th scope="col"> → cell header association — the only field label left
+// is the CSS `::before { content: attr(data-label) }`, which many SR verbosity settings skip. This helper
+// hardens the pattern: it stamps back explicit roles (so the grid stays a grid when block-displayed) and
+// drops a visually-hidden real label span into each labelled <td>, so the field name lives in the
+// accessibility tree instead of only in generated content. Desktop is unchanged: the roles mirror the
+// native semantics, and `.tm-cell-label` is `display:none` above 30rem (so it's out of the a11y tree too,
+// no redundant "Status:" over the intact <thead> association).
+const ROLE_BY_TAG = { TABLE: "table", THEAD: "rowgroup", TBODY: "rowgroup", TR: "row", TH: "columnheader", TD: "cell" };
+
+/**
+ * Build a `<table class="tm-table">` from a <thead>-row and a <tbody>, ARIA-hardened for the ≤30rem
+ * stacked-card layout. Pass the same nodes the consoles already build.
+ * @param {HTMLElement} head a <thead> element (or its row) — role="rowgroup"/"row"/"columnheader" get stamped
+ * @param {HTMLElement} body a <tbody> element — rows/cells get role + a visually-hidden data-label span
+ * @returns {HTMLTableElement}
+ */
+export function stackableTable(head, body) {
+  const table = el("table", { class: "tm-table" }, [head, body]);
+  // Walk the subtree once and stamp the role the tag's implicit semantics would otherwise provide.
+  for (const node of [table, ...table.querySelectorAll("thead, tbody, tr, th, td")]) {
+    const role = ROLE_BY_TAG[node.tagName];
+    if (role) node.setAttribute("role", role);
+  }
+  // Put each field name in the a11y tree (not just CSS ::before). Prepended so it reads before the value.
+  for (const cell of table.querySelectorAll("td[data-label]")) {
+    cell.prepend(el("span", { class: "tm-cell-label", text: `${cell.getAttribute("data-label")}: ` }));
+  }
+  return table;
+}
+
 function toastHost() {
   let host = document.getElementById("tm-toasts");
   if (!host) {

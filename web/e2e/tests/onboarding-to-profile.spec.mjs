@@ -3,7 +3,7 @@ import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
-import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // Cold onboarding → profile journey (TM-738 P0). A BRAND-NEW passwordless user who deep-links the
 // Profile page is INTERCEPTED by the first-login gate (TM-250): the guard in router.js can't let a
@@ -118,8 +118,6 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", String(age));
   await page.fill("#onboarding-phone", "7700 900789");
-  // TM-930: verify the phone (Firebase OTP verify + link) before the gate submits.
-  await verifyGatePhone(page, "+447700900789");
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );
