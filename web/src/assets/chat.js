@@ -846,7 +846,10 @@ function buildComposer(id, meta) {
     class: "tm-chat-mention-box", hidden: true, role: "listbox",
     "aria-label": "Mention a member", "data-testid": "chat-mention-box",
   });
-  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [announceBar, mentionBox, replyPreview, input, sendBtn]);
+  // Order matters (TM-939): announceBar is LAST so its full-width row (.tm-chat-announce-bar
+  // flex:0 0 100%) wraps BELOW the input+send row; replyPreview stays before the input so its
+  // "replying to" row sits above it.
+  const form = el("form", { class: "tm-chat-composer", "data-testid": "chat-composer" }, [mentionBox, replyPreview, input, sendBtn, announceBar]);
   thread.composerInput = input;
   thread.replyPreviewEl = replyPreview;
   thread.mentionBox = mentionBox;
