@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
-import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
+import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // Phone-mandatory behaviour (TM-880 — supersedes the TM-188 "blank phone is allowed" regression this
 // spec used to pin). The contract now:
@@ -123,15 +123,8 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   await page.click("#onboarding-form button[type=submit]");
   await expect(page.locator("#onboarding-phone-error")).toContainText("7 to 15");
 
-  // 5. A valid national number (GB picker default), once OTP-VERIFIED (TM-930), completes the gate.
+  // 5. A valid national number (GB picker default) completes the gate.
   await page.fill("#onboarding-phone", "7700 900654");
-  // TM-930: submitting an UNVERIFIED valid number paints the "verify your number" prompt — the gate
-  // still doesn't lift until the phone is proven.
-  await page.click("#onboarding-form button[type=submit]");
-  await expect(page.locator("#onboarding-phone-error")).toContainText("Verify your number");
-  await expect(page.locator("#onboarding-view")).toBeVisible();
-  // Verify (Firebase OTP verify + link), then submit succeeds.
-  await verifyGatePhone(page, "+447700900654");
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

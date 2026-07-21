@@ -267,3 +267,69 @@ test("@admin @venues admin creates, edits and deactivates a venue; it drops from
   await expect(finalRow).toContainText(EDITED_NAME);
   await expect(finalRow.locator(".tm-badge-off")).toHaveText("Deactivated");
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// SPEC 3 — TM-935: at a phone width the venues console table does NOT overflow the page sideways.
+// ────────────────────────────────────────────────────────────────────────
+//
+// The bug (TM-935): the four admin console tables overflowed the viewport on mobile — the wide
+// <table> forced horizontal page scroll and clipped the right-hand columns (venues was the attached
+// repro). The fix stacks each row into a labelled card at ≤30rem (header hidden; every body <td>
+// carries a data-label the CSS paints via `td::before`), so nothing scrolls sideways and no column
+// is clipped.
+//
+// FAIL-BEFORE / PASS-AFTER: which assertion carries the before/after matters. On origin/main
+// `.tm-table-wrap` is `overflow-x: auto`, which CONTAINS the wide table's overflow internally — so the
+// page itself does NOT scroll sideways pre-fix and `documentElement.scrollWidth <= innerWidth` already
+// passes on origin/main. That first check is therefore a belt-and-braces regression guard, NOT the
+// fail-before. The genuine red-before comes from the assertions below: `noInnerScroll` (the wide <table>
+// overflows its overflow-x:auto wrap → wrap.scrollWidth > clientWidth — the "clipped columns / inner
+// scroll" half of the bug), the header being hidden, and a body cell carrying a data-label. With the
+// stacked-card CSS + data-labelled cells this branch adds, all four go green. Runs at 390×844 (a common
+// phone: iPhone 12/13/14), the AC width in the ticket.
+test("@admin @venues venues console does not overflow horizontally at 390px (TM-935)", async ({ page }, testInfo) => {
+  // Narrow to a phone before anything renders, so the ≤30rem media block is in force throughout.
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // Seed one venue so the table has a real row to lay out (a card must fit the width too, not just an
+  // empty table). UUID suffix, not Date.now — the harness contract.
+  const venueName = `E2E Venue TM935 ${randomUUID().slice(0, 8)}`;
+  const adminHeaders = await authHeadersFor(ADMIN);
+  await seedVenue(adminHeaders, venueName);
+
+  await signInAsAdmin(page);
+  await openVenuesConsole(page);
+
+  // The list rendered (table present + the seeded row visible), so we're measuring the real, populated
+  // console — not an empty shell that would trivially fit.
+  await expect(page.locator("#admin-venues-view table")).toBeVisible();
+  await expect(page.locator("#admin-venues-view table")).toContainText(venueName);
+
+  // Belt-and-braces (not the fail-before — see header note): the document is no wider than the viewport,
+  // so there's no horizontal PAGE scroll. overflow-x:auto on the wrap already holds this on the pre-fix
+  // tree; this guards against a future regression that breaks the page out sideways.
+  const fits = await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  );
+  expect(fits).toBe(true);
+
+  // And nothing is clipped: the table isn't wider than its wrapper, so the `.tm-table-wrap` has no
+  // hidden horizontal scroll either. On the pre-fix tree the wide <table> overflows the wrap (its
+  // scrollWidth > the wrap's clientWidth) — the "clipped columns / inner scroll" half of the bug —
+  // even when the page itself doesn't scroll; this catches that. (allow 1px for sub-pixel rounding.)
+  const noInnerScroll = await page.evaluate(() => {
+    const wrap = document.querySelector("#admin-venues-view .tm-table-wrap");
+    return wrap ? wrap.scrollWidth <= wrap.clientWidth + 1 : false;
+  });
+  expect(noInnerScroll).toBe(true);
+
+  // Belt-and-braces: the header row is hidden (the stacked-card switch) and at least one body cell
+  // carries a data-label — the mechanism the labelled-card layout depends on.
+  await expect(page.locator("#admin-venues-view table thead")).toBeHidden();
+  await expect(page.locator("#admin-venues-view table tbody td[data-label]").first()).toBeVisible();
+
+  await page.screenshot({
+    path: testInfo.outputPath("venues-console-390-no-overflow.png"),
+    fullPage: true,
+  });
+});

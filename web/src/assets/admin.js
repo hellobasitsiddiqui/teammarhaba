@@ -17,7 +17,7 @@
 
 import { apiFetch, adminBroadcastPush, getPushRoutes, ApiError as ApiClientError } from "./api.js";
 import { currentUser, getIdToken } from "./auth.js";
-import { clear, confirmDialog, el, modal, copyToClipboard, relativeTime, toast } from "./ui.js";
+import { clear, confirmDialog, el, modal, copyToClipboard, relativeTime, stackableTable, toast } from "./ui.js";
 // TM-183: the pure URL/model builders for the Operations panel (App endpoints / Diagnostics / Consoles).
 // The rendering + the authenticated diagnostics fetch stay here; the resolvable logic is unit-tested.
 import { appLinks, consoleLinks, DIAGNOSTICS, diagnosticsUrl } from "./admin-ops-core.js";
@@ -986,17 +986,20 @@ function renderTable() {
           onChange: (e) => toggleSelected(u, e.target.checked),
         }),
       ]),
-      el("td", {}, [el("span", { class: contact.fallback ? "tm-muted" : null, text: contact.text }), isSelf(u) ? el("span", { class: "tm-you", text: "you" }) : null]),
-      el("td", { text: u.displayName || "—" }),
-      el("td", {}, [roleBadge(u.role)]),
-      el("td", {}, [statusBadge(u.enabled)]),
-      el("td", {}, [pushBadge(u)]),
-      el("td", { class: "tm-muted", text: String(u.id) }),
+      // TM-935: data-label on every body td feeds the CSS stacked-card layout at ≤30rem (the label is
+      // shown via td::before so a row reads "Email: …" once the header row is hidden). The leading
+      // checkbox + trailing Actions cells carry no label — they're controls, not a labelled field.
+      el("td", { "data-label": "Email" }, [el("span", { class: contact.fallback ? "tm-muted" : null, text: contact.text }), isSelf(u) ? el("span", { class: "tm-you", text: "you" }) : null]),
+      el("td", { "data-label": "Name", text: u.displayName || "—" }),
+      el("td", { "data-label": "Role" }, [roleBadge(u.role)]),
+      el("td", { "data-label": "Status" }, [statusBadge(u.enabled)]),
+      el("td", { "data-label": "Push" }, [pushBadge(u)]),
+      el("td", { "data-label": "ID", class: "tm-muted", text: String(u.id) }),
       el("td", { class: "tm-actions" }, rowActions(u)),
     ]);
   }));
 
-  shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
+  shell.table.append(stackableTable(el("thead", {}, head), body));
   syncSelectAll();
   renderPager(rows.length);
 }

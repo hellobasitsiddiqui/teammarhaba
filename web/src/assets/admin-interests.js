@@ -25,7 +25,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, toast } from "./ui.js";
+import { clear, confirmDialog, el, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import {
   LABEL_MAX,
@@ -396,17 +396,19 @@ function renderTable() {
     {},
     pageRows.map((interest) =>
       el("tr", { dataset: { interestId: String(interest.id) } }, [
-        el("td", {}, [
+        // TM-935: data-label on every body td drives the CSS stacked-card layout at ≤30rem (the label
+        // is painted via td::before once the header row is hidden). The trailing Actions cell has none.
+        el("td", { "data-label": "Interest" }, [
           // Leading catalogue emoji (TM-805) next to the label, only when the row carries one.
           interestEmoji(interest)
             ? el("span", { class: "tm-admin-interest-emoji", "aria-hidden": "true", text: interestEmoji(interest) })
             : null,
           el("span", { class: "tm-event-heading", text: interest.label || "—" }),
         ]),
-        el("td", { class: "tm-muted", text: interest.category || "—" }),
-        el("td", { class: "tm-muted", text: interest.sortWeight == null ? "—" : String(interest.sortWeight) }),
-        el("td", {}, [featuredCell(interest)]),
-        el("td", {}, [statusPill(interest)]),
+        el("td", { "data-label": "Category", class: "tm-muted", text: interest.category || "—" }),
+        el("td", { "data-label": "Weight", class: "tm-muted", text: interest.sortWeight == null ? "—" : String(interest.sortWeight) }),
+        el("td", { "data-label": "Featured" }, [featuredCell(interest)]),
+        el("td", { "data-label": "Status" }, [statusPill(interest)]),
         el("td", { class: "tm-actions" }, rowActions(interest)),
       ]),
     ),
@@ -414,7 +416,7 @@ function renderTable() {
 
   const notice = fetchIncompleteNotice();
   if (notice) shell.table.append(notice);
-  shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
+  shell.table.append(stackableTable(el("thead", {}, head), body));
   renderPager(rows.length);
 }
 

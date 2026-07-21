@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, toast } from "./ui.js";
+import { clear, confirmDialog, el, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
@@ -312,7 +312,7 @@ function renderTable() {
 
   const notice = fetchIncompleteNotice();
   if (notice) shell.table.append(notice);
-  shell.table.append(el("table", { class: "tm-table" }, [el("thead", {}, head), body]));
+  shell.table.append(stackableTable(el("thead", {}, head), body));
   renderPager(rows.length);
 }
 
@@ -346,14 +346,16 @@ function eventRow(event, now) {
   const attendance = `${counts.going == null ? "—" : counts.going} / ${counts.waitlist == null ? "—" : counts.waitlist}`;
   const past = isPastEvent(event, now);
   return el("tr", { class: past ? "tm-event-row-past" : null, dataset: { eventId: String(event.id) } }, [
-    el("td", {}, [
+    // TM-935: data-label on every body td drives the CSS stacked-card layout at ≤30rem (the label is
+    // painted via td::before once the header row is hidden). The trailing Actions cell carries no label.
+    el("td", { "data-label": "Event" }, [
       el("span", { class: "tm-event-heading", text: event.heading || "—" }),
       event.onlineUrl ? el("span", { class: "tm-badge tm-badge-unknown tm-event-tag", text: "Online" }) : null,
     ]),
-    el("td", { class: "tm-muted", text: formatEventWhen(event.startAt, event.timezone) }),
-    el("td", {}, [statusPill(event, now)]),
-    el("td", { class: "tm-muted", text: attendance }),
-    el("td", { class: "tm-muted", text: capacityLabel(event.capacity) }),
+    el("td", { "data-label": "Start", class: "tm-muted", text: formatEventWhen(event.startAt, event.timezone) }),
+    el("td", { "data-label": "Status" }, [statusPill(event, now)]),
+    el("td", { "data-label": "Going / Waitlist", class: "tm-muted", text: attendance }),
+    el("td", { "data-label": "Capacity", class: "tm-muted", text: capacityLabel(event.capacity) }),
     el("td", { class: "tm-actions" }, rowActions(event, now)),
   ]);
 }
