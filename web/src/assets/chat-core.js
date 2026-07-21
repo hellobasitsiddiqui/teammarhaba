@@ -42,6 +42,9 @@
 // established pattern here (calendar-core←events-core, chat-tab-badge-core←notification-bell-core), and
 // keeps this module import-safe in a plain Node test (no DOM / Firebase / Capacitor reaches it).
 import { safeRoute } from "./notification-panel-core.js";
+// The event-chat CTA copy lives in one place (events-core.js) so the event-detail affordance and this
+// deep-link CTA can't drift (TM-445 dedupe); import it rather than re-hardcoding the string here.
+import { EVENT_CHAT_ENTRY_LABEL } from "./events-core.js";
 
 /**
  * The five reaction emoji the picker offers (TM-462), in display order. The single source of truth
@@ -335,7 +338,7 @@ export function deepLinkCta(deepLink) {
   if (!href) return null;
   let label = "Open";
   if (/^#\/events\/[^/]+$/.test(href)) label = "View event";
-  else if (/^#\/chat\/[^/]+$/.test(href)) label = "Open chat";
+  else if (/^#\/chat\/[^/]+$/.test(href)) label = EVENT_CHAT_ENTRY_LABEL;
   else if (href === "#/events") label = "Browse events";
   return { href, label };
 }

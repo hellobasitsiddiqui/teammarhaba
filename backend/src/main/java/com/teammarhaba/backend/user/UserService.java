@@ -677,14 +677,20 @@ public class UserService {
      * managed for the caller's subsequent updates.
      */
     private User createOrReactivate(VerifiedUser caller) {
+        DataIntegrityViolationException integrityFailure = null;
         try {
             provisioner.createOrReactivate(caller);
         } catch (DataIntegrityViolationException race) {
-            // A concurrent first-request won the unique-firebase_uid insert; its REQUIRES_NEW
-            // transaction committed the row and rolled back ours cleanly. Fall through and re-read it.
+            // Expected when a concurrent first-request won the unique-firebase_uid insert: its
+            // REQUIRES_NEW transaction committed the row and rolled back ours cleanly, so the re-read
+            // below finds the winner's row. Keep the exception so that if the re-read instead finds
+            // nothing — meaning this was NOT the benign race but some other integrity violation — we
+            // can chain it as the cause rather than losing why provisioning actually failed.
+            integrityFailure = race;
         }
+        final DataIntegrityViolationException cause = integrityFailure;
         return users.findByFirebaseUid(caller.uid())
                 .orElseThrow(() -> new IllegalStateException(
-                        "provision: users row still absent after create for uid " + caller.uid()));
+                        "provision: users row still absent after create for uid " + caller.uid(), cause));
     }
 }

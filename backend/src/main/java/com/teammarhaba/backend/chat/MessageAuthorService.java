@@ -96,6 +96,7 @@ public class MessageAuthorService {
     private final ApplicationEventPublisher publisher;
     private final AuditService audit;
     private final Clock clock;
+    private final ThreadOpenGate threadGate;
 
     /** Audit {@code target_type} for an author edit/delete — the conversation it acted within. */
     private static final String TARGET_CONVERSATION = "Conversation";
@@ -134,6 +135,7 @@ public class MessageAuthorService {
         this.publisher = publisher;
         this.audit = audit;
         this.clock = clock;
+        this.threadGate = new ThreadOpenGate(events, lifecycle, clock);
     }
 
     /**
@@ -258,20 +260,8 @@ public class MessageAuthorService {
         Conversation conversation = conversations
                 .findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message not found in this conversation."));
-        Long eventId = conversation.getEventId();
-        boolean closed;
-        if (eventId != null) {
-            Instant now = clock.instant();
-            closed = events
-                    .findById(eventId)
-                    .map(event -> lifecycle.isThreadReadOnly(event, now))
-                    .orElse(true); // soft-deleted / missing event → no live chat
-        } else {
-            closed = conversation.isClosed();
-        }
-        if (closed) {
-            throw new ConflictException("This thread is closed; you can no longer edit this message.");
-        }
+        // Shared close-window decision (TM-857) — post / react / edit can't drift; edit-specific 409 wording.
+        threadGate.requireOpen(conversation, "This thread is closed; you can no longer edit this message.");
     }
 
     /**

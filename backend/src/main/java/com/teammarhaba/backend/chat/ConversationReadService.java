@@ -132,7 +132,7 @@ public class ConversationReadService {
         // newest live message of every thread in one query, and every thread's per-caller unread count
         // in one grouped query. Both are constant-cost in the caller's thread count (see method doc).
         Map<Long, Message> lastMessagesByConversationId = lastMessages(conversationIds);
-        Map<Long, Long> unreadByConversationId = unreadCounts(userId, conversationIds);
+        Map<Long, Long> unreadByConversationId = unreadCounts(userId, !conversationIds.isEmpty());
 
         List<ConversationSummaryResponse> rows = memberships.stream()
                 .map(m -> summary(
@@ -187,7 +187,9 @@ public class ConversationReadService {
         // One batched grouped query for every thread's unread (TM-727: the badge endpoint was an N+1 in
         // the caller's thread count), then sum only the badge-eligible threads. unreadCountsForUser spans
         // all the caller's memberships, so intersect with the eligible set above.
-        return unreadCounts(userId, conversationIds).entrySet().stream()
+        // conversationIds is non-empty here (guarded above), so the query always runs; intersect the
+        // per-user counts (which span every membership) back down to the badge-eligible threads.
+        return unreadCounts(userId, true).entrySet().stream()
                 .filter(e -> conversationIds.contains(e.getKey()))
                 .mapToLong(Map.Entry::getValue)
                 .sum();
@@ -224,10 +226,17 @@ public class ConversationReadService {
      * Every one of the caller's threads' unread counts, keyed by conversation id (TM-581) — one batched
      * grouped query behind the list's per-thread unread values, replacing the old per-membership {@code
      * countUnread}. A thread with nothing unread produces no row (read back as {@code 0} in {@link
-     * #summary}); skipped entirely when the caller has no threads.
+     * #summary}).
+     *
+     * <p>The result is scoped by {@code userId} alone — {@link MessageRepository#unreadCountsForUser}
+     * spans every one of the caller's memberships — so callers that only want a subset intersect the
+     * returned map with their own id set. The {@code callerHasThreads} flag is purely an optimisation:
+     * a caller with no threads skips the query entirely and gets an empty map (TM-581 signature fix —
+     * this used to take the id {@link Set} itself, which read as if it scoped the query when it never
+     * did, only tested it for emptiness).
      */
-    private Map<Long, Long> unreadCounts(Long userId, Set<Long> conversationIds) {
-        if (conversationIds.isEmpty()) {
+    private Map<Long, Long> unreadCounts(Long userId, boolean callerHasThreads) {
+        if (!callerHasThreads) {
             return Map.of();
         }
         return messages.unreadCountsForUser(userId).stream()
