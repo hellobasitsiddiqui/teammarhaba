@@ -33,6 +33,16 @@
         },
         "type" : "object"
       },
+      "AdjustCapacityRequest" : {
+        "properties" : {
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "AdminInterestResponse" : {
         "properties" : {
           "active" : {
@@ -536,6 +546,34 @@
           "reliabilityStatus" : {
             "enum" : [ "OK", "WARNED", "DOWNGRADED" ],
             "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "CapacityAdjustResponse" : {
+        "properties" : {
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "freeSpots" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "going" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "overCapacity" : {
+            "type" : "boolean"
+          },
+          "overCapacityBy" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "waitlist" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -1078,6 +1116,24 @@
         },
         "type" : "object"
       },
+      "Entry" : {
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "overCapacity" : {
+            "type" : "boolean"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "EventCard" : {
         "properties" : {
           "capacity" : {
@@ -1380,6 +1436,19 @@
             "type" : "integer"
           }
         },
+        "type" : "object"
+      },
+      "ForceAddAttendeeRequest" : {
+        "properties" : {
+          "override" : {
+            "type" : "boolean"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "userId" ],
         "type" : "object"
       },
       "InterestConfigRequest" : {
@@ -2181,6 +2250,49 @@
           "removedAt" : {
             "format" : "date-time",
             "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RosterActionResponse" : {
+        "properties" : {
+          "going" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "waitlist" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "RosterViewResponse" : {
+        "properties" : {
+          "capacity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "entries" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Entry"
+            },
+            "type" : "array"
+          },
+          "eventId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "going" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "waitlist" : {
+            "format" : "int64",
+            "type" : "integer"
           }
         },
         "type" : "object"
@@ -3025,6 +3137,78 @@
         "tags" : [ "event-admin-controller" ]
       }
     },
+    "/api/v1/admin/events/{id}/attendees" : {
+      "post" : {
+        "operationId" : "forceAddAttendee",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ForceAddAttendeeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RosterActionResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/{id}/attendees/{userId}/evict" : {
+      "post" : {
+        "operationId" : "evictAttendee",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "userId",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RosterActionResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
     "/api/v1/admin/events/{id}/cancel" : {
       "post" : {
         "operationId" : "cancel_1",
@@ -3043,6 +3227,70 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/{id}/capacity" : {
+      "post" : {
+        "operationId" : "adjustCapacity",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AdjustCapacityRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CapacityAdjustResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/{id}/roster" : {
+      "get" : {
+        "operationId" : "roster",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RosterViewResponse"
                 }
               }
             },
