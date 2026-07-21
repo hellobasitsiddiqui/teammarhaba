@@ -147,6 +147,7 @@ const phoneVerify = {
   verified: false, // the currently-composed E.164 has been proven owned + linked
   verifiedE164: "", // the exact E.164 that was verified (guards a silent picker/input edit)
   verificationId: null, // the in-flight Firebase verificationId between send and confirm
+  pendingE164: "", // the exact E.164 the in-flight verificationId was ISSUED for (TM-930 bypass fix)
   sending: false, // a send/verify request is in flight (single-flight guard)
   otp: null, // the attachOtpInput controller over the six boxes
   cooldown: null, // the attachResendCooldown controller over the resend link
@@ -155,6 +156,7 @@ const phoneVerify = {
   otpGroup: null, // the role="group" container holding the six boxes
   otpWrap: null, // the reveal-on-send wrapper (label + boxes + resend), hidden until a send
   statusEl: null, // the "Verified ✓" / helper line
+  changeBtn: null, // the "Change number" affordance shown only in the verified/locked state (TM-930)
   recaptcha: null, // the gate-local invisible reCAPTCHA host
 };
 
@@ -194,6 +196,7 @@ function markPhoneVerified(e164) {
   phoneVerify.verified = true;
   phoneVerify.verifiedE164 = e164;
   phoneVerify.verificationId = null;
+  phoneVerify.pendingE164 = "";
   entry.input.readOnly = true;
   entry.input.classList.add("tm-field-locked");
   if (entry.country) entry.country.disabled = true;
@@ -207,6 +210,20 @@ function markPhoneVerified(e164) {
     phoneVerify.statusEl.classList.add("tm-phone-verified");
     phoneVerify.statusEl.textContent = "Verified ✓";
   }
+  // TM-930: reveal the "Change number" affordance — the ONLY way out of the locked/verified state
+  // (the input is readOnly + the picker disabled + Send hidden, so neither the input nor the change
+  // listeners can fire to unlock it). Clicking it returns to the editable, unverified state.
+  if (phoneVerify.changeBtn) phoneVerify.changeBtn.hidden = false;
+}
+
+/**
+ * Is a verification currently in flight (a code was sent but not yet confirmed)? True in the window
+ * between "Send code" and a successful/failed confirm. Editing the number in this window must drop the
+ * stale in-flight code (it was issued for the OLD digits), so the listeners reset on this too — not just
+ * on the fully-verified state (TM-930 bypass fix).
+ */
+function phoneVerifyInFlight() {
+  return phoneVerify.verificationId != null || phoneVerify.pendingE164 !== "";
 }
 
 /**
@@ -219,6 +236,7 @@ function unverifyPhone() {
   phoneVerify.verified = false;
   phoneVerify.verifiedE164 = "";
   phoneVerify.verificationId = null;
+  phoneVerify.pendingE164 = "";
   if (entry) {
     entry.input.readOnly = false;
     entry.input.classList.remove("tm-field-locked");
@@ -233,6 +251,8 @@ function unverifyPhone() {
     phoneVerify.statusEl.classList.remove("tm-phone-verified");
     phoneVerify.statusEl.textContent = "";
   }
+  // TM-930: the "Change number" affordance only makes sense in the verified/locked state — hide it here.
+  if (phoneVerify.changeBtn) phoneVerify.changeBtn.hidden = true;
 }
 
 /**
@@ -244,16 +264,30 @@ function unverifyPhone() {
 async function confirmPhoneOtp(code) {
   if (phoneVerify.sending) return; // a confirm is already running — drop the re-entrant call
   if (!phoneVerify.verificationId) return; // no in-flight verification (shouldn't happen)
+  // TM-930 bypass fix: the OTP proves ownership of the number the verificationId was ISSUED for
+  // (phoneVerify.pendingE164) — NOT whatever the (editable) input reads now. If the user edited the
+  // national number or country picker AFTER "Send code" but before confirming, the composed value has
+  // drifted away from the number Firebase actually linked; marking that drifted value verified would
+  // let an UNVERIFIED number pass the gate. Guard on the drift and force a fresh send instead.
+  const pending = phoneVerify.pendingE164;
+  if (!pending) return; // no number on record for this verificationId (shouldn't happen)
+  if (composedPhoneE164() !== pending) {
+    // The pair changed since the code was sent — the in-flight code is for the OLD number. Drop this
+    // stale verification and make the user re-send for the number now on screen.
+    unverifyPhone();
+    setFieldError("phone", "The number changed — tap Send code to verify it.");
+    return;
+  }
   phoneVerify.sending = true;
   setPhoneControlsBusy(true);
   setFieldError("phone", "");
-  const e164 = composedPhoneE164();
   try {
     await confirmPhoneLink(phoneVerify.verificationId, code);
-    // Linked. Persist immediately so an abandoned gate still has the verified phone on record.
-    markPhoneVerified(e164);
+    // Linked. Persist immediately so an abandoned gate still has the verified phone on record. Mark the
+    // number the code was ISSUED for (pending) — the guard above proved the input still matches it.
+    markPhoneVerified(pending);
     try {
-      await updateMe({ phone: e164 });
+      await updateMe({ phone: pending });
     } catch (patchErr) {
       // The link succeeded (the number is theirs); a failed PATCH is non-fatal — collectBody's
       // atomic POST /me/onboarding still carries the same verified value on submit. Log only.
@@ -313,6 +347,10 @@ async function sendPhoneCode() {
   setPhoneControlsBusy(true);
   try {
     phoneVerify.verificationId = await startPhoneVerify(e164, phoneVerify.recaptcha);
+    // TM-930 bypass fix: remember the EXACT E.164 this verificationId was issued for, so confirmPhoneOtp
+    // marks THIS number verified (and detects a mid-flow input/picker edit) rather than re-composing from
+    // the still-editable inputs.
+    phoneVerify.pendingE164 = e164;
     // Reveal the six-box OTP; the widget auto-submits through confirmPhoneOtp on the sixth digit.
     if (phoneVerify.otpWrap) phoneVerify.otpWrap.hidden = false;
     phoneVerify.otp?.clear();
@@ -934,10 +972,11 @@ function buildField(field) {
   // Live-clear an inline error as soon as the user starts correcting the field (a <select> fires
   // "input" on a choice too, so the one listener covers both control kinds).
   input.addEventListener("input", () => {
-    // TM-930: editing a VERIFIED phone number un-verifies it — the proof was for the OLD digits, so
-    // the user must re-send + re-confirm. (When locked/readOnly no input event fires, so this only
-    // runs in the unverified state; the guard is belt-and-braces for a programmatic value change.)
-    if (field.field === "phone" && phoneVerify.verified) unverifyPhone();
+    // TM-930: editing the phone un-verifies it (the proof was for the OLD digits, so the user must
+    // re-send + re-confirm) AND drops any in-flight code — an edit made in the send→confirm window
+    // would otherwise leave the OTP boxes live for the OLD number and let an unverified number pass
+    // (TM-930 bypass fix). When locked/readOnly no input event fires, so this runs while editable.
+    if (field.field === "phone" && (phoneVerify.verified || phoneVerifyInFlight())) unverifyPhone();
     setFieldError(field.field, validateField(field, input.value));
   });
 
@@ -964,9 +1003,10 @@ function buildField(field) {
     country.value = "GB"; // concrete default pre-load; prefillPhone applies the real selection
     country.addEventListener("change", () => {
       country.setAttribute("data-user-picked", "true");
-      // TM-930: switching the dial code changes the composed E.164, so a prior verification no longer
-      // applies — un-verify (unlocks the pair, hides the OTP) and require a fresh send + confirm.
-      if (phoneVerify.verified) unverifyPhone();
+      // TM-930: switching the dial code changes the composed E.164, so a prior/in-flight verification no
+      // longer applies — un-verify (unlocks the pair, hides the OTP) and require a fresh send + confirm.
+      // In-flight too: a picker change in the send→confirm window must drop the stale code (bypass fix).
+      if (phoneVerify.verified || phoneVerifyInFlight()) unverifyPhone();
       setFieldError(field.field, validateField(field, input.value));
     });
   }
@@ -1053,6 +1093,20 @@ function buildPhoneVerify(id, describedBy) {
 
   const statusEl = el("p", { id: `${id}-verified`, class: "tm-field-hint tm-phone-status", role: "status", hidden: true });
 
+  // TM-930: the ONLY escape from the verified/locked state. Once verified the national input is
+  // readOnly, the picker disabled, and Send hidden — so the input `input` / picker `change` listeners
+  // (the usual un-verify triggers) can never fire. This button returns the field to the editable,
+  // unverified state so a user who verified the WRONG number can correct + re-verify it (auth.js
+  // confirmPhoneLink already handles updatePhoneNumber for changing an already-linked number). Hidden
+  // until markPhoneVerified reveals it.
+  const changeBtn = el("button", {
+    id: `${id}-change`,
+    type: "button",
+    class: "tm-btn tm-phone-change",
+    text: "Change number",
+    hidden: true,
+  });
+
   // The gate-local invisible reCAPTCHA host — the login one (#recaptcha-container) lives in the login
   // view, which isn't mounted here. Firebase renders the invisible widget into this element.
   const recaptcha = el("div", { id: `${id}-recaptcha`, class: "tm-phone-recaptcha", "aria-hidden": "true" });
@@ -1062,11 +1116,19 @@ function buildPhoneVerify(id, describedBy) {
     if (phoneVerify.cooldown?.isActive()) return; // synthetic-click guard (matches login.js)
     sendPhoneCode();
   });
+  changeBtn.addEventListener("click", () => {
+    // Unlock the pair (input editable, picker enabled, Send back) and drop the verified/linked state so
+    // the user can enter a different number and re-verify it. Focus the national input for the edit.
+    unverifyPhone();
+    const entry = shell?.fields.get("phone");
+    entry?.input.focus();
+  });
 
   phoneVerify.sendBtn = sendBtn;
   phoneVerify.otpGroup = otpGroup;
   phoneVerify.otpWrap = otpWrap;
   phoneVerify.statusEl = statusEl;
+  phoneVerify.changeBtn = changeBtn;
   phoneVerify.recaptcha = recaptcha;
   // The six-box widget auto-submits through confirmPhoneOtp on the sixth digit (TM-867 onComplete),
   // exactly like login.js's SMS step — no explicit verify click.
@@ -1074,7 +1136,7 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.cooldown = attachResendCooldown({ button: resendBtn, codeNoun: "SMS code" });
   phoneVerify.built = true;
 
-  return [sendBtn, statusEl, otpWrap, recaptcha];
+  return [sendBtn, statusEl, changeBtn, otpWrap, recaptcha];
 }
 
 // TM-684: avatar upload + bio ship disabled; wire to onboarding payload

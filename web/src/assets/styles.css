@@ -2466,6 +2466,20 @@ h3,
     font-size: 0.9rem;
 }
 
+/* TM-930: the "Change number" affordance — the only exit from the verified/locked state (the input is
+   readOnly + picker disabled + Send hidden). Understated text button, same look as the resend link. */
+#onboarding-view .tm-phone-change {
+    margin-top: 0.4rem;
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    text-decoration: underline;
+    box-shadow: none;
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+}
+
 /* The locked (verified) national input reads as read-only, not editable. */
 #onboarding-view .tm-input.tm-field-locked {
     background: var(--surface-2);
