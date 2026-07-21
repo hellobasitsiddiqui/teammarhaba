@@ -2405,6 +2405,74 @@ h3,
     cursor: not-allowed;
 }
 
+/* TM-930: the gate phone VERIFY-AND-LINK controls — Send code button, the revealed six-box OTP
+   group, a resend link, the "Verified ✓" status line, and the hidden reCAPTCHA host. The six boxes
+   reuse the .auth-otp-box markup but the auth styles are scoped to #auth-signed-out, so we restyle
+   them here for the onboarding surface (same paper/tinted look). */
+#onboarding-view .tm-phone-send {
+    margin-top: 0.55rem;
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+}
+
+#onboarding-view .tm-phone-status {
+    margin-top: 0.4rem;
+    font-weight: 600;
+}
+
+#onboarding-view .tm-phone-status.tm-phone-verified {
+    color: var(--accent);
+}
+
+#onboarding-view .tm-phone-otp-wrap {
+    margin-top: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+#onboarding-view .tm-phone-otp {
+    display: flex;
+    gap: 0.4rem;
+}
+
+#onboarding-view .tm-phone-otp .auth-otp-box {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 3.1rem;
+    padding: 0.55rem 0;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 600;
+    background: var(--accent-light);
+    border-color: var(--fg-line-strong);
+    box-shadow: var(--shadow-sm);
+}
+
+#onboarding-view .tm-phone-otp .auth-otp-box:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    background: var(--surface-card);
+}
+
+#onboarding-view .tm-phone-resend {
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    text-decoration: underline;
+    box-shadow: none;
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+}
+
+/* The locked (verified) national input reads as read-only, not editable. */
+#onboarding-view .tm-input.tm-field-locked {
+    background: var(--surface-2);
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
 /* A multi-line message input — the textarea sibling of .tm-input (TM-365). Inherits .tm-input's
    colours/border/focus; adds vertical resize + a sensible min height. */
 .tm-textarea {
