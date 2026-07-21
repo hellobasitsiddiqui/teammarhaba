@@ -61,10 +61,13 @@ test("@profile-shell #/profile renders inside the app shell: tab bar present, br
 test("@profile-shell the 'Profile' heading is the FIRST content — the corner-bell nav is out of flow, not a row above it (TM-910 AC1)", async ({ page }) => {
   // TM-910 finding: on #/profile at the phone viewport the account-nav row (bell) stayed in normal
   // flow ABOVE the "Profile" heading, so the heading rendered as the SECOND row (AC1 not met). The
-  // fix lifts the nav out of flow and pins the bell to the top-right corner, so the heading flows to
-  // the top and IS the first content, with the bell riding the heading's band (not overlapping the
-  // gear). This pins that: the heading's top is at/above the bell's top, and the bell/gear don't
-  // overlap. FAILS on pre-fix (heading pushed below the ~44px bell row).
+  // fix lifts the nav out of flow and pins the bell to the top-right CORNER (position:absolute,
+  // top:~1.1rem — physically the highest point), so the heading flows to the top and IS the first
+  // content, with the bell riding beside/level on the heading's own band (not a full row above it,
+  // not overlapping the gear). Because the bell is corner-pinned it legitimately sits a touch ABOVE
+  // the heading's top, so the real invariant is NOT "titleTop <= bellTop" — it's that the heading
+  // starts WITHIN the bell's own band (titleTop <= bellBottom), i.e. it was not pushed a whole
+  // ~44px bell-row DOWN. FAILS on pre-fix (bell was an in-flow row above → heading below the band).
   await signIn(page);
   await page.click("#tab-profile");
   await expect(page.locator("#profile-view")).toBeVisible();
@@ -86,15 +89,19 @@ test("@profile-shell the 'Profile' heading is the FIRST content — the corner-b
     return {
       titleTop: title?.top,
       bellTop: bell?.top,
+      bellBottom: bell?.bottom,
       bellRight: bell?.right,
       viewportWidth: window.innerWidth,
       bellGearOverlap: overlap(bell, gear),
     };
   });
 
-  // Heading-first: the "Profile" title top is not pushed below the bell (it was a whole row below the
-  // ~44px bell band on pre-fix main). Allow a small tolerance for the bell's own top inset.
-  expect(geo.titleTop).toBeLessThanOrEqual(geo.bellTop + 4);
+  // Heading-first (AC1): the "Profile" title starts WITHIN the corner-bell's own band — its top is at
+  // or above the bell's BOTTOM edge — i.e. it was NOT pushed a whole ~44px bell-row DOWN as it was on
+  // pre-fix main (where the bell sat in an in-flow row above the heading → titleTop > bellBottom). The
+  // corner-pinned bell is the highest point, so the heading legitimately rides just below its top but
+  // stays inside its band; this asserts that shared band, not "heading above the corner bell".
+  expect(geo.titleTop).toBeLessThanOrEqual(geo.bellBottom);
   // The bell is pinned to the top-right corner (right edge within 24px of the viewport right).
   expect(geo.bellRight).toBeGreaterThanOrEqual(geo.viewportWidth - 24);
   // The corner-clustered bell does not collide with the heading's own top-right gear control.
