@@ -58,6 +58,49 @@ test("@profile-shell #/profile renders inside the app shell: tab bar present, br
   await expect(page.locator("#status")).toBeHidden();
 });
 
+test("@profile-shell the 'Profile' heading is the FIRST content — the corner-bell nav is out of flow, not a row above it (TM-910 AC1)", async ({ page }) => {
+  // TM-910 finding: on #/profile at the phone viewport the account-nav row (bell) stayed in normal
+  // flow ABOVE the "Profile" heading, so the heading rendered as the SECOND row (AC1 not met). The
+  // fix lifts the nav out of flow and pins the bell to the top-right corner, so the heading flows to
+  // the top and IS the first content, with the bell riding the heading's band (not overlapping the
+  // gear). This pins that: the heading's top is at/above the bell's top, and the bell/gear don't
+  // overlap. FAILS on pre-fix (heading pushed below the ~44px bell row).
+  await signIn(page);
+  await page.click("#tab-profile");
+  await expect(page.locator("#profile-view")).toBeVisible();
+  await expect(page.locator(".tm-pf-title")).toBeVisible();
+  await expect(page.locator("#nav-notif-bell")).toBeVisible();
+
+  const geo = await page.evaluate(() => {
+    const rect = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, w: r.width, h: r.height };
+    };
+    const overlap = (a, b) =>
+      Boolean(a) && Boolean(b) && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const title = rect(".tm-pf-title");
+    const bell = rect("#nav-notif-bell");
+    const gear = rect(".tm-pf-gear");
+    return {
+      titleTop: title?.top,
+      bellTop: bell?.top,
+      bellRight: bell?.right,
+      viewportWidth: window.innerWidth,
+      bellGearOverlap: overlap(bell, gear),
+    };
+  });
+
+  // Heading-first: the "Profile" title top is not pushed below the bell (it was a whole row below the
+  // ~44px bell band on pre-fix main). Allow a small tolerance for the bell's own top inset.
+  expect(geo.titleTop).toBeLessThanOrEqual(geo.bellTop + 4);
+  // The bell is pinned to the top-right corner (right edge within 24px of the viewport right).
+  expect(geo.bellRight).toBeGreaterThanOrEqual(geo.viewportWidth - 24);
+  // The corner-clustered bell does not collide with the heading's own top-right gear control.
+  expect(geo.bellGearOverlap).toBe(false);
+});
+
 test("@profile-shell the brand block is restored when leaving the profile (scoping, not deletion)", async ({ page }) => {
   await signIn(page);
   await page.click("#tab-profile");

@@ -3810,17 +3810,36 @@ html {
  * only exists on the phone viewport (above it the nav is a normal inline row and #nav-items carries
  * the account links — kept intact so a desktop user, and e2e like onboarding-to-profile, still see
  * #nav-profile on #/profile). Below the breakpoint #nav-items is the COLLAPSED dropdown (display:none
- * until the — now hidden — toggle opens it), so the row is just the lone bell: pin it to the top-
- * right corner and collapse the row height so the screen's own heading ("Profile") is the first
- * content. The bell sits in the corner above the heading row, NOT overlapping the heading's top-right
- * control (the Profile diagnostics gear, .tm-pf-gear, in the profile-view below). All CSS, no
- * per-screen markup; route-agnostic so the TM-908/909 lanes reuse it by adding their route. */
+ * until the — now hidden — toggle opens it), so the row is just the lone bell. The nav is lifted OUT
+ * of normal flow and pinned to the top-right corner (see the rule below) so the screen's own heading
+ * ("Profile") is the FIRST content and the bell rides the heading's top-right band WITHOUT overlapping
+ * the heading's own control (the Profile diagnostics gear, .tm-pf-gear, in the profile-view below).
+ * All CSS, no per-screen markup; route-agnostic so the TM-908/909 lanes reuse it by adding their route. */
 @media (max-width: 33rem) {
+    /* TM-910 fix (heading-first, AC1): take the nav OUT of normal flow and pin it to the top-right
+       corner of .app's padding box (.app becomes the positioned ancestor via :has()). With the nav no
+       longer occupying a ~44px row, the screen's own heading ("Profile", the .tm-pf-topbar <h2> in
+       #profile-view) flows to the TOP and is the FIRST content — not the second row below a bell band.
+       The bell overlays the top-right corner, clustering onto the heading's band; the topbar reserves
+       right room the width of the bell so the .tm-pf-gear sits just left of it (one top-right cluster,
+       no overlap). Offsets mirror the ≤30rem .app phone padding (incl. the TM-295 safe-area insets). */
+    .app:has(.app-nav--corner-bell) {
+        position: relative;
+    }
+
     .app-nav.app-nav--corner-bell {
+        position: absolute;
+        top: calc(1.1rem + env(safe-area-inset-top));
+        right: calc(0.85rem + env(safe-area-inset-right));
+        z-index: 2;
         justify-content: flex-end;
         gap: 0;
         min-height: 0;
         margin: 0;
+    }
+
+    .app:has(.app-nav--corner-bell) #profile-view .tm-pf-topbar {
+        padding-right: calc(44px + var(--space-2));
     }
 }
 
