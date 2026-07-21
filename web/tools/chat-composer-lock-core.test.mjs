@@ -41,6 +41,10 @@ test("lockComposer flips thread.canCompose false so dead-end affordances stop re
 test("the reply + react affordances are gated on thread.canCompose (the flag lockComposer clears)", () => {
   // These are the affordances the lock must suppress — assert they read the same flag, so clearing it in
   // lockComposer genuinely removes them on the next repaint (guards against the gate being renamed away).
+  // TM-940 moved reply/edit/delete behind a tap-to-reveal overflow ("⋯") menu: react is still gated inline
+  // on canCompose, reply is gated via `canReply = thread.canCompose` (the menu only adds the Reply item
+  // when canReply), and messageActionMenu renders NO trigger at all when no item applies — so a locked or
+  // un-actionable message shows no dead-end "⋯" (the invariant this guard protects, expressed structurally).
   assert.match(
     SRC,
     /reactionBar\([\s\S]*?thread\.canCompose\)/,
@@ -48,7 +52,12 @@ test("the reply + react affordances are gated on thread.canCompose (the flag loc
   );
   assert.match(
     SRC,
-    /if\s*\(!m\.pending\s*&&\s*m\.id\s*&&\s*thread\.canCompose\)/,
-    "the reply affordance is gated on thread.canCompose",
+    /canReply\s*=\s*thread\.canCompose/,
+    "the reply affordance is gated on thread.canCompose (via canReply, passed to messageActionMenu)",
+  );
+  assert.match(
+    SRC,
+    /if\s*\(items\.length === 0\)\s*return null/,
+    "the overflow menu renders no trigger when nothing applies — a locked/un-actionable message shows no dead-end ⋯",
   );
 });
