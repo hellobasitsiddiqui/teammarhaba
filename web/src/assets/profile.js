@@ -1393,8 +1393,14 @@ function buildShell(view) {
   // data lands; renderStatus() also removes it on a load error so the skeleton never hangs (TM-663).
   const root = el("div", { class: "tm-pf tm-pf-loading" }, [
     el("header", { class: "tm-pf-topbar" }, [
-      // A host-badge doodle beside the heading (TM-215) — decorative; CSS shows it only when the sketchy toggle is on.
-      el("h2", { class: "tm-pf-title" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
+      // The visible "Profile" word is redundant — the bottom Profile tab (active) labels the screen and
+      // the identity header (avatar + name) right below self-identifies it (Basit, product call). So the
+      // <h2> is kept in the DOM (visually-hidden / sr-only) as the screen's heading + landmark for screen
+      // readers and heading navigation, but not rendered — the screen leads visually with the identity
+      // header. The host-badge doodle (TM-215, decorative, sketchy-toggle-only) goes with it rather than
+      // being left orphaned. NOTE: it stays inside .tm-pf-topbar so the corner-bell / .tm-pf-gear layout
+      // (TM-910) is untouched — only its visibility changes.
+      el("h2", { class: "tm-pf-title visually-hidden" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
       el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
     ]),
     idHeader,

@@ -6024,6 +6024,15 @@ button.tm-c-reaction {
     text-decoration: none;
     flex: 0 0 auto;
 }
+/* The main profile topbar's own "Profile" heading (.tm-pf-title) is now sr-only (visually-hidden →
+   out of flex flow — see profile.js) since the visible word is redundant. Without the title's flex:1
+   spacer, the diagnostics gear would fall to the LEFT of the topbar; margin-left:auto keeps it pinned
+   to the top-right so the TM-910 corner cluster (gear just left of the corner bell) is unchanged.
+   Scoped OFF the public-preview topbar (.tm-pf-pub-top) — there the .tm-pf-back arrow is the FIRST,
+   left-aligned control beside a VISIBLE title and must not be shoved right. */
+.tm-pf-topbar:not(.tm-pf-pub-top) .tm-pf-gear {
+    margin-left: auto;
+}
 .tm-pf-gear-icon {
     width: 1.15rem;
     height: 1.15rem;
