@@ -3,8 +3,6 @@ package com.teammarhaba.backend.event;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
-import com.teammarhaba.backend.notify.PushMessage;
-import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.BadRequestException;
@@ -51,7 +49,10 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>Reused seams.</b> Chat membership sync goes through {@link EventChatLifecycleService} (evict →
  * {@code onLeave}/REMOVED, force-add → {@code onGoing}/active member) exactly as an RSVP/leave does; the
- * push goes through {@link EventAttendeeNotifier}; the audit through {@link AuditService}
+ * target's push is deferred to <em>after commit</em> by publishing an {@link EventAttendeeChangedEvent}
+ * that {@link EventLifecycleNotifier} fans out post-commit ({@code @TransactionalEventListener}), so the
+ * FCM round-trip never runs under the event lock / on the pooled connection (TM-730) — the same discipline
+ * {@link EventClaimedEvent} uses; the audit goes through {@link AuditService}
  * ({@link AuditAction#EVENT_ATTENDEE_EVICTED}/{@link AuditAction#EVENT_ATTENDEE_ADDED}); and a
  * lifecycle {@link EventLifecycleEvent} is published so the TM-397 seam (and the offer cascade) sees the
  * change. Age eligibility reuses {@link AgeEligibilityPolicy}, and the one-active-GOING guard reuses
@@ -81,7 +82,6 @@ public class EventRosterAdminService {
     private final AuditService audit;
     private final ApplicationEventPublisher lifecycle;
     private final EventChatLifecycleService chatLifecycle;
-    private final EventAttendeeNotifier notifier;
     private final AgeEligibilityPolicy ageGate;
     private final EventPhasePolicy phasePolicy;
 
@@ -92,7 +92,6 @@ public class EventRosterAdminService {
             AuditService audit,
             ApplicationEventPublisher lifecycle,
             EventChatLifecycleService chatLifecycle,
-            EventAttendeeNotifier notifier,
             AgeEligibilityPolicy ageGate,
             EventPhasePolicy phasePolicy) {
         this.events = events;
@@ -101,7 +100,6 @@ public class EventRosterAdminService {
         this.audit = audit;
         this.lifecycle = lifecycle;
         this.chatLifecycle = chatLifecycle;
-        this.notifier = notifier;
         this.ageGate = ageGate;
         this.phasePolicy = phasePolicy;
     }
@@ -267,9 +265,13 @@ public class EventRosterAdminService {
                         "userId", String.valueOf(targetUserId),
                         "state", removedState == null ? "NONE" : removedState.name()));
         // Notify the evicted user + publish the lifecycle signal only on an actual removal — an idempotent
-        // no-op evict doesn't ping someone who was never on the event.
+        // no-op evict doesn't ping someone who was never on the event. The push is deferred to AFTER_COMMIT
+        // (TM-730): publishing an EventAttendeeChangedEvent in-tx lets EventLifecycleNotifier fan it out
+        // post-commit, off the event lock and pooled connection — never a synchronous FCM round-trip while
+        // the SELECT … FOR UPDATE lock is held. Mirrors the EventClaimedEvent seam.
         if (existing.isPresent()) {
-            notifier.pushToUser(targetUserId, evictedMessage(eventId, event.getHeading()));
+            lifecycle.publishEvent(new EventAttendeeChangedEvent(
+                    eventId, targetUserId, event.getHeading(), EventAttendeeChangedEvent.Kind.EVICTED));
             lifecycle.publishEvent(new EventLifecycleEvent(
                     eventId, event.getHeading(), EventLifecycleEvent.Kind.UPDATED, java.util.Set.of("roster")));
         }
@@ -345,6 +347,16 @@ public class EventRosterAdminService {
         long newGoing = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
         long newWaitlist = attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED);
 
+        // Cascade-stop on a last-spot fill (TM-397), mirroring EventRsvpService.claim: if this add just
+        // consumed the last free spot, void every other waitlister's live offer so nobody keeps seeing a
+        // "spot available to claim" banner for a spot that's gone. Capacity is still enforced under the
+        // lock regardless (a stale-offer claim 409s SPOT_ALREADY_TAKEN), so this is a UX cleanup, not a
+        // safety fix — but it clears the misleading banner immediately instead of waiting for the next
+        // cascade sweep.
+        if (event.hasCapacityLimit() && newGoing >= event.getCapacity()) {
+            attendance.clearOpenOffers(eventId);
+        }
+
         audit.record(
                 admin.uid(),
                 AuditAction.EVENT_ATTENDEE_ADDED,
@@ -353,7 +365,10 @@ public class EventRosterAdminService {
                 Map.of(
                         "userId", String.valueOf(targetUserId),
                         "override", String.valueOf(override)));
-        notifier.pushToUser(targetUserId, addedMessage(eventId, event.getHeading()));
+        // Deferred push (TM-730): publish in-tx, notify AFTER_COMMIT via EventLifecycleNotifier — never a
+        // synchronous FCM fan-out while the event lock and pooled connection are held. Mirrors claim.
+        lifecycle.publishEvent(new EventAttendeeChangedEvent(
+                eventId, targetUserId, event.getHeading(), EventAttendeeChangedEvent.Kind.ADDED));
         lifecycle.publishEvent(new EventLifecycleEvent(
                 eventId, event.getHeading(), EventLifecycleEvent.Kind.UPDATED, java.util.Set.of("roster")));
         return new RosterActionResult(AttendanceState.GOING, newGoing, newWaitlist);
@@ -378,20 +393,6 @@ public class EventRosterAdminService {
     /** Load the event under the {@code FOR UPDATE} lock; a missing/soft-deleted row is a plain 404. */
     private Event lockedEvent(long eventId) {
         return events.findByIdForUpdate(eventId).orElseThrow(EventRosterAdminService::notFound);
-    }
-
-    private static PushMessage evictedMessage(long eventId, String heading) {
-        return new PushMessage(
-                "Your spot was removed: " + heading,
-                "An organiser removed you from this event. You can request to join again.",
-                PushRoutes.eventDetail(eventId));
-    }
-
-    private static PushMessage addedMessage(long eventId, String heading) {
-        return new PushMessage(
-                "You're in: " + heading,
-                "An organiser added you to this event — tap to see the details.",
-                PushRoutes.eventDetail(eventId));
     }
 
     private static ResourceNotFoundException notFound() {
