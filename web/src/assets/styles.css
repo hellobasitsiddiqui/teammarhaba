@@ -3890,6 +3890,59 @@ html {
     line-height: 1;
 }
 
+/* --- Corner-bell chrome (TM-910) --------------------------------------------------------------
+ * On the self-headed surfaces (Profile now; Home/Events via their own lanes) corner-bell.js hides
+ * the floating hamburger (#nav-toggle) and adds `.app-nav--corner-bell` here, leaving just the
+ * notification bell in the account-nav row.
+ *
+ * MOBILE-SCOPED (≤ 33rem — the SAME breakpoint the hamburger + collapsed nav use): the floating row
+ * only exists on the phone viewport (above it the nav is a normal inline row and #nav-items carries
+ * the account links — kept intact so a desktop user, and e2e like onboarding-to-profile, still see
+ * #nav-profile on #/profile). Below the breakpoint #nav-items is the COLLAPSED dropdown (display:none
+ * until the — now hidden — toggle opens it), so the row is just the lone bell. The nav is lifted OUT
+ * of normal flow and pinned to the top-right corner (see the rule below) so the screen's own heading
+ * ("Profile") is the FIRST content and the bell rides the heading's top-right band WITHOUT overlapping
+ * the heading's own control (the Profile diagnostics gear, .tm-pf-gear, in the profile-view below).
+ * All CSS, no per-screen markup; route-agnostic so the TM-908/909 lanes reuse it by adding their route. */
+@media (max-width: 33rem) {
+    /* TM-910 fix (heading-first, AC1): take the nav OUT of normal flow and pin it to the top-right
+       corner of .app's padding box (.app becomes the positioned ancestor via :has()). With the nav no
+       longer occupying a ~44px row, the screen's own heading ("Profile", the .tm-pf-topbar <h2> in
+       #profile-view) flows to the TOP and is the FIRST content — not the second row below a bell band.
+       The bell overlays the top-right corner, clustering onto the heading's band; the topbar reserves
+       right room the width of the bell so the .tm-pf-gear sits just left of it (one top-right cluster,
+       no overlap). Offsets mirror the ≤30rem .app phone padding (incl. the TM-295 safe-area insets). */
+    .app:has(.app-nav--corner-bell) {
+        position: relative;
+    }
+
+    .app-nav.app-nav--corner-bell {
+        position: absolute;
+        top: calc(1.1rem + env(safe-area-inset-top));
+        right: calc(0.85rem + env(safe-area-inset-right));
+        z-index: 2;
+        justify-content: flex-end;
+        gap: 0;
+        min-height: 0;
+        margin: 0;
+    }
+
+    /* The screen normally leaves a 1.5rem top margin below the nav row (.profile-view margin-top).
+       With the nav lifted out of flow and pinned to the app's content-top band, that margin no longer
+       clears a nav row — it just drops the heading a whole 1.5rem BELOW the corner bell, so the bell
+       reads as a band ABOVE the heading (AC1's exact failure: titleTop > bellTop). Collapse it under
+       the corner-bell so the heading rises to the app's content top and shares the bell's band — the
+       heading is then genuinely the FIRST content, with the bell riding its top-right. Scoped to the
+       corner-bell state so desktop / wide (normal nav row) keep the breathing margin. */
+    .app:has(.app-nav--corner-bell) #profile-view.profile-view {
+        margin-top: 0;
+    }
+
+    .app:has(.app-nav--corner-bell) #profile-view .tm-pf-topbar {
+        padding-right: calc(44px + var(--space-2));
+    }
+}
+
 /* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
    to a corner pill. The --page-bg ring separates it from whatever sits behind the nav. */
 .tm-notif-badge {
@@ -6059,6 +6112,15 @@ button.tm-c-reaction {
     background: var(--surface-card);
     text-decoration: none;
     flex: 0 0 auto;
+}
+/* The main profile topbar's own "Profile" heading (.tm-pf-title) is now sr-only (visually-hidden →
+   out of flex flow — see profile.js) since the visible word is redundant. Without the title's flex:1
+   spacer, the diagnostics gear would fall to the LEFT of the topbar; margin-left:auto keeps it pinned
+   to the top-right so the TM-910 corner cluster (gear just left of the corner bell) is unchanged.
+   Scoped OFF the public-preview topbar (.tm-pf-pub-top) — there the .tm-pf-back arrow is the FIRST,
+   left-aligned control beside a VISIBLE title and must not be shoved right. */
+.tm-pf-topbar:not(.tm-pf-pub-top) .tm-pf-gear {
+    margin-left: auto;
 }
 .tm-pf-gear-icon {
     width: 1.15rem;
