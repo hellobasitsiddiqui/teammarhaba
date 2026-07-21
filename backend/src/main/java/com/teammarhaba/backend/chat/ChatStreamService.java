@@ -314,9 +314,9 @@ public class ChatStreamService {
             return 0;
         }
         int revoked = 0;
-        // Snapshot the matching emitters first: dropQuietly mutates `streams` (a CopyOnWriteArraySet
-        // tolerates it, but completing inside the iteration also fires onCompletion → remove concurrently,
-        // so iterate a stable copy and act on it).
+        // Safe to remove while iterating: `streams` is a CopyOnWriteArraySet, so this loop walks a stable
+        // snapshot of the backing array taken when iteration began — dropQuietly's mutation (and the
+        // onCompletion → remove it triggers) can't disturb it or throw ConcurrentModificationException.
         for (SseEmitter emitter : streams) {
             if (ownerUid.equals(streamOwner.get(emitter))) {
                 dropQuietly(streams, emitter); // complete + forget; the client reconnects and is re-gated

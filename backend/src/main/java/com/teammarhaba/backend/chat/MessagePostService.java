@@ -13,7 +13,6 @@ import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import java.time.Clock;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -93,6 +92,7 @@ public class MessagePostService {
     private final ApplicationEventPublisher publisher;
     private final AuditService audit;
     private final Clock clock;
+    private final ThreadOpenGate threadGate;
 
     /** Audit {@code target_type} for a posted chat message — the conversation it landed in. */
     private static final String TARGET_CONVERSATION = "Conversation";
@@ -131,6 +131,7 @@ public class MessagePostService {
         this.publisher = publisher;
         this.audit = audit;
         this.clock = clock;
+        this.threadGate = new ThreadOpenGate(events, lifecycle, clock);
     }
 
     /**
@@ -331,27 +332,11 @@ public class MessagePostService {
     }
 
     /**
-     * Posting is only allowed while the thread is open. For an event thread this delegates to TM-446's
-     * {@link EventChatLifecycleService#isThreadReadOnly} — the single resolver of "manually closed, or
-     * past the close-policy window" — so this path never re-implements the close window. A soft-deleted
-     * event ({@code findById} empty under the entity's {@code @SQLRestriction}) has no live chat and is
-     * treated as closed. A non-event (admin broadcast) thread has no close policy, so it falls back to
-     * the plain soft-close flag.
+     * Posting is only allowed while the thread is open. The close-window decision lives in the shared
+     * {@link ThreadOpenGate} (TM-857), so post / react / edit can never drift apart on it; this path only
+     * supplies the post-specific 409 wording.
      */
     private void requireOpenThread(Conversation conversation) {
-        Long eventId = conversation.getEventId();
-        boolean closed;
-        if (eventId != null) {
-            Instant now = clock.instant();
-            closed = events
-                    .findById(eventId)
-                    .map(event -> lifecycle.isThreadReadOnly(event, now))
-                    .orElse(true); // soft-deleted / missing event → no live chat
-        } else {
-            closed = conversation.isClosed();
-        }
-        if (closed) {
-            throw new ConflictException("This thread is closed; you can no longer post.");
-        }
+        threadGate.requireOpen(conversation, "This thread is closed; you can no longer post.");
     }
 }

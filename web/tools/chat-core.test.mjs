@@ -57,6 +57,7 @@ import {
   removeMessageById,
   createAdminFlagCache,
 } from "../src/assets/chat-core.js";
+import { EVENT_CHAT_ENTRY_LABEL } from "../src/assets/events-core.js";
 
 /* ─────────────────────────────── retained pure utilities ──────────────────────────────────────── */
 
@@ -367,7 +368,9 @@ test("deepLinkCta labels each safe in-app route family and coerces loose shapes"
   assert.deepEqual(deepLinkCta("#/events/42"), { href: "#/events/42", label: "View event" });
   assert.deepEqual(deepLinkCta("/events/42"), { href: "#/events/42", label: "View event" });
   assert.deepEqual(deepLinkCta("events/42"), { href: "#/events/42", label: "View event" });
-  assert.deepEqual(deepLinkCta("#/chat/7"), { href: "#/chat/7", label: "Open chat" });
+  // TM-445: the chat CTA reuses the shared event-chat entry constant, so the two copies can't drift.
+  assert.equal(EVENT_CHAT_ENTRY_LABEL, "Open chat");
+  assert.deepEqual(deepLinkCta("#/chat/7"), { href: "#/chat/7", label: EVENT_CHAT_ENTRY_LABEL });
   // The events list gets its own label; any other known static route falls back to a neutral "Open".
   assert.deepEqual(deepLinkCta("/events"), { href: "#/events", label: "Browse events" });
   assert.deepEqual(deepLinkCta("/home"), { href: "#/home", label: "Open" });

@@ -9,7 +9,6 @@ import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Clock;
-import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +70,7 @@ public class MessageReactionService {
     private final EventChatLifecycleService lifecycle;
     private final UserService users;
     private final Clock clock;
+    private final ThreadOpenGate threadGate;
 
     /** Spring-wired constructor — real wall clock. */
     @Autowired
@@ -106,6 +106,7 @@ public class MessageReactionService {
         this.lifecycle = lifecycle;
         this.users = users;
         this.clock = clock;
+        this.threadGate = new ThreadOpenGate(events, lifecycle, clock);
     }
 
     /**
@@ -214,19 +215,8 @@ public class MessageReactionService {
         if (conversation == null) {
             return; // the message resolved, so its thread exists; be defensive anyway.
         }
-        Long eventId = conversation.getEventId();
-        boolean closed;
-        if (eventId != null) {
-            Instant now = clock.instant();
-            closed = events.findById(eventId)
-                    .map(event -> lifecycle.isThreadReadOnly(event, now))
-                    .orElse(true); // soft-deleted / missing event → no live chat
-        } else {
-            closed = conversation.isClosed();
-        }
-        if (closed) {
-            throw new ConflictException("This thread is closed; reactions can no longer be changed.");
-        }
+        // Shared close-window decision (TM-857) — post / react / edit can't drift; reaction-specific 409 wording.
+        threadGate.requireOpen(conversation, "This thread is closed; reactions can no longer be changed.");
     }
 
     /** A single message's reaction summary from the caller's perspective. */
