@@ -20,6 +20,16 @@ public enum AuditAction {
     /** A user updated their own profile (e.g. display name) via {@code PATCH /api/v1/me}. */
     PROFILE_UPDATED,
 
+    /**
+     * An admin edited ANOTHER user's admin-editable profile fields via {@code PATCH
+     * /api/v1/admin/users/{id}/profile} (TM-172). One row per effective edit, carrying the acting
+     * admin as the actor and the edited account (its Firebase uid) as the target, with
+     * {@code source=admin} and the field-level {@code old → new} diff in its metadata — the same diff
+     * shape as {@link #PROFILE_UPDATED}, but a distinct action so the audit log tells an admin edit of
+     * someone else's profile apart from a user's own self-edit.
+     */
+    ADMIN_USER_PROFILE_EDITED,
+
     /** An account was soft-deleted (tombstoned). */
     ACCOUNT_SOFT_DELETED,
 

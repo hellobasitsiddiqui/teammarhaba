@@ -5,6 +5,7 @@ import com.teammarhaba.backend.event.ReliabilityPolicy;
 import com.teammarhaba.backend.notify.PushRoutes;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserAdminService;
+import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.BadRequestException;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -61,10 +62,13 @@ public class UserAdminController {
     static final Set<String> SORTABLE = Set.of("id", "email", "displayName", "role", "enabled");
 
     private final UserAdminService adminService;
+    private final UserService userService;
     private final ReliabilityPolicy reliabilityPolicy;
 
-    public UserAdminController(UserAdminService adminService, ReliabilityPolicy reliabilityPolicy) {
+    public UserAdminController(
+            UserAdminService adminService, UserService userService, ReliabilityPolicy reliabilityPolicy) {
         this.adminService = adminService;
+        this.userService = userService;
         this.reliabilityPolicy = reliabilityPolicy;
     }
 
@@ -93,12 +97,7 @@ public class UserAdminController {
 
     @GetMapping("/{id}")
     public UserResponse get(@PathVariable long id) {
-        User user = adminService.get(id);
-        return UserResponse.from(
-                user,
-                adminService.authPhoneFor(user.getFirebaseUid()),
-                adminService.isPushEligible(user),
-                reliabilityPolicy.statusFor(user.getLateCancelCount()));
+        return enriched(adminService.get(id));
     }
 
     @PatchMapping("/{id}")
@@ -110,6 +109,37 @@ public class UserAdminController {
         // Enriched like list/get: the console replaces its row with this body, so a PATCH must not
         // silently wipe the phone identifier (TM-372), the push-eligibility flag (TM-427) or the
         // reliability standing (TM-409) off the row.
+        return enriched(user);
+    }
+
+    /**
+     * Admin edit of another user's admin-editable PROFILE fields (TM-172): names, city, age, phone,
+     * notification preference, timezone, locale. Distinct from {@link #update} above (which owns role +
+     * enabled) — this endpoint touches the TM-162 profile set only; identity, role and enabled are out
+     * of scope. Delegates to {@code UserService.adminUpdateProfile}, which applies the <strong>same</strong>
+     * validation as the user's own {@code PATCH /api/v1/me} (shared {@code applyProfileFields}: city
+     * allow-list TM-877, age band TM-884, E.164 phone, name-like TM-771, timezone/locale) and audits the
+     * edit ({@link com.teammarhaba.backend.audit.AuditAction#ADMIN_USER_PROFILE_EDITED}). A missing or
+     * soft-deleted target is a {@code 404} (no existence leak); an invalid value is a {@code 400} from
+     * the shared rules; a non-admin is a {@code 403} (inherited class gate). Returns the updated account,
+     * enriched like {@link #update} so the console can swap its row/detail in place.
+     */
+    @PatchMapping("/{id}/profile")
+    public UserResponse updateProfile(
+            @PathVariable long id,
+            @RequestBody @Valid AdminUpdateProfileRequest request,
+            @AuthenticationPrincipal VerifiedUser caller) {
+        User user = userService.adminUpdateProfile(id, request.toProfileUpdate(), caller.uid());
+        return enriched(user);
+    }
+
+    /**
+     * Enrich a single account into the full admin projection — the auth phone (TM-372), the
+     * push-eligibility flag (TM-427) and the reliability standing (TM-409) — so every single-account
+     * response (get / role-enable PATCH / profile PATCH) carries the same shape and a mutation never
+     * silently drops an enrichment field off the row.
+     */
+    private UserResponse enriched(User user) {
         return UserResponse.from(
                 user,
                 adminService.authPhoneFor(user.getFirebaseUid()),

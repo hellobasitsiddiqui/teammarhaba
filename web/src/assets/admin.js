@@ -29,6 +29,9 @@ import { clampPage } from "./admin-paging-core.js";
 import { statsCards } from "./admin-stats-core.js";
 // TM-847: the pure role→friendly-label mapping (TM-612), extracted so it's unit-testable.
 import { roleLabel } from "./admin-role-label-core.js";
+// TM-172: the admin user-detail PROFILE edit — pure field descriptors + validators + patch builder,
+// reusing the SAME shared self-edit validation (profile-core.js) so the admin edit can't drift looser.
+import { ADMIN_PROFILE_FIELDS, validateAdminField, validateAdminForm, buildAdminProfilePatch } from "./admin-profile-edit-core.js";
 import {
   MAX_TITLE,
   MAX_BODY,
@@ -117,6 +120,25 @@ function isSelf(user) {
 
 async function patchUser(id, body) {
   const res = await apiFetch(`/api/v1/admin/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const problem = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, problem.detail || problem.title || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * TM-172: edit another user's admin-editable PROFILE fields via PATCH /admin/users/{id}/profile. The
+ * body is the minimal changed-fields patch (buildAdminProfilePatch); the server reuses the same
+ * validation as the user's own PATCH /me and audits the edit. Returns the enriched updated user
+ * (same UserResponse shape as the list/role PATCH), so the caller can swap the row in place.
+ */
+async function patchUserProfile(id, body) {
+  const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(id)}/profile`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
@@ -396,6 +418,11 @@ function openDetail(user) {
       el("dt", { text: "ID" }),
       el("dd", { text: String(user.id) }),
     ]),
+    // Editable profile fields (TM-172): the TM-162 profile set (names/city/age/phone/notification/
+    // timezone/locale) with an admin edit form that reuses the SAME client-side validation the user's
+    // own profile edit uses (admin-profile-edit-core → profile-core). Identity/role/enabled above are
+    // unchanged — the profile edit is a separate, scoped surface. Returns its own section nodes.
+    ...profileSection(user),
     // Subscription state + billing history (TM-620): what the account pays for and every charge
     // attempt, straight off GET /admin/users/{id}/subscription. Loaded lazily like the activity log.
     // GATED behind config.flags.membership (TM-624): the whole membership epic ships inert behind the
@@ -416,6 +443,161 @@ function openDetail(user) {
   if (membershipEnabled()) loadSubscription(user);
   loadActivity(user);
   return close;
+}
+
+// ---- admin profile edit (TM-172) --------------------------------------------------------------
+
+/** Human-readable current value of a profile field for the read-only display ("—" when empty). */
+function profileDisplayValue(user, key) {
+  const v = user[key];
+  if (v == null || v === "") return "—";
+  return String(v);
+}
+
+/**
+ * The editable-profile section of the user-detail modal (TM-172): a read-only summary of the current
+ * profile fields plus an "Edit profile" form that PATCHes /admin/users/{id}/profile. Validation and
+ * the changed-fields patch come from admin-profile-edit-core (which reuses the shared self-edit rules),
+ * so the admin edit matches what the server accepts and can't drift looser. On success it swaps the
+ * updated user into state + the list row, re-renders the summary + form in place, and toasts; on error
+ * it surfaces the server/validation message (inline per-field for a 400-shaped body, else a toast).
+ * Returns the section nodes (spread into the modal body).
+ */
+function profileSection(user) {
+  // Mutable "current" view of the target used for display + the off-list-city / grandfathered-age
+  // allowances; updated in place after a successful save so a second edit sees the new saved values.
+  let current = { ...user };
+
+  const summary = el("dl", { class: "tm-detail tm-admin-profile-summary" });
+  const form = el("form", { class: "tm-admin-profile-form", hidden: true, novalidate: true });
+  const editBtn = el("button", { class: "tm-btn tm-btn-sm", type: "button" }, "Edit profile");
+
+  function renderSummary() {
+    clear(summary);
+    for (const field of ADMIN_PROFILE_FIELDS) {
+      summary.append(
+        el("dt", { text: field.label }),
+        el("dd", { text: profileDisplayValue(current, field.key) }),
+      );
+    }
+  }
+
+  // Field controls, so validation + patch-building can read their live values by key.
+  const controls = new Map(); // key -> { input, error }
+
+  function buildForm() {
+    clear(form);
+    controls.clear();
+    for (const field of ADMIN_PROFILE_FIELDS) {
+      const fieldId = `admin-profile-${field.key}-${current.id}`;
+      const errorId = `${fieldId}-error`;
+      let input;
+      if (field.type === "select") {
+        // Keep an already-saved OFF-LIST city selectable (TM-877 allowance) so editing another field
+        // never silently drops it — mirrors the self-edit's fillForm injected-option behaviour.
+        const options = field.options.map(([value, label]) => [value, label]);
+        if (field.key === "city" && current.city && !options.some(([v]) => v === current.city)) {
+          options.push([current.city, current.city]);
+        }
+        input = el(
+          "select",
+          { id: fieldId, class: "tm-input", "aria-describedby": errorId },
+          options.map(([value, label]) =>
+            el("option", { value, selected: String(current[field.key] ?? "") === String(value) }, label)),
+        );
+      } else {
+        input = el("input", {
+          id: fieldId,
+          class: "tm-input",
+          type: field.type === "number" ? "number" : field.type === "tel" ? "tel" : "text",
+          value: current[field.key] == null ? "" : String(current[field.key]),
+          maxlength: field.maxLength || null,
+          min: field.min ?? null,
+          max: field.max ?? null,
+          "aria-describedby": errorId,
+        });
+      }
+      const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
+      // Live per-field validation on input, exactly like the self-edit form, using the SHARED rules.
+      input.addEventListener("input", () => setControlError(field.key, validateAdminField(field, input.value, current)));
+      input.addEventListener("change", () => setControlError(field.key, validateAdminField(field, input.value, current)));
+      controls.set(field.key, { input, error });
+      form.append(
+        el("div", { class: "tm-field" }, [
+          el("label", { for: fieldId, text: field.label }),
+          input,
+          field.hint ? el("p", { class: "tm-field-hint", text: field.hint }) : null,
+          error,
+        ]),
+      );
+    }
+    const saveBtn = el("button", { class: "tm-btn tm-btn-primary tm-btn-sm", type: "submit" }, "Save profile");
+    const cancelBtn = el("button", { class: "tm-btn tm-btn-sm", type: "button" }, "Cancel");
+    cancelBtn.addEventListener("click", () => showForm(false));
+    form.append(el("div", { class: "tm-form-actions" }, [saveBtn, cancelBtn]));
+  }
+
+  function setControlError(key, message) {
+    const c = controls.get(key);
+    if (!c) return;
+    c.error.textContent = message || "";
+    c.error.hidden = !message;
+    if (message) c.input.setAttribute("aria-invalid", "true");
+    else c.input.removeAttribute("aria-invalid");
+  }
+
+  function showForm(on) {
+    if (on) buildForm();
+    form.hidden = !on;
+    editBtn.hidden = on;
+    summary.hidden = on;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const values = {};
+    for (const [key, c] of controls) values[key] = c.input.value;
+
+    // Validate the whole form with the SHARED rules before sending (fail fast in the browser).
+    const errors = validateAdminForm(values, current);
+    for (const field of ADMIN_PROFILE_FIELDS) setControlError(field.key, errors[field.key] || "");
+    if (Object.keys(errors).length > 0) {
+      toast("Fix the highlighted fields.", { type: "error" });
+      return;
+    }
+
+    const patch = buildAdminProfilePatch(values, current);
+    if (Object.keys(patch).length === 0) {
+      toast("No changes to save.", { type: "info" });
+      showForm(false);
+      return;
+    }
+
+    try {
+      const updated = await patchUserProfile(current.id, patch);
+      current = { ...current, ...updated };
+      // Keep the in-memory list row + any open list render in sync (mirrors applyPatch).
+      const idx = state.users.findIndex((u) => u.id === updated.id);
+      if (idx >= 0) state.users[idx] = { ...state.users[idx], ...updated };
+      render();
+      renderSummary();
+      showForm(false);
+      toast("Profile updated.", { type: "success" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Could not update the profile.";
+      toast(msg, { type: "error" });
+    }
+  });
+
+  editBtn.addEventListener("click", () => showForm(true));
+
+  renderSummary();
+  return [
+    el("h3", { class: "tm-detail-h", text: "Profile" }),
+    summary,
+    form,
+    el("div", { class: "tm-form-actions" }, [editBtn]),
+  ];
 }
 
 /** "£9.99" from pence — local to keep admin.js free of the membership modules (mirrors formatPrice). */

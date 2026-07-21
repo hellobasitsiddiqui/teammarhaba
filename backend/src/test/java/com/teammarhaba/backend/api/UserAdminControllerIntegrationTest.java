@@ -15,6 +15,9 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.GetUsersResult;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditEvent;
+import com.teammarhaba.backend.audit.AuditRepository;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
@@ -54,6 +57,9 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private DeviceTokenRepository tokens;
+
+    @Autowired
+    private AuditRepository audit;
 
     // Role changes call the Admin SDK; mock it so no Firebase credentials are needed.
     @MockBean
@@ -334,5 +340,188 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/users/{id}", id).with(admin("admin-elig-single")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.pushEligible").value(true));
+    }
+
+    // --- TM-172: admin edit of ANOTHER user's admin-editable PROFILE fields ---
+    //
+    // PATCH /admin/users/{id}/profile writes the TM-162 profile set (names/city/age/phone/
+    // notificationPref/timezone/locale) for a target user, reusing the SAME validation as the user's
+    // own PATCH /me (shared UserService.applyProfileFields), and audits every edit as
+    // ADMIN_USER_PROFILE_EDITED. Identity/role/enabled are out of scope (governed by PATCH /admin/users/{id}).
+
+    private static final String PROFILE_PATH = "/api/v1/admin/users/{id}/profile";
+
+    /** Newest ADMIN_USER_PROFILE_EDITED audit row against a target uid, or null if none. */
+    private AuditEvent latestAdminProfileEdit(String targetUid) {
+        List<AuditEvent> rows = audit.findByTargetTypeAndTargetIdOrderByCreatedAtDesc("User", targetUid);
+        return rows.stream()
+                .filter(e -> e.getAction() == AuditAction.ADMIN_USER_PROFILE_EDITED)
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Test
+    void adminEditsAnotherUsersProfileFieldsAndAudits() throws Exception {
+        long id = seed("profile-target");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-profile-editor"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                                "{\"firstName\":\"Aisha\",\"lastName\":\"Khan\",\"city\":\"London\",\"age\":30,"
+                                        + "\"phone\":\"+442079460958\",\"notificationPref\":\"EMAIL\","
+                                        + "\"timezone\":\"Europe/London\",\"locale\":\"en-GB\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Aisha"))
+                .andExpect(jsonPath("$.lastName").value("Khan"))
+                .andExpect(jsonPath("$.city").value("London"))
+                .andExpect(jsonPath("$.age").value(30))
+                .andExpect(jsonPath("$.phone").value("+442079460958"))
+                .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
+                .andExpect(jsonPath("$.timezone").value("Europe/London"))
+                .andExpect(jsonPath("$.locale").value("en-GB"));
+
+        User saved = users.findById(id).orElseThrow();
+        assertThat(saved.getFirstName()).isEqualTo("Aisha");
+        assertThat(saved.getCity()).isEqualTo("London");
+        assertThat(saved.getAge()).isEqualTo(30);
+        assertThat(saved.getPhone()).isEqualTo("+442079460958");
+        assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.EMAIL);
+
+        // Audited as an ADMIN action, actor = the admin, target = the edited account's uid, source=admin.
+        AuditEvent edit = latestAdminProfileEdit("profile-target");
+        assertThat(edit).as("admin profile edit is audited").isNotNull();
+        assertThat(edit.getActorUid()).isEqualTo("admin-profile-editor");
+        assertThat(edit.getTargetId()).isEqualTo("profile-target");
+        assertThat(edit.getMetadata()).containsEntry("source", "admin");
+        assertThat(edit.getMetadata()).containsEntry("actorUid", "admin-profile-editor");
+        assertThat(edit.getMetadata()).containsEntry("targetUid", "profile-target");
+    }
+
+    @Test
+    void adminProfileEditIsForbiddenForNonAdmin() throws Exception {
+        long id = seed("profile-target-403");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(regularUser("nosy-user"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Nope\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+
+        assertThat(users.findById(id).orElseThrow().getFirstName()).isNull();
+    }
+
+    @Test
+    void adminProfileEditRejectsAnonymous() throws Exception {
+        long id = seed("profile-target-401");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Nope\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void adminProfileEditRejectsAnOffListCity() throws Exception {
+        // TM-877: the SAME city allow-list the self-edit enforces — "Dubai" is off-list → 400.
+        long id = seed("profile-bad-city");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-bad-city"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Dubai\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"));
+
+        assertThat(users.findById(id).orElseThrow().getCity()).isNull();
+        assertThat(latestAdminProfileEdit("profile-bad-city")).as("a rejected edit is not audited").isNull();
+    }
+
+    @Test
+    void adminProfileEditRejectsAnOutOfBandAge() throws Exception {
+        // TM-884: the SAME 18–99 band the self-edit enforces — 15 is below the floor → 400.
+        long id = seed("profile-bad-age");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-bad-age"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":15}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"));
+
+        assertThat(users.findById(id).orElseThrow().getAge()).isNull();
+    }
+
+    @Test
+    void adminProfileEditRejectsABadPhone() throws Exception {
+        // TM-781: the SAME E.164 boundary shape as UpdateMeRequest — a bare national number (no +dial)
+        // is a 400 at the bean-validation boundary, exactly as the self-edit rejects it.
+        long id = seed("profile-bad-phone");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-bad-phone"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"07700900000\"}"))
+                // A non-E.164 phone is caught at the bean-validation boundary (@Pattern on the DTO, the
+                // SAME pattern UpdateMeRequest carries), so it's a 400 titled "Validation failed" —
+                // vs the off-list-city / out-of-band-age cases, which the service rejects with a
+                // "Bad request" BadRequestException. Both are uniform 400s reusing the self-edit rules.
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"));
+
+        assertThat(users.findById(id).orElseThrow().getPhone()).isNull();
+    }
+
+    @Test
+    void adminProfileEditMissingTargetIs404NotLeaking() throws Exception {
+        mockMvc.perform(patch(PROFILE_PATH, 999_999L)
+                        .with(admin("admin-missing"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Ghost\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("Resource not found"));
+    }
+
+    @Test
+    void adminProfileEditIsPartialAndLeavesOmittedFieldsUntouched() throws Exception {
+        // Seed a user with an existing city, then patch ONLY firstName — the city must survive.
+        User u = new User("profile-partial", "profile-partial@example.com", null);
+        u.setCity("London");
+        u.setAge(40);
+        long id = users.saveAndFlush(u).getId();
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-partial"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Solo\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Solo"))
+                .andExpect(jsonPath("$.city").value("London"))
+                .andExpect(jsonPath("$.age").value(40));
+
+        User saved = users.findById(id).orElseThrow();
+        assertThat(saved.getFirstName()).isEqualTo("Solo");
+        assertThat(saved.getCity()).isEqualTo("London");
+        assertThat(saved.getAge()).isEqualTo(40);
+    }
+
+    @Test
+    void adminProfileEditDoesNotChangeRoleOrEnabled() throws Exception {
+        // Out-of-scope invariant (TM-172): the profile endpoint never touches role/enabled — they stay
+        // governed by PATCH /admin/users/{id}. A profile edit leaves both exactly as they were.
+        long id = seed("profile-scope");
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-scope"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Scoped\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("USER"))
+                .andExpect(jsonPath("$.enabled").value(true));
+
+        User saved = users.findById(id).orElseThrow();
+        assertThat(saved.getRole()).isEqualTo(Role.USER);
+        assertThat(saved.isEnabled()).isTrue();
     }
 }

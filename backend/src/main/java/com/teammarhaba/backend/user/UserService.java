@@ -215,6 +215,78 @@ public class UserService {
     @Transactional
     public User updateProfile(VerifiedUser caller, ProfileUpdate update) {
         User user = provision(caller);
+        List<Map<String, Object>> changes = applyProfileFields(user, update);
+
+        if (!changes.isEmpty()) {
+            // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
+            // target, the source (self vs admin), and the old→new diff in its JSONB metadata. Only
+            // actual changes are recorded — a PATCH that sets a field to its current value is a no-op.
+            // Dirty-checking flushes the entity on commit.
+            audit.record(
+                    caller.uid(),
+                    AuditAction.PROFILE_UPDATED,
+                    TARGET_USER,
+                    caller.uid(),
+                    profileChangeMetadata(caller.uid(), caller.uid(), "self", changes));
+        }
+        return user;
+    }
+
+    /**
+     * Admin edit of ANOTHER user's admin-editable profile fields (TM-172). The admin console reaches
+     * this via {@code PATCH /api/v1/admin/users/{id}/profile}; authorization (ADMIN-only) is enforced
+     * at the web layer ({@code @PreAuthorize}), and this service owns the rules — which are
+     * <strong>identical</strong> to the self-edit path because both share {@link #applyProfileFields}:
+     * the same city allow-list (TM-877), age band (TM-884), E.164 phone shape, name-like check
+     * (TM-771), and timezone/locale resolution. Identity (uid/email), role and enabled are NOT
+     * touched here — those stay governed by the TM-111 admin endpoints ({@link UserAdminService}).
+     *
+     * <ul>
+     *   <li><b>404, not 403, for a missing target</b> — an unknown (or soft-deleted) id is a
+     *       {@link ResourceNotFoundException}, so the API never reveals whether an id exists (the same
+     *       no-existence-leak rule the TM-111 endpoints follow).</li>
+     *   <li><b>Audited as an admin action</b> — every effective edit appends one immutable
+     *       {@link AuditAction#ADMIN_USER_PROFILE_EDITED} row in this transaction, carrying the actor
+     *       (the admin), the target (the edited user), {@code source=admin}, and the field-level diff;
+     *       a no-op edit (every field already at its value) writes nothing.</li>
+     * </ul>
+     *
+     * @param id        the target account's database id
+     * @param update    the profile fields to apply (partial: a {@code null} field is left unchanged)
+     * @param callerUid the acting admin's Firebase uid (the audit actor)
+     * @return the updated account
+     */
+    @Transactional
+    public User adminUpdateProfile(long id, ProfileUpdate update, String callerUid) {
+        User user = users.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found."));
+        List<Map<String, Object>> changes = applyProfileFields(user, update);
+
+        if (!changes.isEmpty()) {
+            // Audited as an ADMIN action (TM-172), distinct from the user's own PROFILE_UPDATED so the
+            // log tells an admin edit apart from a self-edit. The metadata's source=admin + actor/target
+            // uids record WHO edited WHOSE profile and exactly what changed (same diff shape as TM-185).
+            audit.record(
+                    callerUid,
+                    AuditAction.ADMIN_USER_PROFILE_EDITED,
+                    TARGET_USER,
+                    user.getFirebaseUid(),
+                    profileChangeMetadata(callerUid, user.getFirebaseUid(), "admin", changes));
+        }
+        return user;
+    }
+
+    /**
+     * Apply the partial profile {@code update} onto {@code user} in place, returning the field-level
+     * change list (old→new diffs) for auditing. This is the <strong>single shared</strong> field
+     * application + validation path (TM-172): both {@link #updateProfile} (self-edit) and
+     * {@link #adminUpdateProfile} (admin-edit) call it, so the admin edit can never drift to a looser
+     * copy of the rules — the city allow-list (TM-877), age band (TM-884), E.164 phone, name-like
+     * check (TM-771 — via {@code UpdateMeRequest} bean validation at the boundary) and timezone/locale
+     * resolution all run here identically for both callers. Each {@code null} field is left unchanged;
+     * only fields that actually differ from the stored value are written and returned as changes.
+     */
+    private List<Map<String, Object>> applyProfileFields(User user, ProfileUpdate update) {
         List<Map<String, Object>> changes = new ArrayList<>();
 
         if (update.displayName() != null && !Objects.equals(user.getDisplayName(), update.displayName())) {
@@ -306,19 +378,7 @@ public class UserService {
             replaceInterests(user, update.interests(), changes);
         }
 
-        if (!changes.isEmpty()) {
-            // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
-            // target, the source (self vs admin), and the old→new diff in its JSONB metadata. Only
-            // actual changes are recorded — a PATCH that sets a field to its current value is a no-op.
-            // Dirty-checking flushes the entity on commit.
-            audit.record(
-                    caller.uid(),
-                    AuditAction.PROFILE_UPDATED,
-                    TARGET_USER,
-                    caller.uid(),
-                    profileChangeMetadata(caller.uid(), caller.uid(), "self", changes));
-        }
-        return user;
+        return changes;
     }
 
     /**
