@@ -105,26 +105,3 @@ export const dbConfig = {
 export function lettersOnlyStamp() {
   return String(Date.now()).replace(/\d/g, (d) => "abcdefghij"[Number(d)]);
 }
-
-/**
- * A distinct, valid UK E.164 phone per account (TM-931). The V48 always-on unique index
- * (`users_phone_normalized_uq`) rejects a SECOND active account claiming the same normalized number,
- * so every account provisioned/patched in the suite must hold a DIFFERENT phone — a single shared
- * literal (the old `+447700900123`) now 409s the moment a second account tries to take it.
- *
- * Ofcom's `07700 900000`–`900999` block is the reserved "drama / fictional" UK mobile range (never
- * issued to a real subscriber), so `+44770090XXX` yields 1000 safe, real-shaped numbers. We derive the
- * 3-digit suffix deterministically from the account's identity string (its email — FNV-1a → 0–999) so
- * a given account always maps to the SAME number (idempotent re-runs) and two different accounts
- * effectively never collide. Pass a per-run-unique email (e.g. `foo-${Date.now()}@…`) for in-spec
- * accounts and the number is unique per run too.
- */
-export function seededPhoneFor(email) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < email.length; i++) {
-    h ^= email.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  const suffix = String(Math.abs(h) % 1000).padStart(3, "0");
-  return `+44770090${suffix}`;
-}

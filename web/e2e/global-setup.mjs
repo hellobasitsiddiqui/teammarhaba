@@ -14,7 +14,6 @@ import {
   PROJECT_ID,
   API_BASE_URL,
   AUTH_EMULATOR_HOST,
-  seededPhoneFor,
 } from "./fixtures.mjs";
 
 /** Create the user if missing, else reset its password — returns the user record. */
@@ -70,15 +69,10 @@ async function provisionInBackend({ email, password }) {
   // onboarding-complete transition without a valid E.164 phone on record, and the client routes a
   // phone-less account back through the completion gate. Seed one first so every seeded account
   // stays a "returning, complete" fixture (mirrors the accounts' real-world state).
-  //
-  // TM-931: the phone must be UNIQUE per account. The V48 always-on unique index on the normalized
-  // phone now 409s a second account that PATCHes the same number (the old shared `+447700900123`
-  // collided at the second seed and failed the whole run), so we derive a distinct reserved-range
-  // number from the email — see `seededPhoneFor`.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: seededPhoneFor(email) }),
+    body: JSON.stringify({ phone: "+447700900123" }),
   });
   if (!phoneRes.ok) {
     throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);

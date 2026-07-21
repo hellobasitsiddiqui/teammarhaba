@@ -184,32 +184,4 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));
     }
-
-    // ---- AC6: mirror-write of a number another account holds → 409 --------------------------------
-
-    @Test
-    void mirroringAVerifiedPhoneAnotherAccountHoldsIsA409AlreadyRegistered() throws Exception {
-        // First account onboards with a verified number.
-        var first = caller("uid-enf-dup-first", "g@example.com");
-        stubVerifiedPhone("uid-enf-dup-first", "+447700900700");
-        mockMvc.perform(post("/api/v1/me/onboarding")
-                        .with(first)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Gee Gee\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900700\"}"))
-                .andExpect(status().isOk());
-
-        // Second account's Firebase reports the SAME verified number (a separator variant) — the
-        // mirror-write trips users_phone_normalized_uq and surfaces as the friendly 409, not a 500.
-        var second = caller("uid-enf-dup-second", "h@example.com");
-        stubVerifiedPhone("uid-enf-dup-second", "+44 7700 900700");
-        mockMvc.perform(post("/api/v1/me/onboarding")
-                        .with(second)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Aitch Aitch\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900700\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.detail").value(
-                        "This phone number is already registered to another account"));
-    }
 }

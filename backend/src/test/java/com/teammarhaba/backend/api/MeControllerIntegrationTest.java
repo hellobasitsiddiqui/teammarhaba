@@ -636,25 +636,6 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void patchingAPhoneAnotherAccountAlreadyHoldsIsA409AlreadyRegistered() throws Exception {
-        // TM-931: the V48 normalized-phone unique index guarantees 1:1 even flag-off. Two accounts
-        // that PATCH the SAME number (in different separator shapes — the index normalizes both to the
-        // same key) collide: the second trips the index and surfaces as the friendly 409 copy, not 500.
-        mockMvc.perform(patch("/api/v1/me")
-                        .with(caller("uid-dup-first", "dup1@example.com"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+44 20 7946 0958\"}"))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(patch("/api/v1/me")
-                        .with(caller("uid-dup-second", "dup2@example.com"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+442079460958\"}")) // same number, no separators
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.detail").value("This phone number is already registered to another account"));
-    }
-
-    @Test
     void onboardingCompleteIsIdempotentWhenAlreadyComplete() throws Exception {
         // TM-171: the first-login tour calls POST /me/onboarding-complete on finish/skip to durably
         // suppress itself — possibly for a user the TM-250 profile gate already marked complete. A

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
-import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp, seededPhoneFor } from "../fixtures.mjs";
+import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 import { completeInterestsStep } from "../helpers/onboarding.mjs";
 
 // Phone-mandatory behaviour (TM-880 — supersedes the TM-188 "blank phone is allowed" regression this
@@ -67,10 +67,7 @@ test("@profile saving with a blank phone input PRESERVES the stored phone (TM-88
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].first_name).toBe(first);
-    // TM-931: global-setup seeds ADMIN with a per-account UNIQUE phone (seededPhoneFor) now that the
-    // V48 unique index forbids the old shared +447700900123 across accounts — the "preserved" phone is
-    // whatever the seed planted, so assert against that rather than the retired shared literal.
-    expect(rows[0].phone).toBe(seededPhoneFor(ADMIN.email));
+    expect(rows[0].phone).toBe("+447700900123");
   } finally {
     await client.end();
   }

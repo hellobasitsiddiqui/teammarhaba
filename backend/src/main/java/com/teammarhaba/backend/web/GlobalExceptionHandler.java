@@ -197,47 +197,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return Problems.of(HttpStatus.CONFLICT, "Conflict", ex.getMessage());
     }
 
-    /**
-     * The normalized-phone unique index (TM-931, {@code users_phone_normalized_uq}). A mirror-write
-     * of a Firebase-verified phone that another account already holds trips this — surface it as the
-     * honest 409 "already registered" copy (matching the TM-923 hard-block wording) rather than the
-     * generic conflict below. Scoped by the index name so unrelated integrity violations aren't
-     * mislabelled.
-     */
-    static final String PHONE_UNIQUE_INDEX = "users_phone_normalized_uq";
-
-    static final String PHONE_ALREADY_REGISTERED = "This phone number is already registered to another account";
-
     /** DB / state conflict (e.g. unique-constraint violation) -> 409. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleConflict(DataIntegrityViolationException ex) {
         log.warn("Data integrity violation", ex);
-        if (violatesConstraint(ex, PHONE_UNIQUE_INDEX)) {
-            return Problems.of(HttpStatus.CONFLICT, "Conflict", PHONE_ALREADY_REGISTERED);
-        }
         return Problems.of(
                 HttpStatus.CONFLICT,
                 "Conflict",
                 "The request conflicts with the current state of the resource.");
-    }
-
-    /**
-     * Whether {@code ex}'s cause chain names {@code constraintName} — used to scope a friendly 409 to
-     * a specific unique index. Postgres names the violated constraint/index in the driver's error
-     * message, which Hibernate/Spring carry down the {@code getCause()} chain; matching on the name
-     * (rather than the exception type) keeps the mapping precise and driver-agnostic.
-     */
-    private static boolean violatesConstraint(Throwable ex, String constraintName) {
-        for (Throwable t = ex; t != null; t = t.getCause()) {
-            String message = t.getMessage();
-            if (message != null && message.contains(constraintName)) {
-                return true;
-            }
-            if (t.getCause() == t) {
-                break; // guard against a self-referential cause chain
-            }
-        }
-        return false;
     }
 
     /** Optimistic-lock conflict: someone else updated the row first (stale {@code @Version}) -> 409. */
