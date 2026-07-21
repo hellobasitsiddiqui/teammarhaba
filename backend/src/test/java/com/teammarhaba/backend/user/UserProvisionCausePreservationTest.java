@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.teammarhaba.backend.audit.AuditService;
+import com.teammarhaba.backend.auth.VerifiedPhoneService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.config.PhoneVerificationProperties;
 import com.teammarhaba.backend.interests.InterestCatalogueRepository;
 import com.teammarhaba.backend.interests.InterestSelectionConfig;
 import com.teammarhaba.backend.interests.UserInterestRepository;
@@ -32,10 +34,19 @@ class UserProvisionCausePreservationTest {
     @Mock private UserInterestRepository userInterests;
     @Mock private InterestCatalogueRepository catalogue;
     @Mock private InterestSelectionConfig interestBounds;
+    @Mock private VerifiedPhoneService verifiedPhoneService;
 
     private UserService userService() {
         return new UserService(
-                users, audit, provisioner, subscriptions, userInterests, catalogue, interestBounds);
+                users,
+                audit,
+                provisioner,
+                subscriptions,
+                userInterests,
+                catalogue,
+                interestBounds,
+                new PhoneVerificationProperties(false),
+                verifiedPhoneService);
     }
 
     @Test

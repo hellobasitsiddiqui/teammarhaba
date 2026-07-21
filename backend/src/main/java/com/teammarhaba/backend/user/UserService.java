@@ -2,9 +2,12 @@ package com.teammarhaba.backend.user;
 
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
+import com.teammarhaba.backend.auth.VerifiedPhoneService;
+import com.teammarhaba.backend.auth.VerifiedPhoneUnavailableException;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
+import com.teammarhaba.backend.config.PhoneVerificationProperties;
 import com.teammarhaba.backend.interests.InterestCatalogue;
 import com.teammarhaba.backend.interests.InterestCatalogueRepository;
 import com.teammarhaba.backend.interests.InterestSelectionConfig;
@@ -91,6 +94,14 @@ public class UserService {
     private static final java.util.regex.Pattern E164_PHONE =
             java.util.regex.Pattern.compile("^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$");
 
+    /**
+     * The stable, gate-keyable refusal message (TM-931) when verified-phone enforcement is on and the
+     * caller has no Firebase-verified phone (or it can't be read — fail closed). Distinct from the
+     * TM-880 stored-shape message so the gate UI (TM-930) can tell "verify your number" from "a phone
+     * is required".
+     */
+    static final String PHONE_NOT_VERIFIED_MESSAGE = "Phone number must be verified before completing onboarding";
+
     private final UserRepository users;
     private final AuditService audit;
     private final UserProvisioner provisioner;
@@ -98,6 +109,8 @@ public class UserService {
     private final UserInterestRepository userInterests;
     private final InterestCatalogueRepository catalogue;
     private final InterestSelectionConfig interestBounds;
+    private final PhoneVerificationProperties phoneVerification;
+    private final VerifiedPhoneService verifiedPhoneService;
 
     public UserService(
             UserRepository users,
@@ -106,7 +119,9 @@ public class UserService {
             SubscriptionRepository subscriptions,
             UserInterestRepository userInterests,
             InterestCatalogueRepository catalogue,
-            InterestSelectionConfig interestBounds) {
+            InterestSelectionConfig interestBounds,
+            PhoneVerificationProperties phoneVerification,
+            VerifiedPhoneService verifiedPhoneService) {
         this.users = users;
         this.audit = audit;
         this.provisioner = provisioner;
@@ -114,6 +129,8 @@ public class UserService {
         this.userInterests = userInterests;
         this.catalogue = catalogue;
         this.interestBounds = interestBounds;
+        this.phoneVerification = phoneVerification;
+        this.verifiedPhoneService = verifiedPhoneService;
     }
 
     /**
@@ -433,6 +450,11 @@ public class UserService {
     @Transactional
     public User completeOnboarding(VerifiedUser caller) {
         User user = provision(caller);
+        // TM-931: when enforcement is on, the caller's Firebase-verified phone is read and mirrored
+        // onto users.phone BEFORE the TM-880 stored-shape check, so the mirrored (always-E.164)
+        // verified number is what requirePhoneOnRecord then validates, and a phone-less/unverified
+        // account is refused with the distinct verified-phone message rather than the TM-880 one.
+        enforceVerifiedPhoneIfRequired(caller, user);
         requirePhoneOnRecord(user);
         boolean wasComplete = user.isOnboardingCompleted();
         boolean ageWasVerified = user.isAgeVerified();
@@ -513,6 +535,10 @@ public class UserService {
         user.setCity(city);
         user.setAge(age); // range already enforced (18–99) by bean validation at the boundary
         user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
+        // TM-931: when enforcement is on, the Firebase-verified phone wins over the client-supplied
+        // one just set above — read it and mirror it onto users.phone (refusing if it can't be
+        // established). A phone-less/unverified caller is refused with the distinct verified message.
+        enforceVerifiedPhoneIfRequired(caller, user);
 
         boolean wasComplete = user.isOnboardingCompleted();
         user.completeOnboarding();
@@ -569,6 +595,48 @@ public class UserService {
         String phone = user.getPhone();
         if (phone == null || !E164_PHONE.matcher(phone).matches()) {
             throw new BadRequestException("A phone number is required to complete onboarding");
+        }
+    }
+
+    /**
+     * TM-931 (subticket B of TM-923): server-side verified-phone enforcement, flag-gated by
+     * {@code app.phone.require-verified} (default off). A no-op when the flag is off — Firebase is
+     * never touched on the onboarding paths, so flag-off behaviour is byte-for-byte the pre-TM-931
+     * baseline (the TM-880 {@link #requirePhoneOnRecord} rule alone).
+     *
+     * <p>When the flag is on: read the caller's Firebase-verified E.164 phone (fail-closed — a
+     * missing bean / absent user / SDK error / null phone all refuse), then <strong>mirror it onto
+     * {@code users.phone}</strong>, the verified value winning over any client-supplied one. A
+     * refusal surfaces as the distinct, stable {@link #PHONE_NOT_VERIFIED_MESSAGE} {@code 400} the
+     * gate UI (TM-930) keys on. The mirror is audited only when it actually changes the stored value.
+     */
+    private void enforceVerifiedPhoneIfRequired(VerifiedUser caller, User user) {
+        if (!phoneVerification.requireVerified()) {
+            return; // flag off — no Firebase call, pre-TM-931 behaviour preserved.
+        }
+        String verifiedPhone;
+        try {
+            verifiedPhone = verifiedPhoneService.requireVerifiedPhone(caller.uid());
+        } catch (VerifiedPhoneUnavailableException ex) {
+            // Fail closed: no verified phone (or an unreadable identity provider) refuses the
+            // transition with the distinct message; the cause is already logged by the service.
+            throw new BadRequestException(PHONE_NOT_VERIFIED_MESSAGE);
+        }
+        // Mirror the verified E.164 onto users.phone — it always fits VARCHAR(32) and always wins over
+        // the client value. Audit only a real change (mirroring the no-op-edit discipline elsewhere).
+        String previous = user.getPhone();
+        if (!Objects.equals(previous, verifiedPhone)) {
+            user.setPhone(verifiedPhone);
+            audit.record(
+                    caller.uid(),
+                    AuditAction.PROFILE_UPDATED,
+                    TARGET_USER,
+                    caller.uid(),
+                    profileChangeMetadata(
+                            caller.uid(),
+                            caller.uid(),
+                            "self",
+                            List.of(change("phone", previous, verifiedPhone))));
         }
     }
 
