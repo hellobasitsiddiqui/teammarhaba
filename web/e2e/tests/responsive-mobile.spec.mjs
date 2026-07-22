@@ -145,9 +145,13 @@ test.describe("@responsive the account nav collapses behind a hamburger", () => 
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
     await signInAsAdmin(page);
-    // Land on home so the signed-in nav items exist.
-    await page.evaluate(() => (window.location.hash = "#/home"));
-    await expect(page.locator("#auth-signed-in")).toBeVisible();
+    // Land on a signed-in route that STILL carries the floating hamburger so the utility-menu
+    // open/close behaviour under test is reachable. NOTE (TM-908): Home (#/home) is now content-first
+    // — corner-bell.js hides #nav-toggle and pins the bell top-right there — so the hamburger no
+    // longer exists on Home. #/notifications is a signed-in utility screen that keeps the normal nav
+    // row, so the hamburger + its collapsed menu are present to exercise here.
+    await page.evaluate(() => (window.location.hash = "#/notifications"));
+    await expect(page.locator("#notifications-view")).toBeVisible();
 
     const nav = page.locator(".app-nav");
     const toggle = page.locator("#nav-toggle");

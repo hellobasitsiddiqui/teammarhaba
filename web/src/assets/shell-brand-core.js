@@ -20,16 +20,23 @@
 // driven from router.js's render() — the single source of truth for route chrome, the same
 // mechanism as updateTabbar/updateFooter — NOT by per-screen CSS.
 //
-// Deliberately NOT hidden (yet) on Home / Events / Chat / admin: those screens' current look keeps
-// the global brand chrome (index.html's "the wireframe's brand + bell chrome stays global" note,
-// TM-512). Extending this rule to them is a one-line SELF_HEADED addition if design retires the
-// block there too — flagged on TM-886 as a follow-up decision, not silently changed here.
+// Content-first Home (TM-908): Home NOW opts into this rule too. The follow-up decision flagged on
+// TM-886 ("extend to Home/Events if design retires the block there") landed for Home in the top-
+// chrome rework (TM-908 Home / TM-909 Events / TM-910 Profile): the walking-skeleton brand block
+// (the "Circle" wordmark, the "Find your people…" tagline, the "#status" line) is retired above the
+// Home feed so the feed's own "Events near you" heading is the first content. Events (`#/events`) is
+// still handled in its OWN lane (TM-909) and adds its route here when it lands. Chat / admin keep the
+// global brand chrome for now — extending to them is the same one-line SELF_HEADED addition.
 
 /**
  * The routes whose screens own their full-page header, so the shell brand block must NOT paint
  * above them:
  *   • `#/profile` + `#/profile/public` — the Profile hub / public preview ("Profile" header,
  *     TM-514). THE TM-885/TM-886 screens.
+ *   • `#/home` — the signed-in Home feed (TM-512). Content-first (TM-908): the feed leads with its
+ *     own "Events near you" heading, so the walking-skeleton wordmark/tagline/#status must not paint
+ *     above it. Only the SIGNED-IN Home is affected — the signed-out auth landing is a separate view
+ *     (#auth-signed-out on #/login) with its own lockup, untouched by this route rule.
  *   • `#/onboarding` — the first-run / phone completion gate ("Complete your profile" card,
  *     TM-250/TM-880). This is the tab-bar-less gate screen every phone-less account is re-routed
  *     to (mandatory phone, #587) — the screen the TM-885/TM-886 user report was actually looking
@@ -37,7 +44,7 @@
  *   • `#/terms` — the sibling first-run gate (TM-170), rendered as the same self-headed full-page
  *     card in the same gate chain; scoped together so the two gates can't drift apart visually.
  */
-export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/onboarding", "#/terms"]);
+export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/onboarding", "#/terms"]);
 
 /**
  * Whether the app-shell brand block (wordmark h1 + tagline + #status line) should be hidden for

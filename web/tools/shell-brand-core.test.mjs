@@ -38,8 +38,18 @@ test("brand block hides on the first-run gates (the re-gate screen the report wa
   assert.equal(shellBrandHidden("#/terms"), true);
 });
 
-test("brand block stays on every other route (login/home/events/chat/admin unchanged)", () => {
-  for (const route of ["#/login", "#/home", "#/events", "#/events/42", "#/chat", "#/chat/7",
+test("brand block hides on the signed-in Home feed (content-first, TM-908)", () => {
+  // Home opts into the self-headed rule: its "Events near you" heading is the first content, so the
+  // walking-skeleton wordmark/tagline/#status must not paint above it. A hypothetical Home sub-route
+  // (`#/home/...`) must match too, via the same prefix rule the profile sub-route uses.
+  assert.equal(shellBrandHidden("#/home"), true);
+  assert.equal(shellBrandHidden("#/home/feed"), true, "a Home sub-route matches via the prefix rule");
+});
+
+test("brand block stays on every other route (login/events/chat/admin unchanged)", () => {
+  // #/home is NOW self-headed (TM-908) so it is deliberately absent here — see the Home test above.
+  // #/login stays shown: the signed-out auth landing card owns its own lockup and is unaffected.
+  for (const route of ["#/login", "#/events", "#/events/42", "#/chat", "#/chat/7",
     "#/admin", "#/admin/events", "#/help", "#/notifications", "#/diagnostics"]) {
     assert.equal(shellBrandHidden(route), false, `expected the brand block to stay on ${route}`);
   }
@@ -60,7 +70,8 @@ test("fails safe (shown) on junk input", () => {
 
 test("the self-headed route list is frozen and exactly the decided set", () => {
   assert.ok(Object.isFrozen(SELF_HEADED_ROUTES));
-  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/onboarding", "#/terms"]);
+  // #/home added by TM-908 (content-first Home); Events (#/events) is added by its own lane later.
+  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/onboarding", "#/terms"]);
 });
 
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
@@ -85,13 +96,21 @@ function fakeDoc({ withStatus = true } = {}) {
   };
 }
 
-test("updateShellBrand hides all three brand elements on #/profile and restores them on #/home", () => {
+test("updateShellBrand hides all three brand elements on #/profile and restores them on #/events", () => {
   const doc = fakeDoc();
   updateShellBrand({ route: "#/profile" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
-  // Navigating away restores the block (render() reruns this on every hashchange/auth change).
-  updateShellBrand({ route: "#/home" }, doc);
+  // Navigating to a route that still shows the block restores it (render() reruns this on every
+  // hashchange/auth change). #/events is chosen deliberately: #/home is now self-headed (TM-908) and
+  // would keep the block hidden, so it can no longer stand in for a "block restored" route here.
+  updateShellBrand({ route: "#/events" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [false, false, false]);
+});
+
+test("updateShellBrand also hides the block on the signed-in Home feed (TM-908)", () => {
+  const doc = fakeDoc();
+  updateShellBrand({ route: "#/home" }, doc);
+  assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
 });
 
 test("updateShellBrand skips missing elements and a missing document without throwing", () => {
