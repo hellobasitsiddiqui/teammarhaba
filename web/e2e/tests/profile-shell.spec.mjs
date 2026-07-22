@@ -160,6 +160,10 @@ test("@profile-shell the phone re-gate (#/onboarding) shows its own header only 
   const client = new pg.Client(dbConfig);
   await client.connect();
   try {
+    // Raw-SQL legacy-state setup (kept deliberately, TM-934): NULL the seeded ADMIN's phone to simulate
+    // a pre-verification / pre-TM-880 phone-less account, so the re-gate that intercepts a phone-less
+    // completed account can be exercised. This is a legitimate raw-SQL exception to the "seed via the
+    // verified path" rule — the whole point is to reproduce the phone-LESS state the verified path can't.
     await client.query("UPDATE users SET phone = NULL WHERE lower(email) = lower($1)", [ADMIN.email]);
 
     await signInExpectingGate(page);
@@ -177,8 +181,8 @@ test("@profile-shell the phone re-gate (#/onboarding) shows its own header only 
     await expect(page.locator("#app-tabbar")).toBeHidden();
   } finally {
     // Restore the seeded fixture for the specs that run after this one (global-setup only runs once
-    // per suite): put the provisioned phone back.
-    await client.query("UPDATE users SET phone = '+447700900123' WHERE lower(email) = lower($1)", [ADMIN.email]);
+    // per suite): put ADMIN's OWN allocated verified phone back (TM-934 — was the shared +447700900123).
+    await client.query("UPDATE users SET phone = $2 WHERE lower(email) = lower($1)", [ADMIN.email, ADMIN.phone]);
     await client.end();
   }
 });

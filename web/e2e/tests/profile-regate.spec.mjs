@@ -22,7 +22,7 @@
 // pattern); tour-suppression beforeEach; email+password "Try another way" sign-in.
 
 import { test, expect } from "@playwright/test";
-import { AUTH_EMULATOR_HOST, API_BASE_URL } from "../fixtures.mjs";
+import { AUTH_EMULATOR_HOST, API_BASE_URL, uniqueTestPhone } from "../fixtures.mjs";
 
 // The completion gate deliberately hides the bottom tab bar (a gate must not be side-steppable —
 // the TM-885 verdict), and the bar only renders at a phone width (`@media (max-width: 33rem)` —
@@ -74,10 +74,13 @@ async function createCompletedAccount() {
   if (!meRes.ok) throw new Error(`provision (GET /me) failed for ${email}: ${meRes.status} ${await meRes.text()}`);
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
+  // TM-934: a per-run-unique number so this fresh "completed" account never collides with a persona or
+  // a prior run under the strict 1:1 uniqueness rule (V48 index). The test then CLEARS it (below) to
+  // exercise the phone-less re-gate, so the specific value doesn't matter beyond being unique + valid.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: "+447700900123" }),
+    body: JSON.stringify({ phone: uniqueTestPhone() }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
 

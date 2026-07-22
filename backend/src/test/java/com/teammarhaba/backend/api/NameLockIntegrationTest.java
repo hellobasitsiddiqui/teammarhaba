@@ -190,18 +190,21 @@ class NameLockIntegrationTest extends AbstractIntegrationTest {
         // The onboarding gate re-submit is the SECOND self write path. A locked user re-submitting with
         // a DIFFERENT display name is a rename → refused. (A phone is on record so the gate's own
         // requirements are met and we exercise the name lock, not the phone gate.)
+        // TM-934: a phone unique to this test — the V48 users_phone_normalized_uq index makes every
+        // persisted phone in the shared Testcontainers DB unique, so no two test methods may store the
+        // same number (was the shared +447700900123, also used by MeProfilePatch/MeController tests).
         seedAttendedUser("uid-locked-onboard", u -> {
             u.setDisplayName("Omar Farouk");
             u.setFirstName("Omar");
             u.setLastName("Farouk");
-            u.setPhone("+447700900123");
+            u.setPhone("+447700901401");
         });
 
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-locked-onboard"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Renamed Person\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900123\"}"))
+                                + "\"phone\":\"+447700901401\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.detail").value(NameLockedException.DETAIL));
 

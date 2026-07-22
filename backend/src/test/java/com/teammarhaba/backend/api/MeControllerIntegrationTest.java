@@ -130,11 +130,14 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                   "lastName": "Lovelace",
                   "city": "London",
                   "age": 36,
-                  "phone": "+44 20 7946 0958",
+                  "phone": "+44 20 7946 1003",
                   "notificationPref": "BOTH",
                   "timezone": "Europe/London",
                   "locale": "en-GB"
                 }""";
+        // TM-934: this test's phone is unique to it — the V48 users_phone_normalized_uq index makes
+        // every persisted phone in the shared Testcontainers DB unique, so no two test methods may
+        // store the same number (was the shared +44 20 7946 0958, also used by MeProfilePatch tests).
 
         // PATCH echoes the persisted profile back.
         mockMvc.perform(patch("/api/v1/me").with(who).contentType(MediaType.APPLICATION_JSON).content(body))
@@ -144,7 +147,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.lastName").value("Lovelace"))
                 .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(36))
-                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"))
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 1003"))
                 .andExpect(jsonPath("$.notificationPref").value("BOTH"))
                 .andExpect(jsonPath("$.timezone").value("Europe/London"))
                 .andExpect(jsonPath("$.locale").value("en-GB"));
@@ -159,7 +162,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.lastName").value("Lovelace"))
                 .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(36))
-                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"))
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 1003"))
                 .andExpect(jsonPath("$.notificationPref").value("BOTH"))
                 .andExpect(jsonPath("$.timezone").value("Europe/London"))
                 .andExpect(jsonPath("$.locale").value("en-GB"));
@@ -539,11 +542,12 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         var who = caller("uid-onboard", "ada@example.com");
 
         // Age supplied first (TM-162), so completing onboarding self-attests it (TM-163). A phone
-        // must also be on record before the transition is allowed (TM-880).
+        // must also be on record before the transition is allowed (TM-880). TM-934: a number unique
+        // to this test — the V48 unique index bans reusing one literal across methods (shared DB).
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"age\":36,\"phone\":\"+447700900123\"}"))
+                        .content("{\"age\":36,\"phone\":\"+447700901201\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))

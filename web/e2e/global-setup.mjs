@@ -3,7 +3,15 @@
 // USER to disable. Runs once before the suite. Assumes the Auth emulator + backend are already
 // up (the workflow / local instructions start them first).
 //
-// Idempotent: re-running recreates the accounts and re-applies the ADMIN claim.
+// TM-934 (verified, unique phones): under TM-923's strict 1:1 phone uniqueness, every seeded persona
+// gets its OWN fixed number (+4477009001NN, see fixtures.mjs). Each number is seeded BOTH as a verified
+// Firebase phone (Admin SDK `phoneNumber` in ensureUser — verified-by-construction, and the emulator
+// enforces cross-account uniqueness) AND mirrored onto the backend users.phone row (provisionInBackend),
+// which the V48 users_phone_normalized_uq index and the TM-880 onboarding-complete check read. The old
+// scheme PATCHed the SAME +447700900123 for all nine accounts — that now 409s on the always-on index.
+//
+// Idempotent: re-running recreates the accounts, re-applies the ADMIN claim, and re-seeds each persona
+// with its OWN number (a no-op against both the emulator's uniqueness and the DB index).
 import admin from "firebase-admin";
 import {
   ADMIN,
@@ -14,17 +22,31 @@ import {
   PROJECT_ID,
   API_BASE_URL,
   AUTH_EMULATOR_HOST,
+  assertUniquePersonaPhones,
 } from "./fixtures.mjs";
 
-/** Create the user if missing, else reset its password — returns the user record. */
-async function ensureUser(auth, { email, password }) {
+/**
+ * Create the user if missing, else reset its password — returns the user record. TM-934: also seeds the
+ * persona's allocated phone as a VERIFIED Firebase phone (Admin SDK `phoneNumber`), verified-by-
+ * construction. This is the same mechanism production uses (a phone lands on the Firebase account only
+ * once OTP-linked), and the Auth emulator enforces strict 1:1 uniqueness across accounts — so seeding
+ * two personas with the same number would throw here, loudly, at setup. Idempotent: re-seeding the same
+ * uid with its OWN number is a no-op update (the emulator doesn't treat a number already owned by THIS
+ * account as a duplicate), so re-runs against a persisted emulator don't trip the uniqueness block.
+ *
+ * @param {{email:string, password:string, phone?:string}} persona
+ */
+async function ensureUser(auth, { email, password, phone }) {
+  // The verified-phone fields to set, only when the persona carries an allocated number (TM-934). All
+  // seeded personas do; the guard keeps ensureUser usable for a phone-less account if ever needed.
+  const phoneFields = phone ? { phoneNumber: phone } : {};
   try {
     const existing = await auth.getUserByEmail(email);
-    await auth.updateUser(existing.uid, { password, emailVerified: true, disabled: false });
+    await auth.updateUser(existing.uid, { password, emailVerified: true, disabled: false, ...phoneFields });
     return existing;
   } catch (err) {
     if (err && err.code === "auth/user-not-found") {
-      return auth.createUser({ email, password, emailVerified: true });
+      return auth.createUser({ email, password, emailVerified: true, ...phoneFields });
     }
     throw err;
   }
@@ -43,7 +65,7 @@ async function ensureUser(auth, { email, password }) {
  *  Returns the account's authed request headers (Bearer + Accept) so a caller can make further
  *  first-party API calls as this account without minting a second token — used by the broadcast
  *  recipient seeding (TM-366) to PATCH the notification pref and register a device token. */
-async function provisionInBackend({ email, password }) {
+async function provisionInBackend({ email, password, phone }) {
   const signInUrl =
     `http://${AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`;
   const signInRes = await fetch(signInUrl, {
@@ -67,12 +89,22 @@ async function provisionInBackend({ email, password }) {
 
   // Un-gate the seeded account (TM-880): phone is mandatory now — the backend refuses the
   // onboarding-complete transition without a valid E.164 phone on record, and the client routes a
-  // phone-less account back through the completion gate. Seed one first so every seeded account
-  // stays a "returning, complete" fixture (mirrors the accounts' real-world state).
+  // phone-less account back through the completion gate.
+  //
+  // TM-934: mirror the persona's OWN allocated verified phone onto users.phone (each persona has a
+  // distinct +4477009001NN — see fixtures). The Firebase side is already the verified source of truth
+  // (ensureUser set auth.phoneNumber = this same number, verified-by-construction). We still PATCH it
+  // onto the backend row here because, with verified-phone ENFORCEMENT off by default (TM-931 flag
+  // app.phone.require-verified=false — never set in committed config), the backend does NOT auto-mirror
+  // the Firebase phone onto users.phone; requirePhoneOnRecord (the flag-off baseline) validates the
+  // stored users.phone, and the V48 users_phone_normalized_uq index is on that column too. Because every
+  // persona's number is unique, the always-on index accepts all nine seeds (the old shared
+  // +447700900123 409'd on the second account). Idempotent: re-PATCHing a persona with its OWN number
+  // is a no-op against the index (its own row already holds that normalized number).
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: "+447700900123" }),
+    body: JSON.stringify({ phone }),
   });
   if (!phoneRes.ok) {
     throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
@@ -154,6 +186,10 @@ async function seedBroadcastRecipient(auth, recipient) {
 }
 
 export default async function globalSetup() {
+  // TM-934: fail loudly NOW if two personas were allocated the same phone (a table copy-paste slip),
+  // rather than letting it surface as an opaque Admin-SDK "phone already in use" or index 409 mid-seed.
+  assertUniquePersonaPhones();
+
   // Point the Admin SDK at the emulator (no real credentials needed).
   process.env.FIREBASE_AUTH_EMULATOR_HOST ||= AUTH_EMULATOR_HOST;
   if (!admin.apps.length) admin.initializeApp({ projectId: PROJECT_ID });
@@ -192,6 +228,7 @@ export default async function globalSetup() {
 
   console.log(
     `[e2e] seeded admin + target + ${BROADCAST_RECIPIENTS.length} broadcast recipients + ` +
-      `${EVENT_ACCOUNTS.length} events-journey accounts + 1 chat-foundation account and provisioned them in the backend`,
+      `${EVENT_ACCOUNTS.length} events-journey accounts + 1 chat-foundation account (each with its own ` +
+      `verified, unique phone — TM-934) and provisioned them in the backend`,
   );
 }

@@ -49,6 +49,13 @@ async function signInFreshUser(page, email) {
 
 test("@onboarding a brand-new user is gated, completes the profile, and then enters the app", async ({ page }) => {
   const email = `e2e-onboard-${Date.now()}@teammarhaba.test`;
+  // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
+  // strict 1:1 Firebase phone uniqueness a FIXED number (was +447700900456) would already be linked on a
+  // re-run against a non-wiped emulator. Derive a per-run GB national/E.164 pair from the clock (5-digit
+  // tail, clear of the persona band +4477009001NN).
+  const phoneTail = String(Date.now() % 100_000).padStart(5, "0");
+  const gateNational = `7700 9${phoneTail}`;
+  const gateE164 = `+4477009${phoneTail}`;
   // TM-898: location is the TM-877 allowed-cities dropdown now (it was free text, which let the
   // gate persist an off-list city the profile form refuses). A multi-word list city pins the
   // value-with-a-space case end-to-end.
@@ -87,10 +94,10 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await page.fill("#onboarding-name", "Fresh User");
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", "27");
-  await page.fill("#onboarding-phone", "7700 900456");
+  await page.fill("#onboarding-phone", gateNational);
   // TM-930: the phone must be OTP-VERIFIED (Firebase phone verify + link) before the gate submits —
   // send the code, peek it from the Auth emulator, auto-submit the six boxes → "Verified ✓".
-  await verifyGatePhone(page, "+447700900456");
+  await verifyGatePhone(page, gateE164);
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );
@@ -132,7 +139,7 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
     expect(rows[0].display_name).toBe("Fresh User");
     expect(rows[0].city).toBe(location);
     expect(rows[0].age).toBe(27);
-    expect(rows[0].phone).toBe("+447700900456"); // GB picker + national digits, trunk 0 absent
+    expect(rows[0].phone).toBe(gateE164); // GB picker + national digits, trunk 0 absent (TM-934: run-unique)
     expect(rows[0].onboarding_completed).toBe(true);
   } finally {
     await client.end();

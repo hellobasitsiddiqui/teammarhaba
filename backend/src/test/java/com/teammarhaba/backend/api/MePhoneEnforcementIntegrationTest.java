@@ -74,11 +74,12 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
         var who = caller("uid-enf-complete-null", "a@example.com");
         stubVerifiedPhone("uid-enf-complete-null", null);
         // A stored (client) phone is present so the TM-880 rule alone would PASS — enforcement is what
-        // refuses, keyed on the absence of a Firebase-VERIFIED number.
+        // refuses, keyed on the absence of a Firebase-VERIFIED number. TM-934: a number unique to this
+        // test (the V48 users_phone_normalized_uq index bans reusing one literal across methods).
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900123\"}"))
+                        .content("{\"phone\":\"+447700901301\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -99,7 +100,7 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Bee Bee\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900123\"}"))
+                                + "\"phone\":\"+447700901302\"}")) // TM-934: unique per test (V48 index)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));
@@ -158,7 +159,7 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900123\"}"))
+                        .content("{\"phone\":\"+447700901303\"}")) // TM-934: unique per test (V48 index)
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -179,7 +180,7 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Eff Eff\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900123\"}"))
+                                + "\"phone\":\"+447700901304\"}")) // TM-934: unique per test (V48 index)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));

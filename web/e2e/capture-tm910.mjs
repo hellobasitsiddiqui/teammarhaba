@@ -1,3 +1,6 @@
+// TM-934 (migrated): seeds its account with uniqueTestPhone() (a per-run-unique Ofcom-fictional GB
+//   number), not the old shared +447700900123 — under TM-923 strict 1:1 phone uniqueness the shared
+//   literal 409s the V48 users_phone_normalized_uq index on any account after the first. Not a CI path.
 // TM-910 — before/after visual evidence for the Profile-tab chrome rework at an Android-phone
 // viewport (390×844), for BOTH a normal user AND an admin.
 //
@@ -34,7 +37,7 @@ import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "./fixtures.mjs";
+import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID, uniqueTestPhone } from "./fixtures.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.CAPTURE_OUT || join(HERE, "capture-out-tm910");
@@ -92,7 +95,7 @@ async function seed(account) {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
     body: JSON.stringify({ firstName: account.admin ? "Ada" : "Sam", lastName: account.admin ? "Admin" : "User",
-      city: "London", age: 30, phone: "+447700900123" }),
+      city: "London", age: 30, phone: uniqueTestPhone() }),
   });
   if (!patchRes.ok) throw new Error(`seed profile failed: ${patchRes.status} ${await patchRes.text()}`);
 

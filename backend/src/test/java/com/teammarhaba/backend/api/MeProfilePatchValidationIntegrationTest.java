@@ -134,13 +134,15 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
         // exactly as it was — the partial-PATCH contract applied to phone specifically.
         var who = caller("uid-keep-phone", "x@example.com");
 
-        // Establish a phone on the record.
+        // Establish a phone on the record. TM-934: a number unique to THIS test method — the
+        // users_phone_normalized_uq index (V48) makes every persisted phone in the shared
+        // Testcontainers DB unique, so tests can no longer reuse one literal across methods.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+44 20 7946 0958\"}"))
+                        .content("{\"phone\":\"+44 20 7946 1001\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"));
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 1001"));
 
         // A later PATCH that OMITS phone (edits only the display name) must not wipe it.
         mockMvc.perform(patch("/api/v1/me")
@@ -149,14 +151,14 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
                         .content("{\"displayName\":\"Ada L\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Ada L"))
-                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"));
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 1001"));
 
         // And it is genuinely still on the row, not just echoed.
         mockMvc.perform(get("/api/v1/me").with(who))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("+44 20 7946 0958"));
+                .andExpect(jsonPath("$.phone").value("+44 20 7946 1001"));
         assertThat(users.findByFirebaseUid("uid-keep-phone").orElseThrow().getPhone())
-                .isEqualTo("+44 20 7946 0958");
+                .isEqualTo("+44 20 7946 1001");
     }
 
     @Test
@@ -275,10 +277,12 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
         var who = caller("uid-clear-phone", "x@example.com");
 
         // Set a valid phone first so the clear is observable as a real transition, not a no-op.
+        // TM-934: a number unique to this test (the V48 unique index bans reusing one literal across
+        // methods in the shared Testcontainers DB); the value is irrelevant — it's cleared next.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900123\"}"))
+                        .content("{\"phone\":\"+447700901103\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(patch("/api/v1/me")
