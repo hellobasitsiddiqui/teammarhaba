@@ -18,6 +18,8 @@ import {
   homeSections,
   bookable,
   SEE_ALL_LABEL,
+  SEE_ALL_TEXT,
+  SEE_ALL_ARROW,
 } from "../src/assets/home-core.js";
 
 // A fixed "now" and a deterministic tz/locale so time formatting is stable across CI machines.
@@ -53,6 +55,17 @@ test("homeCardTag: reads a category from any of the plausible field shapes, else
   assert.equal(homeCardTag({ category: "   " }), null);
   assert.equal(homeCardTag({}), null);
   assert.equal(homeCardTag(null), null);
+});
+
+test("SEE_ALL_* copy: the word part is the accessible name, the arrow is a separate decorative glyph (TM-969)", () => {
+  // home.js renders SEE_ALL_TEXT as the accessible link text and SEE_ALL_ARROW in an aria-hidden span,
+  // so screen readers announce just "See all events" (not "…right-arrow"). The full label composes both.
+  assert.equal(SEE_ALL_TEXT, "See all events");
+  assert.equal(SEE_ALL_ARROW, "→");
+  assert.equal(SEE_ALL_LABEL, `${SEE_ALL_TEXT} ${SEE_ALL_ARROW}`);
+  assert.equal(SEE_ALL_LABEL, "See all events →"); // unchanged visible copy
+  // The accessible name must NOT contain the arrow glyph.
+  assert.doesNotMatch(SEE_ALL_TEXT, /→/);
 });
 
 test("homeRsvpState: maps myState to the three wireframe button variants", () => {
@@ -308,4 +321,52 @@ test("homeSections: sections 1 & 2 (MY events) are NOT trimmed — all my events
   const yours = homeSections(many, CTX).sections.find((s) => s.key === "your-events");
   assert.equal(yours.cards.length, 6); // uncapped
   assert.equal(yours.isTeaser, false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// WAITLISTED events (TM-969 fix): a member whose only relationship to any event is WAITLISTED must NOT
+// fall through into the first-run empty-home state — the old flat homeFeed surfaced their waitlisted
+// events, so "Your events" (and "Happening now" when live) now covers GOING *and* WAITLISTED. Section 3
+// still excludes waitlisted events (they're already mine, not a "join something new" teaser).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("homeSections: a WAITLISTED-only member does NOT get the empty-home state — the event shows in 'Your events' (TM-969)", () => {
+  const waitlistedOnly = { id: 1, heading: "Popular walk", myState: "WAITLISTED", startAt: "2026-07-20T18:00:00Z" };
+
+  const out = homeSections([waitlistedOnly], CTX);
+  // The regression guard: a WAITLISTED-only Home is NOT the first-run empty state.
+  assert.equal(out.isEmpty, false);
+  const yours = out.sections.find((s) => s.key === "your-events");
+  assert.ok(yours, "the Your events section is present for a waitlisted-only member");
+  assert.deepEqual(yours.cards.map((c) => c.id), [1]);
+  // It keeps its honest 'Waitlist' affordance (not surfaced as a 'Going' card).
+  assert.deepEqual(yours.cards[0].state, { kind: "waitlist", label: "Waitlist" });
+});
+
+test("homeSections: 'Your events' surfaces both my GOING and my WAITLISTED upcoming events (TM-969)", () => {
+  const going = { id: 1, heading: "Confirmed", myState: "GOING", startAt: "2026-07-20T18:00:00Z" };
+  const waitlisted = { id: 2, heading: "On the waitlist", myState: "WAITLISTED", startAt: "2026-07-21T18:00:00Z" };
+
+  const yours = homeSections([going, waitlisted], CTX).sections.find((s) => s.key === "your-events");
+  assert.deepEqual(yours.cards.map((c) => c.id), [1, 2]); // both mine appear, soonest-first
+});
+
+test("homeSections: 'Happening now' includes a live WAITLISTED event of mine (TM-969)", () => {
+  const liveWaitlisted = { id: 1, heading: "Live, on waitlist", myState: "WAITLISTED", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+
+  const now = homeSections([liveWaitlisted], CTX).sections.find((s) => s.key === "happening-now");
+  assert.ok(now, "a live waitlisted event of mine shows under Happening now");
+  assert.deepEqual(now.cards.map((c) => c.id), [1]);
+  assert.deepEqual(now.cards[0].state, { kind: "waitlist", label: "Waitlist" });
+});
+
+test("homeSections: a WAITLISTED event never leaks into the 'Events near you' teaser (it's already mine) (TM-969)", () => {
+  const myWaitlisted = { id: 1, heading: "Mine, waitlisted", myState: "WAITLISTED", city: "Mk", capacity: 10, goingCount: 3, startAt: "2026-07-20T18:00:00Z" };
+  const other = { id: 2, heading: "Bookable", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([myWaitlisted, other], { ...CTX, city: "Mk" });
+  const near = out.sections.find((s) => s.key === "near-you");
+  assert.deepEqual(near.cards.map((c) => c.id), [2]); // my waitlisted event isn't a "near you" teaser card
+  // …it's surfaced under 'Your events' instead.
+  assert.deepEqual(out.sections.find((s) => s.key === "your-events").cards.map((c) => c.id), [1]);
 });

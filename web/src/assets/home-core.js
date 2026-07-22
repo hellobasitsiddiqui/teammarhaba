@@ -11,12 +11,14 @@
 // up to THREE priority sections, rendered top→bottom, each shown ONLY when it has events (empty
 // sections collapse entirely — no orphan header, so the highest non-empty section is always the first
 // content the member sees):
-//   1. "Happening now" — my attending events (myState === "GOING") that are live now.
-//   2. "Your events"   — my upcoming attending events (GOING, not yet live).
-//   3. "Events near you" — nearby events I am NOT attending, BOOKABLE ONLY, as a trimmed teaser
+//   1. "Happening now" — my events (myState GOING or WAITLISTED) that are live now.
+//   2. "Your events"   — my upcoming events (GOING or WAITLISTED, not yet live).
+//   3. "Events near you" — nearby events I am NOT part of, BOOKABLE ONLY, as a trimmed teaser
 //                          (small cap) followed by a "See all events →" link to #/events.
-// The old behaviours fall out of the collapse rule for free: no live-attending → section 2 leads;
-// nothing attending at all → section 3 leads (= the previous today's-near-you Home).
+// WAITLISTED events count as "mine" (sections 1/2) so a waitlisted-only member is never dropped into the
+// empty-home state — a regression from the old flat homeFeed, which surfaced waitlisted events (TM-969).
+// The old behaviours fall out of the collapse rule for free: no live-mine → section 2 leads; nothing of
+// mine at all → section 3 leads (= the previous today's-near-you Home).
 //
 // It builds the Home view-model the DOM shell renders verbatim:
 //   • the section context line ("Upcoming meetups near <city>" — honest about the unfiltered feed, TM-734);
@@ -159,10 +161,20 @@ export function homeCardModel(card, { tz, locale, now = Date.now() } = {}) {
   };
 }
 
-/** Is the caller attending this event (RSVP'd GOING)? The single "my events" predicate the two
- *  attending-first sections share, so "Happening now" and "Your events" can never disagree on it. */
-function isAttending(card) {
-  return card?.myState === "GOING";
+/**
+ * Is this one of MY events — i.e. do I have a personal RSVP relationship to it (GOING or WAITLISTED)?
+ * The single "my events" predicate the two attending-first sections share, so "Happening now" and
+ * "Your events" can never disagree on it.
+ *
+ * TM-969 fix: WAITLISTED is deliberately included. A member whose ONLY relationship to any event is a
+ * waitlist spot is still a member with events — the old flat homeFeed surfaced their waitlisted events,
+ * so excluding them here (GOING-only) regressed them into the first-run empty-home state ("No events
+ * yet"). Section 3's `bookable` predicate already excludes my WAITLISTED events (they're not a "join
+ * something new near you" teaser), so without this a waitlisted-only member would fall through all
+ * three sections. The card keeps its honest "Waitlist" affordance via {@link homeRsvpState}.
+ */
+function isMine(card) {
+  return card?.myState === "GOING" || card?.myState === "WAITLISTED";
 }
 
 /**
@@ -210,9 +222,16 @@ const SECTION = Object.freeze({
   NEAR_YOU: { key: "near-you", header: "Events near you" },
 });
 
-/** The verbatim on-screen text for the section-3 hand-off link to the full events browse list. One
- *  constant so home.js and its tests agree on the copy. */
-export const SEE_ALL_LABEL = "See all events →";
+// The section-3 hand-off link to the full events browse list. Split into a WORD part and a decorative
+// ARROW so home.js can render the arrow in an `aria-hidden` span — otherwise assistive tech reads the
+// "→" glyph out loud, giving the link the accessible name "See all events right-arrow" (TM-969 nit).
+// `SEE_ALL_LABEL` remains the full visible string (word + arrow) for callers/tests that want the copy.
+/** The accessible word part of the hand-off link — the link's accessible name. */
+export const SEE_ALL_TEXT = "See all events";
+/** The decorative trailing glyph, rendered `aria-hidden` so it is shown but not announced. */
+export const SEE_ALL_ARROW = "→";
+/** The full verbatim on-screen text (word + arrow). One constant so home.js and its tests agree. */
+export const SEE_ALL_LABEL = `${SEE_ALL_TEXT} ${SEE_ALL_ARROW}`;
 
 /**
  * The personalized Home view-model (TM-969): up to THREE ordered, collapse-aware sections plus the
@@ -221,13 +240,14 @@ export const SEE_ALL_LABEL = "See all events →";
  * The three sections, in fixed top→bottom priority order, each present ONLY when it has ≥1 card
  * (empty sections collapse entirely — no orphan header — so the highest non-empty section is always
  * the first content):
- *   1. HAPPENING NOW — my attending events (GOING) that are live now (events-core `isHappeningNow`).
- *   2. YOUR EVENTS   — my upcoming attending events (GOING, not yet live), soonest-first.
- *   3. EVENTS NEAR YOU — nearby events I'm NOT attending, {@link bookable} only, trimmed to a small
+ *   1. HAPPENING NOW — my events (GOING or WAITLISTED — see {@link isMine}) that are live now
+ *      (events-core `isHappeningNow`).
+ *   2. YOUR EVENTS   — my upcoming events (GOING or WAITLISTED, not yet live), soonest-first.
+ *   3. EVENTS NEAR YOU — nearby events I'm NOT part of, {@link bookable} only, trimmed to a small
  *      TEASER cap ({@link NEAR_YOU_TEASER_MAX}) with a "See all events →" hand-off to #/events.
  *
- * The old fallbacks fall out of the collapse rule for free: no live-attending → section 2 leads;
- * nothing attending at all → only section 3 shows (= the previous today's-near-you Home); all three
+ * The old fallbacks fall out of the collapse rule for free: no live event of mine → section 2 leads;
+ * nothing of mine at all → only section 3 shows (= the previous today's-near-you Home); all three
  * present → they stack 1, 2, 3.
  *
  * NEAR-YOU FILTER (preserved from TM-662): section 3 is SCOPED to the viewer's `city` when known — an
@@ -247,10 +267,10 @@ export function homeSections(cards, { city, tz, locale, now = Date.now() } = {})
   // the API's soonest-first order within each bucket.
   const { happeningNow, upcoming } = listingBuckets(cards, now);
 
-  // Sections 1 & 2 — MY attending (GOING) events, split by live-vs-upcoming. Uncapped: a member sees
-  // all of their own events (they will be few), so no teaser trimming here.
-  const myLive = happeningNow.filter(isAttending);
-  const myUpcoming = upcoming.filter(isAttending);
+  // Sections 1 & 2 — MY events (GOING *or* WAITLISTED — see {@link isMine}), split by live-vs-upcoming.
+  // Uncapped: a member sees all of their own events (they will be few), so no teaser trimming here.
+  const myLive = happeningNow.filter(isMine);
+  const myUpcoming = upcoming.filter(isMine);
 
   // Section 3 — nearby, bookable events I'm NOT attending. Start from the upcoming bucket (a live event
   // I'm not attending isn't "book something to go to"), drop anything not currently bookable, then scope

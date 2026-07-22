@@ -26,7 +26,7 @@
 import { listEvents, getMe } from "./api.js";
 import { el, clear } from "./ui.js";
 import { viewerTimeZone } from "./events-core.js";
-import { homeContextLine, homeSections, SEE_ALL_LABEL } from "./home-core.js";
+import { homeContextLine, homeSections, SEE_ALL_TEXT, SEE_ALL_ARROW } from "./home-core.js";
 
 const FEED_ID = "tm-home-feed";
 const CONTEXT_ID = "tm-home-context";
@@ -183,11 +183,16 @@ function sectionBlock(section) {
       el("h3", { class: "tm-home-section-title", "data-testid": "home-section-title", text: section.header }),
       list,
       // The teaser (section 3) hands off to the full browse list; the attending sections never do.
+      // The trailing "→" is decorative: it's an aria-hidden span so the link's accessible name is just
+      // the word part ("See all events"), not "See all events right-arrow" read aloud (TM-969 nit).
       section.isTeaser && section.seeAllHref
         ? el(
             "a",
             { class: "tm-home-see-all", href: section.seeAllHref, "data-testid": "home-see-all" },
-            SEE_ALL_LABEL,
+            [
+              el("span", { text: SEE_ALL_TEXT }),
+              el("span", { class: "tm-home-see-all-arrow", "aria-hidden": "true", text: ` ${SEE_ALL_ARROW}` }),
+            ],
           )
         : null,
     ],
