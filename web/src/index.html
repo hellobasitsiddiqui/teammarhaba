@@ -433,27 +433,26 @@
                 </div>
             </form>
 
-            <!-- Home screen (TM-512): the #/home landing, refreshed to the approved wireframe
-                 (design-kit paper-home / app-home + paper-empty-home). Still the panel the router
-                 (TM-109) toggles for #/home, and still #auth-signed-in so the auth/onboarding/terms
-                 e2e gates and login.js keep keying off it — its INNER content is now the product Home:
-                 an "Events near you" section header + a feed of event cards (or the empty-home state),
-                 built by home.js into #tm-home-feed and sitting inside the bottom-nav shell (TM-434).
-                 Token-only styling (styles.css "Home screen" section) so it renders on web, mobile-web
-                 and the Android WebView across the theme families. Built against the design-kit while
-                 TM-511 (shared component library) runs in parallel; shared-component spots (the CTA /
-                 retry buttons) reuse .tm-btn and are marked to reconcile with TM-511 later. -->
+            <!-- Home screen (TM-512, reworked TM-969): the #/home landing, refreshed to the approved
+                 wireframe (design-kit paper-home / app-home + paper-empty-home). Still the panel the
+                 router (TM-109) toggles for #/home, and still #auth-signed-in so the auth/onboarding/
+                 terms e2e gates and login.js keep keying off it — its INNER content is now the
+                 personalized attending-first Home: up to THREE priority sections (Happening now → Your
+                 events → Events near you), each with its own light header and shown only when it has
+                 events, built by home.js into #tm-home-feed (or the empty-home state) and sitting
+                 inside the bottom-nav shell (TM-434). Token-only styling (styles.css "Home screen"
+                 section) so it renders on web, mobile-web and the Android WebView across the theme
+                 families. Shared-component spots (the CTA / retry buttons) reuse .tm-btn. -->
             <section class="tm-home" id="auth-signed-in" hidden aria-label="Home">
-                <!-- Section header (paper-home): the "Events near you" title + the "<city> · this
-                     week" context line (home.js fills the city from /me, best-effort). Kept an <h2> so
-                     the doodle decoration (TM-215) still finds the home heading under sketchy Paper. -->
-                <div class="tm-home-head">
-                    <h2 class="tm-home-title">Events near you</h2>
-                    <p class="tm-home-sub" id="tm-home-context">Upcoming meetups near you</p>
-                </div>
+                <!-- TM-969 product decision: NO generic "Home" page title. Home leads with the FIRST
+                     PRESENT SECTION'S header ("Happening now" / "Your events" / "Events near you"), which
+                     home.js builds into #tm-home-feed below — so the first content the member sees is a
+                     real section, not a page label. The "near <city>" discovery-context line (home.js
+                     fills the city from /me, best-effort) is context for the near-you section only, so it
+                     now renders as that section's sub-line inside the feed, not as a page-wide subtitle. -->
 
-                <!-- Feed mount: home.js builds the "Events near you" cards, or the paper-empty-home
-                     first-run state, here. -->
+                <!-- Feed mount: home.js builds the personalized sections (Happening now / Your events /
+                     Events near you teaser), or the paper-empty-home first-run state, here. -->
                 <div id="tm-home-feed" class="tm-home-feed" data-testid="home-feed"></div>
 
                 <!-- Backend-verified identity (TM-108 demo) — kept, but DEMOTED to a quiet muted footer

@@ -1,14 +1,21 @@
-// Home screen (TM-512) — the "Events near you" feed + first-run empty state, refreshed to the
-// approved wireframe (design-kit `paper-home` / `app-home` and `paper-empty-home`), rendered inside
-// the bottom-nav shell (TM-434) and on the production default theme via tokens only.
+// Home screen (TM-512, reworked TM-969) — the personalized attending-first feed + first-run empty
+// state, refreshed to the approved wireframe (design-kit `paper-home` / `app-home` and
+// `paper-empty-home`), rendered inside the bottom-nav shell (TM-434) and on the production default
+// theme via tokens only.
 //
 // A framework-free view module in the events.js / profile.js / admin.js mould: the router (TM-109)
 // owns the #/home route + visibility and calls `enterHome()` on entry; this module fetches and builds
 // the feed into #tm-home-feed (inside the #auth-signed-in home panel index.html already routes there).
 //
-// ALL decision logic (the listing split, local-time "when", the "N going" copy, the RSVP-state
-// affordance, the empty-vs-populated decision) lives in the pure, unit-tested home-core.js (which in
-// turn reuses events-core.js). This file is the thin DOM shell around it.
+// TM-969 — Home is no longer one flat "near you" list. It renders up to THREE priority sections
+// (Happening now → Your events → Events near you), each under a light header and shown only when it
+// has events; the third is a short bookable teaser followed by a "See all events →" hand-off. The
+// grouping / collapse-empties ordering / bookable predicate / teaser cap all live in the pure,
+// unit-tested home-core.js `homeSections` — this file just paints the sections it returns.
+//
+// ALL decision logic (the section grouping, the listing split, local-time "when", the "N going" copy,
+// the RSVP-state affordance, the empty-vs-populated decision) lives in the pure, unit-tested
+// home-core.js (which in turn reuses events-core.js). This file is the thin DOM shell around it.
 //
 // XSS-safety is inherited from ui.js `el()` (textContent only, no innerHTML seam) — event headings,
 // locations and the city are all untrusted and can never inject markup. Icons are built with a small
@@ -19,10 +26,9 @@
 import { listEvents, getMe } from "./api.js";
 import { el, clear } from "./ui.js";
 import { viewerTimeZone } from "./events-core.js";
-import { homeContextLine, homeFeed } from "./home-core.js";
+import { homeSections, SEE_ALL_TEXT, SEE_ALL_ARROW } from "./home-core.js";
 
 const FEED_ID = "tm-home-feed";
-const CONTEXT_ID = "tm-home-context";
 
 // Viewer formatting context: the browser's timezone + locale so instants render in local time (the
 // events-core.js AC), both failing soft to sensible defaults.
@@ -90,20 +96,19 @@ const calendarIcon = () => {
 // ── entry point (router calls this on every #/home entry) ────────────────────────────────────────
 
 /**
- * Router entry (TM-109): fetch the listing (+ the viewer's city, best-effort, for the context line)
- * and paint the feed or the empty-home state into #tm-home-feed. Re-invoked on every entry so counts
- * / RSVP state are always fresh.
+ * Router entry (TM-109): fetch the listing (+ the viewer's city, best-effort, for the "near you"
+ * discovery-context sub-line under the near-you section) and paint the feed or the empty-home state into
+ * #tm-home-feed. Re-invoked on every entry so counts / RSVP state are always fresh.
  */
 export async function enterHome() {
   const feed = $(FEED_ID);
   if (!feed) return; // markup not present (defensive) — never throw.
   const mine = ++renderToken;
 
-  setContext(homeContextLine(null)); // neutral until /me resolves
   clear(feed).append(el("p", { class: "tm-muted tm-home-loading", "data-testid": "home-loading", text: "Finding meetups near you…" }));
 
   // Fetch the listing and /me together. /me is BEST-EFFORT (only powers the "near <city>" location hint
-  // in the context line); its failure must never blank the feed, so it degrades to null.
+  // on the near-you section's sub-line); its failure must never blank the feed, so it degrades to null.
   let data;
   let me = null;
   try {
@@ -116,21 +121,19 @@ export async function enterHome() {
   }
   if (mine !== renderToken) return;
 
-  setContext(homeContextLine(me?.city));
-
   const cards = Array.isArray(data?.items) ? data.items : [];
-  // Scope the feed to the viewer's city so "near you" is actually near them (TM-662) — the same city
-  // that labels the context line above, so the header and the events under it can never disagree.
-  const model = homeFeed(cards, { city: me?.city, tz: VIEWER_TZ, locale: LOCALE });
+  // Build the personalized sections (TM-969): my live events, my upcoming events, then a bookable
+  // "near you" teaser scoped to the viewer's city (TM-662, preserved on section 3 only). Empty
+  // sections are already collapsed by the core, so the first section here is the first content.
+  const model = homeSections(cards, { city: me?.city, tz: VIEWER_TZ, locale: LOCALE });
 
   clear(feed);
   if (model.isEmpty) {
     feed.append(emptyState());
     return;
   }
-  const list = el("div", { class: "tm-home-list", "data-testid": "home-feed-list" });
-  for (const card of model.cards) list.append(feedCard(card));
-  feed.append(list);
+  // Paint each present section top→bottom. Only the near-you teaser carries a "See all events →" link.
+  for (const section of model.sections) feed.append(sectionBlock(section));
 }
 
 /** Fetch /me for the city context line — degrades to null (city "unknown") on any failure. */
@@ -143,10 +146,56 @@ async function loadMe() {
   }
 }
 
-/** Set the section context subtitle text (the "Upcoming meetups near <city>" line, TM-734). */
-function setContext(text) {
-  const node = $(CONTEXT_ID);
-  if (node) node.textContent = text;
+// ── section block ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One Home section (TM-969): a light header, an optional discovery-context sub-line (the "near <city>"
+ * hint, on the "Events near you" section only), the section's card list, and — for that same near-you
+ * teaser — a "See all events →" link handing off to the full #/events browse list.
+ *
+ * The section shape comes straight from home-core's `homeSections` ({ key, header, subtitle?, cards,
+ * isTeaser, seeAllHref? }); this helper just paints it. The `subtitle` is where the old page-level
+ * context line now lives (TM-969 relocated it here, under the near-you header, when the generic "Home"
+ * page title was removed so the first present section header is the first content). The `data-testid`s
+ * are the seams the e2e keys off — the section key doubles as a stable per-section testid so a spec can
+ * target, e.g., the near-you teaser.
+ */
+function sectionBlock(section) {
+  const list = el("div", { class: "tm-home-list" });
+  for (const card of section.cards) list.append(feedCard(card));
+
+  return el(
+    "section",
+    {
+      class: "tm-home-section",
+      "data-testid": "home-section",
+      dataset: { section: section.key },
+      // The header text labels the section for assistive tech (the visible <h3> is the accessible name).
+      "aria-label": section.header,
+    },
+    [
+      el("h3", { class: "tm-home-section-title", "data-testid": "home-section-title", text: section.header }),
+      // The near-you section carries the "near <city>" discovery-context sub-line as its subtitle
+      // (relocated from the removed page head); other sections have none, so this renders nothing there.
+      section.subtitle
+        ? el("p", { class: "tm-home-section-sub", id: "tm-home-context", "data-testid": "home-section-sub", text: section.subtitle })
+        : null,
+      list,
+      // The teaser (section 3) hands off to the full browse list; the attending sections never do.
+      // The trailing "→" is decorative: it's an aria-hidden span so the link's accessible name is just
+      // the word part ("See all events"), not "See all events right-arrow" read aloud (TM-969 nit).
+      section.isTeaser && section.seeAllHref
+        ? el(
+            "a",
+            { class: "tm-home-see-all", href: section.seeAllHref, "data-testid": "home-see-all" },
+            [
+              el("span", { text: SEE_ALL_TEXT }),
+              el("span", { class: "tm-home-see-all-arrow", "aria-hidden": "true", text: ` ${SEE_ALL_ARROW}` }),
+            ],
+          )
+        : null,
+    ],
+  );
 }
 
 // ── feed card ────────────────────────────────────────────────────────────────────────────────────
