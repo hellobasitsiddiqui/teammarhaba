@@ -251,4 +251,19 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
   active wave-admin-2 sprint) and keep it In Progress. Hardened into [CROSS-AGENT.md](../CROSS-AGENT.md)
   rule #2.
 
+### 2026-07-22 — Curate evidence to 5–10 shots; the e2e lane dumps the WHOLE matrix (TM-962)
+
+- **Reasonable attachment count is 5–10. More than ~10 is a smell — stop, think, and if you truly
+  need more, write the reason on the ticket.** A ticket with 100+ screenshots is wrong: it buries
+  the shots that matter and reads as noise. Attach only the handful that demonstrate *this* ticket's
+  change (before + the 3–4 key after-states).
+- **The e2e evidence lane (`evidence_ticket=TM-XX`) posts the ENTIRE suite matrix** — every spec ×
+  every browser project — to the named ticket. On TM-962 that was **799 screenshots** (admin,
+  broadcast, chat, events… almost none TM-930-related). Never aim the full-matrix dump at a scoped
+  feature/bug/restore ticket. Curate by hand from your own capture script, or point the dump at a
+  dedicated sprint-evidence ticket and hand-attach the relevant few.
+- **If a lane over-attaches, it's fixable:** the `~/.config/teammarhaba/jira.env` REST token can
+  `DELETE /rest/api/3/attachment/{id}` (204). Parallelise it (~12 workers) — 800 sequential deletes
+  time out. Then hand-attach the curated set. Hardened into [CROSS-AGENT.md](../CROSS-AGENT.md) rule #3.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._

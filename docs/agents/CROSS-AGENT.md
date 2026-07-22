@@ -57,6 +57,17 @@ name is your agent name.
    `curl -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" -F "file=@shot.png"
    "$JIRA_BASE_URL/rest/api/3/issue/TM-XX/attachments"` (parse the env file yourself; HTTP 200 = done).
    Do this for every before/after shot before flipping to In Review.
+   **Keep attachments to a REASONABLE, CURATED count — target 5–10, and if you're about to attach
+   more than ~10, STOP and think again, then write the reason on the ticket.** A ticket with 100+
+   screenshots is wrong: it buries the shots that matter and reads as noise, not evidence. Attach
+   only the handful that demonstrate *this* ticket's change (e.g. before + the 3–4 key after-states).
+   **⚠️ The e2e evidence lane (`e2e.yml` dispatched with `evidence_ticket=TM-XX`) posts the ENTIRE
+   suite matrix — every spec × every browser project, hundreds of PNGs — to whatever ticket you
+   name.** Never point it at a scoped feature/bug/restore ticket (TM-962 got 799 that way). Either
+   curate by hand from your own capture script, or aim the full-matrix dump at a dedicated
+   sprint-evidence ticket and hand-attach the relevant few to the feature ticket. If a lane
+   over-attaches, trim it back with `DELETE /rest/api/3/attachment/{id}` (the same REST token can
+   delete).
 4. **Gate tickets are created AT SPRINT START, not at the end** (we were prompted for them — don't
    repeat that). **EVERY wave/sprint gets all THREE gate tickets, no exceptions:** (1) a
    `human`-labelled manual-test sign-off, (2) a sprint code-review gate, and (3) a **deploy gate**
