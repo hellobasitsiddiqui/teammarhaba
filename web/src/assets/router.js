@@ -57,7 +57,10 @@ import { needsTermsAcceptance } from "./terms-gate.js";
 // TM-880: phone is mandatory. The pure rule (no valid stored E.164 phone → route through the
 // first-use completion gate) lives in profile-core so it's unit-testable; it applies to ALL users,
 // existing phone-less accounts included, and fails open on a degraded /me like the other gates.
-import { needsPhoneNumber } from "./profile-core.js";
+// TM-932 adds needsVerifiedPhone: a stored phone that is NOT the account's Firebase-verified number
+// re-gates too (the retroactive half of TM-923's strict "one verified number = one account"). Both
+// pure rules live in profile-core so they're unit-testable; both fail OPEN on a degraded /me.
+import { needsPhoneNumber, needsVerifiedPhone } from "./profile-core.js";
 import { shouldBounceNonAdmin } from "./admin-route-guard-core.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
@@ -1080,9 +1083,17 @@ async function resolveRoleThenGuard() {
   // Gated when first-run onboarding is incomplete OR the account has no valid stored phone (TM-880:
   // phone is mandatory, enforced as a first-use completion gate on ALL users — the same #/onboarding
   // gate, which now collects the phone; needsPhoneNumber also catches a legacy country-ambiguous bare
-  // number, reusing the TM-781 confirm-country rule). Still fails OPEN (true) on a degraded /me.
+  // number, reusing the TM-781 confirm-country rule) OR the stored phone is not the account's
+  // Firebase-VERIFIED number (TM-932: the retroactive re-gate — every existing account whose stored
+  // phone was never OTP-verified is routed through the verify gate on next entry, extending TM-880 to
+  // strict "one verified number = one account"). The verified number is NOT on /me (MeResponse carries
+  // only the self-reported phone); it lives on the Firebase user — sourced here from the uid-pinned
+  // `now` (currentUser() at line 1060, the same session the /me was resolved for), NOT a fresh
+  // currentUser() call. Still fails OPEN (true) on a degraded /me — both phone terms are no-ops then.
   isOnboarded = onboardedOutcome.value
-    ? Boolean(onboardedOutcome.value.onboardingCompleted) && !needsPhoneNumber(onboardedOutcome.value)
+    ? Boolean(onboardedOutcome.value.onboardingCompleted) &&
+      !needsPhoneNumber(onboardedOutcome.value) &&
+      !needsVerifiedPhone(onboardedOutcome.value, now.phoneNumber)
     : true;
   // Terms gate (TM-170): the SAME /me result tells us whether the user still needs to accept the
   // current terms version. The pure rule (terms-gate.js) fails open (false) on a null/degraded /me,

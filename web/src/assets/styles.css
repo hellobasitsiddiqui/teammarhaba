@@ -2514,6 +2514,22 @@ h3,
     font-size: 0.9rem;
 }
 
+/* TM-932: the "Use my verified number" one-tap, shown only in the mismatch case (a different verified
+   phone is linked than the one stored). A light-accent pill CTA — more prominent than the plain
+   change/resend text links, since it's the recommended shortcut past the gate. */
+#onboarding-view .tm-phone-adopt {
+    margin-top: 0.4rem;
+    align-self: flex-start;
+    border: 1.5px solid var(--accent);
+    background: var(--accent-light, transparent);
+    color: var(--accent);
+    box-shadow: none;
+    padding: 0.4rem 0.75rem;
+    border-radius: 0.6rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
 /* The locked (verified) national input reads as read-only, not editable. */
 #onboarding-view .tm-input.tm-field-locked {
     background: var(--surface-2);

@@ -157,6 +157,7 @@ const phoneVerify = {
   otpWrap: null, // the reveal-on-send wrapper (label + boxes + resend), hidden until a send
   statusEl: null, // the "Verified ✓" / helper line
   changeBtn: null, // the "Change number" affordance shown only in the verified/locked state (TM-930)
+  adoptBtn: null, // the "Use my verified number" one-tap shown only in the TM-932 mismatch case
   recaptcha: null, // the gate-local invisible reCAPTCHA host
 };
 
@@ -220,6 +221,8 @@ function markPhoneVerified(e164) {
   // (the input is readOnly + the picker disabled + Send hidden, so neither the input nor the change
   // listeners can fire to unlock it). Clicking it returns to the editable, unverified state.
   if (phoneVerify.changeBtn) phoneVerify.changeBtn.hidden = false;
+  // TM-932: once verified, the "Use my verified number" adopt shortcut is moot — hide it.
+  if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.hidden = true;
 }
 
 /**
@@ -263,6 +266,10 @@ function unverifyPhone() {
   }
   // TM-930: the "Change number" affordance only makes sense in the verified/locked state — hide it here.
   if (phoneVerify.changeBtn) phoneVerify.changeBtn.hidden = true;
+  // TM-932: the adopt shortcut is re-offered by prefillPhone/maybeOfferAdoptVerified only when a
+  // mismatched verified phone is linked — a plain edit-driven un-verify hides it (a user editing the
+  // number toward a fresh OTP isn't in the adopt-the-linked-number flow).
+  if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.hidden = true;
 }
 
 /**
@@ -371,6 +378,68 @@ async function sendPhoneCode() {
   } finally {
     phoneVerify.sending = false;
     setPhoneControlsBusy(false);
+  }
+}
+
+/**
+ * TM-932 mismatch case: the account already has a DIFFERENT verified Firebase phone linked than the
+ * one stored on /me. Reveal a one-tap "Use my verified number (…)" affordance so the user can adopt
+ * the number Firebase already proved they own, WITHOUT re-OTPing it (they'd still be free to verify
+ * the stored number instead via the normal Send-code path). No-op when there's no linked phone (the
+ * common retroactive case — nothing to adopt, the user just verifies the stored number) or when the
+ * linked phone canonically equals the stored one (that path already went straight to verified).
+ *
+ * @param {string} verifiedE164 the account's linked Firebase phone (currentUser().phoneNumber), or "".
+ * @param {string} storedE164 the stored /me phone (used only to skip when it already matches).
+ */
+function maybeOfferAdoptVerified(verifiedE164, storedE164) {
+  if (!phoneVerify.adoptBtn) return;
+  const verifiedCanonical = canonicalE164(verifiedE164);
+  // Nothing linked, or the linked number already equals the stored one → no adopt shortcut.
+  if (!verifiedCanonical || verifiedCanonical === canonicalE164(storedE164)) {
+    phoneVerify.adoptBtn.hidden = true;
+    return;
+  }
+  // A different verified number is on the account — offer to adopt it in one tap.
+  phoneVerify.adoptBtn.textContent = `Use my verified number (${verifiedCanonical})`;
+  phoneVerify.adoptBtn.hidden = false;
+  setFieldError(
+    "phone",
+    "This number isn't verified yet. Verify it below, or use the number already verified on your account.",
+  );
+}
+
+/**
+ * Adopt the account's already-verified Firebase phone (TM-932 mismatch one-tap): the number is ALREADY
+ * linked + proven, so no OTP is needed — we just PATCH /me { phone: <verified> } so the stored value
+ * matches the verified one, mirror it into the picker/national inputs, and paint the verified/locked
+ * state. The gate can then submit (or the router re-guard clears it) with no manual reload.
+ */
+async function adoptVerifiedPhone() {
+  if (phoneVerify.sending) return;
+  const verified = currentUser()?.phoneNumber ?? "";
+  const parsed = splitE164(verified);
+  if (!parsed) return; // defensive: nothing to adopt (button should have been hidden)
+  const entry = shell?.fields.get("phone");
+  phoneVerify.sending = true;
+  setPhoneControlsBusy(true);
+  if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.disabled = true;
+  setFieldError("phone", "");
+  try {
+    // Persist the verified number as the stored phone (no OTP — it's already Firebase-verified). This
+    // is the "adopt" half of the mismatch offer; updateProfile applies the changed value like any PATCH.
+    await updateMe({ phone: verified });
+    // Reflect it in the pair, then land in the verified/locked state so the gate is satisfied.
+    if (entry?.country) entry.country.value = parsed.iso2;
+    if (entry) entry.input.value = parsed.national;
+    markPhoneVerified(verified);
+  } catch (err) {
+    setFieldError("phone", "Couldn't use your verified number. Please try again, or verify below.");
+    console.warn("[onboarding] adopt-verified PATCH /me failed:", err?.message ?? err);
+  } finally {
+    phoneVerify.sending = false;
+    setPhoneControlsBusy(false);
+    if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.disabled = false;
   }
 }
 
@@ -494,6 +563,14 @@ function fillCitySelect(select, value) {
   select.value = saved;
 }
 
+/** Canonical E.164 for a stored/verified value ("+44 7700 900123" → "+447700900123"), or "" if it
+ *  isn't a parseable E.164. Mirrors profile-core.needsVerifiedPhone's canonicalisation so the gate's
+ *  "already verified?" decision agrees exactly with the router's re-gate decision (TM-932). */
+function canonicalE164(value) {
+  const parsed = splitE164(value);
+  return parsed ? composeE164(parsed.iso2, parsed.national) : "";
+}
+
 /**
  * Pre-fill the phone (country picker, national input) pair from the stored value (TM-880), the
  * same three states fillPhoneField handles on the edit form (TM-781):
@@ -502,6 +579,12 @@ function fillCitySelect(select, value) {
  *     placeholder, the prompt paints, and submit is blocked until a country is picked;
  *   • no phone — soft-default the picker from the profile city (else GB), unless the user already
  *     picked a country themselves this session.
+ *
+ * TM-932 (retroactive re-gate): an EXISTING account whose stored phone was never OTP-verified now
+ * lands HERE, with the stored number pre-filled into the verify step, so a single OTP proves it. When
+ * the account already has a DIFFERENT verified phone linked (the mismatch case — e.g. verified one
+ * number, stored another), we ALSO offer a one-tap "adopt the verified number" affordance so the user
+ * needn't re-OTP a number Firebase already proved they own (see maybeOfferAdoptVerified).
  */
 function prefillPhone(entry, profile) {
   // TM-930: a fresh mount starts UNVERIFIED (unlocks the pair, hides any stale OTP) before we decide
@@ -517,10 +600,21 @@ function prefillPhone(entry, profile) {
     entry.country.value = parsed.iso2;
     entry.input.value = parsed.national;
     setFieldError("phone", "");
-    // TM-930: a saved E.164 that already IS the signed-in account's linked Firebase phone is proven —
-    // land straight in the verified/locked state (no OTP). This is the re-gated SMS-sign-in user, or
-    // a returning account whose stored phone matches its verified Firebase number.
-    if (saved === currentUser()?.phoneNumber) markPhoneVerified(saved);
+    // TM-930/TM-932: a saved E.164 that already IS the signed-in account's linked Firebase phone is
+    // proven — land straight in the verified/locked state (no OTP). This is the re-gated SMS-sign-in
+    // user, or a returning account whose stored phone matches its verified Firebase number. Compare
+    // CANONICAL forms (not raw strings) so a formatted stored value ("+44 7700 900123") still matches
+    // Firebase's strict E.164 ("+447700900123") — the same canonicalisation the router's re-gate uses,
+    // so the gate never shows "unverified" for a number the router considers already verified (TM-932).
+    const verified = currentUser()?.phoneNumber ?? "";
+    if (canonicalE164(saved) && canonicalE164(saved) === canonicalE164(verified)) {
+      markPhoneVerified(saved);
+    } else {
+      // Retroactive re-gate: the stored number is NOT this account's verified number. Offer the one-tap
+      // "adopt my verified number" path when a DIFFERENT verified phone is linked (the mismatch case);
+      // otherwise (no linked phone — the common retroactive case) the user just verifies the stored one.
+      maybeOfferAdoptVerified(verified, saved);
+    }
   } else if (saved !== "") {
     entry.country.value = ""; // the disabled placeholder — the explicit confirm-country state
     entry.input.value = saved;
@@ -1117,6 +1211,19 @@ function buildPhoneVerify(id, describedBy) {
     hidden: true,
   });
 
+  // TM-932: the one-tap "adopt my already-verified number" affordance, shown ONLY in the mismatch case
+  // (the account has a DIFFERENT verified Firebase phone than the one stored on /me — e.g. verified one
+  // number, stored another). Clicking it PATCHes /me { phone: <verified> } and lands verified with no
+  // OTP (the number is already proven). Hidden until maybeOfferAdoptVerified reveals it. Its label is
+  // set at reveal time (it carries the verified number).
+  const adoptBtn = el("button", {
+    id: `${id}-adopt`,
+    type: "button",
+    class: "tm-btn tm-phone-adopt",
+    text: "Use my verified number",
+    hidden: true,
+  });
+
   // The gate-local invisible reCAPTCHA host — the login one (#recaptcha-container) lives in the login
   // view, which isn't mounted here. Firebase renders the invisible widget into this element.
   const recaptcha = el("div", { id: `${id}-recaptcha`, class: "tm-phone-recaptcha", "aria-hidden": "true" });
@@ -1133,12 +1240,14 @@ function buildPhoneVerify(id, describedBy) {
     const entry = shell?.fields.get("phone");
     entry?.input.focus();
   });
+  adoptBtn.addEventListener("click", () => adoptVerifiedPhone()); // TM-932 mismatch one-tap
 
   phoneVerify.sendBtn = sendBtn;
   phoneVerify.otpGroup = otpGroup;
   phoneVerify.otpWrap = otpWrap;
   phoneVerify.statusEl = statusEl;
   phoneVerify.changeBtn = changeBtn;
+  phoneVerify.adoptBtn = adoptBtn;
   phoneVerify.recaptcha = recaptcha;
   // The six-box widget auto-submits through confirmPhoneOtp on the sixth digit (TM-867 onComplete),
   // exactly like login.js's SMS step — no explicit verify click.
@@ -1146,7 +1255,7 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.cooldown = attachResendCooldown({ button: resendBtn, codeNoun: "SMS code" });
   phoneVerify.built = true;
 
-  return [sendBtn, statusEl, changeBtn, otpWrap, recaptcha];
+  return [sendBtn, adoptBtn, statusEl, changeBtn, otpWrap, recaptcha];
 }
 
 // TM-684: avatar upload + bio ship disabled; wire to onboarding payload
