@@ -861,6 +861,16 @@ body {
     line-height: 1.4;
 }
 
+/* TM-933: SMS-as-sign-in framing above the phone field — the primary "what is this for" line
+   (post-TM-930 a linked number signs you into your own account). Sits a touch stronger than the
+   quiet legal .auth-disclosure below the field, but still calm helper copy. */
+.auth-hint {
+    margin: 0 0 0.5rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
 /* TM-242: footer privacy note — quiet legal copy alongside the build stamp. */
 .privacy-note {
     margin: 0.4rem 0 0;
