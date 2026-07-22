@@ -20,8 +20,9 @@ import { shellBrandHidden } from "./shell-brand-core.js";
 
 /**
  * Reflect the current route onto the shell brand block: hidden on the self-headed screens
- * (Profile + the first-run gates — see shell-brand-core.js), shown everywhere else (login keeps
- * its existing CSS scoping; Home keeps its current global-brand look).
+ * (Profile, the signed-in Home feed, and the first-run gates — see shell-brand-core.js), shown
+ * everywhere else. Login keeps its existing CSS scoping (the #auth-signed-out card is a separate
+ * view on #/login with its own lockup, so the signed-out landing is unchanged by the Home rule).
  *
  * Fully guarded for a non-DOM (Node) import and for a page without the block (e.g. a test
  * fixture): missing elements are simply skipped.

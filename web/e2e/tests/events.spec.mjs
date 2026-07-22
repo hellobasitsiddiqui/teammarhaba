@@ -50,11 +50,32 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+/** True when we're on the phone project rather than desktop. Detected off the BOTTOM TAB BAR
+ *  (#app-tabbar), NOT the hamburger toggle — a visible tab bar means "phone viewport + signed in"
+ *  (router un-hides it for a signed-in un-gated session; CSS reveals it only ≤528px). Copied from
+ *  golden-path (TM-341) so the spec is project-agnostic across chromium + mobile-chromium.
+ *
+ *  Why not `#nav-toggle.isVisible()`? TM-908 made Home content-first: corner-bell.js now HIDES
+ *  #nav-toggle on the corner-bell routes (#/home, #/profile), so the toggle is invisible there even on
+ *  a phone — a false "desktop" reading. The tab bar stays visible on those routes, so it's the mobile
+ *  signal that survives TM-908. */
+async function isMobileViewport(page) {
+  return page.locator("#app-tabbar").isVisible();
+}
+
 /** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop
  *  width. Copied from golden-path (TM-341) so the spec is project-agnostic across chromium +
- *  mobile-chromium. */
+ *  mobile-chromium.
+ *
+ *  TM-908 wrinkle: on a corner-bell route (#/home, #/profile) the hamburger is HIDDEN, so its utility
+ *  links aren't reachable. When we're on mobile and the toggle isn't present, hop to #/notifications (a
+ *  signed-in route that keeps the normal nav row) so the hamburger + its collapsed menu exist. */
 async function openNav(page) {
   const toggle = page.locator("#nav-toggle");
+  if (!(await toggle.isVisible()) && (await isMobileViewport(page))) {
+    await page.evaluate(() => (window.location.hash = "#/notifications"));
+    await expect(page.locator("#notifications-view")).toBeVisible();
+  }
   if (await toggle.isVisible()) {
     const nav = page.locator(".app-nav");
     if ((await nav.getAttribute("data-nav-open")) !== "true") {
@@ -69,10 +90,11 @@ async function openNav(page) {
 // on desktop the tab bar is display:none and the top-nav link is used as before.
 const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
 
-/** Click a nav destination by its top-nav id. Mobile → bottom tab (TM-434) for a tab-bar destination,
- *  else the hamburger; desktop → the top-nav link directly. Works under both Playwright projects. */
+/** Click a nav destination by its top-nav id. Mobile → bottom tab (TM-434) for a tab-bar destination
+ *  (works from any route, incl. corner-bell Home where the hamburger is hidden), else the hamburger;
+ *  desktop → the top-nav link directly. Works under both Playwright projects. */
 async function clickNav(page, selector) {
-  const onMobile = await page.locator("#nav-toggle").isVisible();
+  const onMobile = await isMobileViewport(page);
   const tabSelector = NAV_TO_TAB[selector];
   if (onMobile && tabSelector) {
     const tab = page.locator(tabSelector);

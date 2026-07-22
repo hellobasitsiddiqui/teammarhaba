@@ -18,9 +18,15 @@
 // chrome), NOT by per-screen CSS.
 //
 // CROSS-LANE (TM-908 / TM-909): this module is deliberately self-contained so the Home and Events
-// lanes can consume the SAME corner-bell treatment by adding their route to CORNER_BELL_ROUTES —
+// lanes consume the SAME corner-bell treatment by adding their route to CORNER_BELL_ROUTES —
 // one owner (this file), the others consume. Those lanes' surfaces are NOT edited here; adding a
 // route is a one-line change, mirroring shell-brand-core's SELF_HEADED_ROUTES.
+//
+// Home slice (TM-908): Home now opts in. Its brand block is retired above the feed (shell-brand-core
+// hides the wordmark/tagline/#status there), so — exactly as on Profile — the only remaining top
+// chrome above the "Events near you" heading is the floating .app-nav row. Adding `#/home` here
+// removes that row and pins the bell to the top-right corner, making the feed heading the first
+// content. Events (`#/events`, TM-909) still consumes this from its own lane when it lands.
 
 /**
  * The routes whose screens own their full-page header AND take the corner-bell treatment (floating
@@ -28,11 +34,14 @@
  *   • `#/profile` + `#/profile/public` — the Profile hub / public preview ("Profile" header,
  *     TM-514). THE TM-910 screens. (Sign-out already lives on the Profile hub via TM-906 — this
  *     ticket only reshapes the chrome around it.)
+ *   • `#/home` — the signed-in Home feed ("Events near you" heading, TM-512/TM-908). Content-first:
+ *     with the brand block retired, the floating nav row is removed and the bell corner-pinned so the
+ *     feed heading is the first content, mirroring Profile.
  *
- * Home (`#/home`, TM-908) and Events (`#/events`, TM-909) are handled in their OWN lanes and add
- * their route here when they land — this list is the shared consumption point.
+ * Events (`#/events`, TM-909) is handled in its OWN lane and adds its route here when it lands —
+ * this list is the shared consumption point.
  */
-export const CORNER_BELL_ROUTES = Object.freeze(["#/profile"]);
+export const CORNER_BELL_ROUTES = Object.freeze(["#/profile", "#/home"]);
 
 /**
  * Whether the corner-bell chrome applies for `route`: the floating hamburger + nav-items row is

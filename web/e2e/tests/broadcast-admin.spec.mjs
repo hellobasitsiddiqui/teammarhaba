@@ -51,11 +51,31 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+/** True when we're on the phone project rather than desktop. Detected off the BOTTOM TAB BAR
+ *  (#app-tabbar), NOT the hamburger toggle — a visible tab bar means "phone viewport + signed in".
+ *  Copied from golden-path (TM-341) so the spec is project-agnostic across chromium + mobile-chromium.
+ *
+ *  Why not `#nav-toggle.isVisible()`? TM-908 made Home content-first: corner-bell.js now HIDES
+ *  #nav-toggle on the corner-bell routes (#/home, #/profile), so the toggle is invisible there even on
+ *  a phone. The tab bar stays visible, so it's the TM-908-proof mobile signal. */
+async function isMobileViewport(page) {
+  return page.locator("#app-tabbar").isVisible();
+}
+
 /** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop
  *  width where the links are always laid out. Copied from golden-path (TM-341) so the spec is
- *  project-agnostic across chromium + mobile-chromium. */
+ *  project-agnostic across chromium + mobile-chromium.
+ *
+ *  TM-908 wrinkle: on a corner-bell route (#/home, #/profile) the hamburger is HIDDEN. This spec signs
+ *  in and lands on #/home, where the admin nav lives behind that now-hidden hamburger. When we're on
+ *  mobile and the toggle isn't present, hop to #/notifications (a signed-in route that keeps the normal
+ *  nav row) so the hamburger + its collapsed menu — incl. #nav-admin — become reachable. */
 async function openNav(page) {
   const toggle = page.locator("#nav-toggle");
+  if (!(await toggle.isVisible()) && (await isMobileViewport(page))) {
+    await page.evaluate(() => (window.location.hash = "#/notifications"));
+    await expect(page.locator("#notifications-view")).toBeVisible();
+  }
   if (await toggle.isVisible()) {
     const nav = page.locator(".app-nav");
     if ((await nav.getAttribute("data-nav-open")) !== "true") {
@@ -99,7 +119,10 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  // Signed in: the admin nav appears (ROLE_ADMIN only) and the signed-out panel is gone.
+  // Signed in: the router settles on Home (#auth-signed-in) — wait for that before opening the nav so
+  // openNav's mobile-detection (the tab bar's visibility) reads the settled chrome, not a mid-render
+  // frame. The admin nav appears (ROLE_ADMIN only) and the signed-out panel is gone.
+  await expect(page.locator("#auth-signed-in")).toBeVisible();
   await openNav(page); // phone: the admin nav lives behind the hamburger — open it before asserting
   await expect(page.locator("#nav-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();

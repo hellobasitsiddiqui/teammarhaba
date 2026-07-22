@@ -145,9 +145,11 @@ test("@profile-shell the brand block is restored when leaving the profile (scopi
   await expect(page.locator("#profile-view")).toBeVisible();
   await expect(page.locator("main.app > h1")).toBeHidden();
 
-  // Back to Home: the brand chrome returns (Home's current look keeps it — TM-512 wireframe note).
-  await page.click("#tab-home");
-  await expect(page.locator("#auth-signed-in")).toBeVisible();
+  // Leaving Profile restores the brand block on a still-branded tab. Home is now self-headed too
+  // (TM-908 content-first), so verify the restoration on Events — which keeps the brand block —
+  // proving the block was SCOPED off Profile, not deleted.
+  await page.click("#tab-events");
+  await expect(page.locator("#events-view")).toBeVisible();
   await expect(page.locator("main.app > h1")).toBeVisible();
   await expect(page.locator("main.app > .tagline")).toBeVisible();
 });

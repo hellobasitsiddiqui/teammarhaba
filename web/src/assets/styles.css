@@ -4067,6 +4067,40 @@ html {
     }
 }
 
+/* === TM-908 Home corner-bell additive block (self-contained; append-only) =====================
+ * The Home lane's slice of the corner-bell heading-first fix. The corner-bell mechanism itself
+ * (lift the nav out of flow + pin the bell top-right) is fully shared from the TM-910 block above and
+ * is triggered on Home the moment corner-bell-core adds `#/home` to CORNER_BELL_ROUTES — this block
+ * ONLY handles the two Home-specific bits the shared rule can't know about, mirroring what TM-910 did
+ * for #profile-view (the .profile-view margin collapse + the .tm-pf-topbar right-padding):
+ *
+ *   1. The signed-in Home feed is #auth-signed-in inside the `.auth` wrapper, and `.auth` carries a
+ *      `margin: 1.75rem auto 0` top margin. With the nav lifted out of flow (shared rule) that margin
+ *      no longer clears a nav row — it just drops the "Events near you" heading a whole 1.75rem BELOW
+ *      the corner bell, so the bell reads as a band ABOVE the heading (the same AC failure TM-910 hit
+ *      on Profile: titleTop > bellTop). Collapse it to 0 under the corner-bell state so the heading
+ *      rises to the app's content top and shares the bell's band — genuinely the FIRST content.
+ *
+ *   2. The heading row (.tm-home-head) has no right-hand control of its own (unlike Profile's gear),
+ *      so it would otherwise run full-width UNDER the corner bell. Reserve right room the width of the
+ *      bell (44px + gutter) so a longer "Events near you"-style heading/subtitle can never collide
+ *      with or slide beneath the pinned bell — one clean top-right cluster.
+ *
+ * Both are scoped to `.app:has(.app-nav--corner-bell)` AND the ≤33rem (phone) breakpoint, exactly
+ * like the TM-910 rules, so desktop / wide (normal inline nav row) keep their breathing margin and
+ * full-width heading. `#auth-signed-in` keys the margin rule to the SIGNED-IN Home panel only (never
+ * the signed-out #auth-signed-out login card, which lives on #/login and is unaffected). */
+@media (max-width: 33rem) {
+    .app:has(.app-nav--corner-bell) .auth:has(#auth-signed-in:not([hidden])) {
+        margin-top: 0;
+    }
+
+    .app:has(.app-nav--corner-bell) #auth-signed-in .tm-home-head {
+        padding-right: calc(44px + var(--space-2));
+    }
+}
+/* === end TM-908 Home corner-bell block ======================================================== */
+
 /* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
    to a corner pill. The --page-bg ring separates it from whatever sits behind the nav. */
 .tm-notif-badge {

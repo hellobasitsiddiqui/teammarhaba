@@ -40,8 +40,17 @@ async function openNav(page) {
   }
 }
 
+/** Open the #/admin hub. Post-TM-908, signed-in Home is content-first: the top nav (hamburger +
+ *  #nav-admin) is gone on phone Home, and the admin affordance (bottom #tab-admin on phone /
+ *  #nav-admin on desktop) renders async after the role resolves — racing it flakes. So deep-link
+ *  straight to the hub, the same reload-onto-#/admin pattern nav-render-races.spec relies on. */
+async function openAdminHub(page) {
+  await page.goto("/#/admin");
+  await expect(page).toHaveURL(/#\/admin$/);
+}
+
 /** Sign in as the seeded ADMIN via the email+password path under "Try another way" (the flow every
- *  admin spec uses), then wait until the admin nav resolves. Leaves the browser on the home view. */
+ *  admin spec uses). Leaves the browser on the home view. */
 async function signInAsAdmin(page) {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -49,16 +58,15 @@ async function signInAsAdmin(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  // Signed in. Home is content-first post-TM-908 (no top nav on phone Home), so don't assert
+  // #nav-admin here — admin nav is reached width-aware in openAdminHub / openVenuesConsole.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
 /** Open the venues console via the #/admin hub's Venues row (TM-937: the per-console top-nav link
- *  is gone; #nav-admin opens the hub) and wait for the list panel + a row to render. */
+ *  is gone; the hub is opened width-aware) and wait for the list panel + a row to render. */
 async function openVenuesConsole(page) {
-  await openNav(page);
-  await page.locator("#nav-admin").click();
+  await openAdminHub(page);
   await page.click('.admin-hub-row[href="#/admin/venues"]');
   await expect(page).toHaveURL(/#\/admin\/venues$/);
   await expect(page.locator("#admin-venues-view")).toBeVisible();
