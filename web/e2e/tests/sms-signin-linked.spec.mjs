@@ -155,13 +155,27 @@ async function smsSignIn(page, phone) {
   await page.fill("#sms-code", code); // fans out across the six boxes → auto-submit
 }
 
+// A test number in the +1 650 555 01NN reserved Firebase test range, guaranteed DISTINCT per call
+// within a run via a monotonic counter off a run-base. Deriving it from `Date.now()` alone (as an
+// earlier version did) let two tests whose start times were an exact 10s multiple apart collide on the
+// same number — making the "unowned" number in the current-state test actually still LINKED to a live
+// account, so SMS resolved to that account and the toBeFalsy assertions failed. Consecutive counter
+// suffixes remove that collision entirely; the run-base keeps numbers varied across re-runs against a
+// persisted emulator.
+const PHONE_RUN_BASE = Date.now();
+let phoneSeq = 0;
+function uniqueTestPhone() {
+  const suffix = (PHONE_RUN_BASE + phoneSeq++) % 10000;
+  return `+1650555${String(suffix).padStart(4, "0")}`;
+}
+
 test("@auth linked-phone SMS sign-in lands in the SAME account — no onboarding gate", async ({ page }) => {
   const auth = emulatorAuth();
   const stamp = Date.now();
   const email = `e2e-linked-${stamp}@teammarhaba.test`;
   // The number we LINK to the account (distinct from the seed default +447700900123). It becomes both
   // the stored profile phone AND the Firebase phone sign-in method for this uid.
-  const linkedPhone = `+1650555${String(stamp).slice(-4)}`;
+  const linkedPhone = uniqueTestPhone();
 
   // 1. An onboarded email account (email sign-in), with `linkedPhone` as its stored profile phone.
   const account = await provisionOnboardedAccount(auth, {
@@ -211,7 +225,7 @@ test("@auth TM-720 reset: sign-out from an SMS session restores the email step; 
   const stamp = Date.now();
   const email = `e2e-reset-${stamp}@teammarhaba.test`;
   const password = "e2e-reset-pw-123456";
-  const linkedPhone = `+1650555${String(stamp).slice(-4)}`;
+  const linkedPhone = uniqueTestPhone();
 
   const account = await provisionOnboardedAccount(auth, { email, password, phone: linkedPhone });
   await auth.updateUser(account.uid, { phoneNumber: linkedPhone });
@@ -228,7 +242,13 @@ test("@auth TM-720 reset: sign-out from an SMS session restores the email step; 
   // TM-720 contract (login.js:368-383): the form is back on the DEFAULT email step, the SMS steps are
   // reset (phone step visible, code step hidden), the alternatives disclosure is collapsed, and the
   // SMS OTP boxes are empty — no stale code can be resubmitted.
-  await page.goto("/#/login");
+  // Route to the login card via an in-app HASH change (NOT page.goto) — a full reload would re-parse
+  // fresh, empty #sms-code inputs and pass vacuously even if the onSignedOut reset were broken. A hash
+  // change keeps the SAME DOM nodes the reset chain acted on, so the toHaveValue("") checks below prove
+  // the code was actually CLEARED (a broken reset would still hold the typed digits here).
+  await page.evaluate(() => {
+    window.location.hash = "#/login";
+  });
   await expect(page.locator("#auth-signed-out")).toBeVisible();
   await expect(page.locator("#emailcode-step-email")).toBeVisible();
   // The alternatives block is collapsed after the reset, so open it to inspect the SMS steps.
@@ -271,7 +291,7 @@ test("@auth CURRENT-STATE PIN: an UNOWNED number creates a fresh phone-only sess
   // phone-first signup rather than a gate. When they land, flip this assertion (it is a canary that
   // the current-state behaviour changed, not a guard that must forever hold).
   const stamp = Date.now();
-  const unownedPhone = `+1650555${String(stamp).slice(-4)}`; // never linked to any account
+  const unownedPhone = uniqueTestPhone(); // never linked to any account
 
   await smsSignIn(page, unownedPhone);
   await expectSignedIn(page); // Firebase auth succeeded — a phone-only account now exists…
