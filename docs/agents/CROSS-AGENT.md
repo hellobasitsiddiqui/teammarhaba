@@ -15,6 +15,22 @@ it. Never make him hunt for whether the ball is in his court — state it every 
 there isn't one. Name your lane when you pick up a sprint; if a lane playbook exists for you, its
 name is your agent name.
 
+## Resuming a lane agent by name (`cr <lane>`)
+
+Those sign-offs aren't just labels — they're how a lane's session is found again after a crash.
+Claude Code has **no native named-resume** (`claude --resume` takes only a UUID or the interactive
+picker), so Basit has a `cr()` helper in `~/.zshrc`: `cr admin` / `cr profile` / `cr login` /
+`cr home` / `cr chat` resumes the newest session whose **dominant `— <Lane> Agent` sign-off** is that
+lane, `cd`s into the repo, and runs `claude --resume <id>`. It self-updates (re-discovers the newest
+dominant session each call), so a lane's *new* sessions are picked up automatically — which only works
+because every reply is signed. One more reason to always sign, and to sign as your real lane.
+
+**Identifying which session is which lane:** count the **dominant** `— <Lane> Agent` sign-off in the
+transcript (`~/.claude/projects/-Users-basitsiddiqui-Projects-TeamMarhaba/*.jsonl`) — NOT the first
+lane it mentions. A session references other lanes in passing (coordination, handoffs); a first-mention
+grep once mis-identified the Login session as Admin and resumed the wrong agent. Dominant sign-off is
+ground truth. Prefer handing Basit `cr <lane>` over a raw UUID.
+
 ## Ticket lifecycle (hard rules)
 
 1. **Backlog → Refinement → To Do → In Progress → In Review → Testing → Done.** New tickets go to
