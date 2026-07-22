@@ -209,4 +209,26 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
   pending — wait in the foreground even if slow."* Only the orchestrator can own long background
   watches (it gets completion notifications; a subagent does not).
 
+### 2026-07-22 — A stale, un-rebased squash-merge silently reverts newer sibling work (TM-962)
+
+- **Rebase every branch over fresh `main` immediately before merge.** TM-935's squash-merge (#621)
+  was cut before TM-930 (#618) merged and was never rebased. Because a squash diff is computed
+  against the branch's *own* base, merging it re-applied a world without TM-930 and **silently
+  reverted the entire TM-930 gate-phone verify-and-link feature** on `main` — `onboarding.js`
+  1259→881, `auth.js` block gone, the `tm930-*` specs + capture + evidence deleted. CI was green
+  (the branch built fine against its stale base); nothing flagged the revert. An un-rebased stale
+  branch doesn't conflict — it *quietly overwrites*.
+- **This is exactly what the wave-admin-2 rebase discipline prevents** — it caught the OpenAPI
+  conflicts on later tickets. TM-935 merged *before* that discipline applied, which is how the
+  regression slipped through. The rule is not "rebase when git reports a conflict"; it's "rebase
+  every branch over current `main` right before merge, unconditionally", because the dangerous case
+  (a stale branch that reverts a sibling) produces **no** conflict marker.
+- **Recovering a revert-by-stale-merge, scoped tightly:** for files *only* the reverted ticket
+  touched, confirm with `git log <revert-parent>..origin/main -- <file>` that the *only* later
+  commit is the offending merge, then blanket-`git checkout <feature-sha> -- <files>`. For files a
+  sibling *also* legitimately changed (a shared `styles.css`, a shared spec), do **not**
+  blanket-restore — re-apply only the reverted ticket's own hunks (`git diff <sha>^ <sha> -- <file>
+  | git apply`) on top of current `main`, so the sibling's work survives. Verify the restored files
+  byte-match the feature SHA and that the diff vs `main` touches *only* the reverted ticket's files.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
