@@ -231,4 +231,24 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
   | git apply`) on top of current `main`, so the sibling's work survives. Verify the restored files
   byte-match the feature SHA and that the diff vs `main` touches *only* the reverted ticket's files.
 
+### 2026-07-22 — "On the board" = in a STARTED sprint, not just In Progress + assigned (TM-962)
+
+- **Flipping status + assigning is NOT the same as being on the board.** Jira only renders a ticket
+  on a sprint board if its **sprint field (`customfield_10020`)** points at a *started* sprint. A
+  ticket that is In Progress and assigned to Basit but has `sprint = None` (or is in the backlog /
+  a closed sprint) is **invisible** — the operator asks "did you not assign it? it's not on the
+  board." That happened on TM-962: the recovery ran to a green PR while the ticket was In Progress +
+  assigned but never added to a sprint, so Basit couldn't see it.
+- **The claim ritual is three steps, and the third is the one that's easy to skip:** (1) flip
+  In Progress, (2) assign the operating account, (3) **add it to the active sprint** whose wave
+  matches the ticket's label — `POST /rest/agile/1.0/sprint/<id>/issue {"issues":["TM-XXX"]}`
+  (active sprint id from `GET /rest/agile/1.0/board/1/sprint?state=active`). Then **re-read
+  `customfield_10020` to confirm** it shows a started sprint. A 204 on the transition proves the
+  status changed, not that the ticket is visible.
+- **This applies even to urgent blockers/hotfixes.** "It's an emergency, just fix it" is exactly
+  when the sprint step gets skipped — but an invisible blocker ticket is one the operator can't
+  track. Put it on the sprint that owns the regression (TM-962 is a `wave-admin-2` regression → the
+  active wave-admin-2 sprint) and keep it In Progress. Hardened into [CROSS-AGENT.md](../CROSS-AGENT.md)
+  rule #2.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
