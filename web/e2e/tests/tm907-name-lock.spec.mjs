@@ -162,11 +162,17 @@ test("@profile a name-locked user sees read-only name fields with an explanation
   await expect(page.locator("#profile-firstName")).not.toHaveAttribute("aria-readonly", "true");
   await saveName(page, first, last);
 
-  // Now induce the lock (one reliability strike) and re-open the profile → fresh /me reports nameLocked.
+  // Now induce the lock (one reliability strike) and RELOAD in place so a fresh mount GET /me reports
+  // nameLocked. We're already on #/profile, so we wait for the RELOAD's own /me — NOT openProfileForm,
+  // whose #nav-profile click fires no new /me when already on the profile route (that hangs the wait).
   await strike(email);
+  const meAfterLock = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
+  );
   await page.reload();
   await expectSignedIn(page);
-  await openProfileForm(page);
+  await meAfterLock;
+  await expect(page.locator("#profile-form")).toBeVisible();
 
   // Pass-after: the SET name fields are read-only (real readOnly property + aria-readonly for a11y),
   // the lock explanation is visible and announced, and the values are unchanged (not wiped).
