@@ -22,8 +22,24 @@ name is your agent name.
    `file:line`, Goal, Scope, Acceptance criteria, Dependencies + dup flags, Open decisions,
    Estimate). Never drop a raw ticket into a started sprint. **Run refinement on the Fable model**
    (see *Findings discipline → Model policy*).
-2. **No work without the ticket visibly In Progress in the active sprint** — flip it yourself
-   BEFORE launching any agent/workflow, even for tickets you just created.
+2. **No work without the ticket VISIBLY on the board — In Progress, in a STARTED sprint.**
+   *Visibly on the board* is a three-part check, and **status + assignee are NOT enough**: a ticket
+   that is In Progress and assigned but whose **sprint field (`customfield_10020`) is `None`** (or
+   sits in the backlog / a closed sprint) does **not** render on the board — the operator literally
+   cannot see it. (TM-962 bit us here: flipped to In Progress and assigned to Basit, but never added
+   to a sprint → invisible on the board until Basit called it out.) So BEFORE launching any
+   agent/workflow — even for a ticket you just created, and even for an urgent blocker/hotfix — do
+   all three and then VERIFY:
+   (a) flip it **In Progress** yourself;
+   (b) **assign** it (see below);
+   (c) **attach it to the active sprint** whose wave matches the ticket's wave label (a `wave-admin-2`
+   ticket → the active wave-admin-2 sprint). The MCP connector has no sprint tool; use the Agile REST
+   API: `curl -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -X POST -H "Content-Type: application/json"
+   "$JIRA_BASE_URL/rest/agile/1.0/sprint/<SPRINT_ID>/issue" -d '{"issues":["TM-XXX"]}'` (HTTP 204 =
+   done; find the active sprint id via `GET /rest/agile/1.0/board/1/sprint?state=active`).
+   **Verification is not optional — re-read `customfield_10020` and confirm it shows a started
+   sprint before you consider the ticket "on the board".** A green transition call is not proof of
+   visibility.
    **Every ticket you create OR claim gets an assignee — the operating account (Basit,
    `accountId 712020:66e23906-b54c-4181-b77a-e591d42be2ee`).** `createJiraIssue` does NOT auto-assign
    (pass it, or `editJiraIssue {"assignee":{"accountId":…}}` right after); claiming means setting
@@ -41,6 +57,17 @@ name is your agent name.
    `curl -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" -F "file=@shot.png"
    "$JIRA_BASE_URL/rest/api/3/issue/TM-XX/attachments"` (parse the env file yourself; HTTP 200 = done).
    Do this for every before/after shot before flipping to In Review.
+   **Keep attachments to a REASONABLE, CURATED count — target 5–10, and if you're about to attach
+   more than ~10, STOP and think again, then write the reason on the ticket.** A ticket with 100+
+   screenshots is wrong: it buries the shots that matter and reads as noise, not evidence. Attach
+   only the handful that demonstrate *this* ticket's change (e.g. before + the 3–4 key after-states).
+   **⚠️ The e2e evidence lane (`e2e.yml` dispatched with `evidence_ticket=TM-XX`) posts the ENTIRE
+   suite matrix — every spec × every browser project, hundreds of PNGs — to whatever ticket you
+   name.** Never point it at a scoped feature/bug/restore ticket (TM-962 got 799 that way). Either
+   curate by hand from your own capture script, or aim the full-matrix dump at a dedicated
+   sprint-evidence ticket and hand-attach the relevant few to the feature ticket. If a lane
+   over-attaches, trim it back with `DELETE /rest/api/3/attachment/{id}` (the same REST token can
+   delete).
 4. **Gate tickets are created AT SPRINT START, not at the end** (we were prompted for them — don't
    repeat that). **EVERY wave/sprint gets all THREE gate tickets, no exceptions:** (1) a
    `human`-labelled manual-test sign-off, (2) a sprint code-review gate, and (3) a **deploy gate**

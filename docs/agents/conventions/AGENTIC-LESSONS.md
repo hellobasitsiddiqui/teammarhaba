@@ -209,4 +209,61 @@ Full feature reference: [`admin-broadcast-feature.md`](../admin-broadcast-featur
   pending — wait in the foreground even if slow."* Only the orchestrator can own long background
   watches (it gets completion notifications; a subagent does not).
 
+### 2026-07-22 — A stale, un-rebased squash-merge silently reverts newer sibling work (TM-962)
+
+- **Rebase every branch over fresh `main` immediately before merge.** TM-935's squash-merge (#621)
+  was cut before TM-930 (#618) merged and was never rebased. Because a squash diff is computed
+  against the branch's *own* base, merging it re-applied a world without TM-930 and **silently
+  reverted the entire TM-930 gate-phone verify-and-link feature** on `main` — `onboarding.js`
+  1259→881, `auth.js` block gone, the `tm930-*` specs + capture + evidence deleted. CI was green
+  (the branch built fine against its stale base); nothing flagged the revert. An un-rebased stale
+  branch doesn't conflict — it *quietly overwrites*.
+- **This is exactly what the wave-admin-2 rebase discipline prevents** — it caught the OpenAPI
+  conflicts on later tickets. TM-935 merged *before* that discipline applied, which is how the
+  regression slipped through. The rule is not "rebase when git reports a conflict"; it's "rebase
+  every branch over current `main` right before merge, unconditionally", because the dangerous case
+  (a stale branch that reverts a sibling) produces **no** conflict marker.
+- **Recovering a revert-by-stale-merge, scoped tightly:** for files *only* the reverted ticket
+  touched, confirm with `git log <revert-parent>..origin/main -- <file>` that the *only* later
+  commit is the offending merge, then blanket-`git checkout <feature-sha> -- <files>`. For files a
+  sibling *also* legitimately changed (a shared `styles.css`, a shared spec), do **not**
+  blanket-restore — re-apply only the reverted ticket's own hunks (`git diff <sha>^ <sha> -- <file>
+  | git apply`) on top of current `main`, so the sibling's work survives. Verify the restored files
+  byte-match the feature SHA and that the diff vs `main` touches *only* the reverted ticket's files.
+
+### 2026-07-22 — "On the board" = in a STARTED sprint, not just In Progress + assigned (TM-962)
+
+- **Flipping status + assigning is NOT the same as being on the board.** Jira only renders a ticket
+  on a sprint board if its **sprint field (`customfield_10020`)** points at a *started* sprint. A
+  ticket that is In Progress and assigned to Basit but has `sprint = None` (or is in the backlog /
+  a closed sprint) is **invisible** — the operator asks "did you not assign it? it's not on the
+  board." That happened on TM-962: the recovery ran to a green PR while the ticket was In Progress +
+  assigned but never added to a sprint, so Basit couldn't see it.
+- **The claim ritual is three steps, and the third is the one that's easy to skip:** (1) flip
+  In Progress, (2) assign the operating account, (3) **add it to the active sprint** whose wave
+  matches the ticket's label — `POST /rest/agile/1.0/sprint/<id>/issue {"issues":["TM-XXX"]}`
+  (active sprint id from `GET /rest/agile/1.0/board/1/sprint?state=active`). Then **re-read
+  `customfield_10020` to confirm** it shows a started sprint. A 204 on the transition proves the
+  status changed, not that the ticket is visible.
+- **This applies even to urgent blockers/hotfixes.** "It's an emergency, just fix it" is exactly
+  when the sprint step gets skipped — but an invisible blocker ticket is one the operator can't
+  track. Put it on the sprint that owns the regression (TM-962 is a `wave-admin-2` regression → the
+  active wave-admin-2 sprint) and keep it In Progress. Hardened into [CROSS-AGENT.md](../CROSS-AGENT.md)
+  rule #2.
+
+### 2026-07-22 — Curate evidence to 5–10 shots; the e2e lane dumps the WHOLE matrix (TM-962)
+
+- **Reasonable attachment count is 5–10. More than ~10 is a smell — stop, think, and if you truly
+  need more, write the reason on the ticket.** A ticket with 100+ screenshots is wrong: it buries
+  the shots that matter and reads as noise. Attach only the handful that demonstrate *this* ticket's
+  change (before + the 3–4 key after-states).
+- **The e2e evidence lane (`evidence_ticket=TM-XX`) posts the ENTIRE suite matrix** — every spec ×
+  every browser project — to the named ticket. On TM-962 that was **799 screenshots** (admin,
+  broadcast, chat, events… almost none TM-930-related). Never aim the full-matrix dump at a scoped
+  feature/bug/restore ticket. Curate by hand from your own capture script, or point the dump at a
+  dedicated sprint-evidence ticket and hand-attach the relevant few.
+- **If a lane over-attaches, it's fixable:** the `~/.config/teammarhaba/jira.env` REST token can
+  `DELETE /rest/api/3/attachment/{id}` (204). Parallelise it (~12 workers) — 800 sequential deletes
+  time out. Then hand-attach the curated set. Hardened into [CROSS-AGENT.md](../CROSS-AGENT.md) rule #3.
+
 _Living document — append a dated lesson whenever the fleet teaches you one._
