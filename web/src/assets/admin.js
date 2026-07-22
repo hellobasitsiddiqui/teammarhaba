@@ -38,6 +38,9 @@ import {
   MAX_RECIPIENTS,
   NO_ROUTE,
   validateBroadcast,
+  // TM-976 (QA-roam A8): gates which validateBroadcast errors are DISPLAYED so a pristine, untouched
+  // compose panel doesn't paint a screenful of "required" red before the admin types anything.
+  composeErrorsToShow,
   routeOptionsFrom,
   // TM-617: the shared friendly fallback for a route with no curated label below, so an unmapped
   // route reads as "Event detail" rather than a raw "#/event-detail" token in the picker.
@@ -97,7 +100,9 @@ const state = {
   selection: new Set(),
   // Cache of the deep-link options once fetched (the draft itself lives on the live inputs, which are
   // the single source of truth — see draft()); kept only so a re-entry doesn't need to refetch.
-  broadcast: { routeOptions: null },
+  // TM-976 (A8): which compose fields the admin has interacted with, so a pristine panel shows no
+  // errors. title/body flip on input; recipients on any selection change; all reset after a send.
+  broadcast: { routeOptions: null, touched: { title: false, body: false, recipients: false } },
 };
 
 let shell = null; // { stats, table, pager, compose } persistent containers
@@ -260,6 +265,7 @@ function toggleSelected(user, on) {
   if (on && !isPushEligible(user)) return;
   if (on) state.selection.add(user.id);
   else state.selection.delete(user.id);
+  state.broadcast.touched.recipients = true; // TM-976 (A8): they've engaged the recipient list.
   // Only the compose panel + the header select-all state change — no need to rebuild the whole table.
   refreshSelectionUi();
   syncSelectAll();
@@ -285,6 +291,7 @@ function toggleSelectAllMatching(on) {
   // the Send-gate stays closed with the same rule (validateBroadcast) until the count is back under.
   const capMsg = on ? selectionCapMessage(state.selection.size) : "";
   if (capMsg) toast(capMsg, { type: "info", timeout: 8000 });
+  state.broadcast.touched.recipients = true; // TM-976 (A8): select-all is a recipient interaction too.
   // The checkboxes on the visible page need repainting, so re-render the table body here.
   renderTable();
   refreshSelectionUi();
@@ -779,12 +786,15 @@ function refreshSelectionUi() {
   const n = state.selection.size;
   c.count.textContent = `${n} selected`;
   const { title, body, recipients, canSend } = validateBroadcast(draft());
-  // Show the length errors as the user types; the empty-recipient hint shows only once they've started
-  // composing (so a pristine, untouched panel isn't shouting "select a recipient" before any intent).
-  setComposeError("title", title);
-  setComposeError("body", body);
-  c.recipientHint.textContent = recipients || "";
-  c.recipientHint.hidden = !recipients;
+  // Send is gated by canSend (the real validation) regardless — but the VISIBLE errors are gated by
+  // what the admin has touched (TM-976 / A8), so a pristine, untouched panel doesn't shout "required"
+  // before any intent. A field's error surfaces once it's touched; the empty-recipient hint once they've
+  // engaged at all (see composeErrorsToShow). The code always meant to do this — the guard was missing.
+  const show = composeErrorsToShow({ title, body, recipients }, state.broadcast.touched);
+  setComposeError("title", show.title);
+  setComposeError("body", show.body);
+  c.recipientHint.textContent = show.recipients || "";
+  c.recipientHint.hidden = !show.recipients;
   c.send.disabled = !canSend || c.sendingBusy;
   updatePreview();
 }
@@ -890,6 +900,8 @@ async function sendBroadcast() {
     c.title.value = "";
     c.body.value = "";
     c.route.value = NO_ROUTE;
+    // TM-976 (A8): the reset panel is pristine again, so the next compose starts quiet (no shout).
+    state.broadcast.touched = { title: false, body: false, recipients: false };
     renderTable(); // repaint the row checkboxes now that the selection is empty
     refreshSelectionUi();
   } catch (err) {
@@ -942,9 +954,10 @@ function buildCompose() {
   }, [el("option", { value: NO_ROUTE, text: "No deep-link" })]);
   const routeHint = el("p", { id: "admin-broadcast-route-hint", class: "tm-muted tm-field-hint", text: "Where a tap on the notification takes the user." });
 
-  // Live inline errors clear as the user types (mirrors profile.js's live-clear).
-  title.addEventListener("input", () => refreshSelectionUi());
-  body.addEventListener("input", () => refreshSelectionUi());
+  // Live inline errors clear as the user types (mirrors profile.js's live-clear). Typing also marks the
+  // field touched (TM-976 / A8) so its error can surface — a pristine, untouched field stays quiet.
+  title.addEventListener("input", () => { state.broadcast.touched.title = true; refreshSelectionUi(); });
+  body.addEventListener("input", () => { state.broadcast.touched.body = true; refreshSelectionUi(); });
 
   const recipientHint = el("p", { id: "admin-broadcast-recipients", class: "tm-field-error", role: "alert", hidden: true });
 

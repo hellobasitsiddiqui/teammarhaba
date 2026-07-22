@@ -112,6 +112,17 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await expect(page.locator("#admin-table")).toBeVisible();
   const compose = page.locator("#admin-broadcast");
   await expect(compose).toBeVisible();
+  // A8 (TM-976): the PRISTINE, untouched compose panel must not shout — no "required" errors, no red
+  // rings — before the admin has typed anything. (validateBroadcast still gates Send; only the visible
+  // errors are held back until a field is touched — composeErrorsToShow.) This is the fail-before spot:
+  // pre-fix all three errors painted on first load.
+  await expect(page.locator("#admin-broadcast-title-error")).toBeHidden();
+  await expect(page.locator("#admin-broadcast-body-error")).toBeHidden();
+  await expect(page.locator("#admin-broadcast-recipients")).toBeHidden();
+  await expect(page.locator("#admin-broadcast-title")).not.toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#admin-broadcast-body")).not.toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#admin-broadcast-send")).toBeDisabled(); // still gated, just not shouting
+  await shot("compose-pristine-no-errors");
   // Show every seeded account on one page so the recipient checkboxes are all present regardless of
   // how many other specs' accounts share the run's DB (50 is the max page size; seeded N ≪ 50).
   await page.getByLabel("Rows per page").selectOption("50");
