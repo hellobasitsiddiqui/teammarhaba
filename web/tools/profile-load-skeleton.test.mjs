@@ -62,16 +62,21 @@ test("TM-663: the pre-data identity render is BLANK, not the misleading 'Your pr
 });
 
 test("TM-663: the pre-data strength render is BLANK, not the misleading '0% complete'", () => {
-  const region = hubBuildRegion();
+  // TM-913: the strength percent is now the RING's centre label — built blank in strengthRing() (the
+  // `pct` span, `text: ""`). The guarantee is unchanged: no concrete 0% (or "0% complete") flashes
+  // before /me resolves. Assert the ring's centre label starts blank in its builder.
+  const ringStart = PROFILE_SRC.indexOf("function strengthRing()");
+  assert.ok(ringStart > 0, "expected the strengthRing() builder to exist");
+  const ringBody = PROFILE_SRC.slice(ringStart, PROFILE_SRC.indexOf("function pfCard", ringStart));
   assert.doesNotMatch(
-    region,
-    /const\s+barPct\s*=\s*el\([^)]*text:\s*"0% complete"/s,
-    "barPct must NOT be initialised to '0% complete' — that concrete 0% is the misleading pre-load flash",
+    ringBody,
+    /const\s+pct\s*=\s*el\([^)]*text:\s*"0%/s,
+    "the ring's centre percent must NOT be initialised to a concrete 0% — that's the misleading pre-load flash",
   );
   assert.match(
-    region,
-    /const\s+barPct\s*=\s*el\([^)]*text:\s*""/s,
-    "barPct must start blank so a loaded user never sees a concrete 0% before real strength paints",
+    ringBody,
+    /const\s+pct\s*=\s*el\([^)]*text:\s*""/s,
+    "the ring's centre percent must start blank so a loaded user never sees a concrete 0% before real strength paints",
   );
 });
 
@@ -146,4 +151,72 @@ test("TM-665: menu rows keep the chevron on-screen — the label wraps, the chev
   const rowBlock = STYLES_SRC.slice(rowStart, STYLES_SRC.indexOf("}", rowStart));
   assert.match(rowBlock, /max-width:\s*100%/, "a menu row must not exceed the card width");
   assert.match(rowBlock, /min-width:\s*0/, "a menu row must be shrinkable so a long label wraps instead of overflowing");
+});
+
+// ---- TM-913: the strength ring (SVG progress ring, was a horizontal bar) -------------------------
+// These are the render-path + styles.css guards for the ring swap. profile.js can't be imported under
+// `node --test` (Firebase CDN chain), so — like the TM-663 guards above — they assert over the source.
+// The behavioural dashoffset math is exercised for real in profile-core.test.mjs (strengthRingGeometry).
+
+test("TM-913: the strength card renders an SVG progress ring, not the old horizontal bar", () => {
+  // The old bar markup (`<div class="tm-pf-bar"><i></i></div>`) is gone from the render path...
+  assert.doesNotMatch(PROFILE_SRC, /class:\s*"tm-pf-bar"/, "the horizontal bar markup must be replaced by the ring");
+  assert.doesNotMatch(STYLES_SRC, /\.tm-pf-bar\s*\{/, "the .tm-pf-bar bar styles must be replaced by the ring styles");
+  // ...replaced by a strengthRing() builder that mounts an SVG <circle> fill arc.
+  assert.match(PROFILE_SRC, /function\s+strengthRing\(\)/, "a strengthRing() builder must exist");
+  assert.match(PROFILE_SRC, /class:\s*"tm-pf-ring-arc"[\s\S]*?"stroke-dasharray"/, "the fill arc must be a dash-array clipped circle");
+});
+
+test("TM-913: paintHub drives the ring arc's dashoffset from the real strength percent", () => {
+  // paintHub sets stroke-dashoffset off strengthRingGeometry(percent) — the ring reflects percent.
+  assert.match(
+    PROFILE_SRC,
+    /ringArc\.style\.strokeDashoffset\s*=\s*String\(strengthRingGeometry\(strength\.percent/,
+    "paintHub must set the arc's dashoffset from strengthRingGeometry(strength.percent)",
+  );
+  // The centre label is the bare percent (no "complete" — that stays in the nudge line, agreed default).
+  assert.match(
+    PROFILE_SRC,
+    /barPct\.textContent\s*=\s*`\$\{strength\.percent\}%`/,
+    "the ring centre must show the bare percent (e.g. '87%'), not '87% complete'",
+  );
+});
+
+test("TM-913: the ring carries role=progressbar with live aria-valuenow reflecting the percent", () => {
+  // The ring container is the progressbar (min/max fixed 0..100 at build time).
+  assert.match(PROFILE_SRC, /role:\s*"progressbar"/, "the ring must be a role=progressbar");
+  assert.match(PROFILE_SRC, /"aria-valuemin":\s*"0"/, "the progressbar must declare aria-valuemin=0");
+  assert.match(PROFILE_SRC, /"aria-valuemax":\s*"100"/, "the progressbar must declare aria-valuemax=100");
+  // paintHub sets valuenow (+ a spoken valuetext) to the live percent.
+  assert.match(
+    PROFILE_SRC,
+    /ring\.setAttribute\("aria-valuenow",\s*String\(strength\.percent\)\)/,
+    "paintHub must set aria-valuenow to the live strength percent",
+  );
+  // The decorative SVG is aria-hidden so the SR announces one progressbar node, not the raw circles.
+  assert.match(PROFILE_SRC, /class:\s*"tm-pf-ring-svg"[\s\S]*?"aria-hidden":\s*"true"/, "the ring SVG must be aria-hidden");
+});
+
+test("TM-913: the ring fill animates on paint but is silenced under prefers-reduced-motion", () => {
+  const arcStart = STYLES_SRC.indexOf(".tm-pf-ring-arc {");
+  assert.ok(arcStart > 0, ".tm-pf-ring-arc must have a rule");
+  const arcBlock = STYLES_SRC.slice(arcStart, STYLES_SRC.indexOf("}", arcStart));
+  assert.match(arcBlock, /transition:\s*stroke-dashoffset/, "the arc must animate its dashoffset on paint");
+  // A reduced-motion block must drop the arc's transition (no animated fill when reduced).
+  assert.match(
+    STYLES_SRC,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.tm-pf-ring-arc\s*\{[\s\S]*?transition:\s*none/,
+    "prefers-reduced-motion must silence the ring fill animation",
+  );
+});
+
+test("TM-913: the loading skeleton adapts to the RING shape (a disc), not a bar", () => {
+  // The skeleton makes the ring box a round shimmer disc and hides the concrete arc + percent while
+  // loading — so nothing (no misleading 0% arc/number) flashes before real strength lands.
+  assert.match(STYLES_SRC, /\.tm-pf-loading\s+\.tm-pf-ring\s*\{[\s\S]*?border-radius:\s*50%/, "the skeleton must round the ring box into a disc");
+  assert.match(
+    STYLES_SRC,
+    /\.tm-pf-loading\s+\.tm-pf-ring-svg[\s\S]*?visibility:\s*hidden/,
+    "the concrete arc + percent must be hidden under the shimmer while loading",
+  );
 });

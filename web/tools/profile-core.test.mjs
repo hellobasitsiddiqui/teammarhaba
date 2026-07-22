@@ -17,6 +17,7 @@ import {
   identitySummary,
   accountContact,
   profileStrength,
+  strengthRingGeometry,
   publicSummary,
   formatJoined,
   phoneFormatError,
@@ -668,4 +669,56 @@ test("interestCount: array → length; non-array / missing / null → 0 (tolerat
   assert.equal(interestCount({}), 0); // field absent
   assert.equal(interestCount(null), 0);
   assert.equal(interestCount(undefined), 0);
+});
+
+// ---- strengthRingGeometry (TM-913) — the progress-ring dashoffset math ---------------------------
+// The profile-strength completeness now renders as a circular SVG progress ring (was a horizontal bar).
+// The fill arc is a <circle> with stroke-dasharray = circumference and stroke-dashoffset =
+// strengthRingGeometry(percent).dashoffset — the undrawn length, so a higher percent leaves LESS
+// undrawn (a fuller arc). These pin the arc→percent relationship the ring depends on.
+
+test("strengthRingGeometry: 0% leaves the WHOLE circle undrawn (empty ring)", () => {
+  const g = strengthRingGeometry(0);
+  assert.equal(g.circumference, 2 * Math.PI * 42);
+  // dashoffset == circumference → nothing drawn.
+  assert.equal(g.dashoffset, g.circumference);
+});
+
+test("strengthRingGeometry: 100% leaves nothing undrawn (full ring)", () => {
+  const g = strengthRingGeometry(100);
+  assert.equal(g.dashoffset, 0);
+});
+
+test("strengthRingGeometry: a partial percent offsets proportionally (60% → 40% undrawn)", () => {
+  const g = strengthRingGeometry(60);
+  // 60% filled → 40% of the circumference remains undrawn.
+  assert.ok(Math.abs(g.dashoffset - g.circumference * 0.4) < 1e-9,
+    "dashoffset must be (1 − percent/100) · circumference");
+});
+
+test("strengthRingGeometry: the five 20%-step strength values map to distinct, monotonic offsets", () => {
+  // profileStrength() yields 0/20/40/60/80/100 (5 fields). The ring must shrink the undrawn arc
+  // monotonically as strength rises — each step a smaller offset than the last.
+  const offsets = [0, 20, 40, 60, 80, 100].map((p) => strengthRingGeometry(p).dashoffset);
+  for (let i = 1; i < offsets.length; i++) {
+    assert.ok(offsets[i] < offsets[i - 1], `offset must decrease as percent rises (step ${i})`);
+  }
+});
+
+test("strengthRingGeometry: clamps out-of-range / degraded percent (no negative or over-full arc)", () => {
+  const c = strengthRingGeometry(0).circumference;
+  assert.equal(strengthRingGeometry(150).dashoffset, 0, "over-100 clamps to a full ring (offset 0)");
+  assert.equal(strengthRingGeometry(-20).dashoffset, c, "negative clamps to an empty ring (offset = C)");
+  assert.equal(strengthRingGeometry(NaN).dashoffset, c, "a NaN percent falls back to empty, not a broken arc");
+});
+
+test("strengthRingGeometry: the arc offset tracks the real profileStrength().percent", () => {
+  // The ring is driven by the SAME data source (profileStrength().percent) — a full profile is a full
+  // ring, an empty one an empty ring. Proves the ring reflects the computed strength end-to-end.
+  const full = profileStrength({ firstName: "Ada", city: "London", age: 30, phone: "+447700900123" }, { hasPhoto: true });
+  const empty = profileStrength({}, { hasPhoto: false });
+  assert.equal(full.percent, 100);
+  assert.equal(empty.percent, 0);
+  assert.equal(strengthRingGeometry(full.percent).dashoffset, 0);
+  assert.equal(strengthRingGeometry(empty.percent).dashoffset, strengthRingGeometry(0).circumference);
 });

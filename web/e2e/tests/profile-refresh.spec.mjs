@@ -20,7 +20,7 @@ async function signIn(page) {
   await expectSignedIn(page);
 }
 
-test("@profile the refreshed Profile hub shows the completeness bar, badges and the edit form", async ({ page }) => {
+test("@profile the refreshed Profile hub shows the completeness ring, badges and the edit form", async ({ page }) => {
   await signIn(page);
 
   // Enter the Profile screen the real way (the nav link → #/profile). Wait for the mount GET /me to
@@ -40,9 +40,67 @@ test("@profile the refreshed Profile hub shows the completeness bar, badges and 
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 
+  // TM-913: the profile strength renders as a circular progress RING (role=progressbar), not the old
+  // horizontal bar. Wait for paintHub() to land the real strength (the skeleton clears + aria-valuenow
+  // is stamped), then assert the ring's aria-valuenow matches the computed strength percent AND the
+  // centred percent label reads the same number.
+  const ring = page.getByRole("progressbar", { name: "Profile strength" });
+  await expect(ring).toBeVisible();
+  await expect(ring).toHaveAttribute("aria-valuemin", "0");
+  await expect(ring).toHaveAttribute("aria-valuemax", "100");
+  // The ring is driven off profileStrength().percent. A seeded ADMIN has name/city/age/phone but no
+  // photo — 4 of the 5 STRENGTH_FIELDS — so the percent is a KNOWN value: round(4/5 * 100) = 80. Pin it
+  // (not just /^\d+$/) so a regression that mis-counts the fields — e.g. 3 → 60 — fails here, and the
+  // visible centre label must echo the same number.
+  await expect(ring).toHaveAttribute("aria-valuenow", "80");
+  await expect(page.locator(".tm-pf-ring-pct")).toHaveText("80%");
+  // The fill arc reflects the percent via its dash-offset: offset = circumference * (1 - percent/100)
+  // (0% → full circumference undrawn; 100% → 0). Bind the RENDERED geometry to the percent — assert the
+  // offset SETTLES at that exact value (poll past the fill animation), so an arc wired to a
+  // wrong-but-nonzero constant offset (drawn, but not tracking the strength) fails here, not just
+  // "some arc is drawn".
+  await expect
+    .poll(
+      async () =>
+        page.locator(".tm-pf-ring-arc").evaluate((el) => {
+          const offset = parseFloat(getComputedStyle(el).strokeDashoffset) || 0;
+          const total = parseFloat(getComputedStyle(el).strokeDasharray) || 0;
+          const valuenow = Number(el.closest(".tm-pf-ring")?.getAttribute("aria-valuenow"));
+          return Math.abs(offset - total * (1 - valuenow / 100));
+        }),
+      { timeout: 5_000 },
+    )
+    .toBeLessThanOrEqual(1);
+
   // The paper-profile menu is present with a real "My events" destination and a public-profile entry.
   await expect(page.getByRole("link", { name: /My events/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Public profile/ })).toBeVisible();
+});
+
+test("@profile a strength gap 'Add …' prompt still deep-links to its field (TM-881 preserved under TM-913)", async ({ page }) => {
+  await signIn(page);
+
+  const meLoaded = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
+  );
+  await expect(page.locator("#nav-profile")).toBeVisible();
+  await page.click("#nav-profile");
+  await expect(page.locator(".tm-pf")).toBeVisible();
+  await meLoaded;
+
+  // The ring painted; the nudge row below it still carries the tappable gap prompts (TM-881). A seeded
+  // ADMIN has no uploaded avatar, so at least one gap ("Add a photo") is present. Clicking it must still
+  // deep-link to the matching field via focusOnPage (strengthGapTarget) — the wave-profile-1 contract the
+  // ring swap must not break. Presentation-only change: the gap buttons are untouched.
+  const gap = page.locator(".tm-pf-nudge-gap").first();
+  await expect(gap).toBeVisible();
+  await gap.click();
+  // After the click the gap's target control is focused (the strengthGapTarget → focusOnPage path):
+  // name/city/age/phone map onto their `profile-<field>` inputs; photo targets the avatar file input /
+  // native capture button. Assert the focused element is one of those valid strength-gap targets so the
+  // deep-link still resolves under the ring.
+  const focusedId = await page.evaluate(() => document.activeElement?.id || "");
+  expect(focusedId).toMatch(/^profile-(firstName|city|age|phone|avatar-(file|camera))$/);
 });
 
 test("@profile the public-profile preview (#/profile/public) renders the paper-public-profile layout", async ({ page }) => {

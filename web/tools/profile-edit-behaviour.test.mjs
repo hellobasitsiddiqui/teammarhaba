@@ -122,6 +122,9 @@ function withFakeDocument(run) {
   const prior = globalThis.document;
   globalThis.document = {
     createElement: (tag) => wireClassList(fakeEl(tag)),
+    // TM-913: the strength ring builds SVG-namespaced nodes (createElementNS). The tested paths don't
+    // inspect the ring's internals, so a plain fake element is enough for it to mount without throwing.
+    createElementNS: (_ns, tag) => wireClassList(fakeEl(tag)),
     createTextNode: (str) => ({ nodeType: 3, data: String(str) }),
     getElementById: () => null,
   };
@@ -173,7 +176,7 @@ function loadProfileModule(deps) {
     "  isNativeCameraAvailable, captureAvatarImage,\n" +
     "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  nextDayInterestsNudge,\n" +
@@ -268,6 +271,7 @@ const deps = {
   identitySummary: core.identitySummary,
   accountContact: core.accountContact,
   profileStrength: core.profileStrength,
+  strengthRingGeometry: core.strengthRingGeometry,
   publicSummary: core.publicSummary,
   // profile.js's validateField delegates to the pure validateProfileField in profile-core.js (TM-763):
   // inject the REAL one so the eval copy's validation runs instead of throwing ReferenceError under Node 20.
@@ -353,7 +357,13 @@ function makeShell(values = {}) {
     photo: wireClassList(fakeEl("img")),
     email: wireClassList(fakeEl("div")),
     phone: wireClassList(fakeEl("div")),
+    // `bar` is the pre-TM-913 horizontal-bar fill node (paintHub set hub.bar.style.width); kept so this
+    // harness evals main's paintHub too. TM-913 swaps it for the progress RING: `ring` is the
+    // role=progressbar container (paintHub sets aria-valuenow/valuetext on it) and `ringArc` the fill
+    // <circle> whose style.strokeDashoffset paintHub drives. All three stay so either side mounts.
     bar: wireClassList(fakeEl("i")),
+    ring: wireClassList(fakeEl("div")),
+    ringArc: wireClassList(fakeEl("circle")),
     barPct: wireClassList(fakeEl("span")),
     barNudge: wireClassList(fakeEl("span")),
     // TM-777 (I5): the next-day interests CTA button paintHub toggles hidden + sets text on.
@@ -1063,7 +1073,9 @@ test("avatar upload success repaints the identity header + strength via the broa
     profile.__getState().profile = me;
 
     profile.paintHub(me);
-    assert.equal(shell.hub.barPct._textContent, "80% complete", "photo-less baseline");
+    // TM-913: the strength percent is now the RING's centre label — the bare percent ("80%"), the word
+    // "complete" moved to the nudge line. The broadcast-repaint behaviour under test is unchanged.
+    assert.equal(shell.hub.barPct._textContent, "80%", "photo-less baseline (ring centre = bare percent)");
     assert.equal(shell.hub.photo.hidden, true);
 
     // Drive a picked file through the shipped change handler (validate → upload → announce).
@@ -1076,7 +1088,7 @@ test("avatar upload success repaints the identity header + strength via the broa
     assert.equal(shell.hub.photo.src, "https://cdn.test/new-avatar.png", "identity header photo updated");
     assert.equal(shell.hub.photo.hidden, false);
     assert.equal(shell.hub.glyph.hidden, true);
-    assert.equal(shell.hub.barPct._textContent, "100% complete", "the hasPhoto strength % updated");
+    assert.equal(shell.hub.barPct._textContent, "100%", "the hasPhoto strength % updated (ring centre = bare percent)");
     // The upload control's own preview repainted too (no regression from the broadcast refactor).
     const preview = avatar.wrapper._children[0]._children.find((c) => c && c.tagName === "IMG");
     assert.equal(preview.src, "https://cdn.test/new-avatar.png");
@@ -1090,6 +1102,9 @@ async function withFakeDocumentAsync(run) {
   const prior = globalThis.document;
   globalThis.document = {
     createElement: (tag) => wireClassList(fakeEl(tag)),
+    // TM-913: the strength ring builds SVG-namespaced nodes (createElementNS). The tested paths don't
+    // inspect the ring's internals, so a plain fake element is enough for it to mount without throwing.
+    createElementNS: (_ns, tag) => wireClassList(fakeEl(tag)),
     createTextNode: (str) => ({ nodeType: 3, data: String(str) }),
     getElementById: () => null,
   };

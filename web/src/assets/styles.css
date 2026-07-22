@@ -6109,7 +6109,7 @@ button.tm-c-reaction {
  * Paper surface tokens so it works across every accent + both toggle states. */
 .tm-pf-loading .tm-pf-name,
 .tm-pf-loading .tm-pf-id .tm-pf-sub,
-.tm-pf-loading .tm-pf-barlbl > span {
+.tm-pf-loading .tm-pf-barnudge {
     /* Give the (blank) text nodes a shimmer block so they read as "loading", not empty. */
     color: transparent;
     border-radius: var(--radius-sm);
@@ -6119,8 +6119,23 @@ button.tm-c-reaction {
     min-width: 6rem;
     min-height: 1em;
 }
-.tm-pf-loading .tm-pf-barlbl > span {
+.tm-pf-loading .tm-pf-barnudge {
     min-width: 4rem;
+}
+/* TM-913: the strength skeleton adapts to the RING shape (not a bar) — the SVG ring shows its faint
+ * track as a plain shimmer disc and its centre percent is hidden while loading, so nothing concrete
+ * flashes before the real strength lands. The track stroke already reads as a quiet ring; the shimmer
+ * pulse on the whole ring box signals "loading" without a misleading 0% arc or number. */
+.tm-pf-loading .tm-pf-ring {
+    border-radius: 50%;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+    background-size: 200% 100%;
+    animation: tm-pf-shimmer 1.2s ease-in-out infinite;
+}
+.tm-pf-loading .tm-pf-ring-svg,
+.tm-pf-loading .tm-pf-ring-pct {
+    /* Hide the concrete arc + number under the shimmer disc until paintHub() lands the real strength. */
+    visibility: hidden;
 }
 /* The avatar glyph is a real fallback, not a wrong value — but during load show it as a plain shimmer
  * disc so nothing concrete flashes before the real initial/photo lands. */
@@ -6137,7 +6152,8 @@ button.tm-c-reaction {
 @media (prefers-reduced-motion: reduce) {
     .tm-pf-loading .tm-pf-name,
     .tm-pf-loading .tm-pf-id .tm-pf-sub,
-    .tm-pf-loading .tm-pf-barlbl > span,
+    .tm-pf-loading .tm-pf-barnudge,
+    .tm-pf-loading .tm-pf-ring,
     .tm-pf-loading .tm-pf-id .tm-pf-avatar {
         animation: none;
     }
@@ -6269,41 +6285,78 @@ button.tm-c-reaction {
     font-weight: 700;
 }
 
-/* Profile-strength completeness bar (paper-profile) — the restyled completeness prompt. */
-.tm-pf-bar {
-    height: 0.85rem;
-    border: var(--border-width) solid var(--border);
-    border-radius: var(--radius-pill);
-    background: var(--surface);
-    overflow: hidden;
+/* Profile-strength completeness RING (paper-profile, TM-913) — the restyled completeness prompt as a
+ * circular SVG progress ring (was a horizontal bar). The SVG fills the box; the percent is centred on
+ * top via a grid overlay. Single accent colour at every strength level (paper aesthetic — no
+ * traffic-light thresholds, the agreed default). */
+.tm-pf-ring {
+    /* The ring + its centred percent share one grid cell so the number sits dead-centre on the circle. */
+    display: grid;
+    place-items: center;
+    width: 6.5rem;
+    height: 6.5rem;
+    margin: var(--space-1) auto var(--space-1);
+    /* Cap so it never outgrows the card on a narrow phone (390px); shrinks with the card if needed. */
+    max-width: 100%;
 }
-.tm-pf-bar > i {
-    display: block;
+.tm-pf-ring > * {
+    grid-area: 1 / 1; /* stack the SVG and the percent in the same cell */
+}
+.tm-pf-ring-svg {
+    width: 100%;
     height: 100%;
-    width: 0;
-    background: var(--accent);
-    transition: width 0.3s ease;
+    /* Start the arc at 12 o'clock and fill clockwise (the familiar completeness-donut direction). */
+    transform: rotate(-90deg);
+}
+.tm-pf-ring-track {
+    fill: none;
+    stroke: var(--surface);
+    stroke-width: 8;
+}
+.tm-pf-ring-arc {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 8;
+    /* Rounded arc ends read as hand-drawn ink rather than a hard machined edge (paper aesthetic). */
+    stroke-linecap: round;
+    /* dashoffset is set inline by paintHub() to C·(1−percent/100); animate the fill on paint. */
+    transition: stroke-dashoffset 0.5s ease;
+}
+/* Sketchy toggle (TM-529): under the hand-drawn skin the ring gets a subtle ink border via a doodle
+   filter so it reads as pen-on-paper, matching the doodle aesthetic; clean Paper leaves it crisp. */
+[data-sketchy="on"] .tm-pf-ring-arc,
+[data-sketchy="on"] .tm-pf-ring-track {
+    stroke-linejoin: round;
+}
+.tm-pf-ring-pct {
+    /* The centred percent IS the visible label (the a11y valuetext carries "N% complete"). */
+    font-size: var(--fs-4);
+    font-weight: 700;
+    color: var(--fg);
+    line-height: 1;
 }
 @media (prefers-reduced-motion: reduce) {
-    .tm-pf-bar > i {
+    .tm-pf-ring-arc {
         transition: none;
     }
 }
 .tm-pf-barlbl {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     gap: var(--space-2);
-    margin-top: var(--space-2);
+    margin-top: var(--space-1);
     color: var(--muted);
     font-size: var(--fs-1);
-    /* Let the label + nudge wrap on a narrow phone rather than forcing the row wider than the card and
-       clipping the nudge on the right edge (TM-665). */
+    /* Let the nudge wrap on a narrow phone rather than forcing the row wider than the card and clipping
+       the nudge on the right edge (TM-665). */
     flex-wrap: wrap;
+    text-align: center;
 }
 .tm-pf-barnudge {
     color: var(--accent);
     font-weight: 600;
-    text-align: right;
+    /* Centred under the ring (TM-913 — the ring is card-centred, the nudge sits below it). */
+    text-align: center;
     /* Shrinkable so a long nudge ("Add your city + your age →") wraps instead of overflowing right. */
     min-width: 0;
     overflow-wrap: anywhere;

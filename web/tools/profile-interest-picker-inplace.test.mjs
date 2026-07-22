@@ -119,7 +119,7 @@ function loadProfileModule() {
     "  isNativeCameraAvailable, captureAvatarImage,\n" +
     "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, publicSummary,\n" +
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  nextDayInterestsNudge,\n" +
@@ -176,6 +176,12 @@ function loadProfileModule() {
     identitySummary: () => ({}),
     accountContact: () => ({}),
     profileStrength: () => ({ percent: 0, gaps: [] }),
+    // TM-913: profile.js computes the ring circumference at module load (const RING_C =
+    // strengthRingGeometry(0)). An inert geometry stub is enough for the picker paths under test.
+    strengthRingGeometry: (percent = 0, radius = 42) => {
+      const circumference = 2 * Math.PI * radius;
+      return { radius, circumference, dashoffset: circumference * (1 - (percent || 0) / 100) };
+    },
     publicSummary: () => ({}),
     validateProfileField: () => "",
     NOTIFICATION_PREFS: ["EMAIL", "PUSH", "BOTH"],
