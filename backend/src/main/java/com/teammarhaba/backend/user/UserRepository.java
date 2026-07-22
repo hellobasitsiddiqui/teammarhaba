@@ -111,4 +111,14 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Query("select u.id from User u where u.id in :ids")
     List<Long> findActiveIdsByIdIn(@Param("ids") Collection<Long> ids);
+
+    /**
+     * How many accounts are <em>active</em> — enabled (not suspended) AND not soft-deleted. The
+     * denominator for the admin interests "Selected by" percentage (TM-832): {@code selectorCount /
+     * activeUsers}. Soft-deleted rows are already excluded by the entity's {@code @SQLRestriction}, so
+     * this JPQL count only needs the explicit {@code enabled = true} clause on top. Returned as a primitive
+     * count; the caller guards divide-by-zero (0 active users → 0%).
+     */
+    @Query("select count(u) from User u where u.enabled = true")
+    long countActiveUsers();
 }

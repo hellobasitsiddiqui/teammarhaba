@@ -3,6 +3,7 @@ package com.teammarhaba.backend.interests;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.user.UserRepository;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
@@ -67,16 +68,22 @@ public class InterestAdminService {
     private final AuditService audit;
     private final EntityManager entityManager;
     private final InterestSelectionConfig selectionConfig;
+    private final UserInterestRepository userInterests;
+    private final UserRepository users;
 
     public InterestAdminService(
             InterestCatalogueRepository catalogue,
             AuditService audit,
             EntityManager entityManager,
-            InterestSelectionConfig selectionConfig) {
+            InterestSelectionConfig selectionConfig,
+            UserInterestRepository userInterests,
+            UserRepository users) {
         this.catalogue = catalogue;
         this.audit = audit;
         this.entityManager = entityManager;
         this.selectionConfig = selectionConfig;
+        this.userInterests = userInterests;
+        this.users = users;
     }
 
     // --- Catalogue CRUD ---
@@ -271,6 +278,47 @@ public class InterestAdminService {
         return new InterestConfig(selectionConfig.minSelections(), selectionConfig.maxSelections());
     }
 
+    // --- Per-interest selection analytics (TM-832) ---
+
+    /**
+     * Per-LABEL selection analytics for the admin console's "Selected by" column (TM-832): for every
+     * label anyone has selected, how many users picked it ({@code selectorCount}) and what whole-number
+     * percentage of the ACTIVE user base that is. SCOPE: count + percent only — the gender split is
+     * deferred (TM-955).
+     *
+     * <p>Exactly TWO aggregate reads, never an N+1: one {@code COUNT(*) GROUP BY label} over the whole
+     * snapshot log ({@link UserInterestRepository#selectionCountsByLabel()}) and one active-user count
+     * ({@link UserRepository#countActiveUsers()}) — the shared percentage denominator. Because the count
+     * is keyed on the free-text snapshot label (TM-773), a selection of a since-renamed or since-retired
+     * interest is still tallied under the label it was picked as, so a retired catalogue interest keeps
+     * its historical count. A label nobody selected is simply absent from the result (the client renders
+     * it as {@code 0 (0%)}).
+     *
+     * <p>Percent is 0-guarded: with no active users the denominator is 0, so every percent is 0 rather
+     * than a divide-by-zero. Otherwise {@code percent = round(100 * selectorCount / activeUsers)}.
+     */
+    @Transactional(readOnly = true)
+    public SelectionStats selectionStats() {
+        long activeUsers = users.countActiveUsers();
+        List<UserInterestRepository.LabelCount> counts = userInterests.selectionCountsByLabel();
+        List<LabelSelectionStat> stats = counts.stream()
+                .map(c -> new LabelSelectionStat(c.getLabel(), c.getCount(), percentOf(c.getCount(), activeUsers)))
+                .toList();
+        return new SelectionStats(activeUsers, stats);
+    }
+
+    /**
+     * A count as a whole-number percentage of {@code activeUsers}, rounded half-up, 0-guarded: a zero (or
+     * negative — defensive) denominator yields 0 rather than dividing by zero. Kept package-visible for a
+     * direct unit test of the divide-by-zero + rounding contract.
+     */
+    public static int percentOf(long selectorCount, long activeUsers) {
+        if (activeUsers <= 0) {
+            return 0;
+        }
+        return (int) Math.round(100.0 * selectorCount / activeUsers);
+    }
+
     // --- helpers ---
 
     /** Load an interest by id including a tombstoned one (the admin paths); 404 if truly absent. */
@@ -308,4 +356,14 @@ public class InterestAdminService {
 
     /** The two interests-selection bounds, returned by {@link #getConfig()} / {@link #setConfig}. */
     public record InterestConfig(int minSelections, int maxSelections) {}
+
+    /**
+     * The per-interest selection analytics (TM-832) returned by {@link #selectionStats()}: the active-user
+     * denominator plus one {@link LabelSelectionStat} per selected label. Count + percent only (the gender
+     * split is deferred, TM-955).
+     */
+    public record SelectionStats(long activeUsers, List<LabelSelectionStat> stats) {}
+
+    /** One label's selection tally: the label, its selector count, and that count as a 0–100 percent. */
+    public record LabelSelectionStat(String label, long selectorCount, int percent) {}
 }

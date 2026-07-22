@@ -24,6 +24,9 @@ import {
   toInterestFormModel,
   validateConfigDraft,
   interestSummaryLabel,
+  indexSelectionStats,
+  selectedByLabel,
+  selectorCountOf,
 } from "../src/assets/admin-interests-core.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateInterestRequest + InterestConfigRequest) ------
@@ -199,4 +202,55 @@ test("interestSummaryLabel renders 'Label — Category' (or just the label)", ()
   assert.equal(interestSummaryLabel({ label: "Hiking", category: "Outdoors & Nature" }), "Hiking — Outdoors & Nature");
   assert.equal(interestSummaryLabel({ label: "Hiking" }), "Hiking");
   assert.equal(interestSummaryLabel({}), "Untitled interest");
+});
+
+// --- selection analytics: "Selected by" column (TM-832) --------------------------------------
+// The pure join+format the DOM layer (admin-interests.js) renders: index the stats by label, join a
+// catalogue row to its tally by label, format "<count> (<pct>%)", and fall back to "0 (0%)" for a label
+// with no stat. Count + percent only — the gender split is deferred (TM-955).
+
+const statsResponse = {
+  activeUsers: 600,
+  stats: [
+    { label: "Coffee & cafés", selectorCount: 42, percent: 7 },
+    { label: "Live music", selectorCount: 300, percent: 50 },
+  ],
+};
+
+test("indexSelectionStats maps label → { selectorCount, percent }", () => {
+  const idx = indexSelectionStats(statsResponse);
+  assert.equal(idx.get("Coffee & cafés").selectorCount, 42);
+  assert.equal(idx.get("Coffee & cafés").percent, 7);
+  assert.equal(idx.get("Live music").selectorCount, 300);
+  assert.equal(idx.get("Unknown"), undefined);
+});
+
+test("indexSelectionStats tolerates a null / malformed response (empty index)", () => {
+  assert.equal(indexSelectionStats(null).size, 0);
+  assert.equal(indexSelectionStats({}).size, 0);
+  assert.equal(indexSelectionStats({ stats: "nope" }).size, 0);
+  // A stray entry with no label is skipped, not indexed under undefined.
+  assert.equal(indexSelectionStats({ stats: [{ selectorCount: 5, percent: 1 }] }).size, 0);
+});
+
+test("selectedByLabel formats '<count> (<pct>%)' and joins by label", () => {
+  const idx = indexSelectionStats(statsResponse);
+  assert.equal(selectedByLabel({ label: "Coffee & cafés" }, idx), "42 (7%)");
+  assert.equal(selectedByLabel({ label: "Live music" }, idx), "300 (50%)");
+});
+
+test("selectedByLabel renders '0 (0%)' for a label with no stat (unselected)", () => {
+  const idx = indexSelectionStats(statsResponse);
+  assert.equal(selectedByLabel({ label: "Nobody picked this" }, idx), "0 (0%)");
+  // Also safe with a missing label or a non-Map index.
+  assert.equal(selectedByLabel({}, idx), "0 (0%)");
+  assert.equal(selectedByLabel({ label: "Coffee & cafés" }, null), "0 (0%)");
+});
+
+test("selectorCountOf returns the numeric count (0 when unselected) for the popularity sort", () => {
+  const idx = indexSelectionStats(statsResponse);
+  assert.equal(selectorCountOf({ label: "Live music" }, idx), 300);
+  assert.equal(selectorCountOf({ label: "Coffee & cafés" }, idx), 42);
+  assert.equal(selectorCountOf({ label: "Nobody picked this" }, idx), 0);
+  assert.equal(selectorCountOf({}, idx), 0);
 });
