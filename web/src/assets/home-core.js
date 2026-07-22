@@ -21,8 +21,10 @@
 // mine at all → section 3 leads (= the previous today's-near-you Home).
 //
 // It builds the Home view-model the DOM shell renders verbatim:
-//   • the section context line ("Upcoming meetups near <city>" — honest about the unfiltered feed, TM-734);
-//   • each ordered, collapse-aware section ({ key, header, cards, isTeaser, seeAllHref? });
+//   • each ordered, collapse-aware section ({ key, header, subtitle?, cards, isTeaser, seeAllHref? });
+//     the "Events near you" section carries the "near <city>" context sub-line as its `subtitle`
+//     (TM-734/TM-969 — honest about the unfiltered feed; rendered under that section's header, NOT as a
+//     page-wide subtitle over a generic "Home" title, which the product decision removed);
 //   • each feed card (tag / title / when / where / going-count + the RSVP-state affordance);
 //   • the empty-vs-populated decision (all three sections empty → the paper-empty-home state).
 //
@@ -92,7 +94,13 @@ function cardMatchesCity(card, viewerKey) {
 }
 
 /**
- * The page context line under the Home page title (the "near <city>" hint).
+ * The discovery-context sub-line for the "Events near you" section (the "near <city>" hint).
+ *
+ * TM-969 relocation: this line is context for the NEAR-YOU section (section 3) only — it describes the
+ * scope of the bookable "near you" teaser, not a Home-wide subtitle. So {@link homeSections} attaches it
+ * as that section's `subtitle` (rendered under its header inside the feed) rather than stranding it above
+ * the first section. It was previously a page-level subtitle under a generic "Home" title, which the
+ * product decision removed so the first present section's header is the first content.
  *
  * TM-662: the near-you section IS scoped to the viewer's city ({@link homeSections} filters section 3
  * by it), so the line honestly names that city as the scope — "Meetups near <city>". When the viewer's
@@ -260,7 +268,7 @@ export const SEE_ALL_LABEL = `${SEE_ALL_TEXT} ${SEE_ALL_ARROW}`;
  *
  * @param {Object[]} cards the raw EventCard listing.
  * @param {{city?: ?string, tz?: string, locale?: string, now?: number}} [ctx] `city` is the viewer's.
- * @returns {{isEmpty: boolean, sections: {key:string, header:string, cards:Object[], isTeaser:boolean, seeAllHref?:string}[]}}
+ * @returns {{isEmpty: boolean, sections: {key:string, header:string, subtitle?:string, cards:Object[], isTeaser:boolean, seeAllHref?:string}[]}}
  */
 export function homeSections(cards, { city, tz, locale, now = Date.now() } = {}) {
   // events-core splits the listing into live / upcoming (finished dropped defensively) and preserves
@@ -286,11 +294,15 @@ export function homeSections(cards, { city, tz, locale, now = Date.now() } = {})
   const toModels = (list) => list.map((c) => homeCardModel(c, { tz, locale, now }));
 
   // Build the three sections in fixed order, then drop the empty ones so the highest non-empty section
-  // is always the first content (no orphan header). The near-you teaser carries the hand-off link.
+  // is always the first content (no orphan header). The near-you teaser carries the hand-off link and —
+  // TM-969 — the "near <city>" discovery-context sub-line ({@link homeContextLine}). That line is scope
+  // context for THIS section only (the city the bookable teaser is filtered by), so it rides on the
+  // section's `subtitle` and is rendered under the "Events near you" header inside the feed, rather than
+  // stranded above the first section as a page-wide subtitle (the generic "Home" head was removed).
   const built = [
     { ...SECTION.HAPPENING_NOW, cards: toModels(myLive), isTeaser: false },
     { ...SECTION.YOUR_EVENTS, cards: toModels(myUpcoming), isTeaser: false },
-    { ...SECTION.NEAR_YOU, cards: toModels(nearYouTeaser), isTeaser: true, seeAllHref: EVENTS_ROUTE },
+    { ...SECTION.NEAR_YOU, subtitle: homeContextLine(city), cards: toModels(nearYouTeaser), isTeaser: true, seeAllHref: EVENTS_ROUTE },
   ];
   const sections = built.filter((s) => s.cards.length > 0);
 

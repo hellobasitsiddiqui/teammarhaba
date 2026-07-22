@@ -1,13 +1,17 @@
 // TM-969 — before/after visual evidence for the attending-first personalized Home FEED, at an
 // Android-phone viewport (390×844).
 //
-// THE CHANGE: Home was a single flat "Events near you" list. TM-969 reworks it into up to THREE
-// priority sections rendered top→bottom, each shown ONLY when it has events:
-//   1. "Happening now"  — my attending events (myState === "GOING") that are live now.
-//   2. "Your events"    — my upcoming attending events (GOING, not yet live).
+// THE CHANGE: Home was a single flat "Events near you" list under a generic "Home" page title. TM-969
+// reworks it into up to THREE priority sections rendered top→bottom, each shown ONLY when it has events,
+// AND drops the generic "Home" page title so the FIRST PRESENT SECTION'S HEADER is the first content
+// (product decision):
+//   1. "Happening now"  — my attending events (GOING or WAITLISTED) that are live now.
+//   2. "Your events"    — my upcoming attending events (GOING/WAITLISTED, not yet live).
 //   3. "Events near you" — nearby events I'm NOT attending, BOOKABLE ONLY, a short teaser followed by
-//                          a "See all events →" hand-off to #/events.
-// Empty sections collapse entirely, so the highest non-empty section is always the first content.
+//                          a "See all events →" hand-off to #/events; it also carries the "near <city>"
+//                          discovery-context sub-line (relocated from the removed page subtitle).
+// Empty sections collapse entirely, so the highest non-empty SECTION HEADER is always the first content
+// — never a "Home" page title. The `firstContentTitle` probe below pins that.
 //
 // To make the three sections all appear we seed, as ADMIN, four visible events and RSVP the capture
 // USER into two of them:
@@ -182,11 +186,19 @@ async function isShown(page, selector) {
 async function probe(page, name) {
   const shape = await page.evaluate(() => {
     const sections = Array.from(document.querySelectorAll('[data-testid="home-section"]'));
+    const homePanel = document.querySelector("#auth-signed-in");
+    // TM-969 product decision: the FIRST heading in the signed-in Home panel must be the first present
+    // SECTION header, not a generic "Home" page title. Probe the first h2/h3 heading text + whether any
+    // legacy generic-title node survives, so the verdict is grounded, not eyeballed.
+    const firstHeading = homePanel?.querySelector("h2, h3");
     return {
       sectionCount: sections.length,
       sectionTitles: sections.map(
         (s) => (s.querySelector('[data-testid="home-section-title"]')?.textContent || "").trim(),
       ),
+      firstContentTitle: (firstHeading?.textContent || "").trim(),
+      hasGenericHomeTitle: Boolean(homePanel?.querySelector(".tm-home-title")),
+      nearYouSubtitle: (document.querySelector('[data-testid="home-section-sub"]')?.textContent || "").trim(),
       seeAllPresent: Boolean(document.querySelector('[data-testid="home-see-all"]')),
       cardCount: document.querySelectorAll('[data-testid="home-event-card"]').length,
     };
@@ -253,6 +265,9 @@ console.log(`\n[capture] ${LABEL}: Home feed probed`);
 const notes = [];
 if (p.sectionCount > 0) notes.push(`sections=${p.sectionCount} [${p.sectionTitles.join(" · ")}]`);
 else notes.push("no sections (flat feed — before-state)");
+// TM-969 product decision: the first content heading is a section header, and no generic "Home" title.
+notes.push(`firstContentTitle="${p.firstContentTitle}"${p.hasGenericHomeTitle ? " (⚠ generic 'Home' title still present)" : " (no generic page title)"}`);
+if (p.nearYouSubtitle) notes.push(`near-you sub-line="${p.nearYouSubtitle}"`);
 if (p.seeAllPresent) notes.push("'See all events →' teaser hand-off present");
 notes.push(`cards=${p.cardCount}`);
 console.log(`  - ${p.name}: ${notes.join("; ")}`);

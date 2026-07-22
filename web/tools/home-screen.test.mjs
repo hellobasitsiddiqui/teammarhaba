@@ -24,6 +24,10 @@ import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(join(HERE, "../src/assets/home.js"), "utf8");
+const INDEX = readFileSync(join(HERE, "../src/index.html"), "utf8");
+// The static home panel markup (#auth-signed-in … up to the feed mount) — the region the generic
+// "Home" page title used to sit in, above the feed.
+const HOME_PANEL = INDEX.slice(INDEX.indexOf('id="auth-signed-in"'), INDEX.indexOf('id="tm-home-feed"'));
 
 // --- delegation: all decision logic lives in the tested pure core, not re-implemented here ----------
 //
@@ -34,16 +38,49 @@ const SRC = readFileSync(join(HERE, "../src/assets/home.js"), "utf8");
 test("the shell delegates the section + context decision to the tested home-core (no re-implemented logic)", () => {
   assert.match(
     SRC,
-    /import\s*\{[^}]*\bhomeContextLine\b[^}]*\}\s*from\s*"\.\/home-core\.js"/,
-    "imports the context-line builder from home-core (where TM-734's honesty rules are unit-tested)",
-  );
-  assert.match(
-    SRC,
     /import\s*\{[^}]*\bhomeSections\b[^}]*\}\s*from\s*"\.\/home-core\.js"/,
-    "imports the sections view-model (grouping + collapse-empties + teaser cap) from home-core, not a local copy",
+    "imports the sections view-model (grouping + collapse-empties + teaser cap + the near-you context sub-line) from home-core, not a local copy",
   );
   assert.match(SRC, /homeSections\(cards,\s*\{/, "builds the sections via homeSections(cards, ctx) — the tested decision (TM-969)");
-  assert.match(SRC, /homeContextLine\(/, "sets the section context via homeContextLine — the tested copy");
+  // TM-969 product decision: the "near <city>" context line is no longer a page-level subtitle the shell
+  // computes and sets on a static #tm-home-context node — home-core attaches it to the near-you SECTION
+  // (`section.subtitle`), so the shell paints it under that section's header and does NOT import/call the
+  // context-line builder itself. (Its honesty rules are still unit-tested in home-core.test.mjs.)
+  assert.doesNotMatch(
+    SRC,
+    /\bhomeContextLine\b/,
+    "the shell no longer imports or calls homeContextLine — the near-you context line rides on section.subtitle from home-core (TM-969)",
+  );
+  assert.match(SRC, /section\.subtitle/, "the shell renders the near-you section's context sub-line from section.subtitle (TM-969)");
+});
+
+// --- TM-969 product decision: Home leads with the first present SECTION header, NOT a generic "Home"
+//     page title. The generic <h2 class="tm-home-title">Home</h2> + the page-level .tm-home-head /
+//     .tm-home-sub subtitle above the feed are GONE from the static home panel; the first content is the
+//     first section's <h3 class="tm-home-section-title">, painted by home.js into #tm-home-feed. -------
+
+test("TM-969: the static home panel has NO generic 'Home' page title above the feed", () => {
+  // No page-title node / head wrapper / page-level subtitle survives above the feed mount.
+  assert.doesNotMatch(HOME_PANEL, /class="tm-home-title"/, "the generic <h2 class=tm-home-title>Home</h2> page title is removed");
+  assert.doesNotMatch(HOME_PANEL, /class="tm-home-head"/, "the page-head wrapper above the feed is removed");
+  assert.doesNotMatch(HOME_PANEL, /class="tm-home-sub"/, "the page-level subtitle above the feed is removed");
+  // And there is no static context node above the feed (the near-you context line now renders INSIDE the
+  // feed as the near-you section's sub-line, built by home.js — never as a stranded page subtitle).
+  assert.doesNotMatch(HOME_PANEL, /id="tm-home-context"/, "no static #tm-home-context node sits above the first section");
+  // Belt-and-braces: the shell never renders a page-level .tm-home-title either.
+  assert.doesNotMatch(SRC, /tm-home-title/, "home.js does not render a generic page title node");
+});
+
+test("TM-969: the shell leads the feed with the section header — the section title is the first content painted per section", () => {
+  const block = SRC.slice(SRC.indexOf("function sectionBlock"), SRC.indexOf("function feedCard"));
+  // Within a section block, the section-title <h3> comes before the subtitle, the card list and the
+  // see-all link — so the header is the first thing in the first (leading) section.
+  const titleAt = block.indexOf('"home-section-title"');
+  const subAt = block.indexOf('"home-section-sub"');
+  const listAt = block.indexOf("list,");
+  assert.ok(titleAt !== -1, "the section header (home-section-title) is rendered");
+  assert.ok(titleAt < subAt, "the section header precedes the near-you context sub-line");
+  assert.ok(titleAt < listAt, "the section header precedes the card list — it leads the section");
 });
 
 // --- XSS-safety: text only ever reaches the DOM through ui.js el() / textContent, never innerHTML -----
@@ -138,8 +175,10 @@ test("state STALE-GUARD: a per-entry monotonic token gates every post-await pain
 test("best-effort /me: a profile-load failure degrades the city hint to null and never blanks the feed", () => {
   const loadMe = SRC.slice(SRC.indexOf("async function loadMe"));
   assert.match(loadMe, /catch\s*\([\s\S]{0,160}return\s+null;/, "loadMe swallows its failure and returns null (city unknown)");
-  // The context line is (re)set from me?.city — a null me degrades to the neutral 'near you' copy.
-  assert.match(SRC, /homeContextLine\(me\?\.\s*city\)/, "the context line reads me?.city — null degrades to 'near you', feed unaffected");
+  // The viewer's city is passed into homeSections as `city: me?.city` — a null me degrades to the neutral
+  // 'near you' copy INSIDE home-core (homeContextLine, unit-tested), which attaches it to the near-you
+  // section's subtitle. So a /me failure only softens that one sub-line; it never blanks the feed (TM-969).
+  assert.match(SRC, /homeSections\(cards,\s*\{\s*city:\s*me\?\.\s*city/, "the sections are built with city: me?.city — null degrades to 'near you' in the core, feed unaffected");
 });
 
 // --- defensive: a missing feed mount never throws ---------------------------------------------------

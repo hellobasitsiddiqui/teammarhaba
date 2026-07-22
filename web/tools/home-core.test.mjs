@@ -200,6 +200,59 @@ test("homeSections: all three sections present stack in fixed order 1,2,3 with h
   assert.equal(SEE_ALL_LABEL, "See all events →");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// TM-969 product decision — Home LEADS WITH THE FIRST PRESENT SECTION'S HEADER (no generic "Home"
+// page title). The pure core is the source of truth for what leads: the first entry in `sections` is a
+// real, named section, and the "near <city>" context line is NOT a page-wide subtitle but the near-you
+// SECTION's own `subtitle`. These pin the decision at the layer the shell renders verbatim.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("homeSections: the FIRST section is a real named section header — Home leads with content, not a 'Home' page title (TM-969)", () => {
+  // When my events lead, "Happening now" is the first content.
+  const liveMine = { id: 1, heading: "My live one", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const first = homeSections([liveMine], CTX).sections[0];
+  assert.equal(first.header, "Happening now");
+  // The section header is one of the three real section headers — never a generic page label like "Home".
+  assert.ok(["Happening now", "Your events", "Events near you"].includes(first.header));
+  assert.notEqual(first.header, "Home");
+
+  // When I'm attending nothing, the near-you section is the first (and only) content — still a real
+  // section header, not a page title.
+  const nearOnly = { id: 2, heading: "Near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-20T18:00:00Z" };
+  const firstNear = homeSections([nearOnly], { ...CTX, city: "Mk" }).sections[0];
+  assert.equal(firstNear.header, "Events near you");
+  assert.notEqual(firstNear.header, "Home");
+});
+
+test("homeSections: the 'near <city>' context line rides on the near-you SECTION's subtitle, not a page-wide field (TM-969)", () => {
+  const nearYou = { id: 1, heading: "Bookable near me", myState: "NONE", city: "Milton Keynes", capacity: 10, goingCount: 2, startAt: "2026-07-20T18:00:00Z" };
+  const out = homeSections([nearYou], { ...CTX, city: "Milton Keynes" });
+  const near = out.sections.find((s) => s.key === "near-you");
+  assert.ok(near, "the near-you section is present");
+  // The subtitle IS the tested context line, honestly naming the scoped city (TM-662).
+  assert.equal(near.subtitle, "Meetups near Milton Keynes");
+  assert.equal(near.subtitle, homeContextLine("Milton Keynes"));
+});
+
+test("homeSections: only the near-you section carries the context subtitle — the attending sections don't (TM-969)", () => {
+  const liveMine = { id: 1, heading: "My live one", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const upcomingMine = { id: 2, heading: "My upcoming", myState: "GOING", startAt: "2026-07-20T18:00:00Z" };
+  const nearYou = { id: 3, heading: "Bookable near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 2, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([liveMine, upcomingMine, nearYou], { ...CTX, city: "Mk" });
+  // Sections 1 & 2 (my events) have no discovery-context sub-line — it's the near-you section's context.
+  assert.equal(out.sections.find((s) => s.key === "happening-now").subtitle, undefined);
+  assert.equal(out.sections.find((s) => s.key === "your-events").subtitle, undefined);
+  // The near-you section carries it (scoped city here).
+  assert.equal(out.sections.find((s) => s.key === "near-you").subtitle, "Meetups near Mk");
+});
+
+test("homeSections: unknown viewer city → the near-you subtitle degrades to the neutral 'near you' copy (TM-969, TM-662)", () => {
+  const nearYou = { id: 1, heading: "Bookable", myState: "NONE", capacity: 10, goingCount: 1, startAt: "2026-07-20T18:00:00Z" };
+  const near = homeSections([nearYou], { ...CTX, city: null }).sections.find((s) => s.key === "near-you");
+  assert.equal(near.subtitle, "Upcoming meetups near you"); // no city claim, feed unaffected
+});
+
 test("homeSections: 'Happening now' = MY GOING events that are live now (not others' live events) (TM-969)", () => {
   const myLive = { id: 1, heading: "Mine live", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
   const othersLive = { id: 2, heading: "Not mine, live", myState: "NONE", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };

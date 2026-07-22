@@ -444,15 +444,12 @@
                  section) so it renders on web, mobile-web and the Android WebView across the theme
                  families. Shared-component spots (the CTA / retry buttons) reuse .tm-btn. -->
             <section class="tm-home" id="auth-signed-in" hidden aria-label="Home">
-                <!-- Page head (paper-home): a friendly page title + the "near <city>" context line
-                     (home.js fills the city from /me, best-effort). The per-section headers ("Happening
-                     now" / "Your events" / "Events near you") now live inside the feed, so this is the
-                     page heading, not a section label. Kept an <h2> so the doodle decoration (TM-215)
-                     still finds the home heading under sketchy Paper. -->
-                <div class="tm-home-head">
-                    <h2 class="tm-home-title">Home</h2>
-                    <p class="tm-home-sub" id="tm-home-context">Upcoming meetups near you</p>
-                </div>
+                <!-- TM-969 product decision: NO generic "Home" page title. Home leads with the FIRST
+                     PRESENT SECTION'S header ("Happening now" / "Your events" / "Events near you"), which
+                     home.js builds into #tm-home-feed below — so the first content the member sees is a
+                     real section, not a page label. The "near <city>" discovery-context line (home.js
+                     fills the city from /me, best-effort) is context for the near-you section only, so it
+                     now renders as that section's sub-line inside the feed, not as a page-wide subtitle. -->
 
                 <!-- Feed mount: home.js builds the personalized sections (Happening now / Your events /
                      Events near you teaser), or the paper-empty-home first-run state, here. -->

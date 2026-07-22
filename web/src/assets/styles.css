@@ -6947,21 +6947,9 @@ a.tm-pf-go:focus-visible {
     text-align: left;
 }
 
-.tm-home-head {
-    margin: 0.25rem 0 var(--space-4);
-}
-
-.tm-home-title {
-    margin: 0 0 0.15rem;
-    font-size: var(--fs-6);
-    line-height: 1.1;
-}
-
-.tm-home-sub {
-    margin: 0;
-    font-size: var(--fs-2);
-    color: var(--muted);
-}
+/* TM-969: the generic "Home" page title (.tm-home-head / .tm-home-title / .tm-home-sub) was removed so
+   Home leads with the first present section's header. The old "near <city>" page subtitle now renders as
+   the near-you section's sub-line (.tm-home-section-sub, defined below with the section styles). */
 
 .tm-home-feed {
     display: block;
@@ -6999,6 +6987,14 @@ a.tm-pf-go:focus-visible {
     line-height: 1.15;
     color: var(--muted);
     font-weight: 600;
+}
+
+/* TM-969: the "near <city>" discovery-context sub-line under the "Events near you" section header
+   (relocated here from the removed page-level subtitle). Quiet + muted so the section header leads. */
+.tm-home-section-sub {
+    margin: calc(-1 * var(--space-1)) 0 var(--space-2);
+    font-size: var(--fs-2);
+    color: var(--muted);
 }
 
 /* The "See all events →" hand-off under the near-you teaser — a quiet accent-coloured link that leads

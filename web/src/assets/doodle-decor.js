@@ -12,18 +12,7 @@
 // XSS-safe: doodles come from the structural builder in doodles.js (attributes + a static <title>
 // only, no innerHTML), and we mount with append/prepend. No untrusted string ever flows in.
 
-import { doodle, doodles } from "./doodles.js";
-
-/**
- * Prepend a header-sized doodle to `host` (once), if `host` exists. Pass `title` only when it adds
- * info beyond the heading text; omit it for a doodle whose label would just repeat the visible
- * heading, so it renders aria-hidden and screen readers don't announce the same words twice.
- */
-function decorateHeader(host, name, title) {
-  if (!host || host.querySelector(":scope > .tm-doodle")) return;
-  const svg = doodle(name, { class: "tm-doodle-header", title });
-  if (svg) host.prepend(svg);
-}
+import { doodles } from "./doodles.js";
 
 /** Insert a full-width squiggle divider after `node` (once), if `node` exists. */
 function dividerAfter(node, { tag = false } = {}) {
@@ -41,10 +30,12 @@ function decorate() {
   // wordmark + single tagline on every surface (web / mobile-web / Android WebView). The signed-in
   // home card below is out of scope for that lockup and keeps its welcome flourish.
 
-  // 1) Signed-in home card — a celebration on the "Signed in" heading, then a divider before the
-  //    admin link block so the card reads as a little welcome.
+  // 1) Signed-in home card — a divider before the admin link block so the card reads as a little
+  //    welcome. TM-969 removed the generic "Home" <h2> page title so Home leads with the first present
+  //    section header; the header doodle that used to anchor on that <h2> has no static home heading to
+  //    bind to (the section headers are <h3>s built dynamically into the feed by home.js, absent at this
+  //    DOMContentLoaded pass), so it's removed cleanly here rather than left dangling on a missing node.
   const homeCard = $("auth-signed-in");
-  decorateHeader(homeCard?.querySelector("h2"), "celebrate", "You're in");
   dividerAfter(homeCard?.querySelector("#me"));
 }
 
