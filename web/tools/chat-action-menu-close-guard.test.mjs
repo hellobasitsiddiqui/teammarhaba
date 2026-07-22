@@ -131,16 +131,20 @@ test("the trigger's own contextmenu stops propagation, so long-pressing it doesn
   assert.match(block.slice(trigCtxAt, trigCtxAt + 160), /stopPropagation\(\)/, "it stops propagation to the row");
 });
 
-// ── TM-989/F: the role="menu" implements the ARIA keyboard pattern (arrows + Tab-closes) ──────────────
+// ── TM-989/F: the role="menu" adds the ARIA arrow-key pattern; Tab stays native (the tm940 contract) ──
 
-test("TM-989/F: the menu keydown implements ArrowUp/ArrowDown navigation and Tab-closes", () => {
+test("TM-989/F: the menu keydown adds ArrowUp/ArrowDown/Home/End nav + Escape-closes, and Tab is NOT intercepted", () => {
   const block = messageActionMenuBlock();
   const kdAt = block.indexOf('menu.addEventListener("keydown"');
   assert.ok(kdAt > -1, "the menu has a keydown handler");
   const handler = block.slice(kdAt, block.indexOf("});", kdAt) + 3);
   assert.match(handler, /"ArrowDown"/, "ArrowDown is handled");
   assert.match(handler, /"ArrowUp"/, "ArrowUp is handled");
-  assert.match(handler, /e\.key === "Tab"/, "Tab closes the menu");
-  assert.match(handler, /setOpen\(false\)/, "Tab / Escape close via setOpen(false)");
+  assert.match(handler, /"Home"/, "Home is handled");
+  assert.match(handler, /"End"/, "End is handled");
+  assert.match(handler, /e\.key === "Escape"[\s\S]*setOpen\(false\)/, "Escape closes via setOpen(false)");
   assert.match(handler, /items\[\w+\]\.focus\(\)/, "arrow keys move focus between items");
+  // TM-989 e2e regression guard: Tab must NOT be intercepted/closed — native tab order must traverse
+  // reply→edit→delete inside the OPEN menu, the behaviour the tm940 spec pins (tm940-message-actions.spec.mjs:153).
+  assert.doesNotMatch(handler, /e\.key === "Tab"/, "Tab is NOT intercepted (native traversal; keeps the tm940 contract)");
 });

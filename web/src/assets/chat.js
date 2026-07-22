@@ -1508,7 +1508,7 @@ function senderIdentity(m, timeLabel = "") {
  * the actions are keyboard- and screen-reader-reachable once open. Once open it implements the ARIA menu
  * keyboard pattern (TM-989/F) that its role="menu"/"menuitem" promises: ArrowUp/ArrowDown move (and wrap)
  * between items, Home/End jump to first/last, Escape or a tap on the trigger re-hides it (focus returns to
- * the trigger), and Tab closes the menu and lets focus move on. The behaviour of each action (beginReply /
+ * the trigger), and Tab traverses the actions in natural DOM order (kept per the tm940 contract). The behaviour of each action (beginReply /
  * beginEdit / deleteOwnMessage) is unchanged — this is a reveal wrapper, not a behaviour change.
  *
  * @param {Object} m the message view-model.
@@ -1584,10 +1584,11 @@ function messageActionMenu(m, { canReply, canOwn } = {}) {
   //   • ArrowDown / ArrowUp → move focus between items, wrapping at the ends;
   //   • Home / End           → first / last item;
   //   • Escape               → close and return focus to the trigger;
-  //   • Tab (either way)     → close the menu and let focus move on naturally (menus trap arrows, not Tab).
+  //   • Tab                  → native traversal within the open menu (reply → edit → delete); NOT intercepted (the tm940 contract).
   menu.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); return; }
-    if (e.key === "Tab") { setOpen(false); return; } // don't preventDefault — let Tab leave the menu
+    // Tab is intentionally NOT intercepted: native tab order traverses the open menu's actions
+    // (reply → edit → delete) — the behaviour the tm940 spec pins. Arrows are the ADDED a11y nav.
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
       e.preventDefault();
       const i = items.indexOf(document.activeElement);
