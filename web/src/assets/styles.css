@@ -2104,6 +2104,22 @@ h3,
     font-size: 0.78rem;
 }
 
+/* TM-907 name-lock: a name field frozen because the account has event history. Reads as clearly
+   inert — muted fill, no caret, not-allowed cursor — but the lock is ALSO conveyed non-visually
+   (readonly + aria-readonly on the input, and the visible .tm-namelock-note below the fields), so
+   the state never depends on colour alone. */
+.tm-input-locked {
+    background: var(--muted-bg, #f2f2f2);
+    color: var(--muted, #666);
+    cursor: not-allowed;
+    opacity: 0.85;
+}
+
+.tm-namelock-note {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+}
+
 /* paper-complete-profile--validation: the inline field error keeps --danger and gains a leading
    warning-triangle icon (a ::before data-URI, inked in the --danger hex #b00020 which dark mode does
    not re-point). Real per-field validation logic is untouched — this is presentation only. */

@@ -290,6 +290,10 @@ function fillForm(profile) {
       input.value = value == null ? "" : String(value);
     }
   }
+  // TM-907: switch the name fields to read-only PRE-EMPTIVELY when the account is name-locked, so the
+  // user sees the lock rather than saving-then-hitting the backend 422. Runs AFTER the value fill above
+  // so the carve-out can read each field's just-set value.
+  applyNameLock(profile);
   // Account-state badges (TM-168): email-verified / age-verified / MFA from the /me state block.
   // `includeUnknown` so the user always sees all three — including any the backend couldn't read —
   // rather than having a badge silently vanish.
@@ -300,6 +304,51 @@ function fillForm(profile) {
   }
   // Paint the paper-profile hub summary (identity + completeness) from the same /me payload.
   paintHub(profile);
+}
+
+// The name fields this Profile surface edits (TM-907). displayName is NOT edited here (it's set on the
+// onboarding gate), so only first/last are lockable on this screen; the backend locks displayName on
+// its own write path regardless.
+const LOCKABLE_NAME_KEYS = ["firstName", "lastName"];
+
+/**
+ * TM-907 read-only name lock. When {@code me.nameLocked} is true, a user with real-world event history
+ * may no longer CHANGE an already-set first/last name — so we render each ALREADY-SET name field
+ * read-only up front (not save-then-error) and reveal a visible, screen-reader-announced explanation.
+ *
+ * <p><b>Carve-out (must-not-break):</b> a currently-EMPTY name field stays fully editable even when
+ * locked — a user who attended with only a displayName can still SET their first/last once (mirroring
+ * the backend's "seed-when-unset" allowance), so a locked empty name never becomes an unfixable
+ * profile-strength gap. Only a field holding a non-blank value is frozen.
+ *
+ * <p>Idempotent and reversible: called on every fillForm (initial load, Reset, post-save repaint), it
+ * both sets AND clears the read-only state, so an admin-corrected / unlocked profile repaints editable.
+ * a11y: read-only is conveyed by the real {@code readOnly} property + {@code aria-readonly="true"} +
+ * a {@code .tm-input-locked} class AND the visible note — never by colour alone.
+ */
+function applyNameLock(profile) {
+  const locked = Boolean(profile?.nameLocked);
+  let anyFrozen = false;
+  for (const key of LOCKABLE_NAME_KEYS) {
+    const entry = shell.fields.get(key);
+    if (!entry) continue;
+    const input = entry.input;
+    // Carve-out: only freeze a name that is ALREADY set — an empty one stays settable once.
+    const hasValue = (input.value ?? "").trim() !== "";
+    const freeze = locked && hasValue;
+    input.readOnly = freeze;
+    if (freeze) {
+      input.setAttribute("aria-readonly", "true");
+      input.classList.add("tm-input-locked");
+      anyFrozen = true;
+    } else {
+      input.removeAttribute("aria-readonly");
+      input.classList.remove("tm-input-locked");
+    }
+  }
+  // The visible explanation shows only when at least one name field is actually frozen (a locked user
+  // with an all-empty name sees no note and can still fill it in — the carve-out, honestly reflected).
+  if (shell.nameLockNote) shell.nameLockNote.hidden = !anyFrozen;
 }
 
 /**
@@ -1319,9 +1368,25 @@ function buildShell(view) {
 
   const avatar = buildAvatar();
 
+  // TM-907 name-lock note: a visible explanation shown ABOVE the form actions when the account's name
+  // is locked (event history). Hidden by default; applyNameLock() reveals it. role="status" so a
+  // screen reader announces it when it appears — the lock is communicated as text, not by colour alone
+  // (the read-only fields also carry aria-readonly + a disabled look).
+  const nameLockNote = el(
+    "p",
+    {
+      class: "tm-muted tm-namelock-note",
+      id: "profile-namelock-note",
+      role: "status",
+      hidden: true,
+      text: "Names are locked after your first event — contact support to correct.",
+    },
+  );
+
   const form = el("form", { class: "tm-profile-form", id: "profile-form", novalidate: true, onSubmit: save }, [
     avatar.wrapper,
     el("div", { class: "tm-form-grid" }, fieldNodes),
+    nameLockNote,
     el("div", { class: "tm-form-actions" }, [saveBtn, reset]),
   ]);
 
@@ -1497,6 +1562,8 @@ function buildShell(view) {
     status,
     avatar,
     root,
+    // TM-907: the visible name-lock explanation, revealed by applyNameLock() when me.nameLocked.
+    nameLockNote,
     // TM-846: `glyph` + `photo` are the identity avatar's two mutually-exclusive faces (paintHub
     // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
     // TM-913: the strength ring — `ring` is the progressbar container (aria lives here), `ringArc` the
