@@ -106,7 +106,7 @@ const json = (route, body, status = 200) =>
 async function mockApi(page) {
   // Catch-all FIRST (Playwright checks routes newest-first, so specific mocks below win).
   await page.route(/\/api\/v1\/.*/, (route) => json(route, { title: "Not found" }, 404));
-  await page.route(/\/api\/v1\/me\/conversations\/unread-total/, (route) => json(route, { unread: 0 }));
+  await page.route(/\/api\/v1\/me\/conversations\/unread-total/, (route) => json(route, { total: 0 }));
   await page.route(/\/api\/v1\/me\/conversations(\?.*)?$/, (route) => json(route, CONVERSATIONS));
   await page.route(new RegExp(`/api/v1/conversations/${THREAD_ID}/messages`), (route) => json(route, MESSAGES));
   await page.route(new RegExp(`/api/v1/conversations/${THREAD_ID}/members`), (route) => json(route, MEMBERS));
