@@ -120,6 +120,30 @@ class NameLockIntegrationTest extends AbstractIntegrationTest {
         return user;
     }
 
+    /**
+     * A CANCELLED event whose window has since passed ({@code endAt} an hour ago) but that never
+     * happened — the organizer called it off before it ran. Not soft-deleted (cancel keeps the row
+     * readable for its attendees), so it still joins; only the {@code status} filter excludes it.
+     */
+    private Event cancelledFinishedEvent() {
+        Instant now = Instant.now();
+        Long creatorId = users.save(new User("uid-creator-" + UUID.randomUUID(), "creator@example.com", "Creator"))
+                .getId();
+        Event event = new Event(
+                "Cancelled walk " + UUID.randomUUID(),
+                "Called off",
+                "Marhaba Cafe",
+                "Europe/London",
+                now.minus(3, ChronoUnit.HOURS),
+                now.minus(1, ChronoUnit.DAYS),
+                now.plus(7, ChronoUnit.DAYS),
+                creatorId,
+                now.minus(1, ChronoUnit.DAYS));
+        event.setEndAt(now.minus(1, ChronoUnit.HOURS));
+        event.cancel(now.minus(2, ChronoUnit.HOURS)); // called off before it ran
+        return events.save(event);
+    }
+
     @Test
     void lockedUserPatchRenameIsRefused() throws Exception {
         // A user who attended a completed event, with a first name already set.
@@ -202,6 +226,36 @@ class NameLockIntegrationTest extends AbstractIntegrationTest {
                         .content("{\"firstName\":\"Changed\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Changed"));
+    }
+
+    @Test
+    void goingAtCancelledEventDoesNotLockTheName() throws Exception {
+        // A GOING spot at an event that was CANCELLED before it ever happened is NOT real history: the
+        // event never ran, the identity was never met. Such a user must still rename freely — only the
+        // reliability arm (a late-cancel strike) locks a no-show. Fail-before: without the status filter
+        // the finished-and-not-soft-deleted CANCELLED event matched and wrongly locked the name.
+        User user = new User("uid-cancelled", "uid-cancelled@example.com", "Yusuf Ali");
+        user.setFirstName("Yusuf");
+        user.setLastName("Ali");
+        user.setDisplayName("Yusuf Ali");
+        user = users.save(user);
+        attendance.save(new EventAttendance(cancelledFinishedEvent().getId(), user.getId(), AttendanceState.GOING));
+
+        // The derived flag is false (no qualifying history) ...
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-cancelled")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nameLocked").value(false));
+
+        // ... and the rename goes through.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-cancelled"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Renamed\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Renamed"));
+
+        assertThat(users.findByFirebaseUid("uid-cancelled").orElseThrow().getFirstName())
+                .isEqualTo("Renamed");
     }
 
     @Test

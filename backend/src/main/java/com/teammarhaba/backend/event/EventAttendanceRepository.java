@@ -109,8 +109,10 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
      * below {@code openEndedStartFloor} ({@code = now − defaultDuration}) — a plain column comparison,
      * no per-row interval arithmetic in JPQL. Cross-entity join on the plain FK ({@code EventAttendance}
      * carries {@code eventId}, not a JPA association); the {@code @SQLRestriction} on {@link Event} keeps
-     * soft-deleted events out. Cancelled ({@code status != PUBLISHED}) events still count as real history
-     * — the identity was met, the reliability record pinned — so status is deliberately not filtered here.
+     * soft-deleted events out. Only {@code PUBLISHED} events lock the name: a CANCELLED event never
+     * happened — the identity was never met and no reliability record was pinned by merely holding a
+     * GOING spot at it — so {@code status = PUBLISHED} is required here (the reliability arm of the lock,
+     * {@code NameLockService}'s {@code lateCancelCount > 0} strike, is what captures a genuine no-show).
      *
      * <p>Read derived-live (no stamped column): the lock is recomputed at each name write, so an
      * existing user with qualifying history is locked at rollout with no backfill (TM-907's retroactive
@@ -122,6 +124,7 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
             where a.userId = :userId
               and e.id = a.eventId
               and a.state = com.teammarhaba.backend.event.AttendanceState.GOING
+              and e.status = com.teammarhaba.backend.event.EventStatus.PUBLISHED
               and (
                 (e.endAt is not null and e.endAt < :now)
                 or (e.endAt is null and e.startAt < :openEndedStartFloor)
