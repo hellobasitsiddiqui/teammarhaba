@@ -207,14 +207,57 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return Problems.of(HttpStatus.CONFLICT, "Conflict", ex.getMessage());
     }
 
+    /**
+     * The unique phone index (TM-934, {@code users_phone_normalized_uq}) rejected a duplicate: a phone
+     * number already registered (verified) to another account -> 409 with a specific, user-facing detail
+     * the phone-gate UI can surface as-is. Distinct from the generic integrity 409 below: strict 1:1
+     * phone uniqueness (TM-923) is a normal, expected outcome the user must be told about honestly, not
+     * an opaque "conflicts with current state" message. Scoped by constraint NAME so only this index maps
+     * to this copy — any other integrity violation keeps the generic message.
+     */
+    private static final String PHONE_UNIQUE_CONSTRAINT = "users_phone_normalized_uq";
+
     /** DB / state conflict (e.g. unique-constraint violation) -> 409. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleConflict(DataIntegrityViolationException ex) {
         log.warn("Data integrity violation", ex);
+        if (violatesConstraint(ex, PHONE_UNIQUE_CONSTRAINT)) {
+            return Problems.of(
+                    HttpStatus.CONFLICT,
+                    "Conflict",
+                    "This phone number is already registered to another account");
+        }
         return Problems.of(
                 HttpStatus.CONFLICT,
                 "Conflict",
                 "The request conflicts with the current state of the resource.");
+    }
+
+    /**
+     * True when {@code ex} (or any cause in its chain) names {@code constraint} — the reliable, portable
+     * way to tell WHICH constraint a {@link DataIntegrityViolationException} violated. Spring wraps the
+     * driver exception, so the constraint name only appears deeper in the chain (Hibernate's
+     * {@code ConstraintViolationException#getConstraintName}, else the Postgres error text); walk the
+     * whole chain and match case-insensitively so a rename of the wrapper layers can't silently drop the
+     * mapping.
+     */
+    private static boolean violatesConstraint(Throwable ex, String constraint) {
+        String needle = constraint.toLowerCase(java.util.Locale.ROOT);
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof org.hibernate.exception.ConstraintViolationException hce
+                    && hce.getConstraintName() != null
+                    && hce.getConstraintName().toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                return true;
+            }
+            String message = t.getMessage();
+            if (message != null && message.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     /** Optimistic-lock conflict: someone else updated the row first (stale {@code @Version}) -> 409. */
