@@ -31,7 +31,7 @@ const SRC = readFileSync(join(HERE, "../src/assets/home.js"), "utf8");
 // logic to test it") is that the DOM shell is thin and delegates. If a future edit inlined the feed /
 // context decision into home.js it would drift from the #/events vocabulary and escape the core's tests.
 
-test("the shell delegates the feed + context decision to the tested home-core (no re-implemented logic)", () => {
+test("the shell delegates the section + context decision to the tested home-core (no re-implemented logic)", () => {
   assert.match(
     SRC,
     /import\s*\{[^}]*\bhomeContextLine\b[^}]*\}\s*from\s*"\.\/home-core\.js"/,
@@ -39,10 +39,10 @@ test("the shell delegates the feed + context decision to the tested home-core (n
   );
   assert.match(
     SRC,
-    /import\s*\{[^}]*\bhomeFeed\b[^}]*\}\s*from\s*"\.\/home-core\.js"/,
-    "imports the feed view-model (empty-vs-populated + ordering) from home-core, not a local copy",
+    /import\s*\{[^}]*\bhomeSections\b[^}]*\}\s*from\s*"\.\/home-core\.js"/,
+    "imports the sections view-model (grouping + collapse-empties + teaser cap) from home-core, not a local copy",
   );
-  assert.match(SRC, /homeFeed\(cards,\s*\{/, "builds the feed via homeFeed(cards, ctx) — the tested decision");
+  assert.match(SRC, /homeSections\(cards,\s*\{/, "builds the sections via homeSections(cards, ctx) — the tested decision (TM-969)");
   assert.match(SRC, /homeContextLine\(/, "sets the section context via homeContextLine — the tested copy");
 });
 
@@ -70,12 +70,19 @@ test("state LOADING: entry paints an immediate 'Finding meetups…' placeholder 
   );
 });
 
-// --- state 2: FEED list of cards ---------------------------------------------------------------------
+// --- state 2: FEED sections of cards (TM-969) --------------------------------------------------------
 
-test("state FEED: a populated listing renders the card list with the e2e-keyed testids", () => {
-  assert.match(SRC, /"data-testid":\s*"home-feed-list"/, "the populated feed renders a testid-tagged list container");
+test("state FEED: a populated listing renders the personalized sections with the e2e-keyed testids (TM-969)", () => {
+  // Each present section is a headed block; the near-you teaser carries a "See all events →" hand-off.
+  assert.match(SRC, /"data-testid":\s*"home-section"/, "the populated feed renders testid-tagged section blocks");
+  assert.match(SRC, /"data-testid":\s*"home-section-title"/, "each section carries a light header (title) testid");
+  assert.match(SRC, /"data-testid":\s*"home-see-all"/, "the near-you teaser carries the 'See all events →' hand-off testid");
   assert.match(SRC, /"data-testid":\s*"home-event-card"/, "each card carries the home-event-card testid");
   assert.match(SRC, /"data-testid":\s*"home-going-count"/, "the 'N going' pill carries its testid");
+  // The section iteration paints exactly what the tested core returns (each section top→bottom).
+  assert.match(SRC, /for\s*\(const\s+section\s+of\s+model\.sections\)/, "renders each home-core section in order");
+  // The "See all" link is gated on the section being the teaser (never on the attending sections).
+  assert.match(SRC, /section\.isTeaser\s*&&\s*section\.seeAllHref/, "the See-all link is shown only for the teaser section");
   // The card is the whole tap-target anchor (matching the #/events browse card) — an <a href> to the
   // detail, never a nested RSVP control that would duplicate the tested events-core gate.
   assert.match(SRC, /"a",\s*\{[\s\S]{0,120}href:\s*model\.href/, "the card is an <a> whose href is the model's detail route");
@@ -119,7 +126,7 @@ test("state STALE-GUARD: a per-entry monotonic token gates every post-await pain
   // can't overwrite the current view.
   const successGuardAt = SRC.indexOf("if (mine !== renderToken) return", SRC.indexOf("await Promise.all"));
   assert.ok(successGuardAt !== -1, "the success path re-checks the token after the awaited fetch");
-  assert.ok(successGuardAt < SRC.indexOf("homeFeed(cards"), "…and does so before building/painting the feed");
+  assert.ok(successGuardAt < SRC.indexOf("homeSections(cards"), "…and does so before building/painting the feed");
 });
 
 // --- best-effort /me: its failure degrades the city hint, never blanks the feed ---------------------

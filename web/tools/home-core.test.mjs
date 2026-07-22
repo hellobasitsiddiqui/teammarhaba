@@ -1,5 +1,6 @@
-// Unit tests for the Home screen's pure core (TM-512) — the "Events near you" feed view-model + the
-// empty-home decision, refreshed to the approved wireframe (design-kit paper-home / paper-empty-home).
+// Unit tests for the Home screen's pure core (TM-512, reworked TM-969) — the personalized
+// attending-first section view-model + the empty-home decision, refreshed to the approved wireframe
+// (design-kit paper-home / paper-empty-home).
 //
 // Framework-free — Node's built-in test runner, picked up by the CI glob
 // `node --test web/tools/*.test.mjs` (ci.yml web-build job). No DOM/Firebase, so it runs in plain Node
@@ -14,7 +15,9 @@ import {
   homeCardTag,
   homeRsvpState,
   homeCardModel,
-  homeFeed,
+  homeSections,
+  bookable,
+  SEE_ALL_LABEL,
 } from "../src/assets/home-core.js";
 
 // A fixed "now" and a deterministic tz/locale so time formatting is stable across CI machines.
@@ -112,78 +115,197 @@ test("homeCardModel: GOING card carries the 'Going ✓' state + warm zero-going 
   assert.equal(model.going, "Be the first to go");
 });
 
-test("homeFeed: empty for no cards, or when every card is finished (paper-empty-home state)", () => {
-  assert.deepEqual(homeFeed([], CTX), { isEmpty: true, cards: [] });
-  assert.deepEqual(homeFeed(null, CTX), { isEmpty: true, cards: [] });
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// bookable(card, now) — the section-3 "still joinable near you" predicate (TM-969). It composes
+// events-core's finished / booking-cutoff / full signals so the "Events near you" teaser never surfaces
+// a dead-end event. These are the fail-before / pass-after tests for the new predicate.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("bookable: a fresh upcoming event with spare capacity IS bookable (TM-969)", () => {
+  const card = { id: 1, startAt: "2026-07-20T18:00:00Z", capacity: 10, goingCount: 3, myState: "NONE" };
+  assert.equal(bookable(card, NOW), true);
+});
+
+test("bookable: excludes finished / started / past-cutoff events (TM-969)", () => {
+  // Finished (past endAt).
+  assert.equal(bookable({ id: 1, startAt: "2026-07-01T09:00:00Z", endAt: "2026-07-01T11:00:00Z" }, NOW), false);
+  // Explicitly finished status.
+  assert.equal(bookable({ id: 2, status: "FINISHED", startAt: "2026-07-20T18:00:00Z" }, NOW), false);
+  // Already started (start in the past, open-ended).
+  assert.equal(bookable({ id: 3, startAt: "2026-07-10T11:00:00Z" }, NOW), false);
+  // Within the 60-min booking cutoff of the start (starts 30 min after NOW) — booking is closed.
+  assert.equal(bookable({ id: 4, startAt: "2026-07-10T12:30:00Z" }, NOW), false);
+});
+
+test("bookable: excludes a FULL event (at/over capacity — waitlist only, not a bookable spot) (TM-969)", () => {
+  assert.equal(bookable({ id: 1, startAt: "2026-07-20T18:00:00Z", capacity: 5, goingCount: 5 }, NOW), false);
+  // Unlimited capacity (no capacity field) is never full → still bookable.
+  assert.equal(bookable({ id: 2, startAt: "2026-07-20T18:00:00Z", goingCount: 999 }, NOW), true);
+});
+
+test("bookable: excludes events I'm already attending / waitlisted (they aren't a 'near you' teaser) (TM-969)", () => {
+  assert.equal(bookable({ id: 1, startAt: "2026-07-20T18:00:00Z", myState: "GOING" }, NOW), false);
+  assert.equal(bookable({ id: 2, startAt: "2026-07-20T18:00:00Z", myState: "WAITLISTED" }, NOW), false);
+});
+
+test("bookable: defensive — null / undefined card is not bookable (TM-969)", () => {
+  assert.equal(bookable(null, NOW), false);
+  assert.equal(bookable(undefined, NOW), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// homeSections(cards, ctx) — the three ordered, collapse-aware sections (TM-969). Replaces the old
+// single homeFeed view-model. These are the fail-before / pass-after tests for the grouping, the
+// collapse-empties ordering, and the teaser cap.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("homeSections: empty for no cards, or when every card is finished (paper-empty-home state)", () => {
+  assert.deepEqual(homeSections([], CTX), { isEmpty: true, sections: [] });
+  assert.deepEqual(homeSections(null, CTX), { isEmpty: true, sections: [] });
   const finished = { id: 1, heading: "Old", status: "FINISHED", startAt: "2026-07-01T09:00:00Z" };
-  const feed = homeFeed([finished], CTX);
-  assert.equal(feed.isEmpty, true);
-  assert.equal(feed.cards.length, 0);
+  const out = homeSections([finished], CTX);
+  assert.equal(out.isEmpty, true);
+  assert.equal(out.sections.length, 0);
 });
 
-test("homeFeed: drops finished events and orders live-now before upcoming", () => {
-  const soon = { id: 2, heading: "Soon", startAt: "2026-07-20T09:00:00Z" };
-  const live = { id: 1, heading: "Live one", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
-  const finished = { id: 3, heading: "Old", status: "FINISHED", startAt: "2026-07-01T09:00:00Z" };
+test("homeSections: all three sections present stack in fixed order 1,2,3 with headers (TM-969)", () => {
+  const liveMine = { id: 1, heading: "My live one", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const upcomingMine = { id: 2, heading: "My upcoming", myState: "GOING", startAt: "2026-07-20T18:00:00Z" };
+  const nearYou = { id: 3, heading: "Bookable near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 2, startAt: "2026-07-21T18:00:00Z" };
 
-  const feed = homeFeed([soon, live, finished], CTX);
-  assert.equal(feed.isEmpty, false);
-  assert.equal(feed.cards.length, 2); // finished dropped
-  // Happening-now first, then upcoming (each preserving the API's soonest-first order).
-  assert.deepEqual(feed.cards.map((c) => c.id), [1, 2]);
-  assert.equal(feed.cards[0].live, true);
-  assert.equal(feed.cards[1].live, false);
+  const out = homeSections([liveMine, upcomingMine, nearYou], { ...CTX, city: "Mk" });
+  assert.equal(out.isEmpty, false);
+  assert.deepEqual(out.sections.map((s) => s.key), ["happening-now", "your-events", "near-you"]);
+  assert.deepEqual(out.sections.map((s) => s.header), ["Happening now", "Your events", "Events near you"]);
+  // Each section carries just its own cards.
+  assert.deepEqual(out.sections[0].cards.map((c) => c.id), [1]);
+  assert.deepEqual(out.sections[1].cards.map((c) => c.id), [2]);
+  assert.deepEqual(out.sections[2].cards.map((c) => c.id), [3]);
+  // Only section 3 is the teaser and carries the "See all events →" hand-off link.
+  assert.deepEqual(out.sections.map((s) => s.isTeaser), [false, false, true]);
+  assert.equal(out.sections[2].seeAllHref, "#/events");
+  assert.equal(SEE_ALL_LABEL, "See all events →");
 });
 
-// TM-662: the "near you" feed must be scoped to the viewer's city — the recorded bug was a London
-// event surfacing under a "Mk" header. This is the fail-before / pass-after regression.
-test("homeFeed: scoped to the viewer's city — same-city events shown, other-city EXCLUDED (TM-662)", () => {
-  const localMk = { id: 1, heading: "Coffee & Code", city: "Mk", startAt: "2026-07-14T18:00:00Z" };
-  const otherLondon = { id: 2, heading: "London thing", city: "London", startAt: "2026-07-15T18:00:00Z" };
+test("homeSections: 'Happening now' = MY GOING events that are live now (not others' live events) (TM-969)", () => {
+  const myLive = { id: 1, heading: "Mine live", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const othersLive = { id: 2, heading: "Not mine, live", myState: "NONE", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
 
-  const feed = homeFeed([localMk, otherLondon], { ...CTX, city: "MK" }); // case-insensitive match
-  assert.equal(feed.isEmpty, false);
-  // The London event never appears under an "MK" viewer — the whole point of the bug.
-  assert.deepEqual(feed.cards.map((c) => c.id), [1]);
+  const out = homeSections([myLive, othersLive], CTX);
+  const now = out.sections.find((s) => s.key === "happening-now");
+  assert.ok(now, "the Happening now section is present");
+  // Only MY live event is in it — a live event I'm not attending never lands here.
+  assert.deepEqual(now.cards.map((c) => c.id), [1]);
+  assert.equal(now.cards[0].live, true);
 });
 
-test("homeFeed: city match ignores case and inner whitespace (TM-662)", () => {
-  const a = { id: 1, heading: "A", city: "Milton  Keynes", startAt: "2026-07-14T18:00:00Z" };
-  const b = { id: 2, heading: "B", city: "milton keynes", startAt: "2026-07-15T18:00:00Z" };
-  const feed = homeFeed([a, b], { ...CTX, city: " Milton Keynes " });
-  assert.deepEqual(feed.cards.map((c) => c.id), [1, 2]); // both normalise to the same city
+test("homeSections: 'Your events' = MY upcoming GOING events, no live ones (TM-969)", () => {
+  const myLive = { id: 1, heading: "Mine live", myState: "GOING", happeningNow: true, startAt: "2026-07-10T11:00:00Z" };
+  const myUpcoming = { id: 2, heading: "Mine soon", myState: "GOING", startAt: "2026-07-20T18:00:00Z" };
+
+  const out = homeSections([myLive, myUpcoming], CTX);
+  const yours = out.sections.find((s) => s.key === "your-events");
+  assert.ok(yours, "the Your events section is present");
+  assert.deepEqual(yours.cards.map((c) => c.id), [2]); // the live one is in section 1, not here
+  assert.equal(yours.cards[0].live, false);
 });
 
-test("homeFeed: falls back to an event's locationText when it carries no city (TM-662)", () => {
-  const byLocationText = { id: 1, heading: "A", locationText: "Bletchley", startAt: "2026-07-14T18:00:00Z" };
-  assert.deepEqual(homeFeed([byLocationText], { ...CTX, city: "Bletchley" }).cards.map((c) => c.id), [1]);
-  assert.deepEqual(homeFeed([byLocationText], { ...CTX, city: "Oxford" }).cards.map((c) => c.id), []);
+test("homeSections: collapse — no live-attending → section 2 (Your events) LEADS (TM-969)", () => {
+  const myUpcoming = { id: 2, heading: "Mine soon", myState: "GOING", startAt: "2026-07-20T18:00:00Z" };
+  const nearYou = { id: 3, heading: "Near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([myUpcoming, nearYou], { ...CTX, city: "Mk" });
+  // No 'Happening now' section (empty → collapsed, no orphan header); the first content is 'Your events'.
+  assert.deepEqual(out.sections.map((s) => s.key), ["your-events", "near-you"]);
 });
 
-test("homeFeed: a viewer whose only local matches are gone yields the honest empty state (TM-662)", () => {
-  const london = { id: 2, heading: "London thing", city: "London", startAt: "2026-07-15T18:00:00Z" };
-  const feed = homeFeed([london], { ...CTX, city: "Mk" });
-  assert.equal(feed.isEmpty, true); // no local events → empty state, not a false "near you" list
-  assert.equal(feed.cards.length, 0);
+test("homeSections: collapse — attending NOTHING → ONLY section 3 (Events near you) shows (TM-969)", () => {
+  const a = { id: 1, heading: "A near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-20T18:00:00Z" };
+  const b = { id: 2, heading: "B near me", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([a, b], { ...CTX, city: "Mk" });
+  assert.equal(out.isEmpty, false);
+  assert.deepEqual(out.sections.map((s) => s.key), ["near-you"]); // = the old today's-near-you Home
+  assert.equal(out.sections[0].isTeaser, true);
 });
 
-test("homeFeed: unknown viewer city degrades to the FULL unfiltered listing (TM-662)", () => {
-  const mk = { id: 1, heading: "A", city: "Mk", startAt: "2026-07-14T18:00:00Z" };
-  const london = { id: 2, heading: "B", city: "London", startAt: "2026-07-15T18:00:00Z" };
-  // No city (null/blank) → cannot scope honestly → show everything (paired with the neutral label).
-  assert.deepEqual(homeFeed([mk, london], { ...CTX, city: null }).cards.map((c) => c.id), [1, 2]);
-  assert.deepEqual(homeFeed([mk, london], { ...CTX, city: "   " }).cards.map((c) => c.id), [1, 2]);
-  assert.deepEqual(homeFeed([mk, london], CTX).cards.map((c) => c.id), [1, 2]); // no city key at all
+test("homeSections: section 3 is BOOKABLE-ONLY — full / started / past-cutoff excluded (TM-969)", () => {
+  const bookableOne = { id: 1, heading: "Joinable", myState: "NONE", city: "Mk", capacity: 10, goingCount: 2, startAt: "2026-07-20T18:00:00Z" };
+  const full = { id: 2, heading: "Full", myState: "NONE", city: "Mk", capacity: 3, goingCount: 3, startAt: "2026-07-21T18:00:00Z" };
+  const withinCutoff = { id: 3, heading: "Too late", myState: "NONE", city: "Mk", startAt: "2026-07-10T12:30:00Z" }; // 30 min out
+  const finished = { id: 4, heading: "Done", myState: "NONE", city: "Mk", status: "FINISHED", startAt: "2026-07-01T09:00:00Z" };
+
+  const out = homeSections([bookableOne, full, withinCutoff, finished], { ...CTX, city: "Mk" });
+  const near = out.sections.find((s) => s.key === "near-you");
+  assert.ok(near, "a bookable event yields a near-you section");
+  assert.deepEqual(near.cards.map((c) => c.id), [1]); // only the genuinely joinable event
 });
 
-test("homeFeed: bounds the digest (the finding notes the old feed was unbounded) (TM-662)", () => {
-  // 20 same-city upcoming events → capped at the digest max (NEAR_YOU_MAX = 12).
-  const many = Array.from({ length: 20 }, (_, i) => ({
+test("homeSections: section 3 excludes events I'm ALREADY attending (they're my events, not a teaser) (TM-969)", () => {
+  const mine = { id: 1, heading: "Mine", myState: "GOING", city: "Mk", startAt: "2026-07-20T18:00:00Z" };
+  const other = { id: 2, heading: "Bookable", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([mine, other], { ...CTX, city: "Mk" });
+  const near = out.sections.find((s) => s.key === "near-you");
+  assert.deepEqual(near.cards.map((c) => c.id), [2]); // my GOING event isn't a "near you" card
+  // …and it IS surfaced in section 2 instead.
+  assert.deepEqual(out.sections.find((s) => s.key === "your-events").cards.map((c) => c.id), [1]);
+});
+
+// The near-you scoping (TM-662) is preserved on section 3 — the recorded bug was a London event
+// surfacing under a "Mk" header.
+test("homeSections: section 3 scoped to the viewer's city — other-city bookable events EXCLUDED (TM-662, preserved)", () => {
+  const localMk = { id: 1, heading: "Coffee & Code", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-20T18:00:00Z" };
+  const otherLondon = { id: 2, heading: "London thing", myState: "NONE", city: "London", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+
+  const out = homeSections([localMk, otherLondon], { ...CTX, city: "MK" }); // case-insensitive match
+  const near = out.sections.find((s) => s.key === "near-you");
+  assert.deepEqual(near.cards.map((c) => c.id), [1]); // the London event never appears under an MK viewer
+});
+
+test("homeSections: section 3 — unknown viewer city degrades to the FULL unfiltered bookable listing (TM-662, preserved)", () => {
+  const mk = { id: 1, heading: "A", myState: "NONE", city: "Mk", capacity: 10, goingCount: 1, startAt: "2026-07-20T18:00:00Z" };
+  const london = { id: 2, heading: "B", myState: "NONE", city: "London", capacity: 10, goingCount: 1, startAt: "2026-07-21T18:00:00Z" };
+  const near = homeSections([mk, london], { ...CTX, city: null }).sections.find((s) => s.key === "near-you");
+  assert.deepEqual(near.cards.map((c) => c.id), [1, 2]); // no city → show everything bookable
+});
+
+test("homeSections: sections 1 & 2 (MY events) are NOT city-scoped — my RSVPs show wherever they are (TM-969)", () => {
+  // My GOING events are in London, but my viewer city is Mk — I must still see my own events.
+  const myLiveLondon = { id: 1, heading: "My live", myState: "GOING", happeningNow: true, city: "London", startAt: "2026-07-10T11:00:00Z" };
+  const myUpcomingLondon = { id: 2, heading: "My soon", myState: "GOING", city: "London", startAt: "2026-07-20T18:00:00Z" };
+
+  const out = homeSections([myLiveLondon, myUpcomingLondon], { ...CTX, city: "Mk" });
+  assert.deepEqual(out.sections.find((s) => s.key === "happening-now").cards.map((c) => c.id), [1]);
+  assert.deepEqual(out.sections.find((s) => s.key === "your-events").cards.map((c) => c.id), [2]);
+});
+
+test("homeSections: section 3 is trimmed to the teaser cap (small taste, not the full list) (TM-969)", () => {
+  // 8 same-city bookable events → the near-you teaser is capped at NEAR_YOU_TEASER_MAX (3).
+  const many = Array.from({ length: 8 }, (_, i) => ({
     id: i,
     heading: `E${i}`,
+    myState: "NONE",
     city: "Mk",
-    startAt: `2026-07-${String(14 + (i % 10)).padStart(2, "0")}T18:00:00Z`,
+    capacity: 10,
+    goingCount: 0,
+    startAt: `2026-07-${String(14 + i).padStart(2, "0")}T18:00:00Z`,
   }));
-  const feed = homeFeed(many, { ...CTX, city: "Mk" });
-  assert.equal(feed.cards.length, 12);
+  const near = homeSections(many, { ...CTX, city: "Mk" }).sections.find((s) => s.key === "near-you");
+  assert.equal(near.cards.length, 3);
+  assert.equal(near.isTeaser, true);
+  assert.equal(near.seeAllHref, "#/events");
+});
+
+test("homeSections: sections 1 & 2 (MY events) are NOT trimmed — all my events show (TM-969)", () => {
+  // 6 of my upcoming GOING events → all show (only the near-you teaser is capped).
+  const many = Array.from({ length: 6 }, (_, i) => ({
+    id: i,
+    heading: `M${i}`,
+    myState: "GOING",
+    startAt: `2026-07-${String(14 + i).padStart(2, "0")}T18:00:00Z`,
+  }));
+  const yours = homeSections(many, CTX).sections.find((s) => s.key === "your-events");
+  assert.equal(yours.cards.length, 6); // uncapped
+  assert.equal(yours.isTeaser, false);
 });

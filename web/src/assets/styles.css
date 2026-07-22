@@ -6979,6 +6979,50 @@ a.tm-pf-go:focus-visible {
     margin-top: var(--space-2);
 }
 
+/* ── TM-969 attending-first sections (additive; separate from any TM-908 block) ───────────────────
+   Home is now up to three priority sections (Happening now / Your events / Events near you), each a
+   headed block; the third is a bookable teaser with a "See all events →" hand-off. Token-only, so it
+   reskins with the accent + both toggle states like the rest of the Home screen. */
+.tm-home-section {
+    margin-top: var(--space-5);
+}
+
+/* The highest non-empty section is the first content — no extra top gap under the page head. */
+.tm-home-section:first-child {
+    margin-top: var(--space-2);
+}
+
+/* A light section header — quieter than the page title, so the cards stay the hero. */
+.tm-home-section-title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--fs-3);
+    line-height: 1.15;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+/* The "See all events →" hand-off under the near-you teaser — a quiet accent-coloured link that leads
+   to the full #/events browse list for the rest of the nearby events. */
+.tm-home-see-all {
+    display: inline-block;
+    margin-top: var(--space-3);
+    font-size: var(--fs-2);
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.tm-home-see-all:hover {
+    text-decoration: underline;
+}
+
+.tm-home-see-all:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+/* ── end TM-969 block ───────────────────────────────────────────────────────────────────────────── */
+
 /* A feed card — the WHOLE card is the link (the tap target), matching the #/events browse card and
    the wireframe. */
 .tm-home-card {

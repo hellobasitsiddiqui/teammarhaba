@@ -139,7 +139,8 @@ test("@auth cold login: from a fully signed-out state, an emailed code signs the
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await expect(page.locator("#onboarding-view")).toBeHidden();
   await expect(page.locator("#terms-view")).toBeHidden();
-  // The signed-in Home carries the "Events near you" feed container (data-testid from index.html).
+  // The signed-in Home carries the personalized feed mount container (TM-969: the attending-first
+  // sections / empty-home render into it — data-testid from index.html).
   await expect(page.locator('[data-testid="home-feed"]')).toBeVisible();
   // ...and the router settled on the home route (not left on #/login).
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/home");
