@@ -5505,6 +5505,8 @@
           "name" : "emoji",
           "required" : false,
           "schema" : {
+            "maxLength" : 32,
+            "minLength" : 0,
             "type" : "string"
           }
         } ],

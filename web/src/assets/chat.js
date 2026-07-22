@@ -1407,15 +1407,21 @@ function messageRow(m, mine = false, runStart = false) {
   // server sends `readReceipt` only for those, so its presence gates this. Tap it to see who's read it.
   if (m.readReceipt && !m.pending) row.append(readReceiptIndicator(m.readReceipt));
   // Message actions (TM-940): reply / edit / delete now live behind a tap-to-reveal overflow ("⋯") instead
-  // of a permanently-visible icon column. `messageActionMenu` builds the trigger + a hidden menu; the menu
-  // is empty (returns null) when nothing applies (a pending echo, a read-only thread, someone else's
-  // message we can't act on), so the row stays clean. All three actions stay real, focusable, aria-labelled
-  // <button>s — revealed on tap/long-press, keyboard- and screen-reader-reachable once open.
+  // of a permanently-visible icon column. `messageActionMenu` builds the trigger + a hidden menu; it returns
+  // null when nothing applies (a pending echo, a read-only thread, someone else's message we can't act on),
+  // so the row stays clean. All three actions stay real, focusable, aria-labelled <button>s — revealed on
+  // tap/long-press, keyboard- and screen-reader-reachable once open.
   if (!m.pending && m.id) {
     const canReply = thread.canCompose;
     const canOwn = mine && !m.system;
     const menu = messageActionMenu(m, { canReply, canOwn });
-    if (menu) row.append(menu);
+    if (menu) {
+      row.append(menu.node);
+      // Long-press anywhere on the message row (the bubble region) also reveals the menu — a real touch
+      // affordance, not just the "⋯" trigger. Open-only (never toggles shut). The trigger's own contextmenu
+      // handler stops propagation, so long-pressing the trigger doesn't double-fire this one.
+      row.addEventListener("contextmenu", (e) => { e.preventDefault(); menu.open(); });
+    }
   }
   return row;
 }
@@ -1490,11 +1496,34 @@ function senderIdentity(m, timeLabel = "") {
  * @returns {?HTMLElement} the action-menu wrapper, or null when nothing applies.
  */
 function messageActionMenu(m, { canReply, canOwn } = {}) {
+  // Build the menu shell FIRST so the item handlers can reference setOpen — every action closes the menu
+  // (and clears aria-expanded) before running, not just the ones that happen to repaint the body. Items are
+  // wired through the shared `run()` helper below.
+  const menu = el("div", {
+    class: "tm-chat-actions-menu", role: "menu", "data-testid": "chat-actions-menu",
+    "aria-label": "Message actions", hidden: true,
+  });
+  const trigger = el("button", {
+    class: "tm-chat-actions-trigger", type: "button",
+    "aria-label": "Message actions", title: "More", "aria-haspopup": "menu",
+    "aria-expanded": "false", "data-testid": "chat-actions-trigger",
+  }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "⋯" })]);
+  const wrap = el("div", { class: "tm-chat-actions", "data-testid": "chat-actions" }, [trigger, menu]);
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    wrap.classList.toggle("tm-chat-actions--open", open);
+  };
+  // Shared close-then-run wrapper: EVERY menu item routes through this, so the menu always hides (and
+  // aria-expanded flips to "false") before the action fires — no item can leave the menu stuck open.
+  const run = (action) => () => { setOpen(false); action(m); };
+
   const items = [];
   if (canReply) {
     items.push(el("button", {
       class: "tm-chat-action-item tm-chat-reply-btn", type: "button", role: "menuitem",
-      "aria-label": "Reply", "data-testid": "chat-reply", onClick: () => beginReply(m),
+      "aria-label": "Reply", "data-testid": "chat-reply", onClick: run(beginReply),
     }, [
       el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true" }, [lineIcon("chat", { size: 15, strokeWidth: 1.6 })]),
       el("span", { class: "tm-chat-action-label", text: "Reply" }),
@@ -1503,7 +1532,7 @@ function messageActionMenu(m, { canReply, canOwn } = {}) {
   if (canOwn && core.canEditWithinWindow(m.sortAt)) {
     items.push(el("button", {
       class: "tm-chat-action-item tm-chat-edit-btn", type: "button", role: "menuitem",
-      "aria-label": "Edit message", "data-testid": "chat-edit", onClick: () => beginEdit(m),
+      "aria-label": "Edit message", "data-testid": "chat-edit", onClick: run(beginEdit),
     }, [
       el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "✎" }),
       el("span", { class: "tm-chat-action-label", text: "Edit" }),
@@ -1512,45 +1541,32 @@ function messageActionMenu(m, { canReply, canOwn } = {}) {
   if (canOwn) {
     items.push(el("button", {
       class: "tm-chat-action-item tm-chat-delete-btn", type: "button", role: "menuitem",
-      "aria-label": "Delete message", "data-testid": "chat-delete", onClick: () => deleteOwnMessage(m),
+      "aria-label": "Delete message", "data-testid": "chat-delete", onClick: run(deleteOwnMessage),
     }, [
       el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "🗑" }),
       el("span", { class: "tm-chat-action-label", text: "Delete" }),
     ]));
   }
   if (items.length === 0) return null; // nothing to reveal → no overflow trigger at all
+  menu.append(...items);
 
-  const menu = el("div", {
-    class: "tm-chat-actions-menu", role: "menu", "data-testid": "chat-actions-menu",
-    "aria-label": "Message actions", hidden: true,
-  }, items);
+  // Open the menu and land focus on the first action (keyboard reachable). Exposed so the message ROW can
+  // wire long-press (contextmenu) on the bubble region, not just the "⋯" trigger.
+  const open = () => { setOpen(true); items[0].focus(); };
 
-  const trigger = el("button", {
-    class: "tm-chat-actions-trigger", type: "button",
-    "aria-label": "Message actions", title: "More", "aria-haspopup": "menu",
-    "aria-expanded": "false", "data-testid": "chat-actions-trigger",
-  }, [el("span", { class: "tm-chat-action-glyph", "aria-hidden": "true", text: "⋯" })]);
-
-  const setOpen = (open) => {
-    menu.hidden = !open;
-    trigger.setAttribute("aria-expanded", String(open));
-    wrap.classList.toggle("tm-chat-actions--open", open);
-  };
   trigger.addEventListener("click", () => {
-    const willOpen = menu.hidden;
-    setOpen(willOpen);
-    if (willOpen) items[0].focus(); // reveal → land focus on the first action (keyboard reachable)
+    if (menu.hidden) open();
+    else setOpen(false); // tap again on the trigger closes it
   });
   // Escape from anywhere inside the menu re-hides it and returns focus to the trigger.
   menu.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); }
   });
+  // Long-press directly on the trigger opens (never toggles shut), so a long-press can't accidentally close
+  // a menu the user just opened by tap.
+  trigger.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); open(); });
 
-  const wrap = el("div", { class: "tm-chat-actions", "data-testid": "chat-actions" }, [trigger, menu]);
-  // Long-press on the bubble region also reveals it (touch affordance) — but only opens, never toggles shut,
-  // so a long-press can't accidentally close a menu the user just opened by tap.
-  wrap.addEventListener("contextmenu", (e) => { e.preventDefault(); setOpen(true); items[0].focus(); });
-  return wrap;
+  return { node: wrap, open };
 }
 
 /**
