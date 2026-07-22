@@ -139,6 +139,35 @@ export function shouldRollbackReaction(current, optimistic) {
 }
 
 /**
+ * Roll a FAILED reaction toggle back at the granularity of the ONE emoji it changed — leaving every OTHER
+ * chip on the message exactly as it currently stands (TM-989/D). Takes the message's CURRENT chips and
+ * splices in only this emoji's pre-toggle state: drop the emoji's chip, then re-insert `prevChip` if the
+ * emoji had one before the toggle (append at the end — its exact prior slot doesn't matter to the chip
+ * row, and a server reconcile re-derives order anyway).
+ *
+ * WHY (the TM-854 whole-array-snapshot bug this replaces): the old rollback captured the ENTIRE reactions
+ * array before the request and, on failure, restored that whole snapshot. With two concurrent toggles on
+ * the SAME message but DIFFERENT emoji, the second toggle's snapshot embeds the FIRST toggle's optimistic
+ * paint; if BOTH fail, restoring that snapshot resurrects the first toggle's already-failed chip — a
+ * phantom reaction. Scoping the rollback to the specific emoji makes the two toggles independent, so one's
+ * failure can never clobber (or resurrect) the other's chip.
+ * @param {Array<{emoji, count, mine}>} current the message's chips at failure time (may already reflect
+ *   another concurrent toggle's paint or a server reconcile).
+ * @param {string} emoji the glyph THIS toggle changed.
+ * @param {{emoji: string, count: number, mine: boolean}|null} prevChip this emoji's chip BEFORE the
+ *   toggle (null if the emoji had no chip then — i.e. the toggle was a fresh react, so rollback removes it).
+ * @returns {Array<{emoji: string, count: number, mine: boolean}>} the chips to paint after rollback.
+ */
+export function rollbackReactionEmoji(current, emoji, prevChip) {
+  const glyph = String(emoji ?? "");
+  const kept = normaliseReactions(current).filter((r) => r.emoji !== glyph); // every OTHER emoji, untouched
+  if (prevChip && prevChip.emoji === glyph && Number(prevChip.count) > 0) {
+    kept.push({ emoji: glyph, count: Math.max(0, Math.trunc(Number(prevChip.count) || 0)), mine: Boolean(prevChip.mine) });
+  }
+  return kept;
+}
+
+/**
  * Derive the read-receipt tick state for an out-going message from how many group members have read
  * it (the delivery ladder, kept as a pure util for a future ticket that surfaces receipts once the
  * API carries read counts):
@@ -311,6 +340,66 @@ export function conversationUnreadInList(items, id) {
   if (!row) return 0;
   const n = Number(row.unreadCount);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * Page through the caller's conversations until THIS thread's summary turns up, and return its per-caller
+ * `unreadCount` (TM-989, C). The original TM-855 deep-link fix ({@link conversationUnreadInList}) only
+ * ever scanned page 0 of `listMyConversations()`, so a chatty member with 20+ threads whose target thread
+ * sat on page 1+ silently got a 0 back — the optimistic Chat-tab badge drop no-oped. This mirrors the
+ * TM-853 pager ({@link module:events-core.collectConversationsForEvent}): walk zero-based pages, stopping
+ * the moment the thread is found (no over-fetching), or when the envelope says it's out of pages, or a
+ * page comes back empty, or the defensive `maxPages` cap trips (never trusts a misbehaving `totalPages`
+ * into an endless loop).
+ *
+ * Stays pure by taking the page-fetcher as an argument (the view injects `(page) => listMyConversations({
+ * page })`), so the whole loop is unit-testable with no fetch. Best-effort: a miss across all scanned
+ * pages returns 0, so the optimistic drop simply no-ops and the post-commit reconcile still corrects the
+ * total — never worse than the single-page behaviour.
+ * @param {(page: number) => Promise<{items?: Array, page?: number, totalPages?: number}>} fetchPage
+ *   fetches one zero-based page of the caller's conversations (the shared page envelope).
+ * @param {number|string} id the conversation id to resolve the unread for.
+ * @param {{maxPages?: number}} [opts] defensive upper bound on pages walked (default 25).
+ * @returns {Promise<number>} the thread's non-negative per-caller unread, or 0 if never found.
+ */
+export async function collectConversationUnread(fetchPage, id, { maxPages = 25 } = {}) {
+  const target = String(id);
+  for (let page = 0; page < maxPages; page++) {
+    const data = await fetchPage(page);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    // Found on this page → return its unread straight away (reuses the tested per-row rule, no re-fetch).
+    if (items.some((s) => s && String(s.id) === target)) {
+      return conversationUnreadInList(items, id);
+    }
+    if (!items.length) break; // empty page — nothing further to scan
+    const totalPages = Number(data?.totalPages);
+    if (Number.isFinite(totalPages) && page + 1 >= totalPages) break; // exhausted
+  }
+  return 0;
+}
+
+/**
+ * The pure decision core of chat.js's `resolveThreadUnread` (TM-855 / TM-989 B) — the on-open resolution
+ * of a just-opened thread's pre-mark unread for the optimistic Chat-tab badge drop, lifted out of the DOM
+ * layer so the REAL wiring (not a re-computation of it) is unit-testable in a plain-Node test:
+ *   • WARM list-tap path → the cached row already carries the unread, so return `cachedUnread` verbatim
+ *     with no fetch (`cachedUnread != null`).
+ *   • DEEP-LINK path (cache miss, `cachedUnread == null`) → PAGE the caller's conversation list via
+ *     {@link collectConversationUnread} and read the thread's server-computed per-caller `unreadCount`.
+ * This is the exact seam the TM-855 fix lives on: reverting it (deep-link → hard-coded 0 / no list lookup)
+ * makes this return 0 on the deep-link path, which the badge-drop test asserts against. The DOM
+ * `resolveThreadUnread` is now a thin wrapper that injects `(page) => listMyConversations({ page })` and
+ * catches fetch failures (best-effort → 0).
+ * @param {number|null|undefined} cachedUnread the cached row's pre-clear unread, or null/undefined on a
+ *   cache miss (deep-link).
+ * @param {(page: number) => Promise<{items?: Array}>} fetchPage the conversation-list page fetcher.
+ * @param {number|string} id the conversation id being opened.
+ * @param {{maxPages?: number}} [opts] forwarded to {@link collectConversationUnread}.
+ * @returns {Promise<number>} the thread's pre-mark unread for the optimistic drop.
+ */
+export async function resolveThreadUnreadCore(cachedUnread, fetchPage, id, opts) {
+  if (cachedUnread != null) return cachedUnread;
+  return collectConversationUnread(fetchPage, id, opts);
 }
 
 /* ─────────────────────────────── Thread message adapters ──────────────────────────────────────── */
@@ -1058,13 +1147,24 @@ export function typingLabel(typists, now) {
  */
 export function createAdminFlagCache(fetchMe) {
   let cached = null; // null = unresolved; boolean once resolved
+  // TM-989: an epoch that invalidate() bumps. Mirrors the TM-721 uid-pin pattern in router.js: we pin
+  // the epoch a resolve() started under, and only write `cached` if invalidate() hasn't run since. Without
+  // this, a /me request already in flight when the account switches (invalidate() fires) would land AFTER
+  // the reset and repopulate the cache with the PREVIOUS user's admin flag — a TOCTOU that could expose
+  // the admin announce toggle to a non-admin who signed in behind an in-flight admin lookup.
+  let epoch = 0;
   return {
     async resolve() {
       if (cached !== null) return cached;
+      const startedEpoch = epoch;
       try {
         const me = await fetchMe();
-        cached = String(me?.role ?? "").toUpperCase() === "ADMIN";
-        return cached;
+        const isAdmin = String(me?.role ?? "").toUpperCase() === "ADMIN";
+        // Only cache if no invalidate() landed while this fetch was in flight. A stale response for a
+        // now-superseded user must not poison the cache; return its value for THIS call but leave the
+        // cache unresolved so the next resolve() re-fetches for the CURRENT user.
+        if (epoch === startedEpoch) cached = isAdmin;
+        return isAdmin;
       } catch {
         // TM-736: a transient /me failure must NOT stick as non-admin for the whole session — leave
         // the cache UNRESOLVED (cached stays null) so the next resolve() re-fetches. Fail safe to
@@ -1075,6 +1175,7 @@ export function createAdminFlagCache(fetchMe) {
     },
     invalidate() {
       cached = null;
+      epoch++;
     },
   };
 }

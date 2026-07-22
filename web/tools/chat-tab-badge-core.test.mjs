@@ -16,7 +16,11 @@ import {
   hasBadge,
   BADGE_CAP,
 } from "../src/assets/chat-tab-badge-core.js";
-import { conversationUnreadInList } from "../src/assets/chat-core.js";
+import {
+  conversationUnreadInList,
+  collectConversationUnread,
+  resolveThreadUnreadCore,
+} from "../src/assets/chat-core.js";
 
 test("unreadTotalOf: reads the aggregate `total` from the unread-total endpoint envelope", () => {
   // The server sums over ALL the caller's threads (TM-582), so this is already the whole-account total
@@ -105,25 +109,74 @@ test("conversationUnreadInList: tolerant of malformed inputs (never throws, neve
   assert.equal(conversationUnreadInList([null, { id: 1, unreadCount: 4 }], 1), 4); // skips a null row
 });
 
-test("end-to-end deep-link drop: TM-855 — a push-opened thread with unread>0 drops the badge", () => {
-  // The failing scenario: deep-link open, empty list cache. Pre-TM-855 the on-open drop used a cached
-  // unread of 0 (cache miss) = decrementUnreadTotal(total, 0) = no change (the bug). The fix resolves the
-  // thread's unread from the fetched LIST summary before the POST, so the optimistic drop finally fires.
+test("end-to-end deep-link drop: TM-855 — drives the REAL resolveThreadUnreadCore wiring (TM-989/B)", async () => {
+  // TM-989/B: the old version of this test just re-ran the pure helpers by hand, so a full revert of the
+  // TM-855 deep-link fix stayed GREEN. This now drives the ACTUAL on-open resolution seam
+  // (markThreadRead → resolveThreadUnread → resolveThreadUnreadCore, the pure core chat.js delegates to):
+  // deep-link open means an empty row cache, so cachedUnread is null and the core MUST fetch the list and
+  // read the thread's server unread. Revert the fix (deep-link → 0 / no list lookup) and this FAILS.
   const totalBefore = unreadTotalOf({ total: 8 });
-  const listItems = [{ id: 5, unreadCount: 3 }]; // the fetched conversation list carries the real unread
-  const wasUnread = conversationUnreadInList(listItems, "5"); // deep-link resolves from the list, not the empty cache
+  let fetched = 0;
+  const fetchPage = async (page) => {
+    fetched++;
+    return { items: [{ id: 5, unreadCount: 3 }], page, totalPages: 1 };
+  };
+  // cachedUnread = null models the deep-link cache miss the DOM layer passes in.
+  const wasUnread = await resolveThreadUnreadCore(null, fetchPage, "5");
+  assert.equal(fetched, 1, "deep-link open actually paged the conversation list (not the empty cache)");
   assert.equal(wasUnread, 3, "the fetched list supplies the real unread the empty cache lacked");
   const totalAfter = decrementUnreadTotal(totalBefore, wasUnread);
   assert.equal(totalAfter, 5, "the badge drops optimistically by the deep-linked thread's unread");
   assert.equal(badgeText(totalAfter), "5");
 });
 
-test("end-to-end list-tap drop: the warm-cache path is unchanged (drops on open from the cache)", () => {
-  // Regression guard: the list-tap path keeps working exactly as before — the cached row's unread drives
-  // the on-open drop directly, with no extra list fetch (resolveThreadUnread returns the cached value).
+test("end-to-end deep-link drop: TM-989/C — a thread BEYOND page 0 is still found and drops the badge", async () => {
+  // TM-855's original lookup scanned only page 0, so a chatty member whose deep-linked thread sat on a
+  // later page got 0 and the drop no-oped. The pager now walks pages. Target thread id 77 lives on page 1.
+  const pages = [
+    { items: [{ id: 1, unreadCount: 0 }, { id: 2, unreadCount: 0 }], page: 0, totalPages: 2 },
+    { items: [{ id: 77, unreadCount: 4 }], page: 1, totalPages: 2 },
+  ];
+  let fetched = 0;
+  const fetchPage = async (page) => {
+    fetched++;
+    return pages[page];
+  };
+  const wasUnread = await resolveThreadUnreadCore(null, fetchPage, "77");
+  assert.equal(fetched, 2, "it walked to page 1 to find the thread (single-page scan would stop at 1 fetch)");
+  assert.equal(wasUnread, 4, "the later-page thread's real unread is resolved (single-page scan yielded 0)");
+  assert.equal(decrementUnreadTotal(unreadTotalOf({ total: 10 }), wasUnread), 6);
+});
+
+test("collectConversationUnread: stops at the first page that has the thread (no over-fetching)", async () => {
+  const pages = [
+    { items: [{ id: 5, unreadCount: 3 }], page: 0, totalPages: 3 },
+    { items: [{ id: 9, unreadCount: 9 }], page: 1, totalPages: 3 },
+  ];
+  let fetched = 0;
+  const unread = await collectConversationUnread((page) => { fetched++; return Promise.resolve(pages[page]); }, 5);
+  assert.equal(unread, 3);
+  assert.equal(fetched, 1, "found on page 0 → does not fetch page 1");
+});
+
+test("collectConversationUnread: a thread that never appears degrades to 0 (best-effort)", async () => {
+  const pages = [
+    { items: [{ id: 1, unreadCount: 2 }], page: 0, totalPages: 2 },
+    { items: [{ id: 2, unreadCount: 5 }], page: 1, totalPages: 2 },
+  ];
+  const unread = await collectConversationUnread((page) => Promise.resolve(pages[page]), 99);
+  assert.equal(unread, 0);
+});
+
+test("end-to-end list-tap drop: the warm-cache path is unchanged — no list fetch (drives the real core)", async () => {
+  // Regression guard: warm list-tap keeps working — resolveThreadUnreadCore returns the cached row's unread
+  // directly with NO page fetch. If a fetch fires here the wiring regressed.
   const totalBefore = unreadTotalOf({ total: 8 });
-  const cachedUnread = 3; // warm row.unread from a rendered list
-  assert.equal(decrementUnreadTotal(totalBefore, cachedUnread), 5, "list-tap drops on open from the warm cache");
+  let fetched = 0;
+  const wasUnread = await resolveThreadUnreadCore(3, async () => { fetched++; return { items: [] }; }, "5");
+  assert.equal(fetched, 0, "warm cache path must not fetch the conversation list");
+  assert.equal(wasUnread, 3);
+  assert.equal(decrementUnreadTotal(totalBefore, wasUnread), 5, "list-tap drops on open from the warm cache");
 });
 
 test("badgeText (re-exported): empty at zero, exact up to the cap, then '9+'", () => {

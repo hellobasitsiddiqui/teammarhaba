@@ -23,7 +23,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { applyReactionToggle, normaliseReactions, shouldRollbackReaction } from "../src/assets/chat-core.js";
+import {
+  applyReactionToggle,
+  normaliseReactions,
+  shouldRollbackReaction,
+  rollbackReactionEmoji,
+} from "../src/assets/chat-core.js";
 
 // ── The pure decision ────────────────────────────────────────────────────────────────────────────────
 
@@ -78,11 +83,27 @@ test("non-array inputs are normalised, matching the chips' own normalise rule", 
 });
 
 // ── The failure-path state machine, mirrored from chat.js toggleReaction ─────────────────────────────
+//
+// TM-989/D: the rollback is now scoped to the ONE emoji the toggle changed (was: a whole-array snapshot).
+// This helper mirrors chat.js exactly: capture only this emoji's pre-toggle chip, and on failure restore
+// only that chip against the CURRENT array (leaving every other chip — including a concurrent toggle's —
+// alone), gated by a per-emoji staleness check.
+function startToggle(message, emoji) {
+  const { reactions: optimistic } = applyReactionToggle(message.reactions, emoji);
+  const prevChip = normaliseReactions(message.reactions).find((r) => r.emoji === emoji) || null;
+  message.reactions = optimistic; // optimistic paint
+  return { emoji, optimistic, prevChip };
+}
 
-/** The failure handler exactly as chat.js now runs it: guarded rollback using the REAL pure decision. */
-function failToggle(message, { prev, optimistic }) {
-  if (shouldRollbackReaction(message.reactions, optimistic)) {
-    message.reactions = prev;
+function failToggle(message, { emoji, optimistic, prevChip }) {
+  const optimisticChip = normaliseReactions(optimistic).find((r) => r.emoji === emoji) || null;
+  const currentChip = normaliseReactions(message.reactions).find((r) => r.emoji === emoji) || null;
+  const untouched =
+    (optimisticChip === null && currentChip === null) ||
+    (optimisticChip !== null && currentChip !== null &&
+      optimisticChip.count === currentChip.count && optimisticChip.mine === currentChip.mine);
+  if (untouched) {
+    message.reactions = rollbackReactionEmoji(message.reactions, emoji, prevChip);
     return "rolled-back";
   }
   return "kept-newer-state";
@@ -91,26 +112,54 @@ function failToggle(message, { prev, optimistic }) {
 test("failure with NO concurrent update rolls the optimistic paint back to the prior chips", () => {
   const prev = [{ emoji: "🎉", count: 2, mine: false }];
   const message = { id: "7", reactions: prev };
-  const { reactions: optimistic } = applyReactionToggle(message.reactions, "👍");
-  message.reactions = optimistic; // the optimistic paint
+  const t = startToggle(message, "👍");
 
-  assert.equal(failToggle(message, { prev, optimistic }), "rolled-back");
-  assert.deepEqual(message.reactions, prev);
+  assert.equal(failToggle(message, t), "rolled-back");
+  assert.deepEqual(normaliseReactions(message.reactions), normaliseReactions(prev));
 });
 
 test("failure AFTER a concurrent poll reconcile keeps the newer server truth (the TM-854 race)", () => {
-  const prev = [];
-  const message = { id: "7", reactions: prev };
-  const { reactions: optimistic } = applyReactionToggle(message.reactions, "👍");
-  message.reactions = optimistic; // my optimistic 👍
+  const message = { id: "7", reactions: [] };
+  const t = startToggle(message, "👍"); // my optimistic 👍
 
-  // Mid-flight, a poll page lands: another member 🎉'd (fresh objects, wholesale replace, rev untouched).
-  const fromPoll = normaliseReactions([{ emoji: "👍", count: 1, mine: true }, { emoji: "🎉", count: 1, mine: false }]);
+  // Mid-flight, a poll page lands: another member 🎉'd AND my 👍 count bumped (fresh objects, wholesale replace).
+  const fromPoll = normaliseReactions([{ emoji: "👍", count: 2, mine: true }, { emoji: "🎉", count: 1, mine: false }]);
   message.reactions = fromPoll;
 
-  // My request then fails — the stale `prev` snapshot must NOT clobber the poll's newer truth.
-  assert.equal(failToggle(message, { prev, optimistic }), "kept-newer-state");
+  // My request then fails — this emoji's chip changed under me, so we must NOT clobber the poll's truth.
+  assert.equal(failToggle(message, t), "kept-newer-state");
   assert.deepEqual(message.reactions, fromPoll);
+});
+
+test("TM-989/D: two concurrent toggles on the SAME message, different emoji — a failed one can't resurrect the other's failed chip", () => {
+  // Repro: 👍 then ❤️ both fired optimistically on the same message, both requests in flight, both FAIL.
+  // Old whole-array rollback: ❤️'s snapshot embedded 👍's optimistic paint, so restoring it after 👍 also
+  // failed brought 👍 back — a phantom reaction. Per-emoji rollback keeps them independent.
+  const message = { id: "9", reactions: [] };
+
+  const tLike = startToggle(message, "👍"); // paints [👍]
+  const tHeart = startToggle(message, "❤️"); // paints [👍, ❤️] — its snapshot sees 👍's paint
+
+  // 👍's request fails first: only 👍's chip is untouched vs its own optimistic → roll 👍 back.
+  assert.equal(failToggle(message, tLike), "rolled-back");
+  // ❤️ must survive; 👍 must be gone.
+  assert.deepEqual(normaliseReactions(message.reactions), normaliseReactions([{ emoji: "❤️", count: 1, mine: true }]));
+
+  // ❤️'s request then also fails: roll ❤️ back too.
+  assert.equal(failToggle(message, tHeart), "rolled-back");
+  // The message must end EMPTY — no phantom 👍 resurrected by ❤️'s rollback.
+  assert.deepEqual(normaliseReactions(message.reactions), [], "no phantom reaction survives both failures");
+});
+
+test("TM-989/D: failed toggle leaves a concurrent SUCCESSFUL toggle's chip intact", () => {
+  // 👍 and ❤️ both optimistic; ❤️ succeeds (server reconcile) then 👍 fails → 👍 rolls back, ❤️ stays.
+  const message = { id: "9", reactions: [] };
+  const tLike = startToggle(message, "👍");
+  startToggle(message, "❤️"); // paints [👍, ❤️]
+
+  // ❤️ reconciles with server truth (its own success): unchanged here, but 👍's chip is still its paint.
+  assert.equal(failToggle(message, tLike), "rolled-back");
+  assert.deepEqual(normaliseReactions(message.reactions), normaliseReactions([{ emoji: "❤️", count: 1, mine: true }]));
 });
 
 // ── Source guards: the real chat.js keeps the fix wired (can't import it here) ───────────────────────
@@ -141,16 +190,21 @@ function toggleReactionCatchBlock() {
   return braceBlock(fnBlock, catchAt);
 }
 
-test("chat.js gates the reaction rollback on shouldRollbackReaction inside the thread guard", () => {
+test("chat.js gates the reaction rollback on a per-emoji staleness check inside the thread guard (TM-989/D)", () => {
   const catchBlock = toggleReactionCatchBlock();
   const threadGuardAt = catchBlock.indexOf("thread.id === threadId");
   assert.ok(threadGuardAt > -1, "the thread guard is present in the catch");
   const guardBlock = braceBlock(catchBlock, threadGuardAt);
-  assert.match(guardBlock, /core\.shouldRollbackReaction\(/, "rollback consults the pure staleness decision");
-  const decisionAt = guardBlock.indexOf("core.shouldRollbackReaction(");
-  const rollbackAt = guardBlock.indexOf("setReactionsOnMessage(id, prev)");
-  assert.ok(rollbackAt > -1, "the rollback write is present");
-  assert.ok(decisionAt < rollbackAt, "the decision guards (precedes) the rollback write");
+  // TM-989/D: the rollback is scoped to THIS emoji — the guard compares this emoji's optimistic vs current
+  // chip and restores only that chip via rollbackReactionEmoji (was: whole-array shouldRollbackReaction + prev).
+  assert.match(guardBlock, /untouched/, "a per-emoji staleness check gates the rollback");
+  assert.match(guardBlock, /core\.rollbackReactionEmoji\(/, "rollback restores only THIS emoji's chip");
+  const decisionAt = guardBlock.indexOf("const untouched");
+  const rollbackAt = guardBlock.indexOf("core.rollbackReactionEmoji(");
+  assert.ok(rollbackAt > -1, "the per-emoji rollback write is present");
+  assert.ok(decisionAt > -1 && decisionAt < rollbackAt, "the staleness decision guards (precedes) the rollback write");
+  // Guard against a regression to the whole-array snapshot that caused the phantom-reaction bug.
+  assert.doesNotMatch(guardBlock, /setReactionsOnMessage\(id,\s*prev\)/, "must NOT restore the whole pre-toggle array");
 });
 
 test("chat.js shows the failure toast INSIDE the thread guard, never after a navigate-away", () => {

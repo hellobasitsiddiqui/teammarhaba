@@ -1280,20 +1280,24 @@ function markThreadRead(id) {
 /**
  * Resolve a just-opened thread's pre-mark unread for the optimistic Chat-tab badge drop (TM-855). The
  * warm list-tap path already has the row, so we return its cached `unread` with no extra request. The
- * DEEP-LINK path (empty `state.rows`) fetches the caller's conversation list once and reads the thread's
- * server-computed, per-caller `unreadCount` from the matching summary — the correct pre-mark source,
- * fetched before the mark-read POST advances the read cursor. Best-effort: any fetch failure (or a
- * thread beyond the first page) degrades to 0, so the optimistic drop simply no-ops and the post-commit
- * `refreshChatTabBadge()` reconcile still corrects the total — never worse than the pre-TM-855 behaviour.
+ * DEEP-LINK path (empty `state.rows`) PAGES the caller's conversation list until this thread's summary
+ * turns up and reads its server-computed, per-caller `unreadCount` — the correct pre-mark source, fetched
+ * before the mark-read POST advances the read cursor. TM-989 (C): the old lookup scanned only page 0, so a
+ * chatty member whose deep-linked thread sat on page 1+ got a stale 0 and the drop no-oped; the pager
+ * ({@link core.collectConversationUnread}, mirroring TM-853's) now considers ALL conversations. Best-effort:
+ * any fetch failure (or a thread not found across the pages) degrades to 0, so the optimistic drop simply
+ * no-ops and the post-commit `refreshChatTabBadge()` reconcile still corrects the total — never worse than
+ * the pre-TM-855 behaviour.
  * @param {number|string} id the conversation id being opened.
  * @param {number|null} cachedUnread the cached row's pre-clear unread, or null on a cache miss (deep-link).
  * @returns {Promise<number>} the thread's pre-mark unread for the optimistic drop.
  */
 async function resolveThreadUnread(id, cachedUnread) {
-  if (cachedUnread != null) return cachedUnread;
   try {
-    const data = await listMyConversations();
-    return core.conversationUnreadInList(data?.items, id);
+    // The warm-cache vs deep-link-paging decision is the pure `resolveThreadUnreadCore` (TM-989/B), driven
+    // directly by its test so a revert of the TM-855 fix fails there. Deep-link pages all conversations
+    // (TM-989/C) — the deep-linked thread may sit beyond page 0.
+    return await core.resolveThreadUnreadCore(cachedUnread, (page) => listMyConversations({ page }), id);
   } catch (err) {
     console.warn("[chat] deep-link unread lookup failed (badge reconciles on next refresh):", err?.message ?? err);
     return 0;
@@ -1417,10 +1421,24 @@ function messageRow(m, mine = false, runStart = false) {
     const menu = messageActionMenu(m, { canReply, canOwn });
     if (menu) {
       row.append(menu.node);
-      // Long-press anywhere on the message row (the bubble region) also reveals the menu — a real touch
-      // affordance, not just the "⋯" trigger. Open-only (never toggles shut). The trigger's own contextmenu
-      // handler stops propagation, so long-pressing the trigger doesn't double-fire this one.
-      row.addEventListener("contextmenu", (e) => { e.preventDefault(); menu.open(); });
+      // Long-press on the message row (the bubble region) also reveals the menu — a real TOUCH affordance,
+      // not just the "⋯" trigger. Open-only (never toggles shut). The trigger's own contextmenu handler
+      // stops propagation, so long-pressing the trigger doesn't double-fire this one.
+      //
+      // TM-989/E: restrict this to TOUCH. Previously it preventDefault'd on EVERY contextmenu — hijacking
+      // the desktop right-click menu on a whole message row (no copy / select / spellcheck / open-link).
+      // We track the last pointer type and only intercept a contextmenu that a touch long-press raised;
+      // a mouse/trackpad right-click falls through to the native menu untouched.
+      let lastPointerWasTouch = false;
+      row.addEventListener("pointerdown", (e) => {
+        // pen counts as touch-like (a stylus long-press should reveal the menu too); mouse does not.
+        lastPointerWasTouch = e.pointerType === "touch" || e.pointerType === "pen";
+      }, true);
+      row.addEventListener("contextmenu", (e) => {
+        if (!lastPointerWasTouch) return; // desktop right-click → leave the native context menu alone
+        e.preventDefault();
+        menu.open();
+      });
     }
   }
   return row;
@@ -1487,13 +1505,16 @@ function senderIdentity(m, timeLabel = "") {
  * Accessibility: the trigger is a real <button aria-haspopup aria-expanded>; each action is a real,
  * focusable, aria-labelled <button>. The menu is `hidden` (so its buttons are removed from the tab order +
  * a11y tree) until revealed — tapping the trigger toggles `hidden` and moves focus to the first action, so
- * the actions are keyboard- and screen-reader-reachable once open. Escape or a tap on the trigger re-hides
- * it. The behaviour of each action (beginReply / beginEdit / deleteOwnMessage) is unchanged — this is a
- * reveal wrapper, not a behaviour change.
+ * the actions are keyboard- and screen-reader-reachable once open. Once open it implements the ARIA menu
+ * keyboard pattern (TM-989/F) that its role="menu"/"menuitem" promises: ArrowUp/ArrowDown move (and wrap)
+ * between items, Home/End jump to first/last, Escape or a tap on the trigger re-hides it (focus returns to
+ * the trigger), and Tab closes the menu and lets focus move on. The behaviour of each action (beginReply /
+ * beginEdit / deleteOwnMessage) is unchanged — this is a reveal wrapper, not a behaviour change.
  *
  * @param {Object} m the message view-model.
  * @param {{canReply: boolean, canOwn: boolean}} gates which actions are permitted here.
- * @returns {?HTMLElement} the action-menu wrapper, or null when nothing applies.
+ * @returns {?{node: HTMLElement, open: () => void}} the action-menu wrapper `node` plus an `open()` the
+ *   message row wires to a touch long-press (TM-957), or null when no action applies (nothing to reveal).
  */
 function messageActionMenu(m, { canReply, canOwn } = {}) {
   // Build the menu shell FIRST so the item handlers can reference setOpen — every action closes the menu
@@ -1558,9 +1579,25 @@ function messageActionMenu(m, { canReply, canOwn } = {}) {
     if (menu.hidden) open();
     else setOpen(false); // tap again on the trigger closes it
   });
-  // Escape from anywhere inside the menu re-hides it and returns focus to the trigger.
+  // Keyboard menu pattern (TM-989/F): the menu declares role="menu"/"menuitem", so it must actually
+  // implement the expected keys, not just Escape (was: role present, behaviour absent):
+  //   • ArrowDown / ArrowUp → move focus between items, wrapping at the ends;
+  //   • Home / End           → first / last item;
+  //   • Escape               → close and return focus to the trigger;
+  //   • Tab (either way)     → close the menu and let focus move on naturally (menus trap arrows, not Tab).
   menu.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); }
+    if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); return; }
+    if (e.key === "Tab") { setOpen(false); return; } // don't preventDefault — let Tab leave the menu
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const i = items.indexOf(document.activeElement);
+      let next;
+      if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = items.length - 1;
+      else if (e.key === "ArrowDown") next = i < 0 ? 0 : (i + 1) % items.length;
+      else next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length; // ArrowUp
+      items[next].focus();
+    }
   });
   // Long-press directly on the trigger opens (never toggles shut), so a long-press can't accidentally close
   // a menu the user just opened by tap.
@@ -1813,7 +1850,11 @@ async function toggleReaction(m, emoji) {
   if (thread.reacting.has(key)) return; // a toggle for this chip is already in flight — ignore the double-tap
   const threadId = thread.id;
   const { reactions: optimistic, action } = core.applyReactionToggle(m.reactions, emoji);
-  const prev = m.reactions; // the untouched prior chips, kept for rollback
+  // TM-989/D: snapshot ONLY this emoji's pre-toggle chip, not the whole array. A whole-array snapshot
+  // captures any concurrent toggle's optimistic paint, so restoring it on failure could resurrect that
+  // other toggle's already-failed chip (a phantom reaction). Scoping to the specific emoji keeps
+  // concurrent toggles on the same message independent.
+  const prevChip = core.normaliseReactions(m.reactions).find((r) => r.emoji === emoji) || null;
   thread.reacting.add(key);
   setReactionsOnMessage(id, optimistic);
   repaintBody(); // optimistic paint: chip in/decrements + highlights instantly, before the round-trip
@@ -1827,12 +1868,24 @@ async function toggleReaction(m, emoji) {
     repaintBody();
   } catch (err) {
     if (thread.id === threadId) {
-      // TM-854: only roll back while the chips are still the optimistic paint this toggle wrote — a
-      // concurrent poll/SSE reconcile that landed mid-flight is newer server truth, not ours to clobber.
+      // TM-854: don't roll back if a concurrent poll/SSE reconcile replaced THIS emoji's chip with newer
+      // server truth mid-flight — that's not ours to clobber. TM-989/D: the guard + rollback are now
+      // scoped to THIS emoji's chip (was: the whole array), so a concurrent toggle on a DIFFERENT emoji of
+      // the same message stays untouched and its already-failed paint can't be resurrected by our restore.
       const msg = thread.messages.find((x) => x.id === id);
-      if (msg && core.shouldRollbackReaction(msg.reactions, optimistic)) {
-        setReactionsOnMessage(id, prev); // roll the optimistic change back
-        repaintBody();
+      if (msg) {
+        const optimisticChip = core.normaliseReactions(optimistic).find((r) => r.emoji === emoji) || null;
+        const currentChip = core.normaliseReactions(msg.reactions).find((r) => r.emoji === emoji) || null;
+        // Only roll back while this emoji's chip is still exactly what our optimistic paint wrote (a value
+        // compare, mirroring shouldRollbackReaction but per-emoji): null-vs-null, or same count+mine.
+        const untouched =
+          (optimisticChip === null && currentChip === null) ||
+          (optimisticChip !== null && currentChip !== null &&
+            optimisticChip.count === currentChip.count && optimisticChip.mine === currentChip.mine);
+        if (untouched) {
+          setReactionsOnMessage(id, core.rollbackReactionEmoji(msg.reactions, emoji, prevChip));
+          repaintBody();
+        }
       }
       // TM-854: the toast lives inside the thread guard so it can't fire after a navigate-away.
       toast("Couldn't update your reaction. Please try again.", { type: "error" });
