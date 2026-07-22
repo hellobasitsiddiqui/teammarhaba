@@ -134,6 +134,16 @@ ground truth. Prefer handing Basit `cr <lane>` over a raw UUID.
   now-unblocked dependent from fresh main. A timed re-check keeps the wave moving with no human ping;
   watching a merge that hasn't happened just burns the turn. (Pairs with the conflict-pair + the
   "unblocked only when the blocker MERGES" rules above.)
+- **A raised PR is not a merged PR — poll for the *actual* merge; never assume auto-merge did it.**
+  Confirm the PR reached `MERGED` (`gh pr view <n> --json state,mergedAt` — `mergedAt` is set), not
+  just "green + mergeable". Docs-only PRs are *supposed* to auto-merge (the automerge-docs Action once
+  CI passes), but it merges with the plain `GITHUB_TOKEN` and **silently bails when branch protection
+  prohibits it** — e.g. `main`'s required code-owner review, which the token can't satisfy: it logs
+  `base branch policy prohibits the merge` and leaves the PR open. When a poll shows the PR still open
+  and `BLOCKED`, you **cannot merge it yourself** (hook-blocked, even for `*.md`), so surface it to
+  Basit with the exact one-liner — `gh pr merge <n> --squash --admin --delete-branch` — rather than
+  reporting it "done / will auto-merge". Never claim a PR merged without seeing `mergedAt`. (Learned
+  on #637: a green docs PR sat open because the bot couldn't clear the code-owner-review policy.)
 - **Reshaping shared UI = migrate ALL its consumers**: every spec in the e2e testDir AND
   standalone scripts outside it (capture/evidence scripts are the classic miss — we shipped a
   repo-wide guard test after one slipped through). When you retire an interaction, grep the whole
