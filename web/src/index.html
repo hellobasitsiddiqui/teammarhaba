@@ -323,6 +323,14 @@
                     <fieldset class="auth-alt">
                         <legend>Text me a code (SMS)</legend>
                         <div id="sms-step-phone" class="auth-step">
+                            <!-- TM-933: post-link framing. Once a verified phone is linked to an
+                                 account (TM-930), SMS is a sign-in method for THAT account — texting a
+                                 code to the mobile number on your account signs you into the same place
+                                 your email code does. One line of helper copy; no id in login.js's els
+                                 map is touched (a NEW element), so the login wiring is unaffected. -->
+                            <p id="sms-signin-hint" class="auth-hint">
+                                Sign in with the mobile number on your account.
+                            </p>
                             <label class="field">
                                 <span>Phone (with country code)</span>
                                 <input id="phone" type="tel" autocomplete="tel" placeholder="+447700900123" />
