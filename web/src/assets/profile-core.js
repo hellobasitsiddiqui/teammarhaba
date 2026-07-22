@@ -436,6 +436,52 @@ export function needsPhoneNumber(me) {
 }
 
 /**
+ * Whether the signed-in caller's stored phone is NOT Firebase-verified, so they must be routed back
+ * through the completion gate to prove ownership of it (TM-932 — the retroactive half of TM-923's
+ * strict "one verified number = one account"). This extends the TM-880 mandatory-phone gate: TM-880
+ * only asked "is there a stored phone at all?"; this asks "is that stored phone the number the account
+ * has actually OTP-verified?". Existing accounts (whose self-reported phone predates the verify step)
+ * are force-gated on next entry until they verify.
+ *
+ * The verified number comes from the Firebase client, NOT `/me` — `MeResponse` carries only the
+ * self-reported `me.phone` (the verified E.164 lives on the Firebase user's `.phoneNumber`, set once a
+ * phone credential is linked, TM-930). The router passes it in as `verifiedPhone` (from the uid-pinned
+ * `currentUser().phoneNumber`); this function stays pure/testable and never reaches for Firebase itself.
+ *
+ * Returns true (must gate) only when there IS a parseable stored phone that the verified number does
+ * NOT canonically match:
+ *   • null/undefined `me` → false (fail OPEN — a degraded `/me` must never trap a user behind a gate,
+ *     the exact same contract as {@link needsPhoneNumber} and the onboarding/terms gates in router.js);
+ *   • no parseable stored E.164 (`!splitE164(me.phone)`) → false — that is {@link needsPhoneNumber}'s
+ *     job (the "supply a phone at all" gate), kept orthogonal so the two terms never double-count;
+ *   • otherwise → true when `verifiedPhone` is missing (a stored phone that was never verified — the
+ *     common retroactive case) OR the two CANONICAL forms differ (the mismatch case: a stored number
+ *     that isn't the one actually linked). Both sides are canonicalised via splitE164→composeE164 so a
+ *     formatted stored value ("+44 7700 900123") never false-gates against Firebase's strict E.164
+ *     ("+447700900123"): only a genuine number difference gates, not a separator difference.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object (reads `me.phone` — the self-reported value).
+ * @param {string|null|undefined} verifiedPhone the account's linked/verified Firebase phone
+ *   (`currentUser().phoneNumber`), or null when no phone credential is linked.
+ * @returns {boolean} true when the account must be re-gated to verify its stored phone.
+ */
+export function needsVerifiedPhone(me, verifiedPhone) {
+  if (!me) return false; // fail OPEN — a degraded /me must never gate (the router contract)
+  const stored = splitE164(me.phone);
+  if (!stored) return false; // no parseable stored phone → needsPhoneNumber's term, not this one
+  // Canonicalise the stored value: splitE164 already parsed it; re-compose to the exact E.164 form
+  // Firebase returns, so a stored "+44 7700 900123" compares equal to a verified "+447700900123".
+  const storedCanonical = composeE164(stored.iso2, stored.national);
+  // Canonicalise the verified value the SAME way so an oddly-formatted Firebase value (it shouldn't be,
+  // but be defensive) can't spuriously mismatch a clean stored one. An unparseable verified value
+  // canonicalises to "" and therefore never equals a real stored number → gate (re-verify).
+  const verifiedParsed = splitE164(verifiedPhone);
+  const verifiedCanonical = verifiedParsed ? composeE164(verifiedParsed.iso2, verifiedParsed.national) : "";
+  // Gate when there's no verified number at all, or it isn't the stored one.
+  return verifiedCanonical === "" || verifiedCanonical !== storedCanonical;
+}
+
+/**
  * TM-771: firstName/lastName/city carried only a length cap, so a purely numeric value ("676767")
  * saved as a name or city. A name-like value must contain at least one letter (any script — Arabic,
  * accented Latin, etc.), and may only use letters, combining marks, spaces, hyphens, apostrophes and

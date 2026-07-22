@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { needsPhoneNumber } from "../src/assets/profile-core.js";
+import { needsPhoneNumber, needsVerifiedPhone } from "../src/assets/profile-core.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER_SRC = readFileSync(join(HERE, "../src/assets/router.js"), "utf8");
@@ -83,26 +83,102 @@ test("a null/undefined (degraded) /me fails OPEN — never gates on a backend hi
   assert.equal(needsPhoneNumber(undefined), false);
 });
 
-// ---- 6. Source guard: the router actually CONSULTS needsPhoneNumber (the TM-880 wiring) ------------
+// ==== TM-932: needsVerifiedPhone — the retroactive verified-phone re-gate ==========================
+//
+// Behavioural coverage of every branch of the new pure rule. The router now gates on
+// `!needsVerifiedPhone(me, currentUser().phoneNumber)` too, so an account whose STORED phone isn't the
+// one Firebase has VERIFIED is re-routed through the OTP verify gate — extending the TM-880 mandatory-
+// phone gate to strict "one verified number = one account" (TM-923). These lock every branch so a
+// refactor can't silently drop the mismatch/no-verified cases, or weaken the fail-open contract.
 
-test("router.js gates isOnboarded on needsPhoneNumber AND keeps the degraded-/me fail-open", () => {
+// ---- 7. Stored phone matches the verified phone → NOT re-gated ------------------------------------
+
+test("a stored phone that equals the account's verified Firebase phone does NOT re-gate", () => {
+  // The already-verified account (verified one number, stored the same) is not gated.
+  assert.equal(needsVerifiedPhone(me("+447700900123"), "+447700900123"), false);
+  // Canonicalisation: Firebase returns strict E.164 ("+447700900123") but the STORED value may carry
+  // separators ("+44 7700 900123") — a formatting-only difference must NOT gate (both canonicalise
+  // to the same E.164). This is the crux: without canonicalising, a formatted stored value would
+  // false-gate an account whose number is genuinely verified.
+  assert.equal(needsVerifiedPhone(me("+44 7700 900123"), "+447700900123"), false);
+  assert.equal(needsVerifiedPhone(me("+447700900123"), "+44 7700 900123"), false);
+  // A non-GB pair round-trips the same way.
+  assert.equal(needsVerifiedPhone(me("+1 415 555 2671"), "+14155552671"), false);
+});
+
+// ---- 8. Stored phone but NO verified phone linked → re-gated (the common retroactive case) --------
+
+test("a stored phone with NO linked/verified Firebase phone re-gates the account (retroactive)", () => {
+  // The headline TM-932 case: an EXISTING account with a self-reported phone that was never OTP-verified
+  // (no phone credential linked → currentUser().phoneNumber is null) is forced through the verify gate.
+  assert.equal(needsVerifiedPhone(me("+447700900123"), null), true);
+  assert.equal(needsVerifiedPhone(me("+447700900123"), undefined), true);
+  assert.equal(needsVerifiedPhone(me("+447700900123"), ""), true);
+});
+
+// ---- 9. Stored phone DIFFERS from the verified phone → re-gated (the mismatch case) ---------------
+
+test("a stored phone that differs from the linked verified phone re-gates the account (mismatch)", () => {
+  // Verified one number, stored a different one — the stored value isn't the proven one, so gate.
+  assert.equal(needsVerifiedPhone(me("+447700900123"), "+447700900999"), true);
+  // Different country entirely.
+  assert.equal(needsVerifiedPhone(me("+14155552671"), "+447700900123"), true);
+  // An UNPARSEABLE verified value can't match any real stored number → gate (re-verify). Defensive:
+  // Firebase should always return clean E.164, but a garbage value must fail closed to "re-verify",
+  // never accidentally pass as "matches".
+  assert.equal(needsVerifiedPhone(me("+447700900123"), "not-a-phone"), true);
+});
+
+// ---- 10. No parseable stored phone → NOT this rule's job (orthogonal to needsPhoneNumber) ---------
+
+test("no parseable stored phone → needsVerifiedPhone is false (that's needsPhoneNumber's term)", () => {
+  // The two terms are kept orthogonal so they never double-count. A missing/blank/legacy-bare/unknown-
+  // dial stored phone is needsPhoneNumber's gate; needsVerifiedPhone stays out of it (returns false)
+  // even when NO verified phone is linked — otherwise a phone-less account would trip BOTH terms.
+  assert.equal(needsVerifiedPhone(me(null), null), false);
+  assert.equal(needsVerifiedPhone(me(""), null), false);
+  assert.equal(needsVerifiedPhone(me("07700900123"), null), false); // legacy bare (no +CC)
+  assert.equal(needsVerifiedPhone(me("+9991234567"), null), false); // unassigned dial code
+  // Even with a verified phone on the account, an unparseable STORED value is not this rule's concern.
+  assert.equal(needsVerifiedPhone(me("07700900123"), "+447700900123"), false);
+});
+
+// ---- 11. Degraded /me → fail OPEN (the same router contract as needsPhoneNumber) ------------------
+
+test("needsVerifiedPhone fails OPEN on a null/undefined (degraded) /me — never gates on a hiccup", () => {
+  // The load-bearing safety contract, identical to needsPhoneNumber: a degraded GET /me must NEVER
+  // trap a user behind a gate, whatever the verified phone is. This is the exact pin the router relies
+  // on (the `: true` fail-open branch handles a null OUTCOME; this handles a null me object itself).
+  assert.equal(needsVerifiedPhone(null, "+447700900123"), false);
+  assert.equal(needsVerifiedPhone(undefined, "+447700900123"), false);
+  assert.equal(needsVerifiedPhone(null, null), false);
+});
+
+// ---- 12. Source guard: the router actually CONSULTS needsPhoneNumber (the TM-880 wiring) ----------
+
+test("router.js gates isOnboarded on needsPhoneNumber AND needsVerifiedPhone AND keeps the degraded-/me fail-open", () => {
   // The whole ternary, pinned as one unit: a resolved /me is "onboarded" only when the flag is set
-  // AND no phone completion is needed; a degraded /me (null) resolves to true (fail open — not
-  // gated). Dropping the `!needsPhoneNumber(...)` term (the exact refactor risk TM-892 flagged)
-  // or flipping the `: true` fallback fails here, on the fast PR gate — the behavioural e2e
-  // (profile-regate.spec.mjs) only runs on main.
+  // AND no phone completion is needed (TM-880) AND the stored phone is Firebase-VERIFIED (TM-932 — the
+  // verified number comes from the uid-pinned `now.phoneNumber`, NOT /me); a degraded /me (null)
+  // resolves to true (fail open — not gated). Dropping EITHER phone term (the exact refactor risk
+  // TM-892 flagged for needsPhoneNumber, extended to needsVerifiedPhone) or flipping the `: true`
+  // fallback fails here, on the fast PR gate — the behavioural e2e (profile-regate.spec.mjs) only runs
+  // on main. NB: this pin is DELIBERATELY updated whenever the ternary's shape changes (TM-932 added
+  // the second term); it is a guard, not a straitjacket — extend it, don't delete it.
   assert.match(
     ROUTER_SRC,
-    /isOnboarded\s*=\s*onboardedOutcome\.value\s*\?\s*Boolean\(onboardedOutcome\.value\.onboardingCompleted\)\s*&&\s*!needsPhoneNumber\(onboardedOutcome\.value\)\s*:\s*true\s*;/,
+    /isOnboarded\s*=\s*onboardedOutcome\.value\s*\?\s*Boolean\(onboardedOutcome\.value\.onboardingCompleted\)\s*&&\s*!needsPhoneNumber\(onboardedOutcome\.value\)\s*&&\s*!needsVerifiedPhone\(onboardedOutcome\.value,\s*now\.phoneNumber\)\s*:\s*true\s*;/,
     "router.js must compute isOnboarded as `value ? Boolean(value.onboardingCompleted) && " +
-      "!needsPhoneNumber(value) : true` — the TM-880 re-gate term and the degraded-/me fail-open " +
-      "are both load-bearing",
+      "!needsPhoneNumber(value) && !needsVerifiedPhone(value, now.phoneNumber) : true` — the TM-880 " +
+      "phone-present term, the TM-932 verified-phone term, and the degraded-/me fail-open are all " +
+      "load-bearing",
   );
-  // And the term must be the REAL shared rule, not a local reimplementation that could drift from
+  // And BOTH terms must be the REAL shared rules, not local reimplementations that could drift from
   // what the profile/onboarding forms enforce.
   assert.match(
     ROUTER_SRC,
-    /import\s*\{\s*needsPhoneNumber\s*\}\s*from\s*"\.\/profile-core\.js"\s*;/,
-    "router.js must import needsPhoneNumber from profile-core.js (the single shared gate rule)",
+    /import\s*\{\s*needsPhoneNumber,\s*needsVerifiedPhone\s*\}\s*from\s*"\.\/profile-core\.js"\s*;/,
+    "router.js must import needsPhoneNumber AND needsVerifiedPhone from profile-core.js (the single " +
+      "shared gate rules)",
   );
 });
