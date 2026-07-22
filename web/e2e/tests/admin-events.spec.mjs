@@ -60,14 +60,12 @@ async function clickNav(page, selector) {
   await item.click();
 }
 
-/** Open the #/admin hub — width-robust. Post-TM-908, signed-in Home is content-first: on PHONE the
- *  top nav (hamburger + #nav-admin) is gone on Home, so use the bottom tab bar's Admin tab; on
- *  DESKTOP the tab bar is hidden (≤33rem only) and #nav-admin stays in the always-open nav, so use
- *  that. Either lands on #/admin. */
+/** Open the #/admin hub. Post-TM-908, signed-in Home is content-first: the top nav (hamburger +
+ *  #nav-admin) is gone on phone Home, and the admin affordance (bottom #tab-admin on phone /
+ *  #nav-admin on desktop) renders async after the role resolves — racing it flakes. So deep-link
+ *  straight to the hub, the same reload-onto-#/admin pattern nav-render-races.spec relies on. */
 async function openAdminHub(page) {
-  const adminTab = page.locator("#tab-admin");
-  if (await adminTab.isVisible()) await adminTab.click();
-  else await page.locator("#nav-admin").click();
+  await page.goto("/#/admin");
   await expect(page).toHaveURL(/#\/admin$/);
 }
 
