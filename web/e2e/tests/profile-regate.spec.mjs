@@ -223,6 +223,18 @@ test("@profile a COMPLETED account with an UNVERIFIED stored phone is re-gated, 
   // just proves ownership — the national part is the stored number without its +44 dial code.
   await expect(page.locator("#onboarding-phone")).toHaveValue(national, { timeout: 15_000 });
 
+  // Fill the other three required gate fields. This ephemeral account was flipped onboardingCompleted
+  // via POST /me/onboarding-complete WITHOUT name/location/age (only the phone was PATCHed), so those
+  // are blank in the prefill — the atomic gate submit needs all four. Retry against the async blank
+  // prefill (TM-590) so a late GET /me can't clobber the typed values before we submit.
+  await expect(async () => {
+    await page.fill("#onboarding-name", "Retro Verify");
+    await page.selectOption("#onboarding-location", "London");
+    await page.fill("#onboarding-age", "34");
+    await expect(page.locator("#onboarding-name")).toHaveValue("Retro Verify");
+    await expect(page.locator("#onboarding-phone")).toHaveValue(national); // prefill still holds
+  }).toPass({ timeout: 15_000 });
+
   // 2. VERIFY through the gate: send the OTP, peek it from the Auth emulator, fill the first box (the
   //    six-box widget auto-submits) → confirmPhoneLink links the credential to this account. The stored
   //    number now IS the verified number.
@@ -232,9 +244,9 @@ test("@profile a COMPLETED account with an UNVERIFIED stored phone is re-gated, 
   await expect(page.locator("#onboarding-phone-verified")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#onboarding-phone-verified")).toContainText("Verified");
 
-  // 3. Submit the gate → interests → the app. The account was ALREADY onboardingCompleted + terms-
-  //    accepted (it's a returning account routed back only for phone verification), so completing the
-  //    gate lifts it and the router re-guards onto the app WITHOUT a manual reload.
+  // 3. Submit the gate → interests → the app. Completing the atomic gate (name/location/age + the now-
+  //    verified phone) re-flips onboardingCompleted and the router re-guards onto the app WITHOUT a
+  //    manual reload — the number is verified, so needsVerifiedPhone no longer holds it.
   const onboarded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

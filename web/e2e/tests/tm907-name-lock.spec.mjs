@@ -51,7 +51,7 @@ async function idTokenFor(email, password) {
  * then set a name from EMPTY while unlocked (exercising the carve-out) before inducing the lock.
  */
 async function provisionOnboardedAccount(auth, { email, password, phone }) {
-  await auth.createUser({ email, password, emailVerified: true });
+  const user = await auth.createUser({ email, password, emailVerified: true });
   const idToken = await idTokenFor(email, password);
   const headers = { Authorization: `Bearer ${idToken}`, Accept: "application/json" };
 
@@ -65,6 +65,11 @@ async function provisionOnboardedAccount(auth, { email, password, phone }) {
     body: JSON.stringify({ phone }),
   });
   if (!patch.ok) throw new Error(`PATCH /me phone failed for ${email}: ${patch.status} ${await patch.text()}`);
+  // TM-932: also link the SAME number as a VERIFIED Firebase phone (Admin SDK), so the client's
+  // retroactive re-gate (needsVerifiedPhone) is satisfied and this onboarded account lands straight in
+  // the app. Without the link the stored phone is unverified → the account is routed back through the
+  // #/onboarding verify gate (nav hidden), which would fail this spec's in-app assertions.
+  await auth.updateUser(user.uid, { phoneNumber: phone });
 
   const onboard = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, { method: "POST", headers });
   if (!onboard.ok) throw new Error(`onboarding-complete failed for ${email}: ${onboard.status} ${await onboard.text()}`);

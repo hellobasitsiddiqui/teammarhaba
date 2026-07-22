@@ -1,6 +1,14 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL, uniqueTestPhone } from "../fixtures.mjs";
+import admin from "firebase-admin";
+import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL, PROJECT_ID, uniqueTestPhone } from "../fixtures.mjs";
 import { authHeadersFor, createEvent, apiRsvp, apiCancelRsvp } from "../events-api.mjs";
+
+/** The Admin SDK pointed at the emulator — links a VERIFIED phone onto a uid (TM-932). Lazily inited. */
+function emulatorAuth() {
+  process.env.FIREBASE_AUTH_EMULATOR_HOST ||= AUTH_EMULATOR_HOST;
+  if (!admin.apps.length) admin.initializeApp({ projectId: PROJECT_ID });
+  return admin.auth();
+}
 
 // Money-safety e2e (TM-728, epic group-membership) — the browser gate for TM-728 finding #3 (the
 // first-event-credit forfeiture rule), the one TM-728 fix with an observable UI signal in this hermetic
@@ -164,7 +172,7 @@ async function createFreshUngatedAccount() {
   if (!signUpRes.ok) {
     throw new Error(`emulator signUp failed for ${email}: ${signUpRes.status} ${await signUpRes.text()}`);
   }
-  const { idToken } = await signUpRes.json();
+  const { idToken, localId: uid } = await signUpRes.json();
   const authed = { Authorization: `Bearer ${idToken}`, Accept: "application/json" };
 
   // 2) Provision the backend users row (JIT via GET /me) — this also JIT-enrols a PAY_PER_EVENT membership
@@ -175,16 +183,20 @@ async function createFreshUngatedAccount() {
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
   // 3) Seed a phone (TM-880: mandatory — the backend refuses onboarding-complete without a valid
-  // E.164 phone on record, and the client would re-gate a phone-less account). TM-934: a per-run-unique
-  // number so this fresh account never collides with a persona or a prior run under the strict 1:1
-  // uniqueness rule (the V48 users_phone_normalized_uq index). This account PATCHes users.phone directly
-  // (no browser gate walk), so no Firebase-side link is needed under the flag-off backend.
+  // E.164 phone on record). TM-934: a per-run-unique number so this fresh account never collides with a
+  // persona or a prior run under the strict 1:1 uniqueness rule (the V48 users_phone_normalized_uq
+  // index). TM-932: the SAME number is ALSO linked as a VERIFIED Firebase phone (Admin SDK) so the
+  // client's retroactive re-gate (needsVerifiedPhone) is satisfied — an unverified stored phone would
+  // now route this account through the #/onboarding verify gate and hide the nav, failing the sign-in
+  // assertions. Mirrors how global-setup seeds the personas (verified-by-construction).
+  const phone = uniqueTestPhone();
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: uniqueTestPhone() }),
+    body: JSON.stringify({ phone }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+  await emulatorAuth().updateUser(uid, { phoneNumber: phone }); // TM-932: verify-link the same number
 
   // 4) Clear the first-run onboarding gate (TM-250) so the browser sign-in lands straight in the app.
   const onboardRes = await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, { method: "POST", headers: authed });
