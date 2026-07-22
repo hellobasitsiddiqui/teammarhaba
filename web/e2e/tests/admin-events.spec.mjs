@@ -60,6 +60,17 @@ async function clickNav(page, selector) {
   await item.click();
 }
 
+/** Open the #/admin hub — width-robust. Post-TM-908, signed-in Home is content-first: on PHONE the
+ *  top nav (hamburger + #nav-admin) is gone on Home, so use the bottom tab bar's Admin tab; on
+ *  DESKTOP the tab bar is hidden (≤33rem only) and #nav-admin stays in the always-open nav, so use
+ *  that. Either lands on #/admin. */
+async function openAdminHub(page) {
+  const adminTab = page.locator("#tab-admin");
+  if (await adminTab.isVisible()) await adminTab.click();
+  else await page.locator("#nav-admin").click();
+  await expect(page).toHaveURL(/#\/admin$/);
+}
+
 /** A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:mm") from a Date's UTC parts — paired with
  *  the UTC timezone on the event, so the wall-clock entered equals the UTC instant stored (predictable
  *  assertions), and the derived lifecycle is unambiguous. */
@@ -95,13 +106,12 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  // Signed in. Home is content-first post-TM-908 (no top nav on phone Home); reach admin width-aware below.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // ── STEP 2: open the events console via the hub (TM-937: the per-console top-nav links are gone;
-  //    #nav-admin opens the #/admin hub and the console is reached from its Events row). ───────────
-  await clickNav(page, "#nav-admin");
+  //    the #/admin hub is opened width-aware and the console is reached from its Events row). ──────
+  await openAdminHub(page);
   await page.click('.admin-hub-row[href="#/admin/events"]');
   await expect(page.locator("#admin-events-view")).toBeVisible();
   await expect(page.locator("#admin-events-table")).toBeVisible();
