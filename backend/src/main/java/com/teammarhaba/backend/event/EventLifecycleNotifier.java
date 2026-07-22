@@ -161,6 +161,30 @@ public class EventLifecycleNotifier {
                 claimedSourceRef(event.eventId(), event.claimedAt()));
     }
 
+    /**
+     * The admin roster op's notification to the single evicted / force-added target (TM-592), post-commit
+     * — transient push + durable inbox row. Fired via {@link EventAttendeeChangedEvent} so the FCM fan-out
+     * runs off the event {@code SELECT … FOR UPDATE} lock and the pooled DB connection {@link
+     * EventRosterAdminService} held (TM-730), exactly as {@link #onClaimed} defers the claim push. Only a
+     * committed roster change reaches here, so a rolled-back evict/add notifies nobody.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onAttendeeChanged(EventAttendeeChangedEvent event) {
+        PushMessage message =
+                switch (event.kind()) {
+                    case EVICTED -> evictedMessage(event.eventId(), event.heading());
+                    case ADDED -> addedMessage(event.eventId(), event.heading());
+                };
+        NotificationType type =
+                switch (event.kind()) {
+                    case EVICTED -> NotificationType.EVENT_UPDATED;
+                    case ADDED -> NotificationType.RSVP_CONFIRMED;
+                };
+        notifier.pushToUser(event.userId(), message);
+        writer.writeSystemToUser(
+                type, event.userId(), message, attendeeChangedSourceRef(event.eventId(), event.userId(), event.kind()));
+    }
+
     /** A material change touches at least one {@link #MATERIAL_FIELDS} entry. */
     private static boolean isMaterial(Set<String> changedFields) {
         return changedFields.stream().anyMatch(MATERIAL_FIELDS::contains);
@@ -209,6 +233,16 @@ public class EventLifecycleNotifier {
         return "event:" + eventId + ":rsvp:" + claimedAt.toEpochMilli();
     }
 
+    /**
+     * The idempotency key for an admin evict/add inbox row (TM-592): event id + target + kind. A re-fired
+     * listener never doubles the row; a later evict-then-readd is a distinct kind so it still lands its own
+     * row. Kept coarse deliberately — a repeated evict of the same user on the same event is genuinely the
+     * same fact, so collapsing it is correct.
+     */
+    private static String attendeeChangedSourceRef(long eventId, long userId, EventAttendeeChangedEvent.Kind kind) {
+        return "event:" + eventId + ":attendee:" + userId + ":" + kind.name().toLowerCase();
+    }
+
     private PushMessage updatedMessage(EventLifecycleEvent lifecycle, Event current) {
         Set<String> changedFields = lifecycle.changedFields();
         boolean timeChanged = changedFields.contains("startAt") || changedFields.contains("timezone");
@@ -241,5 +275,19 @@ public class EventLifecycleNotifier {
 
     private static PushMessage claimedMessage(long eventId, String heading) {
         return new PushMessage("You're in ✓", "You've got a spot at " + heading + ".", PushRoutes.eventDetail(eventId));
+    }
+
+    private static PushMessage evictedMessage(long eventId, String heading) {
+        return new PushMessage(
+                "Your spot was removed: " + heading,
+                "An organiser removed you from this event. You can request to join again.",
+                PushRoutes.eventDetail(eventId));
+    }
+
+    private static PushMessage addedMessage(long eventId, String heading) {
+        return new PushMessage(
+                "You're in: " + heading,
+                "An organiser added you to this event — tap to see the details.",
+                PushRoutes.eventDetail(eventId));
     }
 }

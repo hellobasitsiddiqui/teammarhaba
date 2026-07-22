@@ -515,6 +515,50 @@ export function capacityLabel(capacity) {
 }
 
 /**
+ * Derive the admin roster's capacity state (TM-592) — the browser-side MIRROR of the backend's
+ * {@code CapacityAdjustResult.of}, so the console can render the over-capacity warning without a
+ * round-trip and stays in lock-step with what the server returns. Every derived figure clamps at
+ * {@code >= 0}: {@code freeSpots} is never negative even while the event sits over cap.
+ *
+ * <p>Per the owner decision, lowering capacity below the current GOING count is ALLOWED — no confirmed
+ * attendee is auto-evicted — so a positive {@code overCapacityBy} is a normal, non-error state the admin
+ * is simply warned about.
+ *
+ * @param {?number} capacity the (proposed) capacity; null/""/undefined = unlimited (no ceiling)
+ * @param {number}  going    the current committed (GOING) count
+ * @returns {{capacity: ?number, going: number, freeSpots: ?number, overCapacityBy: number, isOverCapacity: boolean}}
+ */
+export function overCapacityState(capacity, going) {
+  const g = Number.isFinite(Number(going)) ? Math.max(0, Number(going)) : 0;
+  const unlimited = capacity == null || capacity === "";
+  const cap = unlimited ? null : Number(capacity);
+  if (unlimited || !Number.isFinite(cap)) {
+    return { capacity: null, going: g, freeSpots: null, overCapacityBy: 0, isOverCapacity: false };
+  }
+  const freeSpots = Math.max(0, cap - g); // clamp >= 0 — never negative even when over cap
+  const overCapacityBy = Math.max(0, g - cap);
+  return { capacity: cap, going: g, freeSpots, overCapacityBy, isOverCapacity: overCapacityBy > 0 };
+}
+
+/**
+ * The admin-facing over-capacity warning line (TM-592), or "" when the event is at/under cap or
+ * unlimited. Reads a {@link overCapacityState} shape (or a server {@code CapacityAdjustResponse}, which
+ * carries the same fields). Honest about the decided behaviour: attendees are NOT removed; the event
+ * sits over cap and no new GOING joins land until attendance drops under the limit.
+ *
+ * @param {{overCapacityBy?: number, capacity?: ?number}} state
+ * @returns {string}
+ */
+export function overCapacityWarning(state = {}) {
+  const over = Number(state.overCapacityBy) || 0;
+  if (over <= 0) return "";
+  const who = over === 1 ? "1 attendee is" : `${over} attendees are`;
+  const cap = state.capacity == null ? "the new limit" : `the new limit of ${state.capacity}`;
+  return `${who} over ${cap}. No one is removed — the event stays over capacity and no new "going" joins`
+    + " land until attendance drops back under the limit.";
+}
+
+/**
  * Read going/waitlist counts off an EventResponse DEFENSIVELY. The admin projection (TM-392) does not
  * carry attendance counts yet, so this returns nulls today and the list renders "—". It reads a small
  * set of likely field names so the counts light up automatically the moment the projection (or a

@@ -92,6 +92,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.event.EventAdminService eventAdminService;
 
+    // EventAdminController also takes an EventRosterAdminService (TM-592, the roster/capacity/evict/
+    // force-add ops) — supply it so the web slice can construct the controller.
+    @MockitoBean
+    private com.teammarhaba.backend.event.EventRosterAdminService eventRosterAdminService;
+
     // VenueAdminController (TM-519) needs a VenueAdminService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.event.VenueAdminService venueAdminService;
