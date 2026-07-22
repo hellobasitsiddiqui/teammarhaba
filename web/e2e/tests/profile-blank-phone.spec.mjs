@@ -67,7 +67,8 @@ test("@profile saving with a blank phone input PRESERVES the stored phone (TM-88
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].first_name).toBe(first);
-    expect(rows[0].phone).toBe("+447700900123");
+    // TM-934: ADMIN's seeded phone is now its OWN allocated number (was the shared +447700900123).
+    expect(rows[0].phone).toBe(ADMIN.phone);
   } finally {
     await client.end();
   }
@@ -82,6 +83,13 @@ async function peekCode(email) {
 
 test("@profile a phone-less user is held at the completion gate until a valid phone is saved (TM-880)", async ({ page }) => {
   const email = `e2e-phonegate-${Date.now()}@teammarhaba.test`;
+  // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
+  // strict 1:1 Firebase phone uniqueness a FIXED number would already be linked on a re-run against a
+  // non-wiped emulator. Derive a per-run GB national number (trunk-0-less, 5-digit clock tail) + its
+  // composed E.164; clear of the persona band (+4477009001NN) since the tail is clock-seeded.
+  const gateTail = String(Date.now() % 100_000).padStart(5, "0"); // 5 digits
+  const gateNational = `7700 9${gateTail}`;
+  const gateE164 = `+4477009${gateTail}`;
 
   // 1. Sign in a brand-new email-code user (⇒ no phone on record).
   await page.goto("/#/login");
@@ -124,14 +132,14 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   await expect(page.locator("#onboarding-phone-error")).toContainText("7 to 15");
 
   // 5. A valid national number (GB picker default), once OTP-VERIFIED (TM-930), completes the gate.
-  await page.fill("#onboarding-phone", "7700 900654");
+  await page.fill("#onboarding-phone", gateNational);
   // TM-930: submitting an UNVERIFIED valid number paints the "verify your number" prompt — the gate
   // still doesn't lift until the phone is proven.
   await page.click("#onboarding-form button[type=submit]");
   await expect(page.locator("#onboarding-phone-error")).toContainText("Verify your number");
   await expect(page.locator("#onboarding-view")).toBeVisible();
   // Verify (Firebase OTP verify + link), then submit succeeds.
-  await verifyGatePhone(page, "+447700900654");
+  await verifyGatePhone(page, gateE164);
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );
@@ -148,7 +156,7 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
       [email],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].phone).toBe("+447700900654");
+    expect(rows[0].phone).toBe(gateE164);
     expect(rows[0].onboarding_completed).toBe(true);
   } finally {
     await client.end();

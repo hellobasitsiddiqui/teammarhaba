@@ -66,14 +66,17 @@ test("@profile a too-short phone number is rejected inline and NOT saved (TM-752
   await expect(country).toBeVisible();
   await expect(phone).toBeVisible();
 
-  // ── Baseline: save a VALID GB national number so the DB holds a known, correct value we can
-  // later prove was NOT overwritten by the rejected save. 7700900123 is 10 digits → composes to
-  // the E.164 +447700900123. This also exercises the accepting side of the 7–15-digit rule.
+  // ── Baseline: save a VALID GB national number so the DB holds a known, correct value we can later
+  // prove was NOT overwritten by the rejected save. TM-934: use ADMIN's OWN allocated verified number
+  // (+447700900100 → national 7700900100) rather than the old shared +447700900123, so this edit-path
+  // test leaves ADMIN on its seeded number (no stray value for a later ADMIN-asserting spec, and no
+  // clash with the strict-1:1 index). Also exercises the accepting side of the 7–15-digit rule.
+  const adminNational = ADMIN.phone.replace(/^\+44/, ""); // "7700900100"
   await country.selectOption("GB");
-  await phone.fill("7700900123");
+  await phone.fill(adminNational);
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.locator("#tm-toasts .tm-toast-success")).toContainText("Profile saved");
-  expect(await readPhone(ADMIN.email)).toBe("+447700900123");
+  expect(await readPhone(ADMIN.email)).toBe(ADMIN.phone);
 
   // Let the baseline success toast auto-dismiss (default 5s) so the assertions below can key on a
   // FRESH toast without racing the previous one — the toast host is shared and cards stack.
@@ -95,7 +98,8 @@ test("@profile a too-short phone number is rejected inline and NOT saved (TM-752
   await expect(page.locator("#tm-toasts .tm-toast-error")).toContainText("Please fix the highlighted fields.");
   await expect(page.locator("#tm-toasts .tm-toast-success")).toHaveCount(0);
 
-  // The blocked save left the DB untouched: the stored phone is STILL the valid baseline, NOT
-  // the rejected "12". This is the concrete before/after: pre-fix the row would have flipped.
-  expect(await readPhone(ADMIN.email)).toBe("+447700900123");
+  // The blocked save left the DB untouched: the stored phone is STILL the valid baseline (ADMIN's own
+  // allocated number), NOT the rejected "12". This is the concrete before/after: pre-fix the row would
+  // have flipped.
+  expect(await readPhone(ADMIN.email)).toBe(ADMIN.phone);
 });

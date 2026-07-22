@@ -1,3 +1,6 @@
+// TM-934 (migrated): seeds its account with uniqueTestPhone() (a per-run-unique Ofcom-fictional GB
+//   number), not the old shared +447700900123 — under TM-923 strict 1:1 phone uniqueness the shared
+//   literal 409s the V48 users_phone_normalized_uq index on any account after the first. Not a CI path.
 // TM-906 — before/after visual evidence capture for "Sign out only from Profile, with a confirm":
 //   • BEFORE (main's web/src): the top-nav sign-out control — at the 390px phone width the nav
 //     collapses behind the hamburger (TM-229), so the shot opens it and captures the "Sign out"
@@ -28,7 +31,7 @@ import admin from "firebase-admin";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID } from "./fixtures.mjs";
+import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID, uniqueTestPhone } from "./fixtures.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.CAPTURE_OUT || join(HERE, "capture-out-tm906");
@@ -78,7 +81,7 @@ async function seedUser() {
   const patchRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ firstName: "Cap", lastName: "Ture", city: "London", phone: "+447700900123" }),
+    body: JSON.stringify({ firstName: "Cap", lastName: "Ture", city: "London", phone: uniqueTestPhone() }),
   });
   if (!patchRes.ok) throw new Error(`seed profile failed: ${patchRes.status} ${await patchRes.text()}`);
 

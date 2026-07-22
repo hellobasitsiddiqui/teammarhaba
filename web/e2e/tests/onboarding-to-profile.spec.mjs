@@ -88,6 +88,13 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   const displayName = `Fresh User ${nameSuffix}`;
   const location = "Sharjah";
   const age = 27;
+  // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
+  // strict 1:1 Firebase phone uniqueness a FIXED number (was +447700900789) would already be linked on a
+  // re-run against a non-wiped emulator. Derive a per-run GB national/E.164 pair from the clock (5-digit
+  // tail, clear of the persona band +4477009001NN).
+  const phoneTail = String(Date.now() % 100_000).padStart(5, "0");
+  const gateNational = `7700 9${phoneTail}`;
+  const gateE164 = `+4477009${phoneTail}`;
 
   // DEEP-LINK the Profile page as a brand-new user: the signed-out guard stashes #/profile as the
   // intended route and bounces to the login form; we then sign in. The intended-route memory is what
@@ -117,9 +124,9 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await page.fill("#onboarding-name", displayName);
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", String(age));
-  await page.fill("#onboarding-phone", "7700 900789");
+  await page.fill("#onboarding-phone", gateNational);
   // TM-930: verify the phone (Firebase OTP verify + link) before the gate submits.
-  await verifyGatePhone(page, "+447700900789");
+  await verifyGatePhone(page, gateE164);
   const saved = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

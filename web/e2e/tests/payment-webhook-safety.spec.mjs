@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL } from "../fixtures.mjs";
+import { ADMIN, AUTH_EMULATOR_HOST, API_BASE_URL, uniqueTestPhone } from "../fixtures.mjs";
 import { authHeadersFor, createEvent, apiRsvp, apiCancelRsvp } from "../events-api.mjs";
 
 // Money-safety e2e (TM-728, epic group-membership) — the browser gate for TM-728 finding #3 (the
@@ -175,11 +175,14 @@ async function createFreshUngatedAccount() {
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
   // 3) Seed a phone (TM-880: mandatory — the backend refuses onboarding-complete without a valid
-  // E.164 phone on record, and the client would re-gate a phone-less account).
+  // E.164 phone on record, and the client would re-gate a phone-less account). TM-934: a per-run-unique
+  // number so this fresh account never collides with a persona or a prior run under the strict 1:1
+  // uniqueness rule (the V48 users_phone_normalized_uq index). This account PATCHes users.phone directly
+  // (no browser gate walk), so no Firebase-side link is needed under the flag-off backend.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: "+447700900123" }),
+    body: JSON.stringify({ phone: uniqueTestPhone() }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
 

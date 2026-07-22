@@ -51,11 +51,13 @@ class PhoneUniqueIndexMigrationTest extends AbstractIntegrationTest {
 
     /** Re-run the shipped migration SQL (dedup + recreate index) exactly as Flyway would. */
     private void runMigration() {
-        jdbc.execute((java.sql.Connection con) ->
-                ScriptUtils.executeSqlScript(
-                                con,
-                                new ClassPathResource("db/migration/V48__dedup_phone_and_unique_index.sql"))
-                        + 0);
+        // ConnectionCallback must RETURN a value; ScriptUtils.executeSqlScript is void, so run it inside
+        // the lambda and return null (the callback's result is unused).
+        jdbc.execute((java.sql.Connection con) -> {
+            ScriptUtils.executeSqlScript(
+                    con, new ClassPathResource("db/migration/V48__dedup_phone_and_unique_index.sql"));
+            return null;
+        });
     }
 
     private boolean indexExists() {

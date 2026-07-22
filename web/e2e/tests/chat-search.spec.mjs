@@ -34,7 +34,7 @@
 //   • a no-hit query renders the "No messages found." empty state, not a stale result list.
 
 import { test, expect } from "@playwright/test";
-import { AUTH_EMULATOR_HOST, API_BASE_URL } from "../fixtures.mjs";
+import { AUTH_EMULATOR_HOST, API_BASE_URL, uniqueTestPhone } from "../fixtures.mjs";
 import { seedChat } from "../chat-seed.mjs";
 
 // The Chat section is entered via the bottom tab bar (#tab-chat), which the CSS only reveals at a phone
@@ -106,11 +106,15 @@ async function createFreshUngatedAccount() {
   const currentTermsVersion = (await meRes.json()).currentTermsVersion;
 
   // 3) Seed a phone (TM-880: mandatory — the backend refuses onboarding-complete without a valid
-  // E.164 phone on record, and the client would re-gate a phone-less account).
+  // E.164 phone on record, and the client would re-gate a phone-less account). TM-934: a per-run-unique
+  // number so this fresh account never collides with a persona or a prior run under the strict 1:1
+  // uniqueness rule (the V48 users_phone_normalized_uq index). This account doesn't walk the browser
+  // gate (it PATCHes users.phone directly), so no Firebase-side link is needed — the flag-off backend
+  // validates only the stored users.phone.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: "+447700900123" }),
+    body: JSON.stringify({ phone: uniqueTestPhone() }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
 

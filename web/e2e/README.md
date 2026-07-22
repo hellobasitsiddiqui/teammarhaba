@@ -45,6 +45,77 @@ picker, so no non-Paper look is selectable.
   (backend URL + emulator host) so the committed `config.js` stays prod-clean. Playwright starts it.
 - **Backend + Postgres + emulator** are started before Playwright (by the workflow, or by you locally).
 
+## Verified, unique test phones (TM-934)
+
+TM-923 makes the mandatory onboarding phone **OTP-verified and unique** — strict **1:1** number↔account.
+It is enforced two ways, both active in e2e:
+
+- **Firebase phone-credential linking** — a number can be linked to at most one account. The Auth
+  emulator enforces this across accounts, so `auth.updateUser(uid, { phoneNumber })` (verified-by-
+  construction) rejects a number already owned by another account.
+- **The `users_phone_normalized_uq` partial UNIQUE index** (migration `V48`) — on the *normalized*
+  (digits-only) `users.phone`, scoped `WHERE phone IS NOT NULL AND deleted_at IS NULL`. The second
+  live account to claim the same normalized number gets a **409** ("already registered", mapped in
+  `GlobalExceptionHandler`).
+
+So every account that carries a phone needs its **own** number. The allocation scheme:
+
+- **Seeded personas — fixed numbers.** Each of the 9 `global-setup.mjs` personas owns one number from
+  the Ofcom **fictional** mobile block (`+447700900000`–`+447700900999`, never routable), exposed as
+  `.phone` on the persona in `fixtures.mjs`. Specs that assert a persona's stored number read
+  `PERSONA.phone` — never a literal.
+
+  | Persona | Number |
+  | --- | --- |
+  | `ADMIN` | `+447700900100` |
+  | `TARGET` | `+447700900101` |
+  | `PUSH_RECIPIENT` | `+447700900102` |
+  | `BOTH_RECIPIENT` | `+447700900103` |
+  | `OPTOUT_RECIPIENT` | `+447700900104` |
+  | `EVENT_GOER` | `+447700900105` |
+  | `EVENT_WAITER` | `+447700900106` |
+  | `EVENT_FILLER` | `+447700900107` |
+  | `CHAT_SEED` | `+447700900108` |
+
+  `global-setup.mjs` seeds each as a **verified** Firebase phone (`ensureUser` → `auth.updateUser`)
+  **and** mirrors it onto `users.phone` (`provisionInBackend` → `PATCH /me`). Both are needed: with
+  verified-phone *enforcement* off by default (`app.phone.require-verified=false`, TM-931), the backend
+  does not auto-mirror the Firebase phone, and both `requirePhoneOnRecord` (the flag-off baseline) and
+  the `V48` index read `users.phone`. `assertUniquePersonaPhones()` fails the run loudly if two personas
+  ever share a number.
+
+- **Ephemeral accounts — `uniqueTestPhone()`.** Specs that sign up a brand-new account per run
+  (`chat-search`, `payment-webhook-safety`, `profile-regate`) and the capture scripts use
+  `uniqueTestPhone()` (from `fixtures.mjs`) — a per-run-unique number derived from the wall clock (+
+  worker index), so a re-run against a **non-wiped** emulator/Postgres never re-links a taken number.
+
+- **Gate-driving specs — run-unique linked numbers.** Specs that walk the TM-930 gate in the browser
+  (`onboarding-gate`, `onboarding-to-profile`, `golden-path`, `profile-blank-phone`) type + **verify +
+  link** a number through the real OTP UI. They derive a per-run GB national/E.164 pair from the clock
+  (clear of the persona band `+4477009001NN`) for the same re-run-safety reason.
+
+- **`profile-shell.spec.mjs`** deliberately keeps a raw-SQL `UPDATE users SET phone = NULL` (then
+  restores `ADMIN.phone`) to reproduce the **phone-less** legacy state the re-gate exists for — a
+  legitimate raw-SQL exception, commented in place.
+
+### Emulator OTP code-peek
+
+The gate's verify step drives `PhoneAuthProvider.verifyPhoneNumber` against the same Auth emulator as
+SMS sign-in. The emulator exposes the codes it "texted" at:
+
+```
+GET http://${AUTH_EMULATOR_HOST}/emulator/v1/projects/${PROJECT_ID}/verificationCodes
+```
+
+`helpers/onboarding.mjs` `peekPhoneOtp(phoneE164)` filters that list by `phoneNumber` and takes the
+last session's `.code` (the same pattern `tests/tm867-otp-6box.spec.mjs` uses for SMS sign-in), then
+fills the six-box widget (auto-submits on the sixth digit — no verify click). `verifyGatePhone()` and
+`completeOnboarding()` wrap the whole send → peek → fill → "Verified ✓" dance.
+
+> **Real-project device QA (not this suite):** Firebase-console "test phone numbers" are only needed
+> for the **real** project's device-layer QA — the emulator path here needs no console config. That
+> console step is tracked as a separate `human`-labelled ticket linked to TM-934.
+
 ## Run locally
 
 Prereqs: Node 20+, JDK 21, Docker (for Postgres), and a built backend jar.
