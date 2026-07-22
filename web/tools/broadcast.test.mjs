@@ -16,6 +16,7 @@ import {
   MAX_RECIPIENTS,
   NO_ROUTE,
   validateBroadcast,
+  composeErrorsToShow,
   routeOptionsFrom,
   humanizeRoute,
   summariseBroadcast,
@@ -107,6 +108,53 @@ test("tolerates missing/garbage input without throwing", () => {
   assert.equal(validateBroadcast().canSend, false);
   assert.equal(validateBroadcast({}).canSend, false);
   assert.equal(validateBroadcast({ selectionSize: "3" }).recipients, "");
+});
+
+// --- composeErrorsToShow: the pristine-panel display gate (TM-976 / QA-roam A8) --------------
+
+const UNTOUCHED = { title: false, body: false, recipients: false };
+
+test("A8 regression: a pristine, untouched panel shows NO errors even though validateBroadcast reports them", () => {
+  // validateBroadcast on an empty draft DOES report all three required errors (that's the Send-gate)...
+  const v = validateBroadcast({ title: "", body: "", selectionSize: 0 });
+  assert.match(v.title, /required/i);
+  assert.match(v.body, /required/i);
+  assert.match(v.recipients, /select at least one/i);
+  // ...but the DISPLAY gate must strip them all while nothing is touched (the bug was showing them).
+  const show = composeErrorsToShow(v, UNTOUCHED);
+  assert.equal(show.title, "");
+  assert.equal(show.body, "");
+  assert.equal(show.recipients, "");
+});
+
+test("a field's error surfaces only once that field is touched", () => {
+  const v = validateBroadcast({ title: "", body: "", selectionSize: 1 });
+  assert.equal(composeErrorsToShow(v, { ...UNTOUCHED }).title, "", "untouched title stays quiet");
+  const show = composeErrorsToShow(v, { ...UNTOUCHED, title: true });
+  assert.match(show.title, /required/i, "touched-but-empty title shows its error");
+  assert.equal(show.body, "", "untouched body still quiet");
+});
+
+test("the recipient error surfaces once the admin has ENGAGED any field (composing intent)", () => {
+  const v = validateBroadcast({ title: "Hi", body: "Body", selectionSize: 0 });
+  assert.equal(composeErrorsToShow(v, UNTOUCHED).recipients, "", "pristine → no recipient nag");
+  assert.match(composeErrorsToShow(v, { ...UNTOUCHED, title: true }).recipients, /select at least one/i,
+    "typing a title reveals the 'pick a recipient' guidance");
+  assert.match(composeErrorsToShow(v, { ...UNTOUCHED, recipients: true }).recipients, /select at least one/i,
+    "interacting with the list then clearing it also reveals it");
+});
+
+test("touched + valid → no error (the gate never invents an error)", () => {
+  const v = validateBroadcast({ title: "Hi", body: "Body", selectionSize: 2 });
+  const show = composeErrorsToShow(v, { title: true, body: true, recipients: true });
+  assert.equal(show.title, "");
+  assert.equal(show.body, "");
+  assert.equal(show.recipients, "");
+});
+
+test("composeErrorsToShow tolerates missing args without throwing", () => {
+  assert.deepEqual(composeErrorsToShow(), { title: "", body: "", recipients: "" });
+  assert.deepEqual(composeErrorsToShow({ title: "x" }), { title: "", body: "", recipients: "" });
 });
 
 // --- routeOptionsFrom: defensive parse of the push-routes response ---------------------------

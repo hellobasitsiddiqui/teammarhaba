@@ -103,6 +103,30 @@ export function validateBroadcast({ title = "", body = "", selectionSize = 0 } =
 }
 
 /**
+ * Decide which {@link validateBroadcast} errors to actually DISPLAY, given which fields the admin has
+ * touched (TM-976 / QA-roam A8). {@link validateBroadcast} still gates Send via `canSend` regardless of
+ * this — this only suppresses the visible "required" errors on a pristine, untouched panel so it doesn't
+ * shout a screenful of red before the admin has shown any intent.
+ *
+ * - `title` / `body` errors surface only once that field has been touched.
+ * - the `recipients` error surfaces once the admin has ENGAGED at all (touched any field or the
+ *   selection), so "Select at least one recipient." reads as guidance while composing rather than an
+ *   accusation on first paint.
+ *
+ * @param {{title?: string, body?: string, recipients?: string}} validation - a {@link validateBroadcast} result
+ * @param {{title?: boolean, body?: boolean, recipients?: boolean}} [touched]
+ * @returns {{title: string, body: string, recipients: string}} the errors to render ("" = show nothing)
+ */
+export function composeErrorsToShow({ title = "", body = "", recipients = "" } = {}, touched = {}) {
+  const engaged = Boolean(touched.title || touched.body || touched.recipients);
+  return {
+    title: touched.title ? title : "",
+    body: touched.body ? body : "",
+    recipients: engaged ? recipients : "",
+  };
+}
+
+/**
  * Turn the GET /api/v1/admin/users/push-routes response ({@code {"routes":[...]}}) into a clean list
  * of dropdown values: strings only, trimmed, de-duped, sorted for a stable order. This is the SINGLE
  * source of truth for the deep-link picker (never free text) — but it's defensive: on a missing /
