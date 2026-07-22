@@ -12,9 +12,13 @@
 -- (including the '+', which is always leading) via regexp_replace(phone, '[^0-9]', '', 'g'). Two rows
 -- whose phones differ only by separator/'+' formatting collide, which is exactly what 1:1 requires.
 --
--- Scope of uniqueness: only ACTIVE, non-soft-deleted rows with a phone on record. A partial index
--- WHERE phone IS NOT NULL AND deleted_at IS NULL — so NULL phones never collide (many accounts have
--- no phone yet), and a soft-deleted account's number is freed for a live account to (re)claim.
+-- Scope of uniqueness: only ACTIVE, non-soft-deleted rows with a REAL phone on record. A partial index
+-- WHERE phone IS NOT NULL AND the normalized (digits-only) phone is non-empty AND deleted_at IS NULL —
+-- so NULL phones never collide (many accounts have no phone yet), a CLEARED phone (empty string '' — the
+-- TM-188 "no phone" representation the client PATCHes) never collides either (its normalized key is ''
+-- and MANY accounts can be phone-less at once), and a soft-deleted account's number is freed for a live
+-- account to (re)claim. Excluding the empty-normalization case is load-bearing: without it, the second
+-- user to clear their phone to '' would hit a spurious 409 "already registered" (both normalize to '').
 
 -- ---------------------------------------------------------------------------
 -- Step 1 — DEDUP: NULL the losers in each normalized-phone group among active, non-deleted rows.
@@ -32,12 +36,14 @@
 UPDATE users u
 SET phone = NULL
 WHERE u.phone IS NOT NULL
+  AND regexp_replace(u.phone, '[^0-9]', '', 'g') <> ''   -- digitless/empty phones are not in the index
   AND u.deleted_at IS NULL
   AND EXISTS (
       SELECT 1
       FROM users w
       WHERE w.deleted_at IS NULL
         AND w.phone IS NOT NULL
+        AND regexp_replace(w.phone, '[^0-9]', '', 'g') <> ''
         AND regexp_replace(w.phone, '[^0-9]', '', 'g') = regexp_replace(u.phone, '[^0-9]', '', 'g')
         AND w.id < u.id
   );
@@ -50,4 +56,6 @@ WHERE u.phone IS NOT NULL
 -- expression must match Step 1's normalization exactly so the dedup guarantees the index can build.
 CREATE UNIQUE INDEX users_phone_normalized_uq
     ON users (regexp_replace(phone, '[^0-9]', '', 'g'))
-    WHERE phone IS NOT NULL AND deleted_at IS NULL;
+    WHERE phone IS NOT NULL
+      AND regexp_replace(phone, '[^0-9]', '', 'g') <> ''  -- exclude cleared ('') / digitless phones
+      AND deleted_at IS NULL;

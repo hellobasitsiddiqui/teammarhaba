@@ -116,6 +116,27 @@ class PhoneUniqueIndexMigrationTest extends AbstractIntegrationTest {
         cleanup();
     }
 
+    @Test
+    void clearedEmptyStringPhonesDoNotCollide() {
+        // TM-934: the app's "no phone" representation after a clear is the EMPTY STRING '' (TM-188
+        // partial-PATCH), not NULL. Its normalized (digits-only) key is '' — so WITHOUT excluding it from
+        // the partial index, the SECOND account to clear its phone would hit a spurious 409 "already
+        // registered". The index predicate excludes digitless phones, so many '' rows coexist. (A phone
+        // whose characters are all separators, e.g. "()", also normalizes to '' and is likewise excluded.)
+        seed("uq-empty-a", "", false);
+        seed("uq-empty-b", "", false);
+        seed("uq-empty-sep", "()", false); // normalizes to '' too — must not collide
+
+        assertThat(phoneOf("uq-empty-a")).isEqualTo("");
+        assertThat(phoneOf("uq-empty-b")).isEqualTo("");
+        // A real number still collides with itself even alongside the empties.
+        seed("uq-empty-real", "+447700900222", false);
+        assertThatThrownBy(() -> seed("uq-empty-real-dup", "+447700900222", false))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        cleanup();
+    }
+
     /** Remove this test's rows so a shared-container re-run starts clean (no cross-test leakage). */
     private void cleanup() {
         jdbc.update("delete from users where firebase_uid like 'dedup-%' or firebase_uid like 'uq-%'");
