@@ -386,14 +386,14 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                                 "{\"firstName\":\"Aisha\",\"lastName\":\"Khan\",\"city\":\"London\",\"age\":30,"
-                                        + "\"phone\":\"+442079460958\",\"notificationPref\":\"EMAIL\","
+                                        + "\"phone\":\"+442079461099\",\"notificationPref\":\"EMAIL\","
                                         + "\"timezone\":\"Europe/London\",\"locale\":\"en-GB\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Aisha"))
                 .andExpect(jsonPath("$.lastName").value("Khan"))
                 .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(30))
-                .andExpect(jsonPath("$.phone").value("+442079460958"))
+                .andExpect(jsonPath("$.phone").value("+442079461099"))
                 .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
                 .andExpect(jsonPath("$.timezone").value("Europe/London"))
                 .andExpect(jsonPath("$.locale").value("en-GB"));
@@ -402,7 +402,7 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(saved.getFirstName()).isEqualTo("Aisha");
         assertThat(saved.getCity()).isEqualTo("London");
         assertThat(saved.getAge()).isEqualTo(30);
-        assertThat(saved.getPhone()).isEqualTo("+442079460958");
+        assertThat(saved.getPhone()).isEqualTo("+442079461099");
         assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.EMAIL);
 
         // Audited as an ADMIN action, actor = the admin, target = the edited account's uid, source=admin.
