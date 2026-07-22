@@ -1594,6 +1594,9 @@
           "locale" : {
             "type" : "string"
           },
+          "nameLocked" : {
+            "type" : "boolean"
+          },
           "notificationPref" : {
             "enum" : [ "EMAIL", "PUSH", "BOTH" ],
             "type" : "string"

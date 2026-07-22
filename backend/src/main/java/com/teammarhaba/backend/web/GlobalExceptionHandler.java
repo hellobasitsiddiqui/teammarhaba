@@ -92,6 +92,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * A locked-name rename by a user with event history (TM-907) -> 422 with a DISTINCT problem
+     * {@code type} ({@code .../name-locked}) and stable detail, so the web renders the name fields
+     * read-only rather than surfacing a raw error. The admin correction path is exempt (never throws).
+     */
+    @ExceptionHandler(NameLockedException.class)
+    public ProblemDetail handleNameLocked(NameLockedException ex) {
+        return Problems.nameLocked(ex.getMessage());
+    }
+
+    /**
      * Email-verification resend refused for an actionable reason (TM-165): already verified -> 422
      * (well-formed request, but the business rule says there's nothing to do); cooldown -> 429 so the
      * client backs off. Firebase remains the source of truth for whether the address is verified.

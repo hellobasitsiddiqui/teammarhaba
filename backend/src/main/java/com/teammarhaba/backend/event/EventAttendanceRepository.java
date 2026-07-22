@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.event;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -99,6 +100,40 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
     @Modifying
     @Query("delete from EventAttendance a where a.eventId = :eventId and a.userId = :userId")
     int deleteByEventIdAndUserId(@Param("eventId") Long eventId, @Param("userId") Long userId);
+
+    /**
+     * Whether {@code userId} holds (or held) a {@code GOING} spot on any event that has already
+     * <em>finished</em> — the "attended a completed event" arm of the TM-907 name-lock predicate.
+     * "Finished" mirrors {@link EventPhasePolicy#isFinished}: an event with an {@code endAt} is done
+     * once {@code endAt < now}; an open-ended one ({@code endAt is null}) once its start has fallen
+     * below {@code openEndedStartFloor} ({@code = now − defaultDuration}) — a plain column comparison,
+     * no per-row interval arithmetic in JPQL. Cross-entity join on the plain FK ({@code EventAttendance}
+     * carries {@code eventId}, not a JPA association); the {@code @SQLRestriction} on {@link Event} keeps
+     * soft-deleted events out. Only {@code PUBLISHED} events lock the name: a CANCELLED event never
+     * happened — the identity was never met and no reliability record was pinned by merely holding a
+     * GOING spot at it — so {@code status = PUBLISHED} is required here (the reliability arm of the lock,
+     * {@code NameLockService}'s {@code lateCancelCount > 0} strike, is what captures a genuine no-show).
+     *
+     * <p>Read derived-live (no stamped column): the lock is recomputed at each name write, so an
+     * existing user with qualifying history is locked at rollout with no backfill (TM-907's retroactive
+     * decision falls out for free).
+     */
+    @Query(
+            """
+            select (count(a) > 0) from EventAttendance a, Event e
+            where a.userId = :userId
+              and e.id = a.eventId
+              and a.state = com.teammarhaba.backend.event.AttendanceState.GOING
+              and e.status = com.teammarhaba.backend.event.EventStatus.PUBLISHED
+              and (
+                (e.endAt is not null and e.endAt < :now)
+                or (e.endAt is null and e.startAt < :openEndedStartFloor)
+              )
+            """)
+    boolean hasGoingAtFinishedEvent(
+            @Param("userId") Long userId,
+            @Param("now") Instant now,
+            @Param("openEndedStartFloor") Instant openEndedStartFloor);
 
     /**
      * The cascade-stop wipe (TM-393): void every live offer left on the event's waitlist. The
