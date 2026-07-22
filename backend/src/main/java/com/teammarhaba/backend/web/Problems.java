@@ -51,4 +51,16 @@ public final class Problems {
     public static ProblemDetail unprocessable(String detail) {
         return of(HttpStatus.UNPROCESSABLE_ENTITY, "Operation not allowed", detail);
     }
+
+    /**
+     * {@code 422 Unprocessable Entity} for a locked-name rename (TM-907) — a well-formed request that
+     * a business rule forbids, given a <em>distinct</em> {@code type} URI ({@code .../name-locked},
+     * not the generic {@code .../422}) so the web can reliably detect this specific refusal (rather
+     * than string-matching {@code detail}) and switch the name fields to read-only.
+     */
+    public static ProblemDetail nameLocked(String detail) {
+        ProblemDetail problem = of(HttpStatus.UNPROCESSABLE_ENTITY, "Name is locked", detail);
+        problem.setType(TYPE_BASE.resolve("name-locked"));
+        return problem;
+    }
 }

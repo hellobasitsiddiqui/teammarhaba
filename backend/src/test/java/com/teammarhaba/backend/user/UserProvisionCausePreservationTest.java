@@ -35,6 +35,7 @@ class UserProvisionCausePreservationTest {
     @Mock private InterestCatalogueRepository catalogue;
     @Mock private InterestSelectionConfig interestBounds;
     @Mock private VerifiedPhoneService verifiedPhoneService;
+    @Mock private NameLockPredicate nameLock;
 
     private UserService userService() {
         return new UserService(
@@ -46,7 +47,8 @@ class UserProvisionCausePreservationTest {
                 catalogue,
                 interestBounds,
                 new PhoneVerificationProperties(false),
-                verifiedPhoneService);
+                verifiedPhoneService,
+                nameLock);
     }
 
     @Test

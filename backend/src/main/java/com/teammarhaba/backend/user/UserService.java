@@ -15,6 +15,7 @@ import com.teammarhaba.backend.interests.UserInterest;
 import com.teammarhaba.backend.interests.UserInterestRepository;
 import com.teammarhaba.backend.membership.SubscriptionRepository;
 import com.teammarhaba.backend.web.BadRequestException;
+import com.teammarhaba.backend.web.NameLockedException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -111,6 +112,7 @@ public class UserService {
     private final InterestSelectionConfig interestBounds;
     private final PhoneVerificationProperties phoneVerification;
     private final VerifiedPhoneService verifiedPhoneService;
+    private final NameLockPredicate nameLock;
 
     public UserService(
             UserRepository users,
@@ -121,7 +123,8 @@ public class UserService {
             InterestCatalogueRepository catalogue,
             InterestSelectionConfig interestBounds,
             PhoneVerificationProperties phoneVerification,
-            VerifiedPhoneService verifiedPhoneService) {
+            VerifiedPhoneService verifiedPhoneService,
+            NameLockPredicate nameLock) {
         this.users = users;
         this.audit = audit;
         this.provisioner = provisioner;
@@ -131,6 +134,7 @@ public class UserService {
         this.interestBounds = interestBounds;
         this.phoneVerification = phoneVerification;
         this.verifiedPhoneService = verifiedPhoneService;
+        this.nameLock = nameLock;
     }
 
     /**
@@ -232,7 +236,10 @@ public class UserService {
     @Transactional
     public User updateProfile(VerifiedUser caller, ProfileUpdate update) {
         User user = provision(caller);
-        List<Map<String, Object>> changes = applyProfileFields(user, update);
+        // TM-907: the SELF edit path enforces the name lock (enforceNameLock = true) — a user with
+        // event history can't CHANGE an already-set first/last/display name (setting a blank one is
+        // still allowed, the carve-out). The admin path passes false (admin correction is exempt).
+        List<Map<String, Object>> changes = applyProfileFields(user, update, true);
 
         if (!changes.isEmpty()) {
             // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
@@ -277,7 +284,10 @@ public class UserService {
     public User adminUpdateProfile(long id, ProfileUpdate update, String callerUid) {
         User user = users.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
-        List<Map<String, Object>> changes = applyProfileFields(user, update);
+        // TM-907: the admin correction path is EXEMPT from the name lock (enforceNameLock = false) —
+        // an admin must still be able to correct a locked user's name (typo / legal change). It stays
+        // audited as ADMIN_USER_PROFILE_EDITED below, so the correction leaves a trail.
+        List<Map<String, Object>> changes = applyProfileFields(user, update, false);
 
         if (!changes.isEmpty()) {
             // Audited as an ADMIN action (TM-172), distinct from the user's own PROFILE_UPDATED so the
@@ -303,18 +313,31 @@ public class UserService {
      * resolution all run here identically for both callers. Each {@code null} field is left unchanged;
      * only fields that actually differ from the stored value are written and returned as changes.
      */
-    private List<Map<String, Object>> applyProfileFields(User user, ProfileUpdate update) {
+    private List<Map<String, Object>> applyProfileFields(
+            User user, ProfileUpdate update, boolean enforceNameLock) {
         List<Map<String, Object>> changes = new ArrayList<>();
 
+        // TM-907 name lock: on the self path (enforceNameLock), a user with event history can't CHANGE
+        // an already-SET first/last/display name — but SETTING a currently-empty one is still allowed
+        // (the carve-out: mirrors onboarding's "first/last seed only when unset", and keeps a locked
+        // EMPTY name a fixable profile-strength gap). The lock is resolved lazily and ONCE per call,
+        // only if a name field would actually change, so a no-name PATCH pays nothing for the check.
+        boolean locked = enforceNameLock
+                && namedFieldWouldChange(user, update)
+                && nameLock.isNameLocked(user);
+
         if (update.displayName() != null && !Objects.equals(user.getDisplayName(), update.displayName())) {
+            guardNameChange(locked, user.getDisplayName());
             changes.add(change("displayName", user.getDisplayName(), update.displayName()));
             user.setDisplayName(update.displayName());
         }
         if (update.firstName() != null && !Objects.equals(user.getFirstName(), update.firstName())) {
+            guardNameChange(locked, user.getFirstName());
             changes.add(change("firstName", user.getFirstName(), update.firstName()));
             user.setFirstName(update.firstName());
         }
         if (update.lastName() != null && !Objects.equals(user.getLastName(), update.lastName())) {
+            guardNameChange(locked, user.getLastName());
             changes.add(change("lastName", user.getLastName(), update.lastName()));
             user.setLastName(update.lastName());
         }
@@ -396,6 +419,44 @@ public class UserService {
         }
 
         return changes;
+    }
+
+    /**
+     * Whether {@code update} would actually change any of the three name fields (TM-907) — a supplied,
+     * non-null value that differs from what is stored. Used to decide whether to resolve the (possibly
+     * DB-touching) name-lock predicate at all: a PATCH that touches no name never pays for the check,
+     * and one that re-sends a name unchanged is a no-op that must never be refused.
+     */
+    private static boolean namedFieldWouldChange(User user, ProfileUpdate update) {
+        return (update.displayName() != null && !Objects.equals(user.getDisplayName(), update.displayName()))
+                || (update.firstName() != null && !Objects.equals(user.getFirstName(), update.firstName()))
+                || (update.lastName() != null && !Objects.equals(user.getLastName(), update.lastName()));
+    }
+
+    /**
+     * Whether {@code user}'s name is locked by their event history (TM-907) — the read the
+     * {@code GET/PATCH /me} response ({@code MeResponse.nameLocked}) carries so the web renders the
+     * name fields read-only PRE-EMPTIVELY (not save-then-error). Delegates to the derived-live
+     * {@link NameLockPredicate}; exposed here so {@code MeController} keeps routing all user state
+     * through this service rather than injecting the predicate directly.
+     */
+    @Transactional(readOnly = true)
+    public boolean isNameLocked(User user) {
+        return nameLock.isNameLocked(user);
+    }
+
+    /**
+     * The TM-907 carve-out gate for one name field: refuse the write only when the account is
+     * {@code locked} AND the field already holds a non-blank value ({@code current}). Setting a
+     * currently-EMPTY name (null/blank) is always allowed — a locked user who attended with only a
+     * displayName can still fill in their first/last once, exactly like onboarding's seed-when-unset
+     * rule, so the lock never traps an empty name behind an unfixable profile-strength gap. A genuine
+     * change of a set value throws {@link NameLockedException} (422, distinct problem type).
+     */
+    private static void guardNameChange(boolean locked, String current) {
+        if (locked && current != null && !current.isBlank()) {
+            throw new NameLockedException();
+        }
     }
 
     /**
@@ -570,6 +631,14 @@ public class UserService {
         User user = provision(caller);
 
         String fullName = requireText(name, "name");
+        // TM-907: the onboarding re-submit is a SELF write, so it enforces the name lock too. A locked
+        // user re-submitting the gate can't CHANGE an already-set displayName (a genuine rename), but a
+        // locked user whose displayName is still blank may set it (the carve-out) — and the first/last
+        // seed below only ever runs when BOTH are unset, so it is carve-out-safe by construction. The
+        // predicate is resolved once, only when the displayName would actually change.
+        if (!Objects.equals(user.getDisplayName(), fullName) && nameLock.isNameLocked(user)) {
+            guardNameChange(true, user.getDisplayName());
+        }
         user.setDisplayName(fullName);
         boolean seedNames = user.getFirstName() == null && user.getLastName() == null;
         if (seedNames) {

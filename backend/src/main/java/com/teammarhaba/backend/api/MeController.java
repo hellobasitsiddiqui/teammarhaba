@@ -232,6 +232,11 @@ public class MeController {
                 // here, so GET /me, PATCH /me, onboarding and accept-terms all carry interests.
                 userService.interestsFor(user).stream()
                         .map(InterestResponse::from)
-                        .toList());
+                        .toList(),
+                // Name lock (TM-907): derived live from event history so the web can render the name
+                // fields read-only PRE-EMPTIVELY (not save-then-error). Same UserService seam as the
+                // rest of the user state — both toResponse overloads route through here, so GET /me,
+                // PATCH /me, onboarding and accept-terms all carry the current lock state.
+                userService.isNameLocked(user));
     }
 }

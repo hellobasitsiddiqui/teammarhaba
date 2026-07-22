@@ -62,6 +62,14 @@ import java.util.List;
  *                             free-text snapshot ({@code label} + {@code category}) with an optional
  *                             source-catalogue id. An empty list means none saved. Created/replaced via
  *                             {@code PATCH /me} and reported on {@code GET /me}. Additive, non-breaking.
+ * @param nameLocked           whether the caller's first/last/display name is locked because they now
+ *                             have real-world event history — a GOING spot at a completed event or a
+ *                             reliability strike (TM-907). Derived server-side (never stored), so it is
+ *                             retroactive at rollout. The web renders the name fields read-only
+ *                             pre-emptively when {@code true} (save-then-error avoided); an
+ *                             already-EMPTY name stays settable regardless (the server carve-out), and
+ *                             an admin can still correct a locked name. {@code false} for a fresh
+ *                             account with no history.
  */
 public record MeResponse(
         String uid,
@@ -88,4 +96,5 @@ public record MeResponse(
         ReliabilityStatus reliabilityStatus,
         String themeAccent,
         boolean themeSketchy,
-        List<InterestResponse> interests) {}
+        List<InterestResponse> interests,
+        boolean nameLocked) {}
