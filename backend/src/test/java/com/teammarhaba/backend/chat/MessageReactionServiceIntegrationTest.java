@@ -11,6 +11,7 @@ import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserRepository;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Duration;
@@ -314,6 +315,78 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
                 .isInstanceOf(ConflictException.class);
         assertThatThrownBy(() -> service.unreact(closedMember, closedMessage, "👍"))
                 .isInstanceOf(ConflictException.class);
+    }
+
+    // ── emoji allow-list + per-user-per-message cap (TM-989) ───────────────────────────────────────
+
+    @Test
+    void reactingWithADisallowedEmojiIsRejected() {
+        Conversation thread = openThread();
+        VerifiedUser member = member(thread.getId(), "allowlist-member", MuteState.NONE);
+        Long message = postMessage(thread.getId(), newUser("allowlist-author"), "hi");
+
+        // An emoji outside the canonical picker set (TM-989 allow-list) must be rejected on the add
+        // path — a member can't persist arbitrary <=32-char strings that every reader's UI would render
+        // as reaction pills (text-spoofing / storage bloat). Length-bounded-only used to accept these.
+        assertThatThrownBy(() -> service.react(member, message, "spoofed text"))
+                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> service.react(member, message, "🤬")) // a real emoji, but not in the set
+                .isInstanceOf(BadRequestException.class);
+
+        // ...and nothing was persisted for the rejected reactions.
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).isEmpty();
+    }
+
+    @Test
+    void reactingWithAnAllowedEmojiStillSucceeds() {
+        Conversation thread = openThread();
+        VerifiedUser member = member(thread.getId(), "allowed-member", MuteState.NONE);
+        Long message = postMessage(thread.getId(), newUser("allowed-author"), "hi");
+
+        // Every glyph in the allow-list (including the default like ❤️) is accepted.
+        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌")) {
+            assertThat(service.react(member, message, emoji).reactions())
+                    .anySatisfy(count -> assertThat(count.emoji()).isEqualTo(emoji));
+        }
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(5);
+    }
+
+    @Test
+    void perUserPerMessageDistinctReactionCapIsEnforced() {
+        Conversation thread = openThread();
+        VerifiedUser member = member(thread.getId(), "cap-member", MuteState.NONE);
+        Long message = postMessage(thread.getId(), newUser("cap-author"), "hi");
+
+        // Fill the cap: one of each allowed emoji (the cap == allow-list size).
+        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌")) {
+            service.react(member, message, emoji);
+        }
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(5);
+
+        // An idempotent re-react of an already-held emoji is still fine at the cap (adds no row).
+        assertThat(service.react(member, message, "👍").reactions()).hasSize(5);
+
+        // There is no 6th distinct allowed emoji to exceed the cap with a valid glyph, so drive the
+        // cap directly by seeding a 6th DISTINCT legacy row, then a further distinct allowed react is a
+        // 400. This proves the cap fires independently of (before adding) a new row.
+        reactions.saveAndFlush(MessageReaction.of(message, userIdOf(member), "🙈")); // legacy 6th distinct
+        assertThatThrownBy(() -> service.react(member, message, "😮")) // would be a 7th distinct → over cap
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void unreactOfADisallowedLegacyValueStillWorks() {
+        Conversation thread = openThread();
+        VerifiedUser member = member(thread.getId(), "legacy-member", MuteState.NONE);
+        Long message = postMessage(thread.getId(), newUser("legacy-author"), "hi");
+
+        // A value that predates the allow-list (persisted directly, as a legacy row would be) must
+        // still be removable — the allow-list gates the ADD path only, never un-react.
+        reactions.saveAndFlush(MessageReaction.of(message, userIdOf(member), "legacy-emoji"));
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(1);
+
+        assertThat(service.unreact(member, message, "legacy-emoji").reactions()).isEmpty();
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).isEmpty();
     }
 
     // ── unknown / removed targets ─────────────────────────────────────────────────────────────────
