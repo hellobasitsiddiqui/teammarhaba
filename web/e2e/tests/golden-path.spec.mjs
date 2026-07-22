@@ -82,12 +82,36 @@ async function signInFreshUser(page, email) {
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
+/** True when we're on the phone project rather than desktop. Detected off the BOTTOM TAB BAR
+ *  (#app-tabbar), NOT the hamburger toggle. The router un-hides the tab bar for a signed-in, un-gated
+ *  session and the CSS reveals it only ≤528px, so a visible tab bar means exactly "phone viewport +
+ *  signed in" — the same condition under which the hamburger utility menu exists.
+ *
+ *  Why not `#nav-toggle.isVisible()` (the old heuristic)? TM-908 made Home content-first: corner-bell.js
+ *  now HIDES #nav-toggle on the corner-bell routes (#/home, #/profile), so on those routes the toggle
+ *  is invisible even on a phone — a false "desktop" reading that sent clickNav down the wrong branch.
+ *  The tab bar stays visible on those routes, so it's the TM-908-proof mobile signal. */
+async function isMobileViewport(page) {
+  return page.locator("#app-tabbar").isVisible();
+}
+
 /** Open the account nav if it's currently collapsed behind the hamburger (phone width); a no-op at a
  *  desktop width where the links are always laid out. Project-agnostic: at a phone viewport the nav
  *  carries data-nav-open="false" until the toggle is clicked (TM-229 nav-toggle.js); on desktop the
- *  toggle is display:none, so we simply skip it. */
+ *  toggle is display:none, so we simply skip it.
+ *
+ *  TM-908 wrinkle: on a corner-bell route (#/home, #/profile) the hamburger is HIDDEN — the utility
+ *  menu (Help / Admin / Notifications / Sign out) isn't reachable from those surfaces. When we're on
+ *  mobile and the toggle isn't present, hop to #/notifications (a signed-in route that keeps the normal
+ *  nav row) so the hamburger + its collapsed menu exist to open. */
 async function openNav(page) {
   const toggle = page.locator("#nav-toggle");
+  if (!(await toggle.isVisible()) && (await isMobileViewport(page))) {
+    // Mobile, but the current route is corner-bell (toggle hidden). Move to a route that carries the
+    // hamburger so the utility links become reachable, then fall through to open it below.
+    await page.evaluate(() => (window.location.hash = "#/notifications"));
+    await expect(page.locator("#notifications-view")).toBeVisible();
+  }
   if (await toggle.isVisible()) {
     const nav = page.locator(".app-nav");
     if ((await nav.getAttribute("data-nav-open")) !== "true") {
@@ -103,12 +127,13 @@ async function openNav(page) {
 const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
 
 /** Click a nav destination by its top-nav id. Project-agnostic:
- *  - Mobile (the hamburger toggle is visible): for a tab-bar destination, click the bottom tab
- *    (TM-434); otherwise open the hamburger and click the link.
- *  - Desktop (toggle hidden): the tab bar is display:none, so click the top-nav link directly.
+ *  - Mobile (the bottom tab bar is visible): for a tab-bar destination, click the bottom tab (TM-434) —
+ *    this works from ANY route, incl. the corner-bell Home/Profile where the hamburger is hidden;
+ *    otherwise open the hamburger (openNav hops off a corner-bell route first if needed) and click.
+ *  - Desktop (tab bar display:none): click the top-nav link directly.
  *  Waits for the target to be visible so the click can't race the CSS reveal / router paint. */
 async function clickNav(page, selector) {
-  const onMobile = await page.locator("#nav-toggle").isVisible();
+  const onMobile = await isMobileViewport(page);
   const tabSelector = NAV_TO_TAB[selector];
   if (onMobile && tabSelector) {
     const tab = page.locator(tabSelector);
