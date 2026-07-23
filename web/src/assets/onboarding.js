@@ -59,6 +59,7 @@ import { COUNTRIES, flagOf } from "./countries.js";
 import { currentUser, startPhoneVerify, confirmPhoneLink } from "./auth.js";
 import { attachOtpInput } from "./otp-input.js";
 import { attachResendCooldown } from "./resend-cooldown.js";
+import { SUPPORT_EMAIL } from "./help.js";
 // TM-1009: the deploy-time switch over the whole verified-phone requirement
 // (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF this gate reverts to the
 // pre-TM-930 collect-only phone step: the Send-code/OTP verify controls are never built, prefill
@@ -173,11 +174,11 @@ const phoneVerify = {
 // genuinely-owned number that's already registered on ANOTHER (historical) account, verifying collides
 // at Firebase (auth/credential-already-in-use) and there is NO in-app merge yet — so we must not leave
 // the user stuck. We surface a "this is my number → contact support" affordance whose mailto opens the
-// TM-987 support runbook path (Firebase unlink/merge). The support address mirrors help.js's SUPPORT_EMAIL.
+// TM-987 support runbook path (Firebase unlink/merge). The support address is help.js's SUPPORT_EMAIL,
+// imported so there is ONE definition (TM-1019 — was a hardcoded copy that could drift).
 // EVENTUAL in-app fix: TM-306(b) claim-transfer ("link with proof of both") extended to the retroactive
 // collision would replace this manual escape hatch — until then this link is the recovery path TM-992's
 // re-gate requires (see TM-987 / the TM-992 scope comment pulled from it).
-const SUPPORT_EMAIL = "hello@10xai.co.uk";
 const RECOVERY_SUBJECT = "Phone number stuck on another account";
 
 /** Human copy for the phone error line, mapping the Firebase auth error codes we care about (TM-930). */

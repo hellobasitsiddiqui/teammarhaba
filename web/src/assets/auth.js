@@ -309,7 +309,7 @@ export async function confirmPhoneLink(verificationId, code) {
   const cred = PhoneAuthProvider.credential(verificationId, code);
   // Firebase enforces strict 1:1: if the number is already linked to ANOTHER account it rejects with
   // `auth/credential-already-in-use` (surfaced by the caller as the hard-block copy — see
-  // classifyLinkError), so a collision is a hard-block, never a silent merge.
+  // onboarding.js's phoneVerifyErrorCopy), so a collision is a hard-block, never a silent merge.
   if (user.phoneNumber == null) {
     return linkWithCredential(user, cred);
   }

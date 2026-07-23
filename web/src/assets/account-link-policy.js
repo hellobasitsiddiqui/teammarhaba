@@ -19,9 +19,6 @@
 // in-use) if that identifier already belongs to a DIFFERENT account. So the safe link is: (a) there IS
 // a signed-in user, and (b) the credential was just verified in THIS flow. Anything else must NOT link.
 
-/** The Firebase error code raised when the credential already belongs to a different account. */
-export const CREDENTIAL_ALREADY_IN_USE = "auth/credential-already-in-use";
-
 /**
  * The three mutually-exclusive outcomes of a link attempt.
  *  - "link": proof of both present → bind the verified credential to the signed-in account.
@@ -40,8 +37,9 @@ export const CREDENTIAL_ALREADY_IN_USE = "auth/credential-already-in-use";
  * credential). Both must hold; either alone is refused.
  *
  * This never inspects a raw identifier string to decide a match — matching is Firebase's job, and a
- * collision with another account surfaces at bind time as {@link CREDENTIAL_ALREADY_IN_USE} (see
- * {@link classifyLinkError}), which the caller shows as a hard-block rather than a silent merge.
+ * collision with another account surfaces at bind time as the Firebase error
+ * `auth/credential-already-in-use`, which the caller (auth.js / onboarding.js) shows as a hard-block
+ * rather than a silent merge.
  *
  * @param {{signedInUid?: string|null, credentialVerifiedInThisFlow?: boolean}} ctx
  * @returns {LinkDecision}
@@ -60,30 +58,4 @@ export function decideLink(ctx) {
     return "refuse-unverified";
   }
   return "link";
-}
-
-/**
- * Convenience predicate: may this link proceed? True only for the fully-proven "link" decision.
- * @param {{signedInUid?: string|null, credentialVerifiedInThisFlow?: boolean}} ctx
- * @returns {boolean}
- */
-export function isLinkProven(ctx) {
-  return decideLink(ctx) === "link";
-}
-
-/**
- * Classify a Firebase error thrown by a link/bind attempt into a stable outcome the UI keys on. The
- * decisive one is {@link CREDENTIAL_ALREADY_IN_USE}: the verified identifier is genuinely owned by
- * ANOTHER account. The safe response is a HARD-BLOCK ("that number/email already belongs to another
- * account — sign in with it instead"), NEVER an automatic merge of the two accounts — merging on a
- * collision is exactly what proof-of-both forbids.
- *
- * @param {{code?: string}} err a Firebase auth error (has a `.code`).
- * @returns {"collision-hard-block"|"other"} `collision-hard-block` for the already-in-use collision.
- */
-export function classifyLinkError(err) {
-  if (err && err.code === CREDENTIAL_ALREADY_IN_USE) {
-    return "collision-hard-block";
-  }
-  return "other";
 }

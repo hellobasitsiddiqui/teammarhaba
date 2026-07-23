@@ -18,8 +18,9 @@ import { buildGuide } from "./help-guide.js";
 const $ = (id) => document.getElementById(id);
 
 // Support contact. Lives on the 10xai.co.uk domain (same as the email-code sender + the TM-254
-// byline). A plain mailto: — no backend, no new deps.
-const SUPPORT_EMAIL = "hello@10xai.co.uk";
+// byline). A plain mailto: — no backend, no new deps. Exported so the onboarding phone-collision
+// recovery link (onboarding.js, TM-987) shares this ONE definition instead of hardcoding a copy.
+export const SUPPORT_EMAIL = "hello@10xai.co.uk";
 
 /** Build a titled help section: an <h3> heading followed by its body nodes. */
 function section(title, ...body) {

@@ -467,16 +467,12 @@ export function needsPhoneNumber(me) {
  */
 export function needsVerifiedPhone(me, verifiedPhone) {
   if (!me) return false; // fail OPEN — a degraded /me must never gate (the router contract)
-  const stored = splitE164(me.phone);
-  if (!stored) return false; // no parseable stored phone → needsPhoneNumber's term, not this one
-  // Canonicalise the stored value: splitE164 already parsed it; re-compose to the exact E.164 form
-  // Firebase returns, so a stored "+44 7700 900123" compares equal to a verified "+447700900123".
-  const storedCanonical = composeE164(stored.iso2, stored.national);
-  // Canonicalise the verified value the SAME way so an oddly-formatted Firebase value (it shouldn't be,
-  // but be defensive) can't spuriously mismatch a clean stored one. An unparseable verified value
-  // canonicalises to "" and therefore never equals a real stored number → gate (re-verify).
-  const verifiedParsed = splitE164(verifiedPhone);
-  const verifiedCanonical = verifiedParsed ? composeE164(verifiedParsed.iso2, verifiedParsed.national) : "";
+  if (!splitE164(me.phone)) return false; // no parseable stored phone → needsPhoneNumber's term, not this one
+  // Canonicalise both sides through the SINGLE shared helper so a stored "+44 7700 900123" compares
+  // equal to a verified "+447700900123" (formatting-only differences never gate). An unparseable
+  // verified value canonicalises to "" and therefore never equals a real stored number → gate (re-verify).
+  const storedCanonical = canonicalE164(me.phone);
+  const verifiedCanonical = canonicalE164(verifiedPhone);
   // Gate when there's no verified number at all, or it isn't the stored one.
   return verifiedCanonical === "" || verifiedCanonical !== storedCanonical;
 }
