@@ -40,6 +40,7 @@ import {
   formatEventWhen,
   isPastEvent,
   partitionEventsByPast,
+  matchesStatusFilter,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -488,4 +489,50 @@ test("formatEventWhen renders the start in the event's own timezone", () => {
   assert.match(formatEventWhen("2026-07-10T17:00:00.000Z", "America/New_York"), /13:00/);
   // Unparseable → em dash, never a throw.
   assert.equal(formatEventWhen("nope", "Europe/London"), "—");
+});
+
+// --- matchesStatusFilter: the admin list status filter, incl. the TM-965 "Unlisted" gap ------------
+
+test("matchesStatusFilter: ALL / empty matches everything", () => {
+  const ev = { status: "PUBLISHED", past: false, visibilityStart: "2026-01-01T00:00:00Z", visibilityEnd: "2026-12-31T00:00:00Z" };
+  const now = Date.parse("2026-06-01T00:00:00Z");
+  assert.equal(matchesStatusFilter(ev, "ALL", now), true);
+  assert.equal(matchesStatusFilter(ev, "", now), true);
+  assert.equal(matchesStatusFilter(ev, undefined, now), true);
+});
+
+test("matchesStatusFilter: an UNLISTED event matches the 'Unlisted' filter (TM-965)", () => {
+  // Unlisted = PUBLISHED, not finished, but now is PAST the visibility window (window closed) and the
+  // event hasn't started. Before TM-965 there was no Unlisted filter option, so such an event matched
+  // NO non-ALL filter and vanished from every filtered view — this regression-guards that gap.
+  const unlisted = {
+    status: "PUBLISHED",
+    past: false, // authoritative: not finished
+    startAt: "2026-08-01T00:00:00Z", // still upcoming
+    visibilityStart: "2026-06-01T00:00:00Z",
+    visibilityEnd: "2026-06-10T00:00:00Z", // window already closed at `now`
+  };
+  const now = Date.parse("2026-06-20T00:00:00Z"); // after visibilityEnd, before startAt
+
+  // Sanity: the derived lifecycle really is "Unlisted".
+  assert.equal(eventLifecycle(unlisted, now).label, "Unlisted");
+  // The load-bearing assertion: it matches the Unlisted filter…
+  assert.equal(matchesStatusFilter(unlisted, "Unlisted", now), true);
+  // …and only that one (it isn't swept up by the other buckets, and ALL still matches).
+  assert.equal(matchesStatusFilter(unlisted, "Visible", now), false);
+  assert.equal(matchesStatusFilter(unlisted, "Hidden", now), false);
+  assert.equal(matchesStatusFilter(unlisted, "Finished", now), false);
+  assert.equal(matchesStatusFilter(unlisted, "Cancelled", now), false);
+  assert.equal(matchesStatusFilter(unlisted, "ALL", now), true);
+});
+
+test("matchesStatusFilter: Visible / Hidden / Cancelled buckets", () => {
+  const now = Date.parse("2026-06-15T00:00:00Z");
+  const visible = { status: "PUBLISHED", past: false, visibilityStart: "2026-06-01T00:00:00Z", visibilityEnd: "2026-06-30T00:00:00Z" };
+  const hidden = { status: "PUBLISHED", past: false, visibilityStart: "2026-07-01T00:00:00Z", visibilityEnd: "2026-07-30T00:00:00Z" };
+  const cancelled = { status: "CANCELLED", visibilityStart: "2026-06-01T00:00:00Z", visibilityEnd: "2026-06-30T00:00:00Z" };
+  assert.equal(matchesStatusFilter(visible, "Visible", now), true);
+  assert.equal(matchesStatusFilter(hidden, "Hidden", now), true);
+  assert.equal(matchesStatusFilter(cancelled, "Cancelled", now), true);
+  assert.equal(matchesStatusFilter(visible, "Unlisted", now), false);
 });

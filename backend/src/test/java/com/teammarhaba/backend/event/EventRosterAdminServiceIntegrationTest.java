@@ -94,6 +94,9 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
     private RecordingPushSender sender;
 
     @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private LifecycleEventRecorder lifecycleRecorder;
 
     private final List<EventLifecycleEvent> lifecycleEvents = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -209,7 +212,7 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
         Event event = publishedEvent(2);
         assertThatThrownBy(() -> roster.adjustCapacity(adminCaller, event.getId(), -1))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage(EventRosterAdminService.CAPACITY_NEGATIVE);
+                .hasMessage(EventRosterAdminService.CAPACITY_BELOW_MIN);
     }
 
     @Test
@@ -307,6 +310,20 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
     void evictOfAnUnknownUserIs404() {
         Event event = publishedEvent(2);
         assertThatThrownBy(() -> roster.evictAttendee(adminCaller, event.getId(), 9_999_999L))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void evictOfASoftDeletedTargetIs404Cleanly() {
+        // TM-967(b): a roster action on a soft-deleted (tombstoned) target 404s cleanly — the User's
+        // @SQLRestriction hides the row from findById, so it resolves to a plain "User not found" rather
+        // than a constraint-violation 500. Guards that the not-found path also covers tombstoned accounts.
+        Event event = publishedEvent(2);
+        VerifiedUser target = newCaller("tombstoned");
+        long targetId = idOf(target);
+        softDeleteUser(targetId);
+
+        assertThatThrownBy(() -> roster.evictAttendee(adminCaller, event.getId(), targetId))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
@@ -527,6 +544,74 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(attendance.findByEventIdAndUserId(event.getId(), targetId)).isEmpty();
     }
 
+    @Test
+    void evictOnAFinishedEventIsFrozenAndDeletesNoHistory() {
+        // TM-993: evict must take the SAME finished-event freeze its siblings do. Without the guard,
+        // evicting a finished-event GOING row deletes historical attendance (and retroactively unlocks
+        // the TM-907 name lock derived live from hasGoingAtFinishedEvent). The attendance row must survive.
+        Instant now = Instant.now();
+        Event event = finishedEvent(2);
+        VerifiedUser target = newCaller("attended");
+        long targetId = idOf(target);
+        // Seed a GOING row directly (the RSVP verb refuses a finished event), so there IS history to protect.
+        attendance.saveAndFlush(new EventAttendance(event.getId(), targetId, AttendanceState.GOING));
+
+        assertThatThrownBy(() -> roster.evictAttendee(adminCaller, event.getId(), targetId))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventAdminService.EVENT_ENDED_EDIT);
+        assertThat(attendance.findByEventIdAndUserId(event.getId(), targetId))
+                .as("a finished event's attendance history is not deleted by an evict")
+                .isPresent();
+    }
+
+    @Test
+    void evictOnACancelledEventIsFrozenAndDeletesNoHistory() {
+        // TM-993: a CANCELLED event keeps its attendance as readable history (cancel != delete). Evicting a
+        // row from it would mutate that frozen record — reject with a 409 and leave the row intact.
+        Event event = cancelledEvent(2);
+        VerifiedUser target = newCaller("attendee");
+        long targetId = idOf(target);
+        attendance.saveAndFlush(new EventAttendance(event.getId(), targetId, AttendanceState.GOING));
+
+        assertThatThrownBy(() -> roster.evictAttendee(adminCaller, event.getId(), targetId))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventRosterAdminService.EVENT_CANCELLED_ROSTER);
+        assertThat(attendance.findByEventIdAndUserId(event.getId(), targetId))
+                .as("a cancelled event's kept history is not deleted by an evict")
+                .isPresent();
+    }
+
+    @Test
+    void forceAddOnACancelledEventIsFrozenEvenWithOverride() {
+        // TM-967(a): force-add has no event-STATUS gate before this fix, so it could act on a CANCELLED
+        // event. Reject with a 409; even override cannot add an attendee to a called-off event.
+        Event event = cancelledEvent(5);
+        VerifiedUser target = newCaller("late");
+        long targetId = idOf(target);
+
+        assertThatThrownBy(() -> roster.forceAddAttendee(adminCaller, event.getId(), targetId, false))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventRosterAdminService.EVENT_CANCELLED_ROSTER);
+        assertThatThrownBy(() -> roster.forceAddAttendee(adminCaller, event.getId(), targetId, true))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage(EventRosterAdminService.EVENT_CANCELLED_ROSTER);
+        assertThat(attendance.findByEventIdAndUserId(event.getId(), targetId)).isEmpty();
+    }
+
+    // ---------------------------------------------------------------- capacity: reject < 1 (TM-964)
+
+    @Test
+    void adjustCapacityToZeroIsRejected() {
+        // TM-964: capacity 0 is settable ONLY through the roster adjust (create/edit enforce @Min(1)); once
+        // set the edit form prefills "0", errors on the untouched field, and blocks ALL unrelated edits.
+        // The adjust now rejects < 1 to align with @Min(1), so capacity 0 can never be reached.
+        Event event = publishedEvent(2);
+        assertThatThrownBy(() -> roster.adjustCapacity(adminCaller, event.getId(), 0))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage(EventRosterAdminService.CAPACITY_BELOW_MIN);
+        assertThat(event(event).getCapacity()).as("capacity stays at 2, never becomes 0").isEqualTo(2);
+    }
+
     // ---------------------------------------------------------------- stale-offer cleanup
 
     @Test
@@ -595,6 +680,18 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
         event.setEndAt(now.minus(1, ChronoUnit.DAYS)); // ended yesterday → finished
         event.setCapacity(capacity);
         return events.save(event);
+    }
+
+    /** A CANCELLED (called-off) but still-upcoming event, so it is frozen by status, not by finish time. */
+    private Event cancelledEvent(Integer capacity) {
+        Event event = publishedEvent(capacity);
+        event.cancel(Instant.now());
+        return events.saveAndFlush(event);
+    }
+
+    /** Tombstone a user via native SQL (User.markDeleted is package-private) so findById hides the row. */
+    private void softDeleteUser(long userId) {
+        jdbcTemplate.update("UPDATE users SET deleted_at = now() WHERE id = ?", userId);
     }
 
     private VerifiedUser newCaller(String tag) {

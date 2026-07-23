@@ -47,6 +47,7 @@ import {
   toFormModel,
   eventLifecycle,
   capacityLabel,
+  matchesStatusFilter,
   attendanceCounts,
   overCapacityState,
   overCapacityWarning,
@@ -71,6 +72,9 @@ const STATUS_FILTERS = [
   ["ALL", "All statuses"],
   ["Visible", "Visible now"],
   ["Hidden", "Hidden (upcoming)"],
+  // TM-965: "Unlisted" — past its visibility window but not yet started. eventLifecycle emits this label,
+  // so without a matching filter option an unlisted event matched NO non-ALL filter and disappeared.
+  ["Unlisted", "Unlisted (window closed)"],
   ["Finished", "Finished"],
   ["Cancelled", "Cancelled"],
 ];
@@ -187,7 +191,8 @@ export async function loadEvents() {
 function filteredEvents(now) {
   const q = state.search.trim().toLowerCase();
   return state.events.filter((e) => {
-    if (state.statusFilter !== "ALL" && eventLifecycle(e, now).label !== state.statusFilter) return false;
+    // TM-965: match against the DERIVED lifecycle label via the pure predicate — covers "Unlisted" too.
+    if (!matchesStatusFilter(e, state.statusFilter, now)) return false;
     if (q) {
       const haystack = [e.heading, e.locationText, e.city].filter(Boolean).join(" ").toLowerCase();
       if (!haystack.includes(q)) return false;
@@ -601,7 +606,7 @@ function capacityControl(event, roster) {
     id: `roster-capacity-${event.id}`,
     class: "tm-input tm-roster-capacity-input",
     type: "number",
-    min: "0",
+    min: "1", // TM-964: 1..; blank = unlimited. Capacity 0 is never valid (edit form enforces @Min(1)).
     value: roster.capacity == null ? "" : String(roster.capacity),
     "aria-label": "Capacity (blank = unlimited)",
   });
@@ -703,8 +708,10 @@ function attendeeList(event, roster) {
 /** Save a first-class capacity adjust (TM-592); toasts the over-cap warning when the server flags it. */
 async function saveCapacity(event, rawValue) {
   const capacity = rawValue === "" ? null : Number(rawValue);
-  if (capacity != null && (!Number.isInteger(capacity) || capacity < 0)) {
-    toast("Capacity must be a whole number of 0 or more (blank = unlimited).", { type: "error" });
+  // TM-964: reject < 1 (was < 0). Capacity 0 was settable only here, and once set the edit form prefills
+  // "0", errors on its @Min(1) field, and blocks every unrelated edit. Blank = unlimited; min is 1.
+  if (capacity != null && (!Number.isInteger(capacity) || capacity < 1)) {
+    toast("Capacity must be a whole number of 1 or more (blank = unlimited).", { type: "error" });
     return;
   }
   try {
@@ -1254,11 +1261,15 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
           }
         }
       } else {
+        // TM-966: PATCH the metadata FIRST, then upload the image only if that succeeds. The old order
+        // (upload → PATCH with imagePath) uploaded to Storage BEFORE the server could reject the edit —
+        // so a past-event edit (409 EVENT_ENDED) left an ORPHANED storage object. Doing the PATCH first
+        // means a rejected edit never uploads anything; a second PATCH carries the new image path.
+        await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
         if (pending) {
           const { path } = await uploadEventImage(event.id, pending, image.setProgress);
-          body.imagePath = path;
+          await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body: { imagePath: path } });
         }
-        await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
       }
 
       if (stuckCleared.length) {
@@ -1320,6 +1331,14 @@ export async function enterAdminEventForm(mode, id = null) {
 
   const cached = state.events.find((e) => String(e.id) === String(id));
   if (cached) {
+    // TM-966: a past (finished) event is read-only. The list hides its Edit control, but a deep-link /
+    // manually-typed edit URL bypasses that — guard here so the form never mounts for a past event
+    // (the server would 409 the PATCH anyway, and on an edit-with-image the upload runs BEFORE the PATCH,
+    // orphaning a storage object). Redirect back to the list with a toast.
+    if (isPastEvent(cached)) {
+      redirectPastEventEdit();
+      return;
+    }
     mountEventForm(view, "edit", cached);
     return;
   }
@@ -1333,6 +1352,11 @@ export async function enterAdminEventForm(mode, id = null) {
       renderFormError(view, "That event isn't available anymore.", null);
       return;
     }
+    // TM-966: same past-event guard on the deep-link/refresh path (the fetched event carries the `past` flag).
+    if (isPastEvent(event)) {
+      redirectPastEventEdit();
+      return;
+    }
     mountEventForm(view, "edit", event);
   } catch (err) {
     if (mine !== formToken) return;
@@ -1343,6 +1367,17 @@ export async function enterAdminEventForm(mode, id = null) {
       gone ? null : () => enterAdminEventForm("edit", id),
     );
   }
+}
+
+/**
+ * TM-966: bounce a past-event edit attempt back to the events list with an explanatory toast. A finished
+ * event is read-only (the server 409s the PATCH), and mounting the form would let an edit-with-image
+ * upload an object BEFORE the doomed PATCH — orphaning it in Storage. Redirecting before the form mounts
+ * avoids both. Navigating (hash change) re-enters the list route, which reloads it.
+ */
+function redirectPastEventEdit() {
+  toast("This event has ended and can no longer be edited.", { type: "error" });
+  window.location.hash = ADMIN_EVENTS_ROUTE;
 }
 
 /** Mount the page chrome (a "← Events" back-link header) + the form into the view, then focus heading. */
