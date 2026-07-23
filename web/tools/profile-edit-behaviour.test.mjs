@@ -1271,6 +1271,25 @@ test("TM-1005: the affordance is ABSENT when the stored phone IS the account's v
   });
 });
 
+test("TM-1020: with the verified-phone flag OFF the 'Verify this number' affordance is SUPPRESSED", () => {
+  // Fail-before/pass-after: this is the EXACT rig as the first TM-1005 test above (unchanged stored
+  // phone, no linked number) that renders the affordance — the ONLY difference is the flag. TM-1009's
+  // kill-switch gated four surfaces but missed this fifth one, so flag-OFF still solicited a real OTP.
+  verifiedPhoneRequiredImpl = () => false; // the shipped default: verified-phone parked OFF
+  try {
+    withFakeDocument(() => {
+      const { pv } = currentVerifyRig({ accountPhone: null });
+      assert.equal(
+        pv.sendBtn.hidden,
+        true,
+        "flag OFF ⇒ the profile must not sprout a verify affordance for a parked requirement (TM-1020)",
+      );
+    });
+  } finally {
+    verifiedPhoneRequiredImpl = () => true; // restore the flag-ON default for the remaining tests
+  }
+});
+
 test("TM-1005: editing to a DIFFERENT number yields the button to the TM-982 'Send code' path (and back)", () => {
   withFakeDocument(() => {
     const { entry, pv } = currentVerifyRig({ accountPhone: null });
