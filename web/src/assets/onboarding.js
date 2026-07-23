@@ -59,13 +59,22 @@ import { COUNTRIES, flagOf } from "./countries.js";
 import { currentUser, startPhoneVerify, confirmPhoneLink } from "./auth.js";
 import { attachOtpInput } from "./otp-input.js";
 import { attachResendCooldown } from "./resend-cooldown.js";
-import { SUPPORT_EMAIL } from "./help.js";
 // TM-1009: the deploy-time switch over the whole verified-phone requirement
 // (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF this gate reverts to the
 // pre-TM-930 collect-only phone step: the Send-code/OTP verify controls are never built, prefill
 // never paints the verified/locked state, and validateAll's must-verify block (phoneVerifyBlocksSubmit)
 // never fires — a shape-valid number submits without an OTP. Flag ON = TM-930 behaviour, unchanged.
 import { verifiedPhoneRequired, phoneVerifyBlocksSubmit } from "./verified-phone-flag.js";
+// TM-987 / TM-1018: the cross-account collision predicate + the recovery-affordance copy live in the
+// pure phone-reverify-core so the gate AND the profile phone field share ONE definition (they can't
+// drift, and the affordance can't silently exist on only one surface — the TM-1018 bug on the retro cohort).
+import {
+  isPhoneCollision,
+  PHONE_RECOVERY_MAILTO,
+  PHONE_RECOVERY_PROMPT,
+  PHONE_RECOVERY_LINK_TEXT,
+  PHONE_RECOVERY_SUFFIX,
+} from "./phone-reverify-core.js";
 
 // The four required fields and their client-side rules, mirroring the backend OnboardingRequest
 // bean validation (name non-blank ≤255 + name-like TM-771/TM-898; location from the TM-877 allowed
@@ -174,12 +183,10 @@ const phoneVerify = {
 // genuinely-owned number that's already registered on ANOTHER (historical) account, verifying collides
 // at Firebase (auth/credential-already-in-use) and there is NO in-app merge yet — so we must not leave
 // the user stuck. We surface a "this is my number → contact support" affordance whose mailto opens the
-// TM-987 support runbook path (Firebase unlink/merge). The support address is help.js's SUPPORT_EMAIL,
-// imported so there is ONE definition (TM-1019 — was a hardcoded copy that could drift).
-// EVENTUAL in-app fix: TM-306(b) claim-transfer ("link with proof of both") extended to the retroactive
-// collision would replace this manual escape hatch — until then this link is the recovery path TM-992's
-// re-gate requires (see TM-987 / the TM-992 scope comment pulled from it).
-const RECOVERY_SUBJECT = "Phone number stuck on another account";
+// TM-987 support runbook path (Firebase unlink/merge). The copy + the collision predicate now live in
+// phone-reverify-core.js (imported above) so the gate and the profile phone field (TM-1018) share ONE
+// definition. EVENTUAL in-app fix: TM-306(b) claim-transfer ("link with proof of both") extended to the
+// retroactive collision would replace this manual escape hatch.
 
 /** Human copy for the phone error line, mapping the Firebase auth error codes we care about (TM-930). */
 function phoneVerifyErrorCopy(err) {
@@ -1266,13 +1273,13 @@ function buildPhoneVerify(id, describedBy) {
     "p",
     { id: `${id}-recovery`, class: "tm-field-hint tm-phone-recovery", role: "status", hidden: true },
     [
-      "Is this your number? ",
+      PHONE_RECOVERY_PROMPT,
       el("a", {
         class: "tm-phone-recovery-link",
-        href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(RECOVERY_SUBJECT)}`,
-        text: "Contact support",
+        href: PHONE_RECOVERY_MAILTO,
+        text: PHONE_RECOVERY_LINK_TEXT,
       }),
-      " to move it to this account.",
+      PHONE_RECOVERY_SUFFIX,
     ],
   );
 
@@ -1314,12 +1321,6 @@ function buildPhoneVerify(id, describedBy) {
 /** Show/hide the TM-987 cross-account collision recovery affordance (contact-support link). */
 function setPhoneRecoveryVisible(visible) {
   if (phoneVerify.recoveryEl) phoneVerify.recoveryEl.hidden = !visible;
-}
-
-/** Whether an error is the cross-account phone collision hard-block (TM-987 recovery trigger). */
-function isPhoneCollision(err) {
-  const code = err?.code;
-  return code === "auth/credential-already-in-use" || code === "auth/account-exists-with-different-credential";
 }
 
 // TM-684: avatar upload + bio ship disabled; wire to onboarding payload

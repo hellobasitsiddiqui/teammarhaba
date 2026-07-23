@@ -187,6 +187,10 @@ function loadProfileModule(deps) {
     // TM-1005: the pure "offer to verify the CURRENT, unchanged stored number" rule + the banner-CTA
     // handoff event name (from phone-reverify-core.js) — both referenced by the shipped source.
     "  phoneCurrentNeedsVerify, PHONE_VERIFY_REQUEST_EVENT,\n" +
+    // TM-1018: the shared cross-account collision predicate + the recovery-affordance copy (also from
+    // phone-reverify-core.js) — the profile phone field now reveals the same "contact support" escape
+    // hatch the onboarding gate shows, so these symbols are referenced by the shipped source too.
+    "  isPhoneCollision, PHONE_RECOVERY_MAILTO, PHONE_RECOVERY_PROMPT, PHONE_RECOVERY_LINK_TEXT, PHONE_RECOVERY_SUFFIX,\n" +
     // TM-1009: the deploy-time verified-phone flag reader (verified-phone-flag.js). Injected as a
     // mutable fake defaulting to ON so every pre-flag test keeps its original TM-982 semantics
     // (flag ON = exactly the old behaviour); a test can flip it OFF via setVerifiedPhoneRequired.
@@ -333,6 +337,13 @@ const deps = {
   // name, so the affordance visibility/label wiring runs the shipped contract under Node.
   phoneCurrentNeedsVerify: core.phoneCurrentNeedsVerify,
   PHONE_VERIFY_REQUEST_EVENT: reverifyCore.PHONE_VERIFY_REQUEST_EVENT,
+  // TM-1018: the REAL shared collision predicate + recovery-affordance copy, so the profile phone
+  // field's collision hard-block + "contact support" affordance run the exact shipped contract.
+  isPhoneCollision: reverifyCore.isPhoneCollision,
+  PHONE_RECOVERY_MAILTO: reverifyCore.PHONE_RECOVERY_MAILTO,
+  PHONE_RECOVERY_PROMPT: reverifyCore.PHONE_RECOVERY_PROMPT,
+  PHONE_RECOVERY_LINK_TEXT: reverifyCore.PHONE_RECOVERY_LINK_TEXT,
+  PHONE_RECOVERY_SUFFIX: reverifyCore.PHONE_RECOVERY_SUFFIX,
   // TM-1009: the verified-phone requirement flag. Defaults ON here so the TM-982 save-block /
   // Send-code tests below exercise exactly the pre-flag behaviour (the flag-OFF short-circuit has
   // its own coverage in verified-phone-flag.test.mjs). Mutable per-test via the impl seam.
@@ -1343,4 +1354,146 @@ test("TM-1005: the banner CTA's handoff event reveals + FOCUSES the affordance o
   } finally {
     globalThis.document = priorDoc;
   }
+});
+
+// ═══ TM-1018 — the profile phone-verify closure fixes ═════════════════════════════════════════════
+//
+// Three behaviours the shipped confirmPhoneOtp must have on the profile surface — driven through the
+// REAL source (buildField → verify controls → the widget's onComplete → confirmPhoneOtp), with the
+// auth link seam (confirmPhoneLinkImpl) resolving/throwing to steer each path.
+//
+// FAIL-BEFORE / PASS-AFTER (evaluated against pre-TM-1018 profile.js):
+//   • the collision recovery affordance test → red: profile.js had NO recoveryEl (buildPhoneVerify
+//     never built one, confirmPhoneOtp never revealed one) — the retro cohort's only verify surface
+//     offered no escape hatch. Green once the shared affordance lands.
+//   • the changed-number-immediate-PATCH test → red: confirmPhoneOtp DEFERRED the PATCH to the form
+//     Save, so no updateMe fired at confirm time. Green once the eager PATCH lands.
+//   • the edit-drop guard test passes both sides (it pins the existing TM-930 guard survives the
+//     refactor — a mid-flight edit must still drop the stale code, never PATCH the old number).
+
+/** Drive a CHANGED-number verify to a given confirmPhoneLink outcome. Fills a stored phone, edits the
+ *  national number to a different one, taps the revealed Send code, then completes the six-box OTP.
+ *  Returns the shell/entry/pv handles plus the captured PATCH payloads. */
+async function changedNumberVerifyRig({ editTo = "7700 900999", confirmImpl } = {}) {
+  TOASTS = [];
+  currentUserImpl = () => ({ uid: "u-1018", phoneNumber: null });
+  const shell = makeShell();
+  profile.__setShell(shell);
+  const built = profile.buildField(field("phone"));
+  shell.fields.set("phone", { input: built.input, error: built.error, country: built.country });
+  profile.fillForm({ phone: "+447700900123", city: "London", notificationPref: "EMAIL" });
+
+  const patches = [];
+  updateMeImpl = async (patch) => {
+    patches.push(patch);
+    return { phone: patch.phone };
+  };
+  const sends = [];
+  startPhoneVerifyImpl = async (e164) => {
+    sends.push(e164);
+    return "vid-1018";
+  };
+  if (confirmImpl) confirmPhoneLinkImpl = confirmImpl;
+
+  const entry = shell.fields.get("phone");
+  const pv = profile.__phoneVerify();
+  // The user edits to a DIFFERENT number → the TM-982 "Send code" path takes the button.
+  entry.input.value = editTo;
+  entry.input._listeners.input();
+  return { shell, entry, pv, patches, sends };
+}
+
+test("TM-1018(a): a CHANGED number, once confirmed, is PATCHed to /me IMMEDIATELY (not deferred to Save)", async () => {
+  await withFakeDocumentAsync(async () => {
+    try {
+      const { pv, patches, sends } = await changedNumberVerifyRig({ confirmImpl: async () => ({}) });
+      assert.equal(pv.sendBtn.textContent, "Send code", "the changed-number affordance shows 'Send code'");
+      await pv.sendBtn._listeners.click(); // → sendPhoneCode composes + startPhoneVerify + reveals OTP
+      assert.deepEqual(sends, ["+447700900999"], "startPhoneVerify fires for the composed NEW number");
+      assert.equal(pv.otpWrap.hidden, false, "the six-box OTP reveals");
+
+      await OTP_ONCOMPLETE("123456"); // → confirmPhoneOtp → confirmPhoneLink → EAGER updateMe
+
+      assert.equal(pv.statusEl.textContent, "Verified ✓", "the number is verified in the UI");
+      // The headline fix: the verified E.164 is written to /me AT CONFIRM TIME, so abandoning the form
+      // between the two forks can't leave the account with a verified phone /me never learned about.
+      assert.deepEqual(patches, [{ phone: "+447700900999" }], "the verified changed number is PATCHed immediately");
+      assert.ok(TOASTS.some((t) => /save to update/i.test(t.msg)), "the changed-number success toast still shows");
+    } finally {
+      startPhoneVerifyImpl = async () => "fake-verification-id";
+      confirmPhoneLinkImpl = async () => ({});
+      updateMeImpl = async () => ({});
+    }
+  });
+});
+
+test("TM-1018(b): a mid-flight edit AFTER Send code drops the stale code — no PATCH of the old number", async () => {
+  await withFakeDocumentAsync(async () => {
+    try {
+      const { entry, pv, patches } = await changedNumberVerifyRig({ confirmImpl: async () => ({}) });
+      await pv.sendBtn._listeners.click(); // code issued for +447700900999
+      assert.equal(pv.otpWrap.hidden, false, "precondition: the OTP is revealed for the sent number");
+
+      // The user edits the national number AGAIN, after the code was sent but before entering it. The
+      // input listener drops the in-flight verification (the code is for the OLD digits) and hides the OTP.
+      entry.input.value = "7700 900777";
+      entry.input._listeners.input();
+      assert.equal(pv.otpWrap.hidden, true, "the stale OTP is retracted on the mid-flight edit");
+      assert.equal(pv.verificationId, null, "the stale in-flight verification is dropped");
+      assert.equal(pv.pendingE164, "", "no pending number remains for the dropped code");
+
+      // Even if a late six-box completion somehow fires with the old verificationId gone, confirmPhoneOtp
+      // no-ops (no verificationId) — it must NEVER link+PATCH the drifted/old number.
+      if (OTP_ONCOMPLETE) await OTP_ONCOMPLETE("123456");
+      assert.equal(pv.statusEl.textContent, "", "nothing is marked verified after the drop");
+      assert.deepEqual(patches, [], "no PATCH is sent for a number whose in-flight code was dropped");
+    } finally {
+      startPhoneVerifyImpl = async () => "fake-verification-id";
+      confirmPhoneLinkImpl = async () => ({});
+      updateMeImpl = async () => ({});
+    }
+  });
+});
+
+test("TM-1018(b): a cross-account collision HARD-BLOCKS — recovery affordance shows, phone stays unverified, no PATCH", async () => {
+  await withFakeDocumentAsync(async () => {
+    try {
+      const collision = Object.assign(new Error("in use"), { code: "auth/credential-already-in-use" });
+      const { pv, patches } = await changedNumberVerifyRig({
+        confirmImpl: async () => {
+          throw collision; // Firebase rejects the link — the number is on ANOTHER account
+        },
+      });
+      await pv.sendBtn._listeners.click();
+      await OTP_ONCOMPLETE("123456"); // → confirmPhoneOtp → confirmPhoneLink throws the collision
+
+      // The hard block: the exact locked copy paints, the number stays UNVERIFIED, and no /me write happens.
+      assert.equal(
+        pv.recoveryEl.hidden,
+        false,
+        "the 'Is this your number? Contact support' recovery affordance is revealed — the retro-cohort escape hatch",
+      );
+      assert.equal(pv.statusEl.textContent, "", "the phone is NOT marked verified on a collision");
+      assert.equal(pv.verified, false, "the verified flag stays false");
+      assert.deepEqual(patches, [], "a collision never PATCHes /me — the number isn't theirs on this account");
+      // The affordance renders the shared support mailto (XSS-safe el() text), so it's a real next step.
+      const link = pv.recoveryEl._children.find((c) => c && c.tagName === "A");
+      assert.ok(link, "the recovery affordance carries a support link");
+      assert.equal(link.getAttribute("href"), reverifyCore.PHONE_RECOVERY_MAILTO, "the shared support mailto");
+      assert.equal(link._textContent, reverifyCore.PHONE_RECOVERY_LINK_TEXT, "the shared link copy");
+
+      // A NON-collision error (bad code) must NOT show the recovery affordance — it's retryable here.
+      const badCode = Object.assign(new Error("bad"), { code: "auth/invalid-verification-code" });
+      confirmPhoneLinkImpl = async () => {
+        throw badCode;
+      };
+      await pv.sendBtn._listeners.click();
+      await OTP_ONCOMPLETE("000000");
+      assert.equal(pv.recoveryEl.hidden, true, "a retryable error hides the support path — only a collision reveals it");
+    } finally {
+      startPhoneVerifyImpl = async () => "fake-verification-id";
+      confirmPhoneLinkImpl = async () => ({});
+      updateMeImpl = async () => ({});
+    }
+  });
 });
