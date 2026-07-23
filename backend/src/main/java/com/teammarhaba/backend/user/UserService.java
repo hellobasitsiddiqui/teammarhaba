@@ -241,6 +241,24 @@ public class UserService {
         // still allowed, the carve-out). The admin path passes false (admin correction is exempt).
         List<Map<String, Object>> changes = applyProfileFields(user, update, true);
 
+        // TM-982: phone is a VERIFIED IDENTITY. When the caller CHANGES their phone via PATCH /me, the
+        // stored number must be the Firebase-VERIFIED one — so gate the write behind the SAME
+        // app.phone.require-verified flag as the onboarding paths (TM-931), and only when the phone
+        // actually changed (a name/city/notification-only PATCH must never touch Firebase). Activates
+        // when TM-986 flips the flag in prod; a no-op while the flag is off (byte-for-byte the
+        // pre-TM-982 baseline). enforceVerifiedPhoneIfRequired reads the caller's verified E.164 and
+        // mirrors it onto users.phone (the verified value winning over the client one, or refusing with
+        // the distinct PHONE_NOT_VERIFIED_MESSAGE 400 when none is on record) — so a changed-but-
+        // unverified number is rejected/corrected server-side, matching the client's TM-982 save-block.
+        boolean phoneChanged = changes.stream().anyMatch(c -> "phone".equals(c.get("field")));
+        if (phoneChanged) {
+            // enforceVerifiedPhoneIfRequired mirrors the verified number onto users.phone and audits
+            // that mirror as its OWN separate PROFILE_UPDATED diff (clientValue→verifiedValue) when it
+            // actually changes the value — the exact same shape as the onboarding paths — so the trail
+            // stays consistent without reconciling the client-side diff below.
+            enforceVerifiedPhoneIfRequired(caller, user);
+        }
+
         if (!changes.isEmpty()) {
             // Per-field change history (TM-185): the PROFILE_UPDATED audit row carries the actor, the
             // target, the source (self vs admin), and the old→new diff in its JSONB metadata. Only
@@ -730,8 +748,14 @@ public class UserService {
     /**
      * TM-931 (subticket B of TM-923): server-side verified-phone enforcement, flag-gated by
      * {@code app.phone.require-verified} (default off). A no-op when the flag is off — Firebase is
-     * never touched on the onboarding paths, so flag-off behaviour is byte-for-byte the pre-TM-931
-     * baseline (the TM-880 {@link #requirePhoneOnRecord} rule alone).
+     * never touched, so flag-off behaviour is byte-for-byte the pre-TM-931 baseline (the TM-880
+     * {@link #requirePhoneOnRecord} rule alone).
+     *
+     * <p>Called from the two onboarding-complete transitions ({@link #completeOnboarding},
+     * {@link #completeProfileOnboarding}) AND — since TM-982 — from {@link #updateProfile} when a
+     * PATCH /me actually CHANGES the phone (phone is a verified identity, so an edited number must be
+     * the Firebase-verified one too, not just at onboarding). The PATCH caller gates on the phone
+     * having changed so an unrelated edit never pays for a Firebase read.
      *
      * <p>When the flag is on: read the caller's Firebase-verified E.164 phone (fail-closed — a
      * missing bean / absent user / SDK error / null phone all refuse), then <strong>mirror it onto

@@ -168,6 +168,10 @@ function loadProfileModule(deps) {
   const preamble = "const {\n" +
     "  getMe, updateMe, getMembership, getInterestCatalogue, getInterestConfig, ApiError,\n" +
     "  currentUser, signOut,\n" +
+    // TM-982: the phone verify-and-link deps (auth OTP link, six-box widget, resend cooldown) — the
+    // auth.js/otp-input.js/resend-cooldown.js modules can't be imported under Node (auth.js pulls the
+    // Firebase CDN chain; the widgets touch the DOM), so import-safe FAKES are injected instead.
+    "  startPhoneVerify, confirmPhoneLink, attachOtpInput, attachResendCooldown,\n" +
     "  isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES,\n" +
     // `onAvatarChanged` is the pre-TM-846 direct nav repaint; `announceAvatarChanged`/`onAvatarChangedEvent`
     // are the TM-846 broadcast pair. Both stay in the destructure so this harness loads the source from
@@ -178,7 +182,8 @@ function loadProfileModule(deps) {
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
-    "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
+    "  splitE164, composeE164, canonicalE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
+    "  phoneEditNeedsVerify,\n" +
     "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
@@ -228,6 +233,12 @@ let getMembershipImpl = async () => ({});
 let getInterestCatalogueImpl = async () => null;
 let getInterestConfigImpl = async () => null;
 let currentUserImpl = () => null;
+// TM-982 phone verify seams: the OTP-link call (resolve = verified; throw {code} = mapped error) and the
+// verify-start (resolves a fake verificationId). OTP_ONCOMPLETE captures the widget's auto-submit sink so
+// a test can simulate "six digits entered" by invoking it with a code.
+let startPhoneVerifyImpl = async () => "fake-verification-id";
+let confirmPhoneLinkImpl = async () => ({});
+let OTP_ONCOMPLETE = null;
 // Avatar-control seams (TM-846): mutable so the upload-success test can enable the control and make
 // the fake upload "land" a photoURL (the default stays the disabled/no-op state every other test had).
 let isStorageConfiguredImpl = () => false;
@@ -242,6 +253,17 @@ const deps = {
   ApiError,
   currentUser: (...a) => currentUserImpl(...a),
   signOut: async () => {},
+  // TM-982 phone verify-and-link fakes (auth link + widgets). Import-safe stand-ins for the real
+  // modules (which can't load under Node): startPhoneVerify resolves a fake verificationId,
+  // confirmPhoneLink is driven per-test via a mutable impl, and the widget/cooldown attach helpers
+  // return minimal controllers with the exact method surface profile.js null-chains against.
+  startPhoneVerify: (...a) => startPhoneVerifyImpl(...a),
+  confirmPhoneLink: (...a) => confirmPhoneLinkImpl(...a),
+  attachOtpInput: ({ onComplete } = {}) => {
+    OTP_ONCOMPLETE = onComplete; // captured so a test can drive the auto-submit (six digits entered)
+    return { boxes: [], value: () => "", setValue: () => {}, clear: () => {}, focus: () => {} };
+  },
+  attachResendCooldown: () => ({ start: () => {}, reset: () => {}, isActive: () => false, syncDisabled: () => {} }),
   isStorageConfigured: (...a) => isStorageConfiguredImpl(...a),
   uploadAvatar: (...a) => uploadAvatarImpl(...a),
   validateAvatarFile: () => "",
@@ -287,6 +309,10 @@ const deps = {
   // prove the shipped split/compose/default rules through the renderer's own wiring.
   splitE164: core.splitE164,
   composeE164: core.composeE164,
+  // TM-982: the shared canonicalisation + the pure "changed phone needs verify" gate — the REAL pure
+  // implementations, so the renderer's save-block + Send-code affordance run the shipped rules.
+  canonicalE164: core.canonicalE164,
+  phoneEditNeedsVerify: core.phoneEditNeedsVerify,
   defaultCountryFor: core.defaultCountryFor,
   phonePartsError: core.phonePartsError,
   // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
@@ -866,12 +892,15 @@ test("fillForm puts a legacy bare number into the confirm-country state and save
     assert.equal(patched, false, "no PATCH while the country is unconfirmed");
     assert.ok(TOASTS.some((t) => t.opts?.type === "error"), "the user is told to fix the highlighted field");
 
-    // Confirming a country unblocks the save: the same digits now compose to E.164.
+    // Confirming a country composes a real E.164 — but that is a CHANGE from the legacy (unparseable)
+    // stored value, so TM-982 now requires the resolved number to be VERIFIED before the save. Picking
+    // a country alone no longer sends the PATCH: the phone is a verified identity.
     entry.country.value = "GB";
     let sent = null;
     updateMeImpl = async (patch) => { sent = patch; return { phone: patch.phone }; };
     await profile.save({ preventDefault() {} });
-    assert.equal(sent?.phone, "+447700900123", "confirmed country + legacy digits compose to E.164");
+    assert.equal(sent, null, "TM-982: a legacy number resolved to a new E.164 is unverified → save blocked");
+    assert.match(entry.error.textContent, /verify/i, "the verify-your-new-number prompt is painted");
   });
 });
 

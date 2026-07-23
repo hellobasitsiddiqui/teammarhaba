@@ -482,6 +482,58 @@ export function needsVerifiedPhone(me, verifiedPhone) {
 }
 
 /**
+ * Canonical E.164 for any stored/verified/composed value: "+44 7700 900123" → "+447700900123", or ""
+ * when the value isn't a parseable E.164 (blank, a legacy bare number, a non-phone). It round-trips
+ * through {@link splitE164}→{@link composeE164} so a formatted stored value compares equal to
+ * Firebase's strict E.164 form — the single canonicalisation both {@link needsVerifiedPhone} and the
+ * TM-982 profile phone-edit gate rely on, hoisted here so the profile form and the onboarding gate
+ * (which had a private copy) share ONE definition and can never drift on what "the same number" means.
+ *
+ * @param {string|null|undefined} value any phone value (stored, verified, or freshly composed).
+ * @returns {string} the strict "+<dial><digits>" E.164, or "" when unparseable.
+ */
+export function canonicalE164(value) {
+  const parsed = splitE164(value);
+  return parsed ? composeE164(parsed.iso2, parsed.national) : "";
+}
+
+/**
+ * TM-982: the pure rule behind "editing your profile phone must re-verify it". Phone is a VERIFIED
+ * IDENTITY (unique, must re-verify to change), so a CHANGED number can't be saved until it's been
+ * Firebase OTP-verified + linked — but an UNCHANGED number is a no-op that needs no re-verify (the
+ * user might just be saving their city). This decides, purely, whether the profile save must be
+ * BLOCKED pending verification of the number now in the form.
+ *
+ * <p>The three inputs are all canonicalised via {@link canonicalE164} so a formatting-only difference
+ * ("+44 7700 900123" vs "+447700900123") is never mistaken for a change (which would wrongly demand a
+ * re-verify) nor for a match against the verified value.
+ *
+ *   • {@code composed} blank (no parseable number in the form) → false. A blank phone is omitted from
+ *     the PATCH ("leave unchanged" — the existing collectPatch contract), so there is nothing to
+ *     verify; the separate confirm-country / required-shape validation owns the blank/legacy cases.
+ *   • {@code composed} canonically equals {@code stored} → false. The number is UNCHANGED, so no
+ *     re-verification is demanded even if the stored value predates the verify step (that retroactive
+ *     re-gate is the router's {@link needsVerifiedPhone} job, not the edit-form save gate) — the user
+ *     can still fix their city/name without being forced to OTP a number they didn't touch.
+ *   • otherwise (the number CHANGED) → block UNLESS {@code composed} canonically equals
+ *     {@code verifiedComposed} (the number the user just proved they own this session, via
+ *     startPhoneVerify→confirmPhoneLink). A changed-and-verified number saves; a changed-and-unverified
+ *     one is blocked.
+ *
+ * @param {string|null|undefined} stored the phone currently on record (the loaded /me value).
+ * @param {string|null|undefined} composed the E.164 composed from the form's (picker, national) pair.
+ * @param {string|null|undefined} verifiedComposed the E.164 the user verified this session, or "".
+ * @returns {boolean} true when the profile save must be blocked until the new number is verified.
+ */
+export function phoneEditNeedsVerify(stored, composed, verifiedComposed) {
+  const composedCanonical = canonicalE164(composed);
+  if (composedCanonical === "") return false; // blank/omitted → nothing to verify (leave-unchanged)
+  if (composedCanonical === canonicalE164(stored)) return false; // unchanged → no re-verify
+  // Changed: allowed only if it's the exact number the user just verified this session.
+  return composedCanonical !== canonicalE164(verifiedComposed);
+}
+
+/**
  * TM-771: firstName/lastName/city carried only a length cap, so a purely numeric value ("676767")
  * saved as a name or city. A name-like value must contain at least one letter (any script — Arabic,
  * accented Latin, etc.), and may only use letters, combining marks, spaces, hyphens, apostrophes and
