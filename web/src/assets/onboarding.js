@@ -158,8 +158,20 @@ const phoneVerify = {
   statusEl: null, // the "Verified ✓" / helper line
   changeBtn: null, // the "Change number" affordance shown only in the verified/locked state (TM-930)
   adoptBtn: null, // the "Use my verified number" one-tap shown only in the TM-932 mismatch case
+  recoveryEl: null, // the "this is my number → contact support" affordance shown only on a collision (TM-987)
   recaptcha: null, // the gate-local invisible reCAPTCHA host
 };
+
+// TM-987 cross-account collision recovery. When the retroactive re-gate (TM-992) hard-blocks a
+// genuinely-owned number that's already registered on ANOTHER (historical) account, verifying collides
+// at Firebase (auth/credential-already-in-use) and there is NO in-app merge yet — so we must not leave
+// the user stuck. We surface a "this is my number → contact support" affordance whose mailto opens the
+// TM-987 support runbook path (Firebase unlink/merge). The support address mirrors help.js's SUPPORT_EMAIL.
+// EVENTUAL in-app fix: TM-306(b) claim-transfer ("link with proof of both") extended to the retroactive
+// collision would replace this manual escape hatch — until then this link is the recovery path TM-992's
+// re-gate requires (see TM-987 / the TM-992 scope comment pulled from it).
+const SUPPORT_EMAIL = "hello@10xai.co.uk";
+const RECOVERY_SUBJECT = "Phone number stuck on another account";
 
 /** Human copy for the phone error line, mapping the Firebase auth error codes we care about (TM-930). */
 function phoneVerifyErrorCopy(err) {
@@ -223,6 +235,8 @@ function markPhoneVerified(e164) {
   if (phoneVerify.changeBtn) phoneVerify.changeBtn.hidden = false;
   // TM-932: once verified, the "Use my verified number" adopt shortcut is moot — hide it.
   if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.hidden = true;
+  // TM-987: verified → any prior collision is resolved — retract the recovery affordance.
+  setPhoneRecoveryVisible(false);
 }
 
 /**
@@ -270,6 +284,9 @@ function unverifyPhone() {
   // mismatched verified phone is linked — a plain edit-driven un-verify hides it (a user editing the
   // number toward a fresh OTP isn't in the adopt-the-linked-number flow).
   if (phoneVerify.adoptBtn) phoneVerify.adoptBtn.hidden = true;
+  // TM-987: editing/re-sending is a fresh attempt (likely a DIFFERENT number) — retract the collision
+  // recovery affordance so it only ever shows against the number that actually collided.
+  setPhoneRecoveryVisible(false);
 }
 
 /**
@@ -316,6 +333,12 @@ async function confirmPhoneOtp(code) {
     // and paint the mapped error. Collision paints the hard-block copy.
     phoneVerify.otp?.clear();
     setFieldError("phone", phoneVerifyErrorCopy(err));
+    // TM-987: a cross-account collision hard-block ("already registered") is a dead end without a merge
+    // path — reveal the contact-support recovery affordance so a user whose genuinely-owned number is
+    // stuck on another historical account has a way forward (the TM-987 runbook; TM-306(b) claim-transfer
+    // is the eventual in-app fix). Any OTHER error (bad/expired code, rate limit) hides it — those are
+    // retryable on this same account and don't need the support path.
+    setPhoneRecoveryVisible(isPhoneCollision(err));
     phoneVerify.otp?.focus();
   } finally {
     phoneVerify.sending = false;
@@ -1224,6 +1247,25 @@ function buildPhoneVerify(id, describedBy) {
     hidden: true,
   });
 
+  // TM-987: the cross-account collision recovery affordance. Hidden until a hard-block collision
+  // (auth/credential-already-in-use) reveals it. It's a mailto to support (the TM-987 runbook path) plus
+  // a short "this is your number?" prompt, so a user whose genuinely-owned number is stuck on another
+  // historical account isn't left at a dead end. Built with el() (textContent only — XSS-safe) and theme
+  // tokens; the <a> is a normal link so it's keyboard-reachable + screen-reader announced.
+  const recoveryEl = el(
+    "p",
+    { id: `${id}-recovery`, class: "tm-field-hint tm-phone-recovery", role: "status", hidden: true },
+    [
+      "Is this your number? ",
+      el("a", {
+        class: "tm-phone-recovery-link",
+        href: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(RECOVERY_SUBJECT)}`,
+        text: "Contact support",
+      }),
+      " to move it to this account.",
+    ],
+  );
+
   // The gate-local invisible reCAPTCHA host — the login one (#recaptcha-container) lives in the login
   // view, which isn't mounted here. Firebase renders the invisible widget into this element.
   const recaptcha = el("div", { id: `${id}-recaptcha`, class: "tm-phone-recaptcha", "aria-hidden": "true" });
@@ -1248,6 +1290,7 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.statusEl = statusEl;
   phoneVerify.changeBtn = changeBtn;
   phoneVerify.adoptBtn = adoptBtn;
+  phoneVerify.recoveryEl = recoveryEl;
   phoneVerify.recaptcha = recaptcha;
   // The six-box widget auto-submits through confirmPhoneOtp on the sixth digit (TM-867 onComplete),
   // exactly like login.js's SMS step — no explicit verify click.
@@ -1255,7 +1298,18 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.cooldown = attachResendCooldown({ button: resendBtn, codeNoun: "SMS code" });
   phoneVerify.built = true;
 
-  return [sendBtn, adoptBtn, statusEl, changeBtn, otpWrap, recaptcha];
+  return [sendBtn, adoptBtn, statusEl, changeBtn, recoveryEl, otpWrap, recaptcha];
+}
+
+/** Show/hide the TM-987 cross-account collision recovery affordance (contact-support link). */
+function setPhoneRecoveryVisible(visible) {
+  if (phoneVerify.recoveryEl) phoneVerify.recoveryEl.hidden = !visible;
+}
+
+/** Whether an error is the cross-account phone collision hard-block (TM-987 recovery trigger). */
+function isPhoneCollision(err) {
+  const code = err?.code;
+  return code === "auth/credential-already-in-use" || code === "auth/account-exists-with-different-credential";
 }
 
 // TM-684: avatar upload + bio ship disabled; wire to onboarding payload

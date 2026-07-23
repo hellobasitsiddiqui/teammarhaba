@@ -50,6 +50,15 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
     opsService: "teammarhaba-backend",
     opsRepo: "hellobasitsiddiqui/teammarhaba",
     opsJiraBoardUrl: "https://10xai.atlassian.net/jira/software/projects/TM/boards/1",
+    // TM-992: the retroactive phone re-verify DEADLINE (decision C = GRACE, then FORCE). Existing accounts
+    // whose stored phone was never OTP-verified see a dismissible GRACE nudge (phone-reverify-notice.js)
+    // until this date, and are HARD-GATED through the #/onboarding verify-and-link flow (router.js) only
+    // on/after it. SAFE DEFAULT: `null` = GRACE-ONLY — with no date set the re-gate never hard-locks a
+    // user out, so we can't strand existing accounts before product picks a cut-off. Product starts the
+    // countdown by injecting an ISO-8601 date here at deploy time (same seam as apiBaseUrl / buildVersion,
+    // e.g. `phoneReverifyDeadline: "2026-09-01"`); parseReverifyDeadline also accepts epoch-ms. Keep the
+    // token EXACTLY `phoneReverifyDeadline: null` so a deploy sed can find + replace it.
+    phoneReverifyDeadline: null,
     flags: Object.freeze({
         // Membership slice (TM-457): ships OFF (TM-725 — committed default reconciled to match the gate
         // comments above and every reader's "shipped OFF" note). Stays inert dead code until the tier
