@@ -37,6 +37,7 @@ import { firebaseConfig } from "./firebase-config.js";
 import { shouldUseRedirect } from "./auth-env.js";
 import { shouldDisablePhoneAppVerification } from "./phone-e2e.js";
 import { decideLink } from "./account-link-policy.js";
+import { obtainRecaptchaVerifier, discardRecaptchaVerifier } from "./recaptcha-session-core.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -197,57 +198,75 @@ export function signInWithEmailCodeToken(customToken) {
  * <p>Real SMS needs the Firebase **Phone** provider enabled in the console (Blaze plan, paid per SMS)
  * — that's the separate human ticket **TM-239**; this path is built + tested now against the Auth
  * emulator's test numbers (no real SMS, no reCAPTCHA challenge), so enabling the provider later needs
- * no code change. We create a fresh verifier per attempt and clear any previous one so a retry can't
- * reuse a solved/expired widget.
+ * no code change. The invisible verifier is created ONCE per verify session and REUSED across sends
+ * (TM-1007 — see `recaptchaSession` below): the SDK re-arms the widget after every send, and
+ * recreating one on an already-rendered container is exactly what broke every RESEND.
  *
  * @param {string} phoneNumber E.164 phone number to text the code to.
  * @param {HTMLElement} containerEl element to host the invisible reCAPTCHA.
  * @returns {Promise<import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js").ConfirmationResult>}
  */
 export async function startPhoneSignIn(phoneNumber, containerEl) {
-  if (recaptchaVerifier) {
-    try {
-      recaptchaVerifier.clear();
-    } catch {
-      /* already cleared/never rendered — non-fatal. */
-    }
+  const verifier = obtainRecaptchaVerifier(
+    recaptchaSession,
+    containerEl,
+    (el) => new RecaptchaVerifier(auth, el, { size: "invisible" }),
+  );
+  try {
+    return await signInWithPhoneNumber(auth, phoneNumber, verifier);
+  } catch (err) {
+    // A failed send may leave the widget wedged / its token consumed — drop the verifier so the
+    // retry rebuilds fresh (obtain empties the container first, so no dirty-container throw).
+    discardRecaptchaVerifier(recaptchaSession);
+    throw err;
   }
-  recaptchaVerifier = new RecaptchaVerifier(auth, containerEl, { size: "invisible" });
-  return signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
 }
 
-/** The live reCAPTCHA verifier for the in-flight phone sign-in, or null between attempts. */
-let recaptchaVerifier = null;
+/**
+ * The ONE live invisible-reCAPTCHA verifier shared by both phone flows (TM-1007). Invisible
+ * reCAPTCHA is designed to be created once and reused across sends — the SDK's phone API calls
+ * `verifier._reset()` after every send, re-arming the widget — so a RESEND reuses this verifier
+ * instead of clear()+recreate (which threw "reCAPTCHA has already been rendered in this element",
+ * because clear() does NOT remove an invisible widget's DOM from the container). A fresh verifier
+ * is only built for a genuinely new session (different/remounted container, or a retry after a
+ * failed send discarded it) — the lifecycle rules live in recaptcha-session-core.js (unit-tested;
+ * real-reCAPTCHA rendering is unreachable in the e2e Auth-emulator run, see `appVerificationDisabledForTesting` above).
+ */
+const recaptchaSession = { verifier: null, container: null };
 
 /**
  * Begin a phone VERIFY-AND-LINK (TM-930, the #/onboarding completion gate) — the verify half. Mirrors
- * {@link startPhoneSignIn} exactly (fresh invisible reCAPTCHA per attempt, previous one cleared so a
- * retry can't reuse a solved/expired widget), but instead of signing a NEW session in, it drives
- * `PhoneAuthProvider.verifyPhoneNumber` so the resulting credential can be LINKED to the ALREADY
- * signed-in account (see {@link confirmPhoneLink}). The user is already authenticated on the gate —
- * we are proving they own the number and binding it to that account, not starting a session.
+ * {@link startPhoneSignIn} exactly (one reusable invisible reCAPTCHA per verify session, TM-1007),
+ * but instead of signing a NEW session in, it drives `PhoneAuthProvider.verifyPhoneNumber` so the
+ * resulting credential can be LINKED to the ALREADY signed-in account (see {@link confirmPhoneLink}).
+ * The user is already authenticated on the gate — we are proving they own the number and binding it
+ * to that account, not starting a session.
  *
- * <p>Shares the module-level `recaptchaVerifier` with the SMS sign-in path on purpose: both are
- * fresh-verifier-per-attempt, and the two flows are never in flight at the same time (the gate only
- * shows post sign-in; the login SMS flow only shows signed-out). Reusing the one slot keeps the
- * clearing contract (`auth.js:196-197`) intact — a new attempt on EITHER path clears whatever verifier
- * was left behind.
+ * <p>Shares the module-level `recaptchaSession` with the SMS sign-in path on purpose: the two flows
+ * are never in flight at the same time (the gate only shows post sign-in; the login SMS flow only
+ * shows signed-out) and they host the widget in DIFFERENT container elements, so switching flows is
+ * exactly the "new session" case — obtain retires the other flow's verifier and builds fresh into
+ * an emptied container. A RESEND on the same flow reuses the live verifier (the TM-1007 fix).
  *
  * @param {string} phoneE164 the E.164 number to text the code to (e.g. "+447700900456").
  * @param {HTMLElement} containerEl element to host the invisible reCAPTCHA.
  * @returns {Promise<string>} the Firebase `verificationId` — pass it to {@link confirmPhoneLink}.
  */
 export async function startPhoneVerify(phoneE164, containerEl) {
-  if (recaptchaVerifier) {
-    try {
-      recaptchaVerifier.clear();
-    } catch {
-      /* already cleared/never rendered — non-fatal. */
-    }
-  }
-  recaptchaVerifier = new RecaptchaVerifier(auth, containerEl, { size: "invisible" });
+  const verifier = obtainRecaptchaVerifier(
+    recaptchaSession,
+    containerEl,
+    (el) => new RecaptchaVerifier(auth, el, { size: "invisible" }),
+  );
   const provider = new PhoneAuthProvider(auth);
-  return provider.verifyPhoneNumber(phoneE164, recaptchaVerifier);
+  try {
+    return await provider.verifyPhoneNumber(phoneE164, verifier);
+  } catch (err) {
+    // Same retry hygiene as startPhoneSignIn: a failed send drops the verifier so the next
+    // attempt (often the user immediately re-tapping Send/Resend) starts from a clean widget.
+    discardRecaptchaVerifier(recaptchaSession);
+    throw err;
+  }
 }
 
 /**
