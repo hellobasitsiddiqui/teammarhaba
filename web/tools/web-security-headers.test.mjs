@@ -40,6 +40,15 @@ test("the SPA is served with a Content-Security-Policy", () => {
   // Scripts: self + the Firebase SDK CDN + the Revolut widget — and NO 'unsafe-inline' script exec.
   assert.match(csp, /script-src[^;]*https:\/\/www\.gstatic\.com/, "CSP script-src must allow the Firebase SDK (gstatic)");
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/, "CSP script-src must NOT allow 'unsafe-inline' (XSS)");
+  // Firebase phone/SMS auth (TM-1002): the SDK's invisible reCAPTCHA hard-codes
+  // https://www.google.com/recaptcha/ for BOTH the api.js loader script AND the challenge iframe
+  // (see web/src/assets/auth.js — RecaptchaVerifier). If either directive omits it, the loader is
+  // CSP-blocked, the verifier never renders, and EVERY phone number fails sign-in in prod — an
+  // emulator run can't catch this (test numbers bypass real reCAPTCHA), so the header is pinned here.
+  // The allowance is path-scoped (`/recaptcha/`) so the rest of google.com stays blocked.
+  assert.match(csp, /script-src[^;]*www\.google\.com\/recaptcha\//, "CSP script-src must allow the reCAPTCHA loader (TM-1002 — breaks ALL phone auth)");
+  assert.match(csp, /frame-src[^;]*www\.google\.com\/recaptcha\//, "CSP frame-src must allow the reCAPTCHA challenge iframe (TM-1002 — breaks ALL phone auth)");
+  assert.match(csp, /frame-src[^;]*recaptcha\.google\.com\/recaptcha\//, "CSP frame-src must allow the recaptcha.google.com challenge host (TM-1002 — breaks ALL phone auth)");
   // Fonts + the Revolut card iframe must survive the policy (regression: don't break the app).
   assert.match(csp, /font-src[^;]*https:\/\/fonts\.gstatic\.com/, "CSP must allow the Google Fonts font host");
   assert.match(csp, /frame-src[^;]*revolut\.com/, "CSP frame-src must allow the Revolut checkout iframe");
