@@ -282,20 +282,25 @@ public class InterestAdminService {
 
     /**
      * Per-LABEL selection analytics for the admin console's "Selected by" column (TM-832): for every
-     * label anyone has selected, how many users picked it ({@code selectorCount}) and what whole-number
-     * percentage of the ACTIVE user base that is. SCOPE: count + percent only — the gender split is
-     * deferred (TM-955).
+     * label an ACTIVE user has selected, how many active users picked it ({@code selectorCount}) and what
+     * whole-number percentage of the ACTIVE user base that is. SCOPE: count + percent only — the gender
+     * split is deferred (TM-955).
      *
-     * <p>Exactly TWO aggregate reads, never an N+1: one {@code COUNT(*) GROUP BY label} over the whole
-     * snapshot log ({@link UserInterestRepository#selectionCountsByLabel()}) and one active-user count
-     * ({@link UserRepository#countActiveUsers()}) — the shared percentage denominator. Because the count
-     * is keyed on the free-text snapshot label (TM-773), a selection of a since-renamed or since-retired
-     * interest is still tallied under the label it was picked as, so a retired catalogue interest keeps
-     * its historical count. A label nobody selected is simply absent from the result (the client renders
-     * it as {@code 0 (0%)}).
+     * <p>Exactly TWO aggregate reads, never an N+1: one {@code COUNT(*) GROUP BY label} restricted to the
+     * snapshots owned by active users ({@link UserInterestRepository#selectionCountsByLabel()}) and one
+     * active-user count ({@link UserRepository#countActiveUsers()}) — the shared percentage denominator.
+     * <b>Both the numerator and the denominator are scoped to the SAME population</b> (enabled,
+     * non-deleted accounts) so the percentage is always {@code 0..100} — counting a snapshot owned by a
+     * suspended or soft-deleted account (which outlives its owner's tombstone) against an active-only
+     * denominator previously let a per-interest percent exceed 100% (TM-961). Because the count is keyed
+     * on the free-text snapshot label (TM-773), a selection of a since-renamed or since-retired interest
+     * is still tallied under the label it was picked as (as long as the picking user is active), so a
+     * retired catalogue interest keeps its historical count. A label no active user selected is simply
+     * absent from the result (the client renders it as {@code 0 (0%)}).
      *
      * <p>Percent is 0-guarded: with no active users the denominator is 0, so every percent is 0 rather
-     * than a divide-by-zero. Otherwise {@code percent = round(100 * selectorCount / activeUsers)}.
+     * than a divide-by-zero. Otherwise {@code percent = round(100 * selectorCount / activeUsers)}, always
+     * in {@code 0..100} because numerator and denominator share the active-user population.
      */
     @Transactional(readOnly = true)
     public SelectionStats selectionStats() {

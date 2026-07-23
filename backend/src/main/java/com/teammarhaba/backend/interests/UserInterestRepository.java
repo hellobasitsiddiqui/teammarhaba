@@ -32,21 +32,45 @@ public interface UserInterestRepository extends JpaRepository<UserInterest, Long
     long countBySourceInterestId(Long sourceInterestId);
 
     /**
-     * Per-LABEL selection tallies across the WHOLE snapshot log (TM-832) — {@code COUNT(*) GROUP BY
-     * label} — the aggregate behind the admin interests console's "Selected by" analytics. ONE query
-     * (never an N+1): every label's selector count comes back in a single grouped scan, and the caller
-     * joins it to the catalogue rows by label.
+     * Per-LABEL selection tallies over the snapshots owned by ACTIVE users (TM-832, TM-961) — a
+     * {@code COUNT(*) GROUP BY label} restricted to selections whose owner is an <em>active</em> account
+     * (enabled, non-deleted) — the aggregate behind the admin interests console's "Selected by"
+     * analytics. ONE query (never an N+1): every label's selector count comes back in a single grouped
+     * scan, and the caller joins it to the catalogue rows by label.
+     *
+     * <p><b>Population must match the percentage denominator (TM-961).</b> The percent this count feeds
+     * is {@code selectorCount / activeUsers}, where {@code activeUsers} =
+     * {@link com.teammarhaba.backend.user.UserRepository#countActiveUsers()} = accounts with
+     * {@code enabled = true AND deleted_at IS NULL}. So this count is scoped to the SAME population by an
+     * explicit inner join to {@code users} with the identical predicate. If it counted ALL snapshots
+     * (including those owned by a suspended or soft-deleted account — a {@code user_interest} row outlives
+     * its owner's tombstone), a label picked only by non-active users could report a {@code selectorCount}
+     * larger than {@code activeUsers} and the percentage would exceed 100% (TM-961). The join keeps
+     * numerator and denominator on the same footing, so every percent is in {@code 0..100}.
+     *
+     * <p><b>Native query, not JPQL.</b> {@code UserInterest.userId} is a plain {@code Long}, deliberately
+     * NOT a JPA association (it stays decoupled from the {@code User} aggregate's {@code @SQLRestriction}),
+     * so a JPQL join could not reach {@code users} and could not honour the soft-delete restriction. A
+     * native join to {@code users} spells the active predicate out directly, mirroring
+     * {@code countActiveUsers()} exactly.
      *
      * <p>Keyed on the snapshot's FREE-TEXT {@code label} (TM-773), deliberately NOT on
      * {@code source_interest_id}: a selection of a since-renamed or since-retired interest is still
      * counted under the label it was picked as, which is exactly the label the catalogue row is matched
-     * by. That means a retired catalogue interest still shows its historical selection count, and it is
-     * why the count "correctly includes selections of a since-retired interest" (the ticket contract).
+     * by. That means a retired catalogue interest still shows its historical selection count (as long as
+     * the picking user is still active), and it is why the count "correctly includes selections of a
+     * since-retired interest" (the ticket contract).
      *
      * <p>Returned as a lightweight {@link LabelCount} projection (label + count) rather than entities;
-     * a label with zero selections is simply absent (the caller treats a missing label as 0).
+     * a label with zero active selections is simply absent (the caller treats a missing label as 0).
      */
-    @Query("select ui.label as label, count(ui) as count from UserInterest ui group by ui.label")
+    @Query(
+            value =
+                    "select ui.label as label, count(*) as count from user_interest ui "
+                            + "join users u on u.id = ui.user_id "
+                            + "where u.enabled = true and u.deleted_at is null "
+                            + "group by ui.label",
+            nativeQuery = true)
     List<LabelCount> selectionCountsByLabel();
 
     /** A single {@code (label, count)} tally row from {@link #selectionCountsByLabel()} (TM-832). */
