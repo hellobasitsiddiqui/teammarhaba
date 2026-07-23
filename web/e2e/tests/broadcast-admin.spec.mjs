@@ -139,9 +139,21 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   // rings — before the admin has typed anything. (validateBroadcast still gates Send; only the visible
   // errors are held back until a field is touched — composeErrorsToShow.) This is the fail-before spot:
   // pre-fix all three errors painted on first load.
-  await expect(page.locator("#admin-broadcast-title-error")).toBeHidden();
-  await expect(page.locator("#admin-broadcast-body-error")).toBeHidden();
-  await expect(page.locator("#admin-broadcast-recipients")).toBeHidden();
+  //
+  // TM-995: anchor each error element's EXISTENCE (toBeAttached) BEFORE asserting it's hidden. A bare
+  // toBeHidden() passes vacuously on ZERO matches, so if one of these ids were renamed/removed the guard
+  // would silently go green — asserting "hidden" without first proving the node is in the DOM is not a
+  // real check. The attached-then-hidden pair fails loudly on a rename yet still proves the pristine
+  // panel doesn't shout.
+  const titleError = page.locator("#admin-broadcast-title-error");
+  const bodyError = page.locator("#admin-broadcast-body-error");
+  const recipientsError = page.locator("#admin-broadcast-recipients");
+  await expect(titleError).toBeAttached();
+  await expect(titleError).toBeHidden();
+  await expect(bodyError).toBeAttached();
+  await expect(bodyError).toBeHidden();
+  await expect(recipientsError).toBeAttached();
+  await expect(recipientsError).toBeHidden();
   await expect(page.locator("#admin-broadcast-title")).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.locator("#admin-broadcast-body")).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.locator("#admin-broadcast-send")).toBeDisabled(); // still gated, just not shouting

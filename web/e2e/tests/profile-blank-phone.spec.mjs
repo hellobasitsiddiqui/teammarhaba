@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
-import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
+import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
 
 // Phone-mandatory behaviour (TM-880 — supersedes the TM-188 "blank phone is allowed" regression this
@@ -85,11 +85,10 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
   const email = `e2e-phonegate-${Date.now()}@teammarhaba.test`;
   // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
   // strict 1:1 Firebase phone uniqueness a FIXED number would already be linked on a re-run against a
-  // non-wiped emulator. Derive a per-run GB national number (trunk-0-less, 5-digit clock tail) + its
-  // composed E.164; clear of the persona band (+4477009001NN) since the tail is clock-seeded.
-  const gateTail = String(Date.now() % 100_000).padStart(5, "0"); // 5 digits
-  const gateNational = `7700 9${gateTail}`;
-  const gateE164 = `+4477009${gateTail}`;
+  // non-wiped emulator. TM-994: uniqueGateGbNumber derives a per-run GB national/E.164 pair AND excludes
+  // the persona band (+4477009001NN) by construction — a raw `Date.now()%100000` tail could land in
+  // 00100–00108 (~1/1100 runs) and 409 the second claim against a seeded persona.
+  const { national: gateNational, e164: gateE164 } = uniqueGateGbNumber();
 
   // 1. Sign in a brand-new email-code user (⇒ no phone on record).
   await page.goto("/#/login");

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { peekPhoneOtp } from "../helpers/onboarding.mjs";
-import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { API_BASE_URL, dbConfig, uniqueGateGbNumber } from "../fixtures.mjs";
 
 // TM-930 review fixes — two regressions in the gate phone VERIFY-AND-LINK step (onboarding.js):
 //
@@ -52,10 +52,10 @@ async function signInFreshUser(page, email) {
   await expectSignedIn(page);
 }
 
-function uniqueGbNumber(seed = Date.now()) {
-  const five = String(seed).slice(-5).padStart(5, "0");
-  return { national: `7700 9${five}`, e164: `+4477009${five}` };
-}
+// TM-994: run-unique GB gate number, guaranteed disjoint from the seeded persona band (+4477009001NN)
+// by construction — see fixtures.uniqueGateGbNumber. (A local `+4477009`+5 generator could land in the
+// 00100–00108 persona tail ~1/1100 runs and 409 on the second claim.)
+const uniqueGbNumber = uniqueGateGbNumber;
 
 async function fillGateProfile(page, { name, location = "London", age = 30, phone }) {
   await expect(page.locator("#onboarding-form")).toBeVisible();

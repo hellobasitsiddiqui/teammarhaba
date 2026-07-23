@@ -44,10 +44,15 @@ export const WEB_BASE_URL = process.env.E2E_WEB_BASE_URL || "http://127.0.0.1:80
  * persisted state never collide on a number under the strict 1:1 uniqueness rule.
  *
  * Format: `+447700` + 5 clock digits → e.g. `+447700 48213`. Its normalized (digits-only) key is 11
- * digits, whereas the fixed persona numbers `+4477009001NN` normalize to 12 digits — so a generated
- * number can NEVER equal a persona number (different digit length), independent of the clock value. Two
- * generated numbers only clash if their millisecond clocks agree modulo the window, which across a
- * single serial run never happens (the same pattern tm930-gate-phone-verify-link's uniqueGbNumber uses).
+ * digits, whereas the fixed persona numbers `+4477009001NN` normalize to 12 digits — so a number from
+ * THIS helper can NEVER equal a persona number (different digit length), independent of the clock value.
+ * Two generated numbers only clash if their millisecond clocks agree modulo the window, which across a
+ * single serial run never happens.
+ *
+ * ⚠️ This disjoint-by-digit-length property is SPECIFIC to this `+447700`+5 = 11-digit shape. The gate
+ * specs need a full-length GB mobile (`+4477009`+5 = 12 digits, same length as the personas) to type into
+ * the onboarding picker, so they do NOT get length-disjointness for free — they must use
+ * {@link uniqueGateGbNumber}, which excludes the reserved persona tail band explicitly (TM-994).
  *
  * @param {number} [workerIndex=0] Playwright's `testInfo.workerIndex` (serial today, but future-proofed).
  * @returns {string} an E.164 number, e.g. "+447700048213".
@@ -56,6 +61,57 @@ export function uniqueTestPhone(workerIndex = 0) {
   // 5 varying digits: low 4 of the ms clock + a 1-digit worker lane (0–9). Padded, so always 5 digits.
   const tail = String((Date.now() % 10_000) * 10 + (workerIndex % 10)).padStart(5, "0");
   return `+447700${tail}`;
+}
+
+// ─── Gate-walk verified-phone allocation (TM-994) ───────────────────────────────────────────────
+//
+// The 6 first-run-gate specs (tm930-gate-phone-verify-link, tm930-phone-edit-bypass, onboarding-gate,
+// profile-blank-phone, onboarding-to-profile, golden-path) sign a fresh user up and VERIFY+LINK a phone
+// through the browser onboarding gate. The picker needs a full-length GB national mobile, so they compose
+// `+4477009` + 5 clock digits = a 12-digit normalized key — the SAME length as the seeded persona band
+// `+4477009001NN` (NN = 00…08 ⇒ normalized tails 00100…00108). So `uniqueTestPhone`'s "different digit
+// length ⇒ never a persona" reasoning does NOT hold here: when `Date.now() % 100000` lands in 00100–00108
+// (~1 run in 1100) the generated number is byte-for-byte a persona number, and the second account to claim
+// it hits Firebase `credential-already-in-use` + the backend `users_phone_normalized_uq` 409 — an opaque,
+// ~1/1100 flake. These helpers make the generated tail disjoint from the persona band BY CONSTRUCTION.
+
+/** The reserved persona tail band: `+4477009001NN`, NN = 00…08 ⇒ 5-digit tails 00100–00108. */
+export const PERSONA_TAIL_MIN = 100;
+export const PERSONA_TAIL_MAX = 108;
+
+/**
+ * Force a 5-digit gate-phone tail OUT of the reserved persona band (00100–00108) while keeping it a
+ * 5-digit value, so `+4477009<tail>` can NEVER equal a `+4477009001NN` persona number. Pure + total
+ * (defined for every 5-digit input) → unit-testable across the whole 00000–99999 space.
+ *
+ * A tail already outside the band is returned unchanged; a tail inside it is bumped by 1000 (→ 01100–
+ * 01108), which is still 5 digits and provably outside 00100–00108 — the only reserved band in the
+ * `+4477009` prefix. Idempotent: applying it twice is a no-op.
+ *
+ * @param {number|string} tail a 0–99999 tail (any width; coerced + clamped to 5 digits).
+ * @returns {string} a 5-digit string guaranteed to be < PERSONA_TAIL_MIN or > PERSONA_TAIL_MAX.
+ */
+export function outOfPersonaBand(tail) {
+  let n = Math.abs(Number(tail)) % 100_000;
+  if (n >= PERSONA_TAIL_MIN && n <= PERSONA_TAIL_MAX) n += 1000; // hop out of 001xx, still 5 digits
+  return String(n).padStart(5, "0");
+}
+
+/**
+ * A per-run-unique GB national/E.164 mobile for the onboarding-gate VERIFY+LINK walk, guaranteed disjoint
+ * from the seeded persona band by construction (TM-994). Shape matches what the specs already type:
+ * `{ national: "7700 9XXXXX", e164: "+4477009XXXXX" }` — a full-length GB mobile the picker accepts.
+ *
+ * @param {number} [seed=Date.now()] uniqueness source (the wall clock, offset per test to de-clash siblings).
+ * @param {string|number} [suffix=""] extra distinguishing digits appended before de-banding (e.g. golden-path
+ *        appends a per-project 0/1 so chromium and mobile-chromium runs in one emulator don't collide).
+ * @returns {{national: string, e164: string}} the national number to type + its composed E.164.
+ */
+export function uniqueGateGbNumber(seed = Date.now(), suffix = "") {
+  // Derive 5 varying digits from the clock (+ optional suffix), then hop out of the persona band.
+  const raw = `${Math.abs(Number(seed))}${suffix}`.replace(/\D/g, "");
+  const five = outOfPersonaBand(Number(raw.slice(-5)) || 0);
+  return { national: `7700 9${five}`, e164: `+4477009${five}` };
 }
 
 /**
