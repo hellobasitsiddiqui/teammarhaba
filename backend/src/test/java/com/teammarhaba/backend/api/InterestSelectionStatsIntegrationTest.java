@@ -169,6 +169,50 @@ class InterestSelectionStatsIntegrationTest extends AbstractIntegrationTest {
         assertThat(popularPercent).isEqualTo((int) Math.round(100.0 * 3 / activeUsers));
     }
 
+    /**
+     * TM-961 regression: the selector count (numerator) and the active-user total (denominator) must be
+     * scoped to the SAME population, so a per-interest percentage can never exceed 100%.
+     *
+     * <p>Boundary case: a label selected by ONE active user PLUS a suspended user PLUS a soft-deleted
+     * user. All three own a {@code user_interest} snapshot for the label (a snapshot outlives its owner's
+     * suspend/tombstone), but only the active user is inside the {@code activeUsers} denominator. Before
+     * the fix the numerator counted ALL THREE snapshots while the denominator counted ONLY the active
+     * user, so this label's {@code selectorCount} exceeded its slice of {@code activeUsers} and the
+     * percent could round above 100. After the fix the count is joined to active users, so the numerator
+     * drops the suspended + deleted selections and the percent is always in {@code 0..100}.
+     */
+    @Test
+    void percentNeverExceeds100WhenNonActiveUsersSelectedTheLabel() {
+        Long active = newActiveUser("cap-active");
+        Long suspended = newActiveUser("cap-suspended");
+        Long deleted = newActiveUser("cap-deleted");
+
+        // All three pick the SAME label. Its snapshots survive their owners' suspend/tombstone.
+        select(active, "Cap", null);
+        select(suspended, "Cap", null);
+        select(deleted, "Cap", null);
+
+        // Flip one account suspended (enabled=false) and one soft-deleted (deleted_at set) via native
+        // updates — both drop out of the active-user denominator (countActiveUsers), so their selections
+        // must ALSO drop out of the numerator for the percentage to stay <= 100.
+        jdbc.update("update users set enabled = false where id = ?", suspended);
+        jdbc.update("update users set deleted_at = now() where id = ?", deleted);
+
+        InterestAdminService.SelectionStats stats = adminService.selectionStats();
+        long activeUsers = stats.activeUsers();
+
+        InterestAdminService.LabelSelectionStat capStat = stats.stats().stream()
+                .filter(s -> s.label().equals(LABEL_PREFIX + "Cap"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("expected a stat row for the Cap label"));
+
+        // Numerator is scoped to active users: only the single active selection is counted (not 3).
+        assertThat(capStat.selectorCount()).isEqualTo(1);
+        // The count never exceeds the denominator, so the percentage is always in 0..100.
+        assertThat(capStat.selectorCount()).isLessThanOrEqualTo(activeUsers);
+        assertThat(capStat.percent()).isBetween(0, 100);
+    }
+
     @Test
     void suspendedUsersAreNotInThePercentDenominator() {
         // Two active + one suspended account, so activeUsers counts only the enabled ones.
