@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import pg from "pg";
-import { ADMIN, API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { ADMIN, API_BASE_URL, dbConfig, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
 
 // First-login profile gate (TM-250): a brand-new passwordless user is routed to a blocking
@@ -51,11 +51,10 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   const email = `e2e-onboard-${Date.now()}@teammarhaba.test`;
   // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
   // strict 1:1 Firebase phone uniqueness a FIXED number (was +447700900456) would already be linked on a
-  // re-run against a non-wiped emulator. Derive a per-run GB national/E.164 pair from the clock (5-digit
-  // tail, clear of the persona band +4477009001NN).
-  const phoneTail = String(Date.now() % 100_000).padStart(5, "0");
-  const gateNational = `7700 9${phoneTail}`;
-  const gateE164 = `+4477009${phoneTail}`;
+  // re-run against a non-wiped emulator. TM-994: uniqueGateGbNumber derives a per-run GB national/E.164
+  // pair AND excludes the persona band (+4477009001NN) by construction — a raw `Date.now()%100000` tail
+  // could land in 00100–00108 (~1/1100 runs) and 409 the second claim against a seeded persona.
+  const { national: gateNational, e164: gateE164 } = uniqueGateGbNumber();
   // TM-898: location is the TM-877 allowed-cities dropdown now (it was free text, which let the
   // gate persist an off-list city the profile form refuses). A multi-word list city pins the
   // value-with-a-space case end-to-end.

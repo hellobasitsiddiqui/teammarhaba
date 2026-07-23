@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
-import { API_BASE_URL, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
+import { API_BASE_URL, dbConfig, lettersOnlyStamp, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
 import { signOutViaProfile } from "../helpers/auth-state.mjs";
 
@@ -187,12 +187,13 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   // TM-930: the number must be OTP-verified + LINKED to a Firebase account, and Firebase enforces
   // strict 1:1 number↔account. golden-path runs on BOTH the chromium and mobile-chromium projects in
   // one suite (one emulator), so a FIXED number would make the second project collide with the first.
-  // Derive a per-project-run-unique GB number from the stamp + the project name so each run links a
-  // fresh number (mirrors the tm930 spec's uniqueGbNumber helper).
-  const phoneSeed = String(stamp).slice(-4) + (testInfo.project.name === "mobile-chromium" ? "1" : "0");
-  const nationalPhone = `7700 9${phoneSeed}`;
+  // TM-994: uniqueGateGbNumber derives a per-project-run-unique GB number (stamp + a per-project 0/1
+  // suffix) AND excludes the seeded persona band (+4477009001NN) by construction — a raw `+4477009`+5
+  // tail could land in 00100–00108 (~1/1100 runs) and 409 the second claim against a seeded persona.
+  const projectDigit = testInfo.project.name === "mobile-chromium" ? "1" : "0";
+  const { national: nationalPhone, e164: phoneE164 } = uniqueGateGbNumber(stamp, projectDigit);
   await page.fill("#onboarding-phone", nationalPhone);
-  await verifyGatePhone(page, `+4477009${phoneSeed}`);
+  await verifyGatePhone(page, phoneE164);
   const onboarded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me/onboarding") && r.request().method() === "POST",
   );

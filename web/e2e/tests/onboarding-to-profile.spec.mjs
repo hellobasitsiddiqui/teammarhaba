@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { API_BASE_URL, dbConfig, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
 
 // Cold onboarding → profile journey (TM-738 P0). A BRAND-NEW passwordless user who deep-links the
@@ -90,11 +90,10 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   const age = 27;
   // TM-934: the number this fresh user VERIFIES + LINKS in the browser gate must be run-unique — under
   // strict 1:1 Firebase phone uniqueness a FIXED number (was +447700900789) would already be linked on a
-  // re-run against a non-wiped emulator. Derive a per-run GB national/E.164 pair from the clock (5-digit
-  // tail, clear of the persona band +4477009001NN).
-  const phoneTail = String(Date.now() % 100_000).padStart(5, "0");
-  const gateNational = `7700 9${phoneTail}`;
-  const gateE164 = `+4477009${phoneTail}`;
+  // re-run against a non-wiped emulator. TM-994: uniqueGateGbNumber derives a per-run GB national/E.164
+  // pair AND excludes the persona band (+4477009001NN) by construction — a raw `Date.now()%100000` tail
+  // could land in 00100–00108 (~1/1100 runs) and 409 the second claim against a seeded persona.
+  const { national: gateNational, e164: gateE164 } = uniqueGateGbNumber();
 
   // DEEP-LINK the Profile page as a brand-new user: the signed-out guard stashes #/profile as the
   // intended route and bounces to the login form; we then sign in. The intended-route memory is what

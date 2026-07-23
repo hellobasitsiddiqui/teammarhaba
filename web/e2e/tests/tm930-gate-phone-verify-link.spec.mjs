@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { expectSignedIn } from "../helpers/auth-state.mjs";
 import { completeInterestsStep, peekPhoneOtp } from "../helpers/onboarding.mjs";
-import { API_BASE_URL, dbConfig } from "../fixtures.mjs";
+import { API_BASE_URL, dbConfig, uniqueGateGbNumber } from "../fixtures.mjs";
 
 // TM-930 — the #/onboarding completion gate now makes the mandatory phone a Firebase phone
 // VERIFY-AND-LINK step: the user proves ownership via an OTP and the credential is linked to their
@@ -60,11 +60,12 @@ async function signInFreshUser(page, email) {
  * timestamp/seed. The Auth emulator is NOT wiped between local re-runs, so a FIXED number would stay
  * linked to a prior run's account and make a fresh "link this number" collide unexpectedly — a unique
  * number per test keeps the OTP session + Firebase link unambiguous. Returns { national, e164 }.
+ *
+ * TM-994: delegates to fixtures.uniqueGateGbNumber, which additionally excludes the seeded persona tail
+ * band (+4477009001NN) by construction — a raw `+4477009`+5 tail could land in 00100–00108 ~1/1100 runs
+ * and 409 the second claim against a seeded persona. Same shape as before; disjoint by construction now.
  */
-function uniqueGbNumber(seed = Date.now()) {
-  const five = String(seed).slice(-5).padStart(5, "0");
-  return { national: `7700 9${five}`, e164: `+4477009${five}` };
-}
+const uniqueGbNumber = uniqueGateGbNumber;
 
 /** Fill the gate profile fields (name/location/age + the national phone), WITHOUT verifying. */
 async function fillGateProfile(page, { name, location = "London", age = 30, phone }) {
