@@ -534,6 +534,43 @@ export function phoneEditNeedsVerify(stored, composed, verifiedComposed) {
 }
 
 /**
+ * TM-1005: should the profile offer a "Verify this number" affordance for the CURRENT, UNCHANGED
+ * stored phone? The gap this closes: {@link phoneEditNeedsVerify} deliberately treats an unchanged
+ * number as a no-op (so a city-only edit never demands an OTP), and the TM-992 grace banner's CTA
+ * pointed at the #/onboarding gate — which the router bounces an already-onboarded user straight off
+ * during the grace window. Net effect: an account whose STORED phone was never Firebase-verified (all
+ * email-code/admin accounts + every pre-TM-930 legacy account, per {@link needsVerifiedPhone}) was told
+ * to "verify your number" with NO path that actually verifies it. This rule powers that missing path:
+ * it reveals a verify affordance on the profile phone field that runs the SAME startPhoneVerify →
+ * confirmPhoneLink flow, WITHOUT requiring the user to edit/re-type the number.
+ *
+ * Pure and orthogonal to the TM-982 save gate (this NEVER blocks a save — it only reveals an
+ * affordance). True only when ALL of:
+ *   • there IS a parseable stored E.164 (`stored`) — a missing/legacy-bare phone is
+ *     {@link needsPhoneNumber}'s / the confirm-country flow's territory, not this one's;
+ *   • the number now composed in the form is canonically THE SAME as the stored one — once the user
+ *     edits to a DIFFERENT number, the TM-982 changed-number path ({@link phoneEditNeedsVerify} + its
+ *     "Send code" affordance) owns the flow, and the two must never both claim the button;
+ *   • the account's Firebase-verified phone (`verifiedPhone` = currentUser().phoneNumber) does NOT
+ *     canonically match the stored number — i.e. exactly {@link needsVerifiedPhone}'s eligibility,
+ *     re-expressed over the live form values. Once the OTP links (or the number was verified all
+ *     along), this goes false and the affordance hides.
+ *
+ * @param {string|null|undefined} stored the canonical/raw phone on record (the loaded /me value).
+ * @param {string|null|undefined} composed the E.164 composed from the form's (picker, national) pair.
+ * @param {string|null|undefined} verifiedPhone the account's linked/verified Firebase phone
+ *   (`currentUser().phoneNumber`), or null when no phone credential is linked.
+ * @returns {boolean} true when the profile should offer "Verify this number" for the unchanged phone.
+ */
+export function phoneCurrentNeedsVerify(stored, composed, verifiedPhone) {
+  const storedCanonical = canonicalE164(stored);
+  if (storedCanonical === "") return false; // no parseable stored phone → nothing on record to verify
+  if (canonicalE164(composed) !== storedCanonical) return false; // changed → the TM-982 path owns it
+  // Unchanged: offer verification exactly when the account-level verified number isn't this one.
+  return canonicalE164(verifiedPhone) !== storedCanonical;
+}
+
+/**
  * TM-771: firstName/lastName/city carried only a length cap, so a purely numeric value ("676767")
  * saved as a name or city. A name-like value must contain at least one letter (any script — Arabic,
  * accented Latin, etc.), and may only use letters, combining marks, spaces, hyphens, apostrophes and

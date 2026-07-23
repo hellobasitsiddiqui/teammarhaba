@@ -26,10 +26,11 @@ import {
   parseReverifyDeadline,
   reverifyNoticeText,
   ReverifyDecision,
+  REVERIFY_CTA_TARGET,
+  PHONE_VERIFY_REQUEST_EVENT,
 } from "./phone-reverify-core.js";
 
 const HOST_ID = "phone-reverify-notice";
-const ONBOARDING = "#/onboarding";
 
 // Dismissed for the current page session only (in memory, like the email-verify banner) — a fresh load
 // re-nags an unverified user, but we don't pester repeatedly within one visit. Reset on sign-out.
@@ -72,16 +73,23 @@ function paint(deadline) {
 
   const message = el("span", { class: "tm-verify-banner-text", text: reverifyNoticeText(deadline) });
 
-  // "Verify now" routes into the existing #/onboarding verify-and-link gate (TM-930) — the same
-  // non-side-steppable flow the router forces after the deadline. Reusing it means the grace path and
-  // the forced path land in exactly one place. A plain hash nav (not a full reload) so it's instant.
+  // "Verify now" lands on the PROFILE and asks it to reveal the TM-1005 "Verify this number"
+  // affordance (the shared REVERIFY_CTA_TARGET + PHONE_VERIFY_REQUEST_EVENT contract from
+  // phone-reverify-core.js). It deliberately does NOT route to #/onboarding any more: during the grace
+  // window the router still counts the account as onboarded (the verified-phone term only folds into
+  // the gate on HARD_GATE), so router.js bounced an onboarded user straight off #/onboarding — the CTA
+  // was a dead-end (TM-1005). The event is dispatched AFTER the hash nav so the profile's listener (or
+  // its post-paint pending pickup) always runs against the destination view.
   const verifyBtn = el("button", {
     type: "button",
     class: "tm-verify-banner-resend",
     text: "Verify now",
     onClick: () => {
       hide();
-      if (typeof window !== "undefined") window.location.hash = ONBOARDING;
+      if (typeof window !== "undefined") {
+        window.location.hash = REVERIFY_CTA_TARGET;
+        window.dispatchEvent(new CustomEvent(PHONE_VERIFY_REQUEST_EVENT));
+      }
     },
   });
 

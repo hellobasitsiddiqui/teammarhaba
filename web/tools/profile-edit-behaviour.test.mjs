@@ -184,6 +184,9 @@ function loadProfileModule(deps) {
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     "  splitE164, composeE164, canonicalE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  phoneEditNeedsVerify,\n" +
+    // TM-1005: the pure "offer to verify the CURRENT, unchanged stored number" rule + the banner-CTA
+    // handoff event name (from phone-reverify-core.js) — both referenced by the shipped source.
+    "  phoneCurrentNeedsVerify, PHONE_VERIFY_REQUEST_EVENT,\n" +
     "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
@@ -193,6 +196,9 @@ function loadProfileModule(deps) {
   // A test seam appended to the eval copy only: reach the module-private shell/state + internals.
   const seam = "\nexport function __setShell(s){ shell = s; }\n" +
     "export function __getState(){ return state; }\n" +
+    // TM-1005: the phone verify controller (sendBtn/otpWrap/statusEl handles) so the affordance tests
+    // can assert visibility + label without re-walking the built wrapper tree.
+    "export function __phoneVerify(){ return phoneVerify; }\n" +
     "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField, buildAvatar };\n";
 
   const stripped = withoutImports.replace(/gstatic\.com|from ["']\.\//, "");
@@ -208,6 +214,10 @@ function loadProfileModule(deps) {
 // paintHub paints exactly what ships; the network + UI functions are controllable fakes.
 const coreUrl = new URL("../src/assets/profile-core.js", import.meta.url);
 const core = await import(coreUrl);
+// TM-1005: the pure banner-CTA contract (the handoff event name) — import-safe, injected REAL so the
+// profile's listener registers under the exact shipped event name.
+const reverifyCoreUrl = new URL("../src/assets/phone-reverify-core.js", import.meta.url);
+const reverifyCore = await import(reverifyCoreUrl);
 // The country picker data (TM-781) — import-safe pure data, so the REAL list/flags are injected and
 // the option-rendering test proves the exact shipped "<flag> <name> +<dial>" strings.
 const countriesUrl = new URL("../src/assets/countries.js", import.meta.url);
@@ -313,6 +323,10 @@ const deps = {
   // implementations, so the renderer's save-block + Send-code affordance run the shipped rules.
   canonicalE164: core.canonicalE164,
   phoneEditNeedsVerify: core.phoneEditNeedsVerify,
+  // TM-1005: the REAL pure "verify the current, unchanged number" rule + the real banner-CTA event
+  // name, so the affordance visibility/label wiring runs the shipped contract under Node.
+  phoneCurrentNeedsVerify: core.phoneCurrentNeedsVerify,
+  PHONE_VERIFY_REQUEST_EVENT: reverifyCore.PHONE_VERIFY_REQUEST_EVENT,
   defaultCountryFor: core.defaultCountryFor,
   phonePartsError: core.phonePartsError,
   // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
@@ -336,6 +350,18 @@ const deps = {
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
   membershipEnabled: () => false,
   MEMBERSHIP_ROUTE: "#/membership",
+};
+
+// TM-1005: a minimal fake `window`, installed BEFORE the module evals so its top-level wiring runs —
+// the banner-CTA handoff listener (window.addEventListener(PHONE_VERIFY_REQUEST_EVENT, …)) registers
+// into WINDOW_LISTENERS, where the handoff test can fire it. Everything else the module touches on
+// window is optional-chained (tmPhoneReverifyNotice) or a plain property write (tmProfile).
+const WINDOW_LISTENERS = {};
+globalThis.window = {
+  addEventListener: (type, fn) => {
+    (WINDOW_LISTENERS[type] ||= []).push(fn);
+  },
+  location: { hash: "" },
 };
 
 const profile = await loadProfileModule(deps);
@@ -1143,3 +1169,139 @@ async function withFakeDocumentAsync(run) {
     globalThis.document = prior;
   }
 }
+
+// ═══ TM-1005 — a way to verify the CURRENT, UNCHANGED stored phone ═════════════════════════════════
+//
+// The dead-end these pin shut: an account whose stored phone was never Firebase-verified (email-code /
+// admin accounts + pre-TM-930 legacy) was nagged to "verify your number", but the TM-982 affordance
+// only revealed on a phone CHANGE and the grace banner's CTA bounced off #/onboarding. The fix: the
+// same verify button now also reveals — labelled "Verify this number" — when the form holds the
+// UNCHANGED stored number and currentUser().phoneNumber isn't it, runs the SAME startPhoneVerify →
+// confirmPhoneLink flow, and the banner CTA hands off to it via PHONE_VERIFY_REQUEST_EVENT.
+//
+// FAIL-BEFORE / PASS-AFTER: evaluated against pre-TM-1005 profile.js these go red — the affordance
+// stays hidden for an unchanged number (refreshPhoneVerifyAffordance only consulted the changed-number
+// rule) and no PHONE_VERIFY_REQUEST_EVENT listener registers. Against the fixed source they pass.
+
+/** Build a REAL phone field (buildField → verify controls wired) inside a fresh shell, then fill the
+ *  form with a stored phone — the exact prefill path the page runs. Returns the phoneVerify handles. */
+function currentVerifyRig({ storedPhone = "+447700900123", accountPhone = null } = {}) {
+  TOASTS = [];
+  currentUserImpl = () => ({ uid: "u-1005", phoneNumber: accountPhone });
+  const shell = makeShell();
+  profile.__setShell(shell);
+  const built = profile.buildField(field("phone"));
+  // Swap the real built controls in as the shell's phone entry (makeShell's plain fakes don't carry
+  // the verify wiring); fillForm/composedPhoneE164 read this entry.
+  shell.fields.set("phone", { input: built.input, error: built.error, country: built.country });
+  profile.fillForm({ phone: storedPhone, city: "London", notificationPref: "EMAIL" });
+  return { shell, entry: shell.fields.get("phone"), pv: profile.__phoneVerify() };
+}
+
+test("TM-1005: 'Verify this number' renders for an UNCHANGED stored phone with no verified number", () => {
+  withFakeDocument(() => {
+    const { pv } = currentVerifyRig({ accountPhone: null });
+    assert.equal(pv.sendBtn.hidden, false, "the verify affordance must be visible — this was the dead-end");
+    assert.equal(pv.sendBtn.textContent, "Verify this number", "unchanged-number wording (not 'Send code')");
+  });
+});
+
+test("TM-1005: the affordance also renders when the account-verified number is a DIFFERENT number", () => {
+  withFakeDocument(() => {
+    const { pv } = currentVerifyRig({ accountPhone: "+447700900999" });
+    assert.equal(pv.sendBtn.hidden, false, "stored ≠ linked ⇒ the stored number still needs verifying");
+    assert.equal(pv.sendBtn.textContent, "Verify this number");
+  });
+});
+
+test("TM-1005: the affordance is ABSENT when the stored phone IS the account's verified number", () => {
+  withFakeDocument(() => {
+    const { pv } = currentVerifyRig({ accountPhone: "+447700900123" });
+    assert.equal(pv.sendBtn.hidden, true, "a verified account must not sprout a stray verify affordance");
+  });
+});
+
+test("TM-1005: editing to a DIFFERENT number yields the button to the TM-982 'Send code' path (and back)", () => {
+  withFakeDocument(() => {
+    const { entry, pv } = currentVerifyRig({ accountPhone: null });
+    // The user edits the national number → the changed-number rule owns the button + wording.
+    entry.input.value = "7700 900999";
+    entry.input._listeners.input();
+    assert.equal(pv.sendBtn.hidden, false);
+    assert.equal(pv.sendBtn.textContent, "Send code", "a CHANGED number keeps the TM-982 wording");
+    // Editing BACK to the stored number re-offers the current-number verify (not a dead-end again).
+    entry.input.value = "7700 900123";
+    entry.input._listeners.input();
+    assert.equal(pv.sendBtn.hidden, false);
+    assert.equal(pv.sendBtn.textContent, "Verify this number");
+  });
+});
+
+test("TM-1005: the affordance runs the SAME OTP verify-and-link, without re-typing the number", async () => {
+  await withFakeDocumentAsync(async () => {
+    const { pv } = currentVerifyRig({ accountPhone: null });
+    const sends = [];
+    startPhoneVerifyImpl = async (e164) => {
+      sends.push(e164);
+      return "vid-1005";
+    };
+    let linked = null;
+    confirmPhoneLinkImpl = async (vid, code) => {
+      linked = { vid, code };
+      return {};
+    };
+    let bannerRefreshes = 0;
+    globalThis.window.tmPhoneReverifyNotice = { refresh: () => bannerRefreshes++ };
+    try {
+      // Tap "Verify this number" — the button's own click listener, i.e. the shipped sendPhoneCode.
+      await pv.sendBtn._listeners.click();
+      assert.deepEqual(sends, ["+447700900123"], "startPhoneVerify fires for the STORED number as-is");
+      assert.equal(pv.otpWrap.hidden, false, "the six-box OTP reveals");
+      // Six digits land → the widget auto-submits → confirmPhoneLink links the credential.
+      await OTP_ONCOMPLETE("123456");
+      assert.deepEqual(linked, { vid: "vid-1005", code: "123456" });
+      assert.equal(pv.statusEl.textContent, "Verified ✓");
+      assert.equal(pv.sendBtn.hidden, true, "verified ⇒ the affordance hides");
+      // Current-number wording: nothing to save (collectPatch omits an unchanged phone) — the user
+      // must NOT be told to save; and the grace banner is asked to re-check itself immediately.
+      assert.ok(TOASTS.some((t) => t.msg === "Number verified ✓"), "the no-save-needed success toast");
+      assert.ok(!TOASTS.some((t) => /save to update/i.test(t.msg)), "no misleading 'save to update' copy");
+      assert.equal(bannerRefreshes, 1, "the grace banner re-checks (clears) without waiting for an auth change");
+    } finally {
+      delete globalThis.window.tmPhoneReverifyNotice;
+      startPhoneVerifyImpl = async () => "fake-verification-id";
+      confirmPhoneLinkImpl = async () => ({});
+    }
+  });
+});
+
+test("TM-1005: the banner CTA's handoff event reveals + FOCUSES the affordance once painted", () => {
+  const priorDoc = globalThis.document;
+  try {
+    globalThis.document = {
+      createElement: (tag) => wireClassList(fakeEl(tag)),
+      createElementNS: (_ns, tag) => wireClassList(fakeEl(tag)),
+      createTextNode: (str) => ({ nodeType: 3, data: String(str) }),
+      getElementById: () => null,
+    };
+    const { pv } = currentVerifyRig({ accountPhone: null });
+    assert.equal(pv.sendBtn.hidden, false, "precondition: the affordance is painted");
+    // The profile must LISTEN on the shared contract event (phone-reverify-core's name, not a copy).
+    const listeners = WINDOW_LISTENERS[reverifyCore.PHONE_VERIFY_REQUEST_EVENT] || [];
+    assert.ok(listeners.length > 0, "profile.js registers the PHONE_VERIFY_REQUEST_EVENT listener");
+    // Now the view is visible (the CTA hash-nav landed) and ids resolve — fire the handoff.
+    let scrolled = 0;
+    let focused = 0;
+    pv.sendBtn.scrollIntoView = () => scrolled++;
+    pv.sendBtn.focus = () => focused++;
+    const view = wireClassList(fakeEl("div"));
+    view.hidden = false;
+    globalThis.document.getElementById = (id) =>
+      id === "profile-view" ? view : id === pv.sendBtn.getAttribute("id") ? pv.sendBtn : null;
+    for (const fn of listeners) fn();
+    assert.ok(scrolled > 0, "the affordance scrolls into view");
+    assert.ok(focused > 0, "the affordance receives focus — the CTA finally LANDS somewhere");
+  } finally {
+    globalThis.document = priorDoc;
+  }
+});
