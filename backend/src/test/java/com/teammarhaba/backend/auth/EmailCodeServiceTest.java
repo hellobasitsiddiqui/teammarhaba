@@ -434,6 +434,49 @@ class EmailCodeServiceTest {
         assertThat(service.verify(EMAIL, codeB)).isEqualTo("custom-token-ada");
     }
 
+    // --- Account convergence: reuse, never duplicate (TM-990) ---
+
+    @Test
+    void twoSignInsForSameVerifiedEmail_convergeOnTheSameUid_neverMintingASecond() throws Exception {
+        // TM-990 acceptance (a): a person signing in twice by email-code must land in the SAME account
+        // each time — the existing Firebase account for the email is REUSED, and NO second uid is minted
+        // (the duplicate-account bug TM-306 closes). getUserByEmail returns the owning account on both.
+        service.request(EMAIL);
+        String firstToken = service.verify(EMAIL, mailer.lastCode);
+
+        clock.advance(Duration.ofSeconds(61)); // clear the send cooldown for a second, independent login
+        service.request(EMAIL);
+        String secondToken = service.verify(EMAIL, mailer.lastCode);
+
+        // Both logins minted a token for the SAME uid — convergence, not duplication.
+        assertThat(firstToken).isEqualTo("custom-token-ada");
+        assertThat(secondToken).isEqualTo("custom-token-ada");
+        verify(firebaseAuth, times(2)).createCustomToken(UID);
+        // And crucially: an existing account was reused, so no NEW Firebase account was ever created.
+        verify(firebaseAuth, never()).createUser(org.mockito.ArgumentMatchers.any(CreateRequest.class));
+    }
+
+    @Test
+    void reuseIsRefused_whenFirebaseReturnsAnAccountForADifferentEmail() throws Exception {
+        // Defence-in-depth (TM-990): getUserByEmail is documented to return the account owning the
+        // queried email, but if a refactor/SDK ever handed back a record for a DIFFERENT address, the
+        // convergence must NOT bind the caller to that mismatched account — it refuses loudly rather
+        // than silently merging one person into another's account (the takeover shape).
+        UserRecord mismatched = mock(UserRecord.class);
+        when(mismatched.getUid()).thenReturn("uid-someone-else");
+        when(mismatched.getEmail()).thenReturn("someone-else@example.com");
+        when(firebaseAuth.getUserByEmail(EMAIL)).thenReturn(mismatched);
+
+        service.request(EMAIL);
+        String code = mailer.lastCode;
+
+        assertThatThrownBy(() -> service.verify(EMAIL, code))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("does not match");
+        // No token was minted for the mismatched account — convergence refused, not silently merged.
+        verify(firebaseAuth, never()).createCustomToken(anyString());
+    }
+
     // --- Inbox-free test-email hook (TM-312) ---
 
     @Test

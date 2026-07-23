@@ -36,6 +36,7 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 import { shouldUseRedirect } from "./auth-env.js";
 import { shouldDisablePhoneAppVerification } from "./phone-e2e.js";
+import { decideLink } from "./account-link-policy.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -270,8 +271,26 @@ export async function startPhoneVerify(phoneE164, containerEl) {
  */
 export async function confirmPhoneLink(verificationId, code) {
   const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in — cannot link a phone number.");
+  // Proof-of-both gate (TM-990): a link may proceed ONLY when the user is already signed into the
+  // first account (proof of the first identifier) AND the phone credential was just verified in THIS
+  // flow (proof of the second — the SMS OTP produced `verificationId` + `code`). The decision lives in
+  // the pure, unit-tested account-link-policy so the "never link on an unverified match" rule is
+  // guarded by a test. A "refuse-not-signed-in" verdict is the same not-signed-in error as before;
+  // "refuse-unverified" guards against a caller invoking this without a real verification round.
+  const decision = decideLink({
+    signedInUid: user && user.uid,
+    credentialVerifiedInThisFlow: !!verificationId && !!code,
+  });
+  if (decision === "refuse-not-signed-in") {
+    throw new Error("Not signed in — cannot link a phone number.");
+  }
+  if (decision === "refuse-unverified") {
+    throw new Error("Phone not verified in this flow — cannot link without proof of control.");
+  }
   const cred = PhoneAuthProvider.credential(verificationId, code);
+  // Firebase enforces strict 1:1: if the number is already linked to ANOTHER account it rejects with
+  // `auth/credential-already-in-use` (surfaced by the caller as the hard-block copy — see
+  // classifyLinkError), so a collision is a hard-block, never a silent merge.
   if (user.phoneNumber == null) {
     return linkWithCredential(user, cred);
   }
