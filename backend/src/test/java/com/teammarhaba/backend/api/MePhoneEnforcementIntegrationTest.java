@@ -73,13 +73,15 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteRefusedWhenNoVerifiedPhone() throws Exception {
         var who = caller("uid-enf-complete-null", "a@example.com");
         stubVerifiedPhone("uid-enf-complete-null", null);
-        // A stored (client) phone is present so the TM-880 rule alone would PASS — enforcement is what
-        // refuses, keyed on the absence of a Firebase-VERIFIED number. TM-934: a number unique to this
-        // test (the V48 users_phone_normalized_uq index bans reusing one literal across methods).
+        // TM-982: a phone-changing PATCH now ALSO enforces (the profile phone-edit twin), so we can no
+        // longer seed a stored phone via an unenforced PATCH here — and we don't need to: the
+        // onboarding-complete transition refuses purely on the absence of a Firebase-VERIFIED number
+        // (enforceVerifiedPhoneIfRequired runs before requirePhoneOnRecord), whether or not a client
+        // phone is on record. Provision the account with a no-op PATCH, then assert the refusal.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700901301\"}"))
+                        .content("{\"timezone\":\"Europe/London\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -156,10 +158,14 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteFailsClosedOnFirebaseError() throws Exception {
         var who = caller("uid-enf-complete-err", "e@example.com");
         stubFirebaseError("uid-enf-complete-err");
+        // TM-982: a phone-changing PATCH now enforces too, so seed the account with a non-phone PATCH
+        // (a phone PATCH here would itself fail closed on the stubbed Firebase error). The
+        // onboarding-complete transition below is what this test exercises — it fails closed on the
+        // Firebase read error regardless of any stored phone.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700901303\"}")) // TM-934: unique per test (V48 index)
+                        .content("{\"timezone\":\"Europe/London\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -184,5 +190,70 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));
+    }
+
+    // ==== TM-982: PATCH /me phone-edit enforcement — phone is a VERIFIED IDENTITY ===================
+    //
+    // The client's TM-982 save-block has a server twin behind the SAME flag (gated on TM-986 flipping it
+    // in prod): a PATCH /me that CHANGES the phone must land on the Firebase-verified number, else the
+    // write is refused/corrected. These are fail-before/pass-after: on clean main (no enforcement call in
+    // updateProfile) the first would return 200 with the unverified number stored, and the second would
+    // keep the client value — both flip with the TM-982 change. The flag-OFF baseline (a plain phone
+    // PATCH succeeds untouched) stays covered by MeControllerIntegrationTest.
+
+    // ---- A changed phone with NO verified number on Firebase → refused (fail-before was 200) ---------
+
+    @Test
+    void patchMeRefusesAChangedPhoneWhenNoVerifiedPhone() throws Exception {
+        var who = caller("uid-enf-patch-null", "g@example.com");
+        stubVerifiedPhone("uid-enf-patch-null", null);
+
+        // Changing the phone via PATCH is refused when Firebase reports no verified number for the caller.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700901305\"}")) // TM-934: unique per test (V48 index)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(
+                        "Phone number must be verified before completing onboarding"));
+
+        // Nothing stored — the whole @Transactional PATCH rolled back (no half-applied unverified phone).
+        assertThat(users.findByFirebaseUid("uid-enf-patch-null"))
+                .hasValueSatisfying(u -> assertThat(u.getPhone()).isNull());
+    }
+
+    // ---- A changed phone is MIRRORED to the verified value (client value can't win) -----------------
+
+    @Test
+    void patchMeMirrorsTheVerifiedPhoneOverAChangedClientValue() throws Exception {
+        var who = caller("uid-enf-patch-ok", "h@example.com");
+        stubVerifiedPhone("uid-enf-patch-ok", "+447700900777");
+
+        // Client tries to PATCH a DIFFERENT number; the Firebase-verified one must win + be what's stored.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+441111111112\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.phone").value("+447700900777"));
+
+        assertThat(users.findByFirebaseUid("uid-enf-patch-ok").orElseThrow().getPhone())
+                .isEqualTo("+447700900777");
+    }
+
+    // ---- A PATCH that does NOT touch the phone never reads Firebase → succeeds untouched -------------
+
+    @Test
+    void patchMeWithoutAPhoneChangeNeverConsultsFirebase() throws Exception {
+        var who = caller("uid-enf-patch-nophone", "i@example.com");
+        // Deliberately DO NOT stub getUser: if enforcement were (wrongly) triggered by a non-phone PATCH,
+        // the unstubbed Admin SDK call would fail closed and 400. A green 200 proves the phone-changed
+        // gate keeps Firebase out of an unrelated edit (age only).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"age\":41}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.age").value(41));
     }
 }

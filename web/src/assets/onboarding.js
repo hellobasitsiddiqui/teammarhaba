@@ -44,6 +44,7 @@ import { interestEmoji } from "./interests-core.js";
 import {
   splitE164,
   composeE164,
+  canonicalE164,
   defaultCountryFor,
   phonePartsError,
   CITY_OPTIONS,
@@ -584,14 +585,6 @@ function fillCitySelect(select, value) {
     select.setAttribute("data-offlist", saved);
   }
   select.value = saved;
-}
-
-/** Canonical E.164 for a stored/verified value ("+44 7700 900123" → "+447700900123"), or "" if it
- *  isn't a parseable E.164. Mirrors profile-core.needsVerifiedPhone's canonicalisation so the gate's
- *  "already verified?" decision agrees exactly with the router's re-gate decision (TM-932). */
-function canonicalE164(value) {
-  const parsed = splitE164(value);
-  return parsed ? composeE164(parsed.iso2, parsed.national) : "";
 }
 
 /**
