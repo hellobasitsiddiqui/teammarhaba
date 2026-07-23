@@ -60,16 +60,35 @@ export const PHONE_VERIFY_REQUEST_EVENT = "tm:phone-verify-request";
  * load-bearing for the SAFE DEFAULT below: a typo'd deadline must degrade to grace-only, never to an
  * accidental hard-gate on a date we can't actually read.
  *
+ * THE NUMERIC SANITY FLOOR (TM-1016). The numeric / all-digit-string path is a foot-gun: without a floor
+ * it accepts ANY finite number as epoch-MS, so a plausible hand-edit at the deploy-config seam —
+ * a bare year ("2026"), a compact date ("20260901"), or an epoch-SECONDS paste ("1788230400") — parses to
+ * a tiny millisecond value (~Jan 1970), i.e. a deadline already long past. That would flip an eligible
+ * account straight to HARD_GATE, locking out every unverified-phone user — the exact opposite of the
+ * "a typo degrades to grace-only, never a hard-gate" invariant this module promises. So we only accept a
+ * number (or all-digit string) as epoch-ms when it is a PLAUSIBLE instant: >= EPOCH_MS_FLOOR (1e12, ~Sep
+ * 2001). Anything below is not a real millisecond timestamp; we return null → grace-only, never a gate.
+ * (ISO-8601 date strings are unaffected — a real date like "2026-09-01" goes through Date.parse below.)
+ *
  * @param {string|number|null|undefined} raw the configured deadline (ISO string, epoch-ms, or absent).
- * @returns {number|null} epoch-ms, or null when absent/unparseable.
+ * @returns {number|null} epoch-ms, or null when absent/unparseable/implausible.
  */
+// The smallest value we'll trust as an epoch-MILLISECONDS instant: 1e12 ms ≈ 2001-09-09. Below this a
+// "number" is far more likely a bare year, a compact YYYYMMDD, or an epoch-SECONDS paste than a real
+// millisecond timestamp — none of which we can safely treat as a deadline, so they degrade to grace-only.
+const EPOCH_MS_FLOOR = 1e12;
+
 export function parseReverifyDeadline(raw) {
   if (raw == null || raw === "") return null;
-  // Numeric (or numeric-string) epoch-ms — accept as-is when finite.
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  // Numeric epoch-ms — accept only when finite AND a plausible instant (>= the sanity floor). A number
+  // below the floor is a mis-entered deadline (bare year / epoch-seconds / YYYYMMDD), not a real ms
+  // timestamp; return null so it degrades to grace-only rather than an accidental past-dated hard-gate.
+  if (typeof raw === "number") return Number.isFinite(raw) && raw >= EPOCH_MS_FLOOR ? raw : null;
   const asNumber = Number(raw);
   if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(asNumber) && /^\s*\d+\s*$/.test(raw)) {
-    return asNumber;
+    // Same floor for the all-digit string form ("1788230400", "20260901", "2026"): only a value that is
+    // itself a plausible epoch-ms instant is a deadline — anything smaller is a typo → grace-only (null).
+    return asNumber >= EPOCH_MS_FLOOR ? asNumber : null;
   }
   // Otherwise treat it as a date string (ISO-8601). Date.parse returns NaN for garbage → null.
   const parsed = Date.parse(raw);

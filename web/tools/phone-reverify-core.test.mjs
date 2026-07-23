@@ -118,6 +118,40 @@ test("parseReverifyDeadline accepts ISO strings and epoch-ms, and maps absent/ga
   assert.equal(parseReverifyDeadline(NaN), null);
 });
 
+// ---- 5b. parseReverifyDeadline — the numeric SANITY FLOOR (TM-1016) --------------------------------
+
+test("parseReverifyDeadline rejects sub-floor numeric deadlines (typo → grace-only, never a hard-gate)", () => {
+  // The bug: the all-digit path accepted ANY finite number as epoch-MS. A plausible hand-edit at the
+  // deploy-config seam — a bare year, a compact YYYYMMDD, or an epoch-SECONDS paste — resolved to a tiny
+  // ms value (~Jan 1970), i.e. an already-passed deadline → HARD_GATE, locking out every unverified user.
+  // With the sanity floor (>= 1e12, ~Sep 2001) these all degrade to null → grace-only.
+  assert.equal(parseReverifyDeadline("2026"), null); // a bare year
+  assert.equal(parseReverifyDeadline("20260901"), null); // a compact YYYYMMDD
+  assert.equal(parseReverifyDeadline("1788230400"), null); // an epoch-SECONDS paste (~2026 in seconds)
+  assert.equal(parseReverifyDeadline(2026), null); // same, as a raw number
+  assert.equal(parseReverifyDeadline(1788230400), null); // epoch-seconds as a raw number
+  // Just below the floor is still rejected; the floor itself and above are accepted.
+  assert.equal(parseReverifyDeadline(1e12 - 1), null);
+  assert.equal(parseReverifyDeadline(1e12), 1e12);
+  // A genuine epoch-ms (>= 1e12) STILL parses to that instant — the fix must not break real timestamps.
+  assert.equal(parseReverifyDeadline(NOW), NOW);
+  assert.equal(parseReverifyDeadline(String(NOW)), NOW);
+  // And a valid ISO date STILL parses through Date.parse, untouched by the numeric floor.
+  assert.equal(parseReverifyDeadline("2026-09-01"), Date.parse("2026-09-01"));
+  assert.equal(parseReverifyDeadline("2026-09-01T00:00:00Z"), Date.parse("2026-09-01T00:00:00Z"));
+});
+
+test("a typo'd numeric deadline flows through parse → decide as GRACE_NUDGE, never HARD_GATE", () => {
+  // End-to-end: the load-bearing property. Each of these mis-entered deadlines must NOT hard-gate an
+  // eligible account — they parse to null and phoneReverifyDecision falls to the grace-only safe default.
+  for (const raw of ["2026", "20260901", "1788230400"]) {
+    const deadline = parseReverifyDeadline(raw);
+    const decision = phoneReverifyDecision({ needsReverify: true, deadline, now: NOW });
+    assert.notEqual(decision, ReverifyDecision.HARD_GATE, `typo'd deadline "${raw}" must not hard-gate`);
+    assert.equal(decision, ReverifyDecision.GRACE_NUDGE, `typo'd deadline "${raw}" must be grace-only`);
+  }
+});
+
 // ---- 6. parse → decide round-trips end-to-end -----------------------------------------------------
 
 test("a configured ISO deadline flows through parse → decide as expected across the boundary", () => {
