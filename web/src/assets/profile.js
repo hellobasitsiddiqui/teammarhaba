@@ -309,6 +309,10 @@ function phoneNeedsVerify() {
  * the same startPhoneVerify → confirmPhoneLink flow without the user re-typing their number.
  */
 function phoneNeedsCurrentVerify() {
+  // TM-1020: gate on the same TM-1009 kill-switch as phoneNeedsVerify — with verified-phone parked
+  // OFF the profile must NOT sprout a "Verify this number" affordance that solicits a real OTP for a
+  // requirement the flag has switched off. This is the 5th consumer TM-1009's fold missed.
+  if (!verifiedPhoneRequired()) return false;
   return phoneCurrentNeedsVerify(phoneVerify.storedE164, composedPhoneE164(), currentUser()?.phoneNumber);
 }
 
