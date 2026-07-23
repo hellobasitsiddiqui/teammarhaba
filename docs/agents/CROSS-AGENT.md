@@ -144,6 +144,17 @@ ground truth. Prefer handing Basit `cr <lane>` over a raw UUID.
   Basit with the exact one-liner — `gh pr merge <n> --squash --admin --delete-branch` — rather than
   reporting it "done / will auto-merge". Never claim a PR merged without seeing `mergedAt`. (Learned
   on #637: a green docs PR sat open because the bot couldn't clear the code-owner-review policy.)
+- **Sweep EVERY open PR you raised — poll them ALL, not just the one merged in front of you.** When a
+  wave has several PRs in flight, witnessing one `gh pr merge` tells you nothing about the others:
+  Basit merges siblings out-of-band, in any order, minutes apart and unprompted. So before you call a
+  PR "merge-ready" (or "still open"), re-query its **actual** state — `gh pr view <n> --json
+  state,mergedAt` for EACH, or sweep `gh pr list --state merged --limit N` **and** `--state open`.
+  This matters because the merge-automation only auto-transitions a PR's *primary* ticket, so a PR
+  that merged out-of-band leaves the REST of its ticket set **stranded In Review**. On every sweep,
+  reconcile each merged PR's FULL ticket set → Testing (comment the merge SHA). Do NOT report "N PRs
+  merge-ready" off a stale mental model — the poll is the source of truth. (Learned in wave-admin-2:
+  reported #652/#654 "merge-ready" while they'd already merged 4–8 min earlier, stranding
+  TM-964/965/966/967 In Review — the automation had moved only each PR's first ticket.)
 - **Reshaping shared UI = migrate ALL its consumers**: every spec in the e2e testDir AND
   standalone scripts outside it (capture/evidence scripts are the classic miss — we shipped a
   repo-wide guard test after one slipped through). When you retire an interaction, grep the whole
