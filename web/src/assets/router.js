@@ -73,6 +73,12 @@ import {
   parseReverifyDeadline,
   ReverifyDecision,
 } from "./phone-reverify-core.js";
+// TM-1009: the deploy-time switch over the WHOLE verified-phone requirement
+// (config.flags.requireVerifiedPhone, shipped OFF). The pure rules above stay un-flagged; this router
+// short-circuits at the call site — with the flag OFF, effectiveReverifyDecision collapses the
+// reverify decision to NONE so the verified-phone term drops out of isOnboarded entirely (existing
+// unverified accounts are NOT re-gated). Flag ON = the TM-932/TM-992 behaviour, unchanged.
+import { verifiedPhoneRequired, effectiveReverifyDecision } from "./verified-phone-flag.js";
 import { shouldBounceNonAdmin } from "./admin-route-guard-core.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
@@ -1119,11 +1125,19 @@ async function resolveRoleThenGuard() {
   // the /me was resolved for), NOT a fresh currentUser() call. Still fails OPEN (true) on a degraded /me:
   // needsVerifiedPhone returns false on a null /me, so the reverify decision is NONE and every phone term
   // is a no-op then.
-  const reverifyDecision = phoneReverifyDecision({
-    needsReverify: needsVerifiedPhone(onboardedOutcome.value, now.phoneNumber),
-    deadline: parseReverifyDeadline(reverifyDeadlineConfig()),
-    now: Date.now(),
-  });
+  //
+  // TM-1009: the whole verified-phone requirement is behind config.flags.requireVerifiedPhone (shipped
+  // OFF). effectiveReverifyDecision short-circuits HERE, at the call site — with the flag OFF the
+  // decision collapses to NONE, so the reverify term below is always satisfied and NO existing
+  // unverified account is re-gated. needsVerifiedPhone/phoneReverifyDecision stay pure and un-flagged.
+  const reverifyDecision = effectiveReverifyDecision(
+    verifiedPhoneRequired(),
+    phoneReverifyDecision({
+      needsReverify: needsVerifiedPhone(onboardedOutcome.value, now.phoneNumber),
+      deadline: parseReverifyDeadline(reverifyDeadlineConfig()),
+      now: Date.now(),
+    }),
+  );
   isOnboarded = onboardedOutcome.value
     ? Boolean(onboardedOutcome.value.onboardingCompleted) &&
       !needsPhoneNumber(onboardedOutcome.value) &&

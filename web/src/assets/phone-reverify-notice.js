@@ -21,6 +21,10 @@ import { getMe } from "./api.js";
 import { el } from "./ui.js";
 import { sessionKey, isResponseCurrent } from "./session-guard-core.js";
 import { needsVerifiedPhone } from "./profile-core.js";
+// TM-1009: the deploy-time switch over the whole verified-phone requirement
+// (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF, effectiveReverifyDecision
+// collapses the decision to NONE so this banner never nags about a requirement that is switched off.
+import { verifiedPhoneRequired, effectiveReverifyDecision } from "./verified-phone-flag.js";
 import {
   phoneReverifyDecision,
   parseReverifyDeadline,
@@ -146,11 +150,17 @@ export async function refresh() {
   // The verified phone comes from the Firebase user (NOT /me — MeResponse carries only the self-reported
   // value), pinned to the SAME session the /me was resolved for.
   const verifiedPhone = currentUser()?.phoneNumber ?? null;
-  const decision = phoneReverifyDecision({
-    needsReverify: needsVerifiedPhone(me, verifiedPhone),
-    deadline: parseReverifyDeadline(deadlineConfig()),
-    now: Date.now(),
-  });
+  // TM-1009: with the verified-phone requirement switched OFF the decision collapses to NONE — the
+  // grace nudge must not nag users to verify a number nothing requires verified. Same call-site
+  // short-circuit as the router's isOnboarded fold, so banner and gate can never disagree.
+  const decision = effectiveReverifyDecision(
+    verifiedPhoneRequired(),
+    phoneReverifyDecision({
+      needsReverify: needsVerifiedPhone(me, verifiedPhone),
+      deadline: parseReverifyDeadline(deadlineConfig()),
+      now: Date.now(),
+    }),
+  );
 
   // Show the nudge ONLY in the grace window (and only if not dismissed this session). NONE = nothing to
   // do; HARD_GATE = the router bounces the user to #/onboarding, so a banner would be moot.

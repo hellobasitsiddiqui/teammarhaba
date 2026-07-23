@@ -49,6 +49,15 @@ const E2E_CONFIG = `window.TEAMMARHABA_CONFIG = Object.freeze({
     // THEMSELVES, before any app script runs, via page.addInitScript (they also inject the payments/Revolut
     // widget block there) — so membership is scoped to exactly those two specs, not the served app at large.
     // See the beforeEach in paid-rsvp.spec.mjs / subscribe.spec.mjs.
+    //
+    // TM-1009: the verified-phone requirement flag is pinned ON here (the committed config.js ships it
+    // OFF). The whole existing suite — completeOnboarding's Send-code/OTP walk (helpers/onboarding.mjs),
+    // the TM-930/932 gate-verify specs, the TM-982 phone-edit specs, the TM-992 reverify-nudge specs —
+    // was written against, and still regression-covers, the flag-ON (go-live) behaviour; running the
+    // harness flag-OFF would leave the Send button unbuilt and strand every one of those walks. The
+    // flag-OFF (collect-only) behaviour is unit-covered in web/tools/verified-phone-flag.test.mjs; a
+    // spec that wants to exercise it can override via page.addInitScript, like the payment specs do.
+    flags: Object.freeze({ requireVerifiedPhone: true }),
 });
 `;
 

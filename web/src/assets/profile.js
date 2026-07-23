@@ -82,6 +82,11 @@ import { PHONE_VERIFY_REQUEST_EVENT } from "./phone-reverify-core.js";
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
 // CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
 import { COUNTRIES, flagOf } from "./countries.js";
+// TM-1009: the deploy-time switch over the whole verified-phone requirement
+// (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF the TM-982 phone-edit save
+// gate below (phoneNeedsVerify) is a no-op — a CHANGED number saves without an OTP, and since the
+// Send-code affordance keys off the same rule, no verify UI sprouts either. ON = TM-982, unchanged.
+import { verifiedPhoneRequired } from "./verified-phone-flag.js";
 // Pure Interests-card logic (TM-778) — chip view-model, catalogue grouping, add/remove-within-min/max,
 // and the min/max config normaliser, unit-tested in web/tools/interests-core.test.mjs.
 import {
@@ -274,6 +279,10 @@ function composedPhoneE164() {
  * when true the save is blocked and the phone field paints the verify prompt.
  */
 function phoneNeedsVerify() {
+  // TM-1009: the whole verified-phone requirement is deploy-time switchable (shipped OFF). With the
+  // flag OFF a changed number needs no re-verify — this single early-return covers both consumers
+  // (the save block in validateAll AND the Send-code affordance in refreshPhoneVerifyAffordance).
+  if (!verifiedPhoneRequired()) return false;
   const composed = composedPhoneE164();
   const verified = phoneVerify.verified ? phoneVerify.verifiedE164 : "";
   return phoneEditNeedsVerify(phoneVerify.storedE164, composed, verified);

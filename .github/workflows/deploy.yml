@@ -159,6 +159,26 @@ jobs:
           fi
           grep -E "membership: (true|false)" web/dist/assets/config.js
 
+      # Inject the web verified-phone requirement flag into the built config.js (TM-1009) — the SAME
+      # deploy-time seam as the membership flag above. config.js ships `requireVerifiedPhone: false`
+      # (phone collected but not forced-verified, so testing/onboarding is never blocked); it flips ON
+      # only when the repo variable WEB_REQUIRE_VERIFIED_PHONE is explicitly "true" — an opt-in go-live
+      # toggle, never an accidental default. NOTE (TM-986): real end-to-end enforcement needs the SERVER
+      # flag too (`app.phone.require-verified` on the backend, also default false) — flip BOTH at go-live.
+      # Runs before fingerprinting so the content hash reflects the final flag.
+      - name: Inject web verified-phone flag into config.js
+        env:
+          WEB_REQUIRE_VERIFIED_PHONE: ${{ vars.WEB_REQUIRE_VERIFIED_PHONE }}
+        run: |
+          set -euo pipefail
+          if [ "${WEB_REQUIRE_VERIFIED_PHONE}" = "true" ]; then
+            sed -i "s#requireVerifiedPhone: false#requireVerifiedPhone: true#" web/dist/assets/config.js
+            echo "- Web verified-phone flag: ON (WEB_REQUIRE_VERIFIED_PHONE=true). Remember the server twin app.phone.require-verified (TM-986)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Web verified-phone flag: OFF (phone collected, not forced-verified; set repo var WEB_REQUIRE_VERIFIED_PHONE=true to enforce)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          grep -E "requireVerifiedPhone: (true|false)" web/dist/assets/config.js
+
       # Content-hash the built assets so each deploy changes their URLs — an automatic cache-bust
       # (TM-144). Runs AFTER the config.js injections above so the hash reflects the final content;
       # it rewrites index.html + the ES-module import specifiers. firebase.json then serves

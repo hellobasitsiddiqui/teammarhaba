@@ -35,6 +35,10 @@ import {
   REVERIFY_CTA_TARGET,
   PHONE_VERIFY_REQUEST_EVENT,
 } from "../src/assets/phone-reverify-core.js";
+// TM-1009: phone-reverify-notice.js now feeds its decision through the deploy-time flag. Use the REAL
+// collapse helper; verifiedPhoneRequired is forced ON below so these pre-flag CTA tests keep their
+// original semantics (the flag-OFF short-circuit is covered in verified-phone-flag.test.mjs).
+import { effectiveReverifyDecision } from "../src/assets/verified-phone-flag.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -126,6 +130,9 @@ const deps = {
   ReverifyDecision,
   REVERIFY_CTA_TARGET,
   PHONE_VERIFY_REQUEST_EVENT,
+  // TM-1009: the flag reader (forced ON here) + the real collapse helper the notice now routes through.
+  verifiedPhoneRequired: () => true,
+  effectiveReverifyDecision,
 };
 
 function loadNoticeModule() {
@@ -135,6 +142,7 @@ function loadNoticeModule() {
     "const { onAuthChanged, currentUser, getMe, el, sessionKey, isResponseCurrent, needsVerifiedPhone,\n" +
     "  phoneReverifyDecision, parseReverifyDeadline, reverifyNoticeText, ReverifyDecision,\n" +
     "  REVERIFY_CTA_TARGET, PHONE_VERIFY_REQUEST_EVENT,\n" +
+    "  verifiedPhoneRequired, effectiveReverifyDecision,\n" +
     "} = globalThis.__NOTICE_DEPS__;\n";
   const code = preamble + withoutImports;
   assert.doesNotMatch(code, /^import[\s\S]*?from/m, "all top-level imports must be replaced before eval");
