@@ -311,6 +311,129 @@ class EmailCodeServiceTest {
         assertThat(token).isEqualTo("custom-token-ada");
     }
 
+    // --- Multi-slot pending codes (TM-1003) ---
+    // A resend / second device / impatient retry used to OVERWRITE the single outstanding code, and
+    // Gmail threads the identical-subject emails together — so users read the SUPERSEDED code and got
+    // 401 "That code is not valid" for a code they were just sent. Each address now holds up to 3
+    // recent codes, each honouring its own TTL, with ONE attempt budget shared across the set.
+
+    @Test
+    void supersededCode_stillVerifiesAfterAResend() throws Exception {
+        // The core TM-1003 bug: request twice (A then B), then verify with A — the code the user is
+        // actually reading. On the single-slot code this failed CODE_INVALID because B overwrote A.
+        service.request(EMAIL);
+        String codeA = mailer.lastCode;
+
+        clock.advance(Duration.ofSeconds(61)); // past the send cooldown so the resend is allowed
+        service.request(EMAIL);
+        String codeB = mailer.lastCode;
+        assertThat(mailer.sends).hasSize(2); // both emails really went out
+        // (codeA == codeB is a 1-in-10^6 fluke; the assertion below is valid either way.)
+
+        String token = service.verify(EMAIL, codeA);
+
+        assertThat(token).isEqualTo("custom-token-ada");
+        verify(firebaseAuth).createCustomToken(UID);
+    }
+
+    @Test
+    void correctVerifyBurnsAllOutstandingCodes_siblingCodeCannotBeReplayed() throws Exception {
+        // Single-use is per ADDRESS now: the first correct match burns the whole set, so the sibling
+        // code B must not mint a second session after A logged the user in.
+        service.request(EMAIL);
+        String codeA = mailer.lastCode;
+        clock.advance(Duration.ofSeconds(61));
+        service.request(EMAIL);
+        String codeB = mailer.lastCode;
+
+        assertThat(service.verify(EMAIL, codeA)).isEqualTo("custom-token-ada"); // burns A AND B
+
+        assertThatThrownBy(() -> service.verify(EMAIL, codeB))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+        verify(firebaseAuth, times(1)).createCustomToken(UID); // exactly one token ever minted
+    }
+
+    @Test
+    void attemptCapIsSharedAcrossTheSet_notFivePerCode() throws Exception {
+        // The budget (5) is SHARED across all outstanding codes AND survives a resend — a resend must
+        // not refill an attacker's allowance. 3 wrong guesses, then a resend, then 2 more wrong
+        // guesses = 5 across the set -> locked out. (On the old single-slot code the resend replaced
+        // the entry with a FRESH budget of 5, so guess #5 was a plain CODE_INVALID — this test is the
+        // shared-cap regression guard.)
+        service.request(EMAIL);
+        String codeA = mailer.lastCode;
+        clock.advance(Duration.ofSeconds(61));
+        service.request(EMAIL);
+        String codeB = mailer.lastCode;
+        String wrong = wrongCodeUnlike(codeA, codeB);
+
+        // Wrong guesses 1..4 consume shared budget (two before an extra resend would even matter).
+        for (int i = 0; i < 4; i++) {
+            assertThatThrownBy(() -> service.verify(EMAIL, wrong))
+                    .isInstanceOf(EmailCodeException.class)
+                    .extracting(e -> ((EmailCodeException) e).reason())
+                    .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+        }
+        // A mid-stream resend keeps the REMAINING budget (1), it does not reset to 5...
+        clock.advance(Duration.ofSeconds(61));
+        service.request(EMAIL);
+        // ...so the 5th wrong guess across the set locks the address out and burns everything.
+        assertThatThrownBy(() -> service.verify(EMAIL, wrong))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.VERIFY_RATE_LIMITED);
+
+        // Both genuine codes were burned by the lockout — neither can mint a token any more.
+        for (String burned : new String[] {codeA, codeB}) {
+            assertThatThrownBy(() -> service.verify(EMAIL, burned))
+                    .isInstanceOf(EmailCodeException.class)
+                    .extracting(e -> ((EmailCodeException) e).reason())
+                    .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+        }
+        verify(firebaseAuth, never()).createCustomToken(anyString());
+    }
+
+    @Test
+    void absentEntry_reportsExpiredOrReplaced_coversRestartAndEviction() {
+        // No pending entry (never requested / aged out / process restarted — the store is in-memory,
+        // so every deploy wipes it). The message must tell the user the actionable truth ("request a
+        // new one"), not the misleading "not valid". Still CODE_INVALID/401: an absent entry is not
+        // the distinct just-expired-but-readable 410 case.
+        assertThatThrownBy(() -> service.verify(EMAIL, "123456"))
+                .isInstanceOf(EmailCodeException.class)
+                .satisfies(e -> {
+                    assertThat(((EmailCodeException) e).reason())
+                            .isEqualTo(EmailCodeException.Reason.CODE_INVALID);
+                    assertThat(e.getMessage())
+                            .isEqualTo("That code has expired or been replaced — request a new one.");
+                });
+    }
+
+    @Test
+    void eachCodeHonoursItsOwnExpiry_oldCodeExpiresWhileNewerStaysValid() throws Exception {
+        // Codes in the set expire INDIVIDUALLY: A (10m TTL) issued at T0 dies at T0+10m even though a
+        // fresh B sits next to it. Submitting the dead A yields the explicit EXPIRED signal (-> 410,
+        // "request a new one"), and crucially does NOT harm B, which still verifies.
+        service.request(EMAIL);
+        String codeA = mailer.lastCode;
+        clock.advance(Duration.ofMinutes(9).plusSeconds(30)); // past cooldown, A still alive
+        service.request(EMAIL);
+        String codeB = mailer.lastCode;
+        // Guard the 1-in-10^6 fluke where the two random codes collide — the EXPIRED-vs-live
+        // distinction below is meaningless if A and B are literally the same digits.
+        org.junit.jupiter.api.Assumptions.assumeTrue(!codeA.equals(codeB), "random codes collided");
+        clock.advance(Duration.ofMinutes(1)); // now T0+10m30s: A expired, B has ~9m left
+
+        assertThatThrownBy(() -> service.verify(EMAIL, codeA))
+                .isInstanceOf(EmailCodeException.class)
+                .extracting(e -> ((EmailCodeException) e).reason())
+                .isEqualTo(EmailCodeException.Reason.CODE_EXPIRED);
+
+        assertThat(service.verify(EMAIL, codeB)).isEqualTo("custom-token-ada");
+    }
+
     // --- Inbox-free test-email hook (TM-312) ---
 
     @Test
@@ -462,6 +585,20 @@ class EmailCodeServiceTest {
         UserRecord r = mock(UserRecord.class);
         when(r.getUid()).thenReturn(uid);
         return r;
+    }
+
+    /**
+     * A 6-digit code guaranteed to differ from every given code: try the ten repeated-digit strings
+     * ("000000".."999999") — at most {@code codes.length} of them can collide, so one always survives.
+     */
+    private static String wrongCodeUnlike(String... codes) {
+        for (char d = '0'; d <= '9'; d++) {
+            String candidate = String.valueOf(d).repeat(6);
+            if (java.util.Arrays.stream(codes).noneMatch(candidate::equals)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("ten candidates cannot all collide with " + codes.length + " codes");
     }
 
     /** Flip one digit so the result is guaranteed different from {@code code}. */

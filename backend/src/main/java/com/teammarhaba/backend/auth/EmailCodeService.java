@@ -13,6 +13,8 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,10 +37,16 @@ import org.springframework.stereotype.Service;
  *
  * <p><strong>Code handling.</strong> The plaintext code is emailed and then immediately discarded —
  * only its SHA-256 hash is held, keyed by normalised email, so a memory/heap dump never reveals an
- * outstanding code. Each address has at most one outstanding code (a re-request replaces it). A code
- * is <em>single-use</em> (burned on the first correct verify), <em>short-lived</em> ({@link
- * EmailCodeProperties#ttl()}), and <em>attempt-capped</em> ({@link
- * EmailCodeProperties#maxVerifyAttempts()} wrong guesses burn it) to stop brute-forcing a short code.
+ * outstanding code. Each address holds a <em>small set</em> of outstanding codes (up to
+ * {@link #MAX_PENDING_CODES}, the most recent wins eviction) rather than a single slot: a resend, a
+ * second device, or an impatient retry used to <em>overwrite</em> the outstanding code, and because
+ * Gmail threads the identical-subject emails together, users routinely read the SUPERSEDED code and
+ * were told it "is not valid" (TM-1003). Now every recent, unexpired code verifies. Codes are still
+ * <em>single-use</em> — the first correct verify burns <strong>all</strong> codes for the address, so
+ * a token is never minted twice and an old code can't be replayed after login — <em>short-lived</em>
+ * ({@link EmailCodeProperties#ttl()}, each code honours its own expiry), and <em>attempt-capped</em>
+ * ({@link EmailCodeProperties#maxVerifyAttempts()} wrong guesses <strong>shared across the whole
+ * set</strong>, not per code, so holding 3 live codes never multiplies the brute-force budget).
  *
  * <p><strong>Rate limiting.</strong> {@code request} enforces a per-address send cooldown
  * ({@link EmailCodeProperties#sendCooldown()}) so the endpoint can't be used to spam an inbox or
@@ -67,6 +75,15 @@ public class EmailCodeService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailCodeService.class);
 
+    /**
+     * How many outstanding codes one address may hold at once (TM-1003). 3 covers the real-world
+     * shapes — "tap Resend once or twice", "started login on phone AND laptop" — without materially
+     * widening the guessing surface (the verify attempt budget is shared across the set, so an
+     * attacker still gets exactly {@link EmailCodeProperties#maxVerifyAttempts()} tries). When a 4th
+     * code is requested the oldest is dropped, so memory per address stays O(1).
+     */
+    static final int MAX_PENDING_CODES = 3;
+
     private final ObjectProvider<FirebaseAuth> firebaseAuth;
     private final EmailCodeMailer mailer;
     private final EmailCodeProperties props;
@@ -74,12 +91,15 @@ public class EmailCodeService {
     private final SecureRandom random = new SecureRandom();
 
     /**
-     * Normalised email -> the single outstanding code for that address. Bounded + expiring
-     * (TM-247): entries expire after {@link EmailCodeProperties#ttl()} (a code is invalid past
-     * then anyway) and the cache is size-capped, so a flood of distinct addresses can't grow it
-     * without limit. A missing entry == "no outstanding code", the existing null-handled case.
+     * Normalised email -> the outstanding codes for that address (up to {@link #MAX_PENDING_CODES},
+     * TM-1003) plus their shared attempt budget. Bounded + expiring (TM-247): entries expire after
+     * {@link EmailCodeProperties#ttl()} (every code in the entry is invalid past then anyway) and
+     * the cache is size-capped, so a flood of distinct addresses can't grow it without limit. A
+     * missing entry == "no outstanding code" — which now also covers the deploy/restart case (the
+     * store is process-local, so a restart loses all pending codes) and is reported with an
+     * actionable "expired or been replaced" message rather than a bare "not valid".
      */
-    private final Cache<String, PendingCode> pending;
+    private final Cache<String, PendingCodes> pending;
 
     /**
      * Normalised email -> the instant of its last successful send; drives the send cooldown.
@@ -123,8 +143,10 @@ public class EmailCodeService {
     }
 
     /**
-     * Generate and email a fresh login code for {@code rawEmail}. Replaces any outstanding code for
-     * the address (so a "Resend" is just another request). Enforces the per-address send cooldown.
+     * Generate and email a fresh login code for {@code rawEmail}. The new code <em>joins</em> the
+     * address's outstanding set (up to {@link #MAX_PENDING_CODES}, oldest evicted) rather than
+     * replacing it (TM-1003) — so a "Resend", a second device, or an impatient retry never
+     * invalidates the code the user is actually reading. Enforces the per-address send cooldown.
      *
      * <p>The response intentionally carries no signal about whether the address has an account — the
      * caller always sees the same outcome — so the endpoint can't enumerate users.
@@ -142,9 +164,15 @@ public class EmailCodeService {
         // unaffected. We bypass the send cooldown for the test path too, so the e2e harness can re-request
         // freely; the per-IP limiter (EmailCodeRateLimiter) still applies in front. (Marking these
         // accounts accountType=test is follow-up TM-311, not in scope here.)
+        // Deliberately still SINGLE-slot (a plain put, not an append): the fixed code is the only code
+        // the harness ever submits, and replacing wholesale keeps the e2e state deterministic (TM-1003
+        // multi-slot is for the real-mail path where a superseded code is the user-facing bug).
         if (props.test().matches(email)) {
             String fixedCode = props.test().fixedCode();
-            pending.put(email, new PendingCode(hash(fixedCode), now.plus(props.ttl()), props.maxVerifyAttempts()));
+            pending.put(
+                    email,
+                    PendingCodes.single(
+                            new PendingCode(hash(fixedCode), now.plus(props.ttl())), props.maxVerifyAttempts()));
             log.info("Issued the FIXED test login code for an allow-listed test address (no email sent).");
             return;
         }
@@ -157,7 +185,15 @@ public class EmailCodeService {
         }
 
         String code = generateCode();
-        pending.put(email, new PendingCode(hash(code), now.plus(props.ttl()), props.maxVerifyAttempts()));
+        PendingCode fresh = new PendingCode(hash(code), now.plus(props.ttl()));
+        // Atomic append (same asMap().compute() discipline as verify, TM-732): a fresh entry starts a
+        // new set with the FULL attempt budget; an existing entry keeps its REMAINING budget — a resend
+        // must not refill an attacker's guessing allowance (the budget only resets once the whole entry
+        // is gone: burned, expired out, or never created).
+        pending.asMap()
+                .compute(email, (key, current) -> current == null
+                        ? PendingCodes.single(fresh, props.maxVerifyAttempts())
+                        : current.withNewCode(fresh, now, MAX_PENDING_CODES));
         lastSent.put(email, now);
 
         // Hand the plaintext to the mailer and let it go out of scope — only the hash is retained.
@@ -166,9 +202,10 @@ public class EmailCodeService {
     }
 
     /**
-     * Verify {@code rawCode} against the outstanding code for {@code rawEmail} and, on success, mint a
-     * Firebase custom token for the address's account (creating the account on first sight, matching
-     * Firebase passwordless). The code is single-use: a correct verify burns it.
+     * Verify {@code rawCode} against the address's outstanding codes and, on success, mint a Firebase
+     * custom token for the address's account (creating the account on first sight, matching Firebase
+     * passwordless). Any non-expired code in the set verifies (TM-1003 — the superseded-code fix);
+     * codes stay single-use because the first correct match burns <strong>all</strong> of them.
      *
      * @return a Firebase custom token the client exchanges via {@code signInWithCustomToken}
      * @throws EmailCodeException for an invalid ({@link EmailCodeException.Reason#CODE_INVALID}),
@@ -191,29 +228,61 @@ public class EmailCodeService {
         VerifyOutcome[] captured = {null};
         pending.asMap().compute(email, (key, current) -> {
             if (current == null) {
-                captured[0] = VerifyOutcome.INVALID;
+                // No entry at all: never requested, all codes aged out of the cache, or the process
+                // restarted (the store is in-memory, so a deploy wipes it). Distinct from a live wrong
+                // guess so the user gets an actionable message instead of "not valid".
+                captured[0] = VerifyOutcome.ABSENT;
                 return null; // absent -> stays absent
             }
-            if (clock.instant().isAfter(current.expiresAt())) {
-                captured[0] = VerifyOutcome.EXPIRED;
-                return null; // burn the expired entry
-            }
-            if (!constantTimeEquals(current.codeHash(), codeHash)) {
-                // Burn the code once the attempt budget is exhausted, so a short numeric code can't be
-                // brute-forced; otherwise consume exactly one attempt and let the caller retry.
-                if (current.attemptsLeft() <= 1) {
-                    captured[0] = VerifyOutcome.RATE_LIMITED;
-                    return null; // last attempt spent -> burn
+            Instant now = clock.instant();
+            List<PendingCode> live = current.liveCodes(now);
+
+            // 1) Correct match against ANY still-live code — including a superseded one (TM-1003).
+            //    Burn the WHOLE set atomically: single-use is per address now, so a token can never be
+            //    minted twice and no sibling code survives a successful login to be replayed.
+            for (PendingCode candidate : live) {
+                if (constantTimeEquals(candidate.codeHash(), codeHash)) {
+                    captured[0] = VerifyOutcome.CORRECT;
+                    return null;
                 }
-                captured[0] = VerifyOutcome.INVALID;
-                return current.withOneFewerAttempt(); // atomic decrement
             }
-            // Correct: burn the single-use code here (atomically), so a token is never issued twice for it.
-            captured[0] = VerifyOutcome.CORRECT;
-            return null;
+
+            // 2) The submitted code IS one of ours but its own TTL has passed -> the explicit
+            //    "expired" signal (410), not a bare "invalid" (401). Matching an expired code costs no
+            //    attempt (parity with the old single-slot flow, where expiry was checked before the
+            //    compare); the dead codes are pruned but any still-live siblings keep their chance.
+            boolean matchesExpired = current.codes().stream()
+                    .filter(c -> now.isAfter(c.expiresAt()))
+                    .anyMatch(c -> constantTimeEquals(c.codeHash(), codeHash));
+            if (matchesExpired) {
+                captured[0] = VerifyOutcome.EXPIRED;
+                return live.isEmpty() ? null : current.withCodes(live);
+            }
+
+            // 3) Nothing live left at all (every code aged past its TTL, submitted code matches none of
+            //    the corpses): the whole entry is dead — report EXPIRED and drop it, exactly like the old
+            //    single-slot behaviour for a touched expired entry.
+            if (live.isEmpty()) {
+                captured[0] = VerifyOutcome.EXPIRED;
+                return null;
+            }
+
+            // 4) A genuinely wrong guess against live codes. The attempt budget is SHARED across the set
+            //    (TM-1003): holding 3 live codes still allows only maxVerifyAttempts wrong guesses in
+            //    total, so multi-slot never widens the brute-force surface. Burn everything once the
+            //    budget is exhausted; otherwise consume exactly one attempt and let the caller retry.
+            if (current.attemptsLeft() <= 1) {
+                captured[0] = VerifyOutcome.RATE_LIMITED;
+                return null; // last attempt spent -> burn ALL codes for the address
+            }
+            captured[0] = VerifyOutcome.INVALID;
+            return current.withCodes(live).withOneFewerAttempt(); // atomic decrement (+ prune the dead)
         });
 
         switch (captured[0]) {
+            case ABSENT -> throw new EmailCodeException(
+                    EmailCodeException.Reason.CODE_INVALID,
+                    "That code has expired or been replaced — request a new one.");
             case INVALID -> throw new EmailCodeException(
                     EmailCodeException.Reason.CODE_INVALID, "That code is not valid.");
             case EXPIRED -> throw new EmailCodeException(
@@ -233,8 +302,10 @@ public class EmailCodeService {
         return token;
     }
 
-    /** The mutually-exclusive results of one atomic {@code verify} attempt (TM-732). */
+    /** The mutually-exclusive results of one atomic {@code verify} attempt (TM-732/TM-1003). */
     private enum VerifyOutcome {
+        /** No pending entry for the address (never requested / aged out / process restarted). */
+        ABSENT,
         INVALID,
         EXPIRED,
         RATE_LIMITED,
@@ -300,10 +371,49 @@ public class EmailCodeService {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** One outstanding code: the hash of the digits, when it expires, and how many tries remain. */
-    private record PendingCode(String codeHash, Instant expiresAt, int attemptsLeft) {
-        PendingCode withOneFewerAttempt() {
-            return new PendingCode(codeHash, expiresAt, attemptsLeft - 1);
+    /** One outstanding code: the hash of the digits and when it (individually) expires. */
+    private record PendingCode(String codeHash, Instant expiresAt) {}
+
+    /**
+     * The full pending state for one address (TM-1003): its outstanding codes — oldest first, at most
+     * {@link #MAX_PENDING_CODES} — and the attempt budget <strong>shared across all of them</strong>.
+     * The budget deliberately lives on the set, not on each code: if every code carried its own
+     * {@code maxVerifyAttempts}, requesting 3 codes would triple an attacker's guessing allowance.
+     * Immutable (every mutation returns a new instance) so it composes safely with the atomic
+     * {@code asMap().compute()} read-modify-write in {@code verify}/{@code request}.
+     */
+    private record PendingCodes(List<PendingCode> codes, int attemptsLeft) {
+        /** A brand-new entry: one code, the full attempt budget. */
+        static PendingCodes single(PendingCode code, int attempts) {
+            return new PendingCodes(List.of(code), attempts);
+        }
+
+        /**
+         * Append {@code fresh}, pruning codes already past their own TTL and evicting the oldest once
+         * over {@code maxCodes}. Keeps the REMAINING attempt budget (a resend is not an attempt-budget
+         * refill — see the comment at the call site in {@code request}).
+         */
+        PendingCodes withNewCode(PendingCode fresh, Instant now, int maxCodes) {
+            List<PendingCode> next = new ArrayList<>(liveCodes(now));
+            next.add(fresh);
+            while (next.size() > maxCodes) {
+                next.remove(0); // oldest first -> drop from the front
+            }
+            return new PendingCodes(List.copyOf(next), attemptsLeft);
+        }
+
+        /** The subset of codes whose own TTL has not yet passed, in original (oldest-first) order. */
+        List<PendingCode> liveCodes(Instant now) {
+            return codes.stream().filter(c -> !now.isAfter(c.expiresAt())).toList();
+        }
+
+        /** Same budget-keeping entry with a replaced (typically pruned) code list. */
+        PendingCodes withCodes(List<PendingCode> replacement) {
+            return new PendingCodes(List.copyOf(replacement), attemptsLeft);
+        }
+
+        PendingCodes withOneFewerAttempt() {
+            return new PendingCodes(codes, attemptsLeft - 1);
         }
     }
 }
