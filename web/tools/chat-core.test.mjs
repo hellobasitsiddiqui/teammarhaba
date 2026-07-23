@@ -966,6 +966,37 @@ test("createAdminFlagCache: invalidate() drops the cached flag so a re-resolve p
   assert.equal(fetches, 2);
 });
 
+test("createAdminFlagCache: a /me landing after invalidate() does NOT poison the cache with the previous user's flag (TM-989)", async () => {
+  // TM-989 TOCTOU: resolve() awaits fetchMe(), then writes `cached`. If the account switches
+  // (invalidate() fires) while that fetch is in flight, the resolved value belongs to the OLD user.
+  // The unfixed code wrote it into `cached` unconditionally — so an admin's in-flight /me could
+  // repopulate the cache as admin AFTER a non-admin signed in behind it (exposing the announce
+  // toggle), or vice-versa. The fix pins an epoch and only caches if invalidate() hasn't run since.
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let fetches = 0;
+  const roles = [{ role: "ADMIN" }, { role: "MEMBER" }];
+  const cache = createAdminFlagCache(async () => {
+    const role = roles[fetches++];
+    if (fetches === 1) await gate; // first (previous-user) fetch hangs until we let it land
+    return role;
+  });
+
+  // Start resolving for user A (admin). It parks on the gate — not yet resolved.
+  const inflight = cache.resolve();
+  // Account switches to user B (non-admin) mid-flight.
+  cache.invalidate();
+  // Now let A's stale /me land. Its value must NOT be written into the cache.
+  release();
+  assert.equal(await inflight, true); // the stale call still returns A's own value to ITS caller…
+
+  // …but the cache must be UNRESOLVED, so B's next resolve() re-fetches and sees B's real role.
+  assert.equal(await cache.resolve(), false); // user B: non-admin, freshly fetched
+  assert.equal(fetches, 2); // proves a real second fetch happened (stale value did not stick)
+  assert.equal(await cache.resolve(), false); // and B's fresh value is now cached (no third fetch)
+  assert.equal(fetches, 2);
+});
+
 test("createAdminFlagCache: resolves role case-insensitively and only for ADMIN", async () => {
   assert.equal(await createAdminFlagCache(async () => ({ role: "admin" })).resolve(), true);
   assert.equal(await createAdminFlagCache(async () => ({ role: "ADMIN" })).resolve(), true);

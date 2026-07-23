@@ -88,14 +88,39 @@ test("messageActionMenu exposes an open() and returns it (so the row can wire lo
   assert.match(block, /return \{ node: wrap, open \}/, "the menu returns { node, open } for the row to consume");
 });
 
-test("the message ROW binds a long-press (contextmenu) handler that opens the menu", () => {
+function messageRowBlock() {
   const rowFnAt = CHAT_SRC.indexOf("function messageRow");
   assert.ok(rowFnAt > -1, "messageRow exists");
-  const rowBlock = braceBlock(CHAT_SRC, rowFnAt);
+  return braceBlock(CHAT_SRC, rowFnAt);
+}
+
+test("the message ROW binds a long-press (contextmenu) handler that opens the menu", () => {
+  const rowBlock = messageRowBlock();
+  const ctxAt = rowBlock.indexOf('row.addEventListener("contextmenu"');
+  assert.ok(ctxAt > -1, "the row has a contextmenu handler");
+  const handler = rowBlock.slice(ctxAt, ctxAt + 260);
+  assert.match(handler, /menu\.open\(\)/, "the row reveals the menu on long-press (contextmenu → menu.open())");
+  assert.match(handler, /e\.preventDefault\(\)/, "it suppresses the native menu on a touch long-press");
+});
+
+// ── TM-989/E: the long-press affordance is TOUCH-only; desktop right-click keeps the native menu ──────
+
+test("TM-989/E: the row tracks pointer type and only intercepts a TOUCH-raised contextmenu", () => {
+  const rowBlock = messageRowBlock();
+  // A pointerdown listener records whether the last pointer was touch/pen (not mouse).
   assert.match(
     rowBlock,
-    /row\.addEventListener\("contextmenu",\s*\(e\)\s*=>\s*\{\s*e\.preventDefault\(\);\s*menu\.open\(\)/,
-    "the row reveals the menu on long-press (contextmenu → menu.open())",
+    /row\.addEventListener\("pointerdown"[\s\S]*?pointerType\s*===\s*"touch"/,
+    "the row records the last pointer type from pointerdown",
+  );
+  const ctxAt = rowBlock.indexOf('row.addEventListener("contextmenu"');
+  const handler = rowBlock.slice(ctxAt, ctxAt + 260);
+  // It bails (native menu preserved) when the last pointer was NOT touch — the desktop right-click fix.
+  assert.match(handler, /if\s*\(!lastPointerWasTouch\)\s*return/, "a non-touch (mouse) contextmenu falls through to the native menu");
+  // The preventDefault must come AFTER the touch guard, so it can't run on a desktop right-click.
+  assert.ok(
+    handler.indexOf("lastPointerWasTouch") < handler.indexOf("preventDefault"),
+    "the touch guard precedes (gates) the preventDefault",
   );
 });
 
@@ -104,4 +129,22 @@ test("the trigger's own contextmenu stops propagation, so long-pressing it doesn
   const trigCtxAt = block.indexOf('trigger.addEventListener("contextmenu"');
   assert.ok(trigCtxAt > -1, "the trigger has its own contextmenu handler");
   assert.match(block.slice(trigCtxAt, trigCtxAt + 160), /stopPropagation\(\)/, "it stops propagation to the row");
+});
+
+// ── TM-989/F: the role="menu" adds the ARIA arrow-key pattern; Tab stays native (the tm940 contract) ──
+
+test("TM-989/F: the menu keydown adds ArrowUp/ArrowDown/Home/End nav + Escape-closes, and Tab is NOT intercepted", () => {
+  const block = messageActionMenuBlock();
+  const kdAt = block.indexOf('menu.addEventListener("keydown"');
+  assert.ok(kdAt > -1, "the menu has a keydown handler");
+  const handler = block.slice(kdAt, block.indexOf("});", kdAt) + 3);
+  assert.match(handler, /"ArrowDown"/, "ArrowDown is handled");
+  assert.match(handler, /"ArrowUp"/, "ArrowUp is handled");
+  assert.match(handler, /"Home"/, "Home is handled");
+  assert.match(handler, /"End"/, "End is handled");
+  assert.match(handler, /e\.key === "Escape"[\s\S]*setOpen\(false\)/, "Escape closes via setOpen(false)");
+  assert.match(handler, /items\[\w+\]\.focus\(\)/, "arrow keys move focus between items");
+  // TM-989 e2e regression guard: Tab must NOT be intercepted/closed — native tab order must traverse
+  // reply→edit→delete inside the OPEN menu, the behaviour the tm940 spec pins (tm940-message-actions.spec.mjs:153).
+  assert.doesNotMatch(handler, /e\.key === "Tab"/, "Tab is NOT intercepted (native traversal; keeps the tm940 contract)");
 });
