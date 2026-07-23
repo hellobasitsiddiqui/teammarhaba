@@ -93,6 +93,29 @@ ground truth. Prefer handing Basit `cr <lane>` over a raw UUID.
    until it is shipped and serving-asserted, so it must exist from day one, never bolted on at close.
 
 
+## Grooming a ticket — drive it with Q&A cards, don't write the card solo
+
+Refinement is **collaborative** — surface the open decisions and let Basit steer them, don't hand him
+a finished card built from your own defaults. When you groom a ticket into its refinement card:
+
+1. **Ground first.** Read the actual code so every option is real (`file:line`), not hypothetical. A
+   grooming round built on guesses wastes the trip — and the ticket text is often stale (primitives
+   already shipped), which only the code reveals.
+2. **Ask via Q&A cards.** Surface each genuine fork the card can't resolve itself — scope boundary, a
+   UX/product choice, what to do with a stray element, the **estimate** — as an **interactive
+   multiple-choice question card** (the `AskUserQuestion` prompt) in the terminal, and let Basit
+   answer. Recommend an option first (mark it "(Recommended)"). One card per real fork; don't card-ify
+   a decision that has an obvious default — just note it and move on.
+3. **Then write the card.** Only after the Q&A is settled do you edit the ticket description into the
+   grounded shape (Context/what-exists with real `file:line` · Goal · Scope · Acceptance criteria ·
+   Dependencies + dup flags · resolved Decisions · Estimate). Run the refinement pass on the **Fable**
+   model (see *Findings discipline → Model policy*).
+
+The anti-pattern (learned on TM-908): writing the full refinement card unilaterally and asking Basit to
+review it after the fact. He wants to answer the forks as they come up, card by card, *before* the card
+is written.
+
+
 ## Jira REST mechanics + sprint-opening ritual (wave-chat-1)
 
 - **Creds**: `~/.config/teammarhaba/jira.env` — load with `set -a; source …; set +a` (a plain
