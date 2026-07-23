@@ -37,7 +37,7 @@
         "properties" : {
           "capacity" : {
             "format" : "int32",
-            "minimum" : 0,
+            "minimum" : 1,
             "type" : "integer"
           }
         },
