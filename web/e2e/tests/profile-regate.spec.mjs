@@ -9,19 +9,31 @@
 // (`!needsVerifiedPhone(me, currentUser().phoneNumber)`) is re-gated too — realising the strict
 // "one verified number = one account" (TM-923) for the WHOLE existing user base, not just new signups.
 //
-// This spec now carries two behavioural checks (both on main only — the fast PR twin
-// web/tools/profile-regate-core.test.mjs guards the wiring on the PR gate):
+// TM-992 (decision C = GRACE, then FORCE) then SOFTENED the TM-932 verified-phone term: the router only
+// folds it into `isOnboarded` when phoneReverifyDecision says HARD_GATE — i.e. a CONFIG-DRIVEN deadline
+// (`window.TEAMMARHABA_CONFIG.phoneReverifyDeadline`) exists AND has passed. Inside the grace window (or,
+// the SAFE DEFAULT, with no deadline configured at all) the account stays UN-gated and gets only the
+// dismissible nudge banner (phone-reverify-notice.js). TM-1010: this spec originally still asserted the
+// pre-TM-992 IMMEDIATE hard gate, which made it red on main — the hard-gate test now forces the deadline
+// PAST (per-page config override), and a grace-window test pins the nudge-not-gate default.
+//
+// This spec now carries three behavioural checks (all on main only — the fast PR twins
+// web/tools/profile-regate-core.test.mjs + phone-reverify-core.test.mjs guard the wiring on the PR gate):
 //   1. TM-880 (phone CLEARED): a completed account whose phone is cleared server-side is re-gated
-//      (needsPhoneNumber). Its control account now seeds a VERIFIED phone (Admin SDK) so it lands
-//      un-gated BEFORE the clear even under TM-932.
-//   2. TM-932 (phone UNVERIFIED): a completed account with a STORED phone but NO linked Firebase phone
-//      credential (the common retroactive population) is re-gated on reload (needsVerifiedPhone), and
-//      verifying through the gate (Firebase OTP + link, via the Auth emulator) un-gates it.
+//      (needsPhoneNumber — NOT softened by TM-992, which covers only the verified-phone term). Its
+//      control account now seeds a VERIFIED phone (Admin SDK) so it lands un-gated BEFORE the clear.
+//   2. TM-932/TM-992 (phone UNVERIFIED, deadline PAST): a completed account with a STORED phone but NO
+//      linked Firebase phone credential (the common retroactive population) is HARD-re-gated once the
+//      re-verify deadline has passed (forced past for the page), and verifying through the gate
+//      (Firebase OTP + link, via the Auth emulator) un-gates it.
+//   3. TM-992 (phone UNVERIFIED, grace window): the same population WITHOUT a configured deadline lands
+//      IN the app with the dismissible nudge banner — grace, never a lock-out.
 //
 // FAIL-BEFORE (unit twin proves it deterministically; this main-only spec is the behavioural sibling):
-// dropping `!needsVerifiedPhone(...)` from the router ternary leaves the UNVERIFIED account un-gated on
-// reload and test 2's gate-intercept assertions fail; a "gate everyone" regression fails test 1's
-// un-gated control (a verified account must NOT be gated).
+// dropping `!needsVerifiedPhone(...)`/the HARD_GATE term from the router ternary leaves the UNVERIFIED
+// account un-gated past the deadline and test 2's gate-intercept assertions fail; a "gate everyone"
+// regression (e.g. hard-gating without a deadline) fails test 1's un-gated control AND test 3's
+// grace-window landing (a verified/inside-grace account must NOT be gated).
 //
 // Idioms: per-run self-owned account via the Auth emulator's accounts:signUp + the public-API
 // un-gate sequence (the chat-search / payment-webhook-safety pattern — no shared fixture touched);
@@ -138,6 +150,36 @@ async function createCompletedAccount({ verifyPhone = false } = {}) {
   return { email, password, authed, uid, phone };
 }
 
+/**
+ * Force the retroactive re-verify deadline PAST for this page, so phoneReverifyDecision returns
+ * HARD_GATE for an unverified stored phone. TM-992 shipped grace-then-force: without a configured
+ * deadline the SAFE DEFAULT is grace-only (a dismissible nudge, NEVER the hard #/onboarding re-gate),
+ * so the hard-gate path can only be exercised deterministically by configuring a deadline that has
+ * already passed.
+ *
+ * Mechanism: serve.mjs synthesises /assets/config.js as a classic script that ASSIGNS a frozen
+ * `window.TEAMMARHABA_CONFIG` AFTER init-scripts run, so a plain assignment here would be clobbered.
+ * Instead install an accessor whose setter re-merges `phoneReverifyDeadline` into whatever config.js
+ * assigns — the exact per-spec config-override pattern paid-rsvp/subscribe use for the membership flag.
+ * The init-script persists across reloads of this page, so the deadline stays past for the whole test.
+ * Must be called BEFORE the first page.goto.
+ */
+async function forcePastReverifyDeadline(page, deadline = "2020-01-01") {
+  await page.addInitScript((past) => {
+    const merge = (cfg) => Object.freeze({ ...(cfg || {}), phoneReverifyDeadline: past });
+    let current = merge(window.TEAMMARHABA_CONFIG || {});
+    Object.defineProperty(window, "TEAMMARHABA_CONFIG", {
+      configurable: true,
+      get() {
+        return current;
+      },
+      set(next) {
+        current = merge(next);
+      },
+    });
+  }, deadline);
+}
+
 /** Sign in through the real UI (email+password "Try another way" — the sibling specs' path). */
 async function signInThroughUi(page, { email, password }) {
   await page.goto("/#/login");
@@ -199,7 +241,7 @@ test("@profile a COMPLETED account whose phone is cleared is re-gated on reload 
   await expect(page.locator("#app-tabbar")).toBeHidden();
 });
 
-test("@profile a COMPLETED account with an UNVERIFIED stored phone is re-gated, and verifying un-gates it (TM-932)", async ({
+test("@profile a COMPLETED account with an UNVERIFIED stored phone is HARD-re-gated once the re-verify deadline has passed, and verifying un-gates it (TM-932/TM-992)", async ({
   page,
 }) => {
   // The retroactive population: a completed account with a STORED phone on the backend row but NO
@@ -209,12 +251,19 @@ test("@profile a COMPLETED account with an UNVERIFIED stored phone is re-gated, 
   const account = await createCompletedAccount(); // NO verifyPhone — stored phone is unverified
   const national = account.phone.replace(/^\+44/, ""); // uniqueTestPhone() is a GB (+44) number
 
+  // TM-992 (grace-then-force): the hard re-gate fires ONLY once the config-driven re-verify deadline has
+  // passed — inside the grace window (the harness default: no deadline) the account gets the dismissible
+  // nudge, not a gate (asserted by the grace-window test below). Force the deadline PAST for this page so
+  // phoneReverifyDecision is deterministically HARD_GATE and the gate assertions below are exercised.
+  await forcePastReverifyDeadline(page);
+
   await signInThroughUi(page, account);
 
   // 1. RE-GATED: onboardingCompleted=true and the stored phone is present + parseable, but it isn't the
-  //    account's Firebase-verified number (there is no linked phone at all) — so needsVerifiedPhone
-  //    flips isOnboarded false and the completion gate intercepts, tab bar hidden. On MAIN (without the
-  //    router term) this account would land in the app with the tab bar shown — the fail-before seam.
+  //    account's Firebase-verified number (there is no linked phone at all) — and the re-verify deadline
+  //    has passed, so phoneReverifyDecision is HARD_GATE, isOnboarded flips false and the completion gate
+  //    intercepts, tab bar hidden. Without the router's HARD_GATE term this account would land in the app
+  //    with the tab bar shown — the fail-before seam.
   await expect(page.locator("#onboarding-view")).toBeVisible();
   await expect(page.locator("#onboarding-phone-send")).toBeVisible(); // the TM-930 verify step
   await expect(page.locator("#app-tabbar")).toBeHidden();
@@ -259,9 +308,39 @@ test("@profile a COMPLETED account with an UNVERIFIED stored phone is re-gated, 
   await expect(page.locator("#app-tabbar")).toBeVisible();
 
   // 4. UN-GATED for good: a reload re-resolves GET /me + the now-verified Firebase phone, so
-  //    needsVerifiedPhone is satisfied and the account stays in the app (no re-gate loop).
+  //    needsVerifiedPhone is satisfied and the account stays in the app (no re-gate loop). The forced
+  //    PAST deadline is still in effect on this reload (the init-script persists for the page), so
+  //    staying un-gated proves it's the VERIFICATION that satisfied the policy (decision NONE), not the
+  //    deadline quietly ceasing to apply.
   await page.reload();
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await expect(page.locator("#onboarding-view")).toBeHidden();
   await expect(page.locator("#app-tabbar")).toBeVisible();
+});
+
+test("@profile inside the grace window an UNVERIFIED stored phone gets the dismissible nudge, NOT the gate (TM-992)", async ({
+  page,
+}) => {
+  // The same retroactive population as the hard-gate test above, but WITHOUT forcing the deadline: the
+  // harness config (serve.mjs) carries no phoneReverifyDeadline — matching the committed prod default —
+  // so phoneReverifyDecision returns GRACE_NUDGE (the SAFE DEFAULT: never lock existing users out before
+  // product picks a date). The account must land IN the app, tab bar shown, with only the dismissible
+  // nudge banner up. This is exactly the shipped TM-992 behaviour this spec used to contradict (TM-1010).
+  const account = await createCompletedAccount(); // unverified stored phone, NO deadline override
+
+  await signInThroughUi(page, account);
+
+  // UN-gated: grace, not force. (A regression back to the TM-932 immediate hard gate fails HERE.)
+  await expect(page.locator("#onboarding-view")).toBeHidden();
+  await expect(page.locator("#app-tabbar")).toBeVisible();
+
+  // The soft nudge is up — phone-reverify-notice.js renders it only on GRACE_NUDGE, with the no-deadline
+  // copy (no date to quote). Its "Verify now" routes into the SAME #/onboarding verify flow the hard gate
+  // forces, so grace and force land in exactly one place.
+  await expect(page.locator("#phone-reverify-notice")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator("#phone-reverify-notice")).toContainText("verify your phone number");
+
+  // Dismiss is honoured within the visit (in-memory, like the email-verify banner).
+  await page.click("#phone-reverify-notice .tm-verify-banner-dismiss");
+  await expect(page.locator("#phone-reverify-notice")).toBeHidden();
 });
