@@ -6,6 +6,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.EventChatLifecycleService;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.user.UserService;
+import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Clock;
@@ -121,10 +122,24 @@ public class MessageReactionService {
         requireOpenThread(conversationId);
 
         String glyph = normalise(emoji);
+        // Add-path allow-list (TM-989): only a glyph from the canonical picker set may be persisted, so
+        // a member can't store arbitrary <=32-char strings that every reader's UI would render as pills
+        // (text-spoofing + storage/response bloat). Un-react is NOT gated on this, so a legacy value can
+        // still be removed.
+        if (!ReactionEmojis.ALLOWED.contains(glyph)) {
+            throw new BadRequestException("Unsupported reaction emoji.");
+        }
         // Toggle-on is idempotent: skip the insert if the reaction already exists, and if a concurrent
         // request beats us to it the UNIQUE (message_id, user_id, emoji) constraint holds — we swallow
         // that as "already reacted" so a double-tap never surfaces a 409.
         if (!reactions.existsByMessageIdAndUserIdAndEmoji(messageId, userId, glyph)) {
+            // Per-user-per-message distinct-reaction cap (TM-989): a member may hold at most one of each
+            // allowed emoji on a message; a NEW distinct reaction beyond the cap is a 400. Only checked
+            // on a genuine insert (an idempotent re-react of an existing emoji is exempt — it adds no row).
+            if (reactions.countByMessageIdAndUserId(messageId, userId)
+                    >= ReactionEmojis.MAX_PER_USER_PER_MESSAGE) {
+                throw new BadRequestException("Too many reactions on this message.");
+            }
             try {
                 reactions.saveAndFlush(MessageReaction.of(messageId, userId, glyph));
             } catch (DataIntegrityViolationException alreadyReacted) {
