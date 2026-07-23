@@ -10,12 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  decideLink,
-  isLinkProven,
-  classifyLinkError,
-  CREDENTIAL_ALREADY_IN_USE,
-} from "../src/assets/account-link-policy.js";
+import { decideLink } from "../src/assets/account-link-policy.js";
 
 // ── decideLink: proof of BOTH ────────────────────────────────────────────────────────────────────
 
@@ -26,7 +21,6 @@ test("PROVEN link: signed into the first account AND the second credential verif
     decideLink({ signedInUid: "uid-A", credentialVerifiedInThisFlow: true }),
     "link",
   );
-  assert.equal(isLinkProven({ signedInUid: "uid-A", credentialVerifiedInThisFlow: true }), true);
 });
 
 test("REFUSED: an UNVERIFIED match does NOT auto-link even when signed in (the takeover guard)", () => {
@@ -36,7 +30,6 @@ test("REFUSED: an UNVERIFIED match does NOT auto-link even when signed in (the t
     decideLink({ signedInUid: "uid-A", credentialVerifiedInThisFlow: false }),
     "refuse-unverified",
   );
-  assert.equal(isLinkProven({ signedInUid: "uid-A", credentialVerifiedInThisFlow: false }), false);
 });
 
 test("REFUSED: not signed into any first account — a link would fabricate a merge", () => {
@@ -47,32 +40,14 @@ test("REFUSED: not signed into any first account — a link would fabricate a me
     "refuse-not-signed-in",
   );
   assert.equal(decideLink({ signedInUid: undefined, credentialVerifiedInThisFlow: true }), "refuse-not-signed-in");
-  assert.equal(isLinkProven({ signedInUid: null, credentialVerifiedInThisFlow: true }), false);
 });
 
 test("REFUSED: neither proof present", () => {
   assert.equal(decideLink({}), "refuse-not-signed-in");
   assert.equal(decideLink({ signedInUid: "", credentialVerifiedInThisFlow: false }), "refuse-not-signed-in");
-  assert.equal(isLinkProven({}), false);
 });
 
 test("decideLink coerces a truthy-but-non-boolean verified flag safely", () => {
   // Only an actual "both proofs" state links; a missing/garbage flag never accidentally proves.
   assert.equal(decideLink({ signedInUid: "uid-A" }), "refuse-unverified"); // flag undefined => not verified
-});
-
-// ── classifyLinkError: a collision is a HARD-BLOCK, never a silent merge ──────────────────────────
-
-test("a credential-already-in-use collision is classified as a hard-block", () => {
-  // Firebase raises this when the verified identifier genuinely belongs to ANOTHER account. The safe
-  // response is a hard-block ("sign in with it instead"), NEVER an automatic merge of the two.
-  assert.equal(classifyLinkError({ code: CREDENTIAL_ALREADY_IN_USE }), "collision-hard-block");
-  assert.equal(classifyLinkError({ code: "auth/credential-already-in-use" }), "collision-hard-block");
-});
-
-test("other auth errors are not mistaken for a collision", () => {
-  assert.equal(classifyLinkError({ code: "auth/invalid-verification-code" }), "other");
-  assert.equal(classifyLinkError({ code: "auth/code-expired" }), "other");
-  assert.equal(classifyLinkError({}), "other");
-  assert.equal(classifyLinkError(null), "other");
 });

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.teammarhaba.backend.AbstractIntegrationTest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -33,8 +34,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * TM-975 is this guard test plus the documented reconciliation of the ticket graph.
  *
  * <p>The index is already live (Flyway applied V48 at context startup), so this test only INSERTs
- * against the applied schema — it never re-runs migration DDL. Each test cleans up its own rows so a
- * shared-container re-run starts clean.
+ * against the applied schema — it never re-runs migration DDL. An {@code @AfterEach} hook removes each
+ * test's seeded rows so a shared-container re-run starts clean AND — critically — so a FAILING
+ * assertion doesn't leak its half-seeded rows into a sibling test (TM-1019: cleanup used to run inline
+ * at the end of the test body, so it was skipped exactly when an assertion threw).
  */
 class PhoneUniqueInvariantTest extends AbstractIntegrationTest {
 
@@ -77,8 +80,6 @@ class PhoneUniqueInvariantTest extends AbstractIntegrationTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> seed("inv-second-spaced", "+44 7700 900321", false))
                 .isInstanceOf(DataIntegrityViolationException.class);
-
-        cleanup();
     }
 
     @Test
@@ -100,12 +101,16 @@ class PhoneUniqueInvariantTest extends AbstractIntegrationTest {
         // And the live number is still protected against another ACTIVE duplicate.
         assertThatThrownBy(() -> seed("inv-live-dup", "+447700900654", false))
                 .isInstanceOf(DataIntegrityViolationException.class);
-
-        cleanup();
     }
 
-    /** Remove this test's rows so a shared-container re-run starts clean (no cross-test leakage). */
-    private void cleanup() {
+    /**
+     * Remove every seeded row AFTER each test — runs even when a test's assertion throws, so a
+     * failing test can't leak its half-seeded {@code inv-%} rows into a sibling test (which would then
+     * see a spurious duplicate-phone collision). {@code @AfterEach} is the guarantee the old inline
+     * end-of-body cleanup could not give (TM-1019).
+     */
+    @AfterEach
+    void cleanup() {
         jdbc.update("delete from users where firebase_uid like 'inv-%'");
     }
 }
