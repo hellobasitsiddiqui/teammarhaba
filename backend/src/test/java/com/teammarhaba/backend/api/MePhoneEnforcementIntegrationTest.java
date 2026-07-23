@@ -256,4 +256,69 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.age").value(41));
     }
+
+    // ==== TM-1017: a FORMAT-ONLY phone difference is NOT a change (canonical E.164) =================
+    //
+    // The phone-changed check in applyProfileFields compared the raw stored string against the raw
+    // incoming one (Objects.equals). A legacy-formatted stored number ("+44 7700 900123") vs the
+    // client's composed one ("+447700900123") is the SAME number stored two ways (V48 normalises both
+    // to the digits-only key), but raw-equals reads it as a CHANGE — so with the flag ON,
+    // enforceVerifiedPhoneIfRequired fired and 400'd EVERY save (even a city-only PATCH that also
+    // re-sends the phone) for the unverified legacy cohort during the grace window. These are
+    // fail-before/pass-after: on clean main the raw-equals sees a change → enforcement → 400; with the
+    // TM-1017 canonical-equals it's a no-op → 200. getUser is deliberately UNSTUBBED, so if enforcement
+    // were (wrongly) triggered the fail-closed Admin SDK read would 400 — a green 200 proves the phone
+    // is treated unchanged and Firebase is never consulted.
+
+    /** Seed {@code uid}'s account with a legacy-formatted stored phone, without tripping enforcement. */
+    private void seedLegacyFormattedPhone(RequestPostProcessor who, String uid, String legacyPhone)
+            throws Exception {
+        // Provision via a no-op, non-phone PATCH (no phone field → no Firebase read under the flag).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Europe/London\"}"))
+                .andExpect(status().isOk());
+        // Write the legacy spelling directly (a PATCH couldn't, under the flag), simulating a row saved
+        // before TM-781's stricter composition — separators the client's composed value drops.
+        var user = users.findByFirebaseUid(uid).orElseThrow();
+        user.setPhone(legacyPhone);
+        users.saveAndFlush(user);
+    }
+
+    @Test
+    void patchMeCityOnlyIsNotBlockedWhenPhoneReSentInAdifferentFormat() throws Exception {
+        var who = caller("uid-enf-legacy-fmt", "j@example.com");
+        seedLegacyFormattedPhone(who, "uid-enf-legacy-fmt", "+44 7700 900123");
+
+        // The web client re-sends the composed (separator-free) phone alongside a city edit. Same
+        // number, different spelling → must be a NO-OP on the phone, so no enforcement, so a plain 200.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"London\",\"phone\":\"+447700900123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("London"));
+
+        // The stored phone is untouched (the legacy spelling stays; no mirror ran because no change).
+        assertThat(users.findByFirebaseUid("uid-enf-legacy-fmt").orElseThrow().getPhone())
+                .isEqualTo("+44 7700 900123");
+    }
+
+    @Test
+    void patchMeReSendingTheSameNumberReformattedIsANoOp() throws Exception {
+        var who = caller("uid-enf-reformat", "k@example.com");
+        seedLegacyFormattedPhone(who, "uid-enf-reformat", "+44 7700 900456");
+
+        // A PATCH carrying ONLY the phone, reformatted to the canonical spelling → unchanged number →
+        // no enforcement → 200 (fail-before: raw-equals saw a change → enforcement → 400).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700900456\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(users.findByFirebaseUid("uid-enf-reformat").orElseThrow().getPhone())
+                .isEqualTo("+44 7700 900456");
+    }
 }
