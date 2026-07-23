@@ -187,6 +187,10 @@ function loadProfileModule(deps) {
     // TM-1005: the pure "offer to verify the CURRENT, unchanged stored number" rule + the banner-CTA
     // handoff event name (from phone-reverify-core.js) — both referenced by the shipped source.
     "  phoneCurrentNeedsVerify, PHONE_VERIFY_REQUEST_EVENT,\n" +
+    // TM-1009: the deploy-time verified-phone flag reader (verified-phone-flag.js). Injected as a
+    // mutable fake defaulting to ON so every pre-flag test keeps its original TM-982 semantics
+    // (flag ON = exactly the old behaviour); a test can flip it OFF via setVerifiedPhoneRequired.
+    "  verifiedPhoneRequired,\n" +
     "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
@@ -248,6 +252,8 @@ let currentUserImpl = () => null;
 // a test can simulate "six digits entered" by invoking it with a code.
 let startPhoneVerifyImpl = async () => "fake-verification-id";
 let confirmPhoneLinkImpl = async () => ({});
+// TM-1009: the verified-phone requirement flag — ON by default (see the deps kit note below).
+let verifiedPhoneRequiredImpl = () => true;
 let OTP_ONCOMPLETE = null;
 // Avatar-control seams (TM-846): mutable so the upload-success test can enable the control and make
 // the fake upload "land" a photoURL (the default stays the disabled/no-op state every other test had).
@@ -327,6 +333,10 @@ const deps = {
   // name, so the affordance visibility/label wiring runs the shipped contract under Node.
   phoneCurrentNeedsVerify: core.phoneCurrentNeedsVerify,
   PHONE_VERIFY_REQUEST_EVENT: reverifyCore.PHONE_VERIFY_REQUEST_EVENT,
+  // TM-1009: the verified-phone requirement flag. Defaults ON here so the TM-982 save-block /
+  // Send-code tests below exercise exactly the pre-flag behaviour (the flag-OFF short-circuit has
+  // its own coverage in verified-phone-flag.test.mjs). Mutable per-test via the impl seam.
+  verifiedPhoneRequired: (...a) => verifiedPhoneRequiredImpl(...a),
   defaultCountryFor: core.defaultCountryFor,
   phonePartsError: core.phonePartsError,
   // setFieldError compares against this to decide whether the COUNTRY PICKER (not the national
@@ -927,6 +937,35 @@ test("fillForm puts a legacy bare number into the confirm-country state and save
     await profile.save({ preventDefault() {} });
     assert.equal(sent, null, "TM-982: a legacy number resolved to a new E.164 is unverified → save blocked");
     assert.match(entry.error.textContent, /verify/i, "the verify-your-new-number prompt is painted");
+  });
+});
+
+// TM-1009: the flag-OFF companion of the blocked-save case above — with the verified-phone
+// requirement switched OFF (config.flags.requireVerifiedPhone false, the shipped default), the
+// TM-982 save gate is a no-op: the SAME changed-and-unverified number goes straight through to
+// PATCH /me, with no verify prompt. This exercises the shipped save() through the real source
+// (fail-before proof: red until profile.js's phoneNeedsVerify consults the flag).
+test("flag OFF (TM-1009): a CHANGED, unverified phone saves without an OTP — the TM-982 gate is off", async () => {
+  await withFakeDocumentAsync(async () => {
+    TOASTS = [];
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    verifiedPhoneRequiredImpl = () => false; // the shipped default: phone collected, not forced-verified
+    try {
+      profile.fillForm({ firstName: "Ada", phone: "+447700900123", city: "London" });
+      const entry = shell.fields.get("phone");
+      // The user CHANGES their number and saves without ever tapping Send code / entering an OTP.
+      entry.input.value = "7700 900999";
+      let sent = null;
+      updateMeImpl = async (patch) => { sent = patch; return { phone: patch.phone }; };
+      await profile.save({ preventDefault() {} });
+      assert.ok(sent, "the PATCH is sent — no verify block with the flag OFF");
+      assert.equal(sent.phone, "+447700900999", "the changed number is composed + saved as-is");
+      assert.doesNotMatch(entry.error.textContent ?? "", /verify/i, "no verify prompt is painted");
+    } finally {
+      verifiedPhoneRequiredImpl = () => true; // restore the flag-ON default for the other tests
+    }
   });
 });
 

@@ -68,6 +68,18 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
         // so go-live is a deploy toggle, not a source edit. Keep the token EXACTLY `membership: false`
         // so the deploy sed matches.
         membership: false,
+        // TM-1009: the deploy-time switch over the WHOLE verified-phone requirement (client half).
+        // OFF (the committed default): the phone is still COLLECTED + mandatory-present (TM-880), but
+        // nothing forces it VERIFIED — the router's retroactive re-gate (TM-932/TM-992) doesn't fire,
+        // the onboarding gate doesn't demand an OTP (TM-930), and a profile phone edit saves without a
+        // re-verify (TM-982). ON = exactly the pre-TM-1009 verified-phone behaviour. All consumers read
+        // it through verified-phone-flag.js `verifiedPhoneRequired()` (the membershipEnabled() idiom).
+        // Injection seam: deploy.yml flips it at build time when repo var WEB_REQUIRE_VERIFIED_PHONE is
+        // "true" — `requireVerifiedPhone: false` -> `requireVerifiedPhone: true` — so go-live is a
+        // deploy toggle, not a source edit. Real enforcement needs the SERVER flag too
+        // (`app.phone.require-verified`, also default false — TM-931/TM-986). Keep the token EXACTLY
+        // `requireVerifiedPhone: false` so the deploy sed matches.
+        requireVerifiedPhone: false,
     }),
     payments: Object.freeze({
         // Revolut SANDBOX Merchant PUBLIC key (pk_…) — public by design, ships in the client widget (TM-478).

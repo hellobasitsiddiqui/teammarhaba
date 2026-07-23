@@ -59,6 +59,12 @@ import { COUNTRIES, flagOf } from "./countries.js";
 import { currentUser, startPhoneVerify, confirmPhoneLink } from "./auth.js";
 import { attachOtpInput } from "./otp-input.js";
 import { attachResendCooldown } from "./resend-cooldown.js";
+// TM-1009: the deploy-time switch over the whole verified-phone requirement
+// (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF this gate reverts to the
+// pre-TM-930 collect-only phone step: the Send-code/OTP verify controls are never built, prefill
+// never paints the verified/locked state, and validateAll's must-verify block (phoneVerifyBlocksSubmit)
+// never fires — a shape-valid number submits without an OTP. Flag ON = TM-930 behaviour, unchanged.
+import { verifiedPhoneRequired, phoneVerifyBlocksSubmit } from "./verified-phone-flag.js";
 
 // The four required fields and their client-side rules, mirroring the backend OnboardingRequest
 // bean validation (name non-blank ≤255 + name-like TM-771/TM-898; location from the TM-877 allowed
@@ -537,7 +543,9 @@ function validateAll() {
   // still accepts unverified phones until B). A shape-valid but not-yet-verified pair paints the
   // "verify your number" prompt on the phone field. This runs only when the pair itself is valid, so
   // a blank/too-short number surfaces its own error first (not the verify prompt on top of it).
-  if (ok && !phoneIsVerified()) {
+  // TM-1009: the whole must-verify requirement is behind config.flags.requireVerifiedPhone (shipped
+  // OFF) — with the flag OFF phoneVerifyBlocksSubmit never blocks, so the gate is collect-only.
+  if (ok && phoneVerifyBlocksSubmit(verifiedPhoneRequired(), phoneIsVerified())) {
     setFieldError("phone", "Verify your number to continue — tap Send code.");
     ok = false;
   }
@@ -622,14 +630,18 @@ function prefillPhone(entry, profile) {
     // CANONICAL forms (not raw strings) so a formatted stored value ("+44 7700 900123") still matches
     // Firebase's strict E.164 ("+447700900123") — the same canonicalisation the router's re-gate uses,
     // so the gate never shows "unverified" for a number the router considers already verified (TM-932).
-    const verified = currentUser()?.phoneNumber ?? "";
-    if (canonicalE164(saved) && canonicalE164(saved) === canonicalE164(verified)) {
-      markPhoneVerified(saved);
-    } else {
-      // Retroactive re-gate: the stored number is NOT this account's verified number. Offer the one-tap
-      // "adopt my verified number" path when a DIFFERENT verified phone is linked (the mismatch case);
-      // otherwise (no linked phone — the common retroactive case) the user just verifies the stored one.
-      maybeOfferAdoptVerified(verified, saved);
+    // TM-1009: the verified/locked prefill state only exists while the verified-phone requirement is
+    // ON. With the flag OFF the pair stays plainly editable (collect-only) — no lock, no adopt offer.
+    if (verifiedPhoneRequired()) {
+      const verified = currentUser()?.phoneNumber ?? "";
+      if (canonicalE164(saved) && canonicalE164(saved) === canonicalE164(verified)) {
+        markPhoneVerified(saved);
+      } else {
+        // Retroactive re-gate: the stored number is NOT this account's verified number. Offer the one-tap
+        // "adopt my verified number" path when a DIFFERENT verified phone is linked (the mismatch case);
+        // otherwise (no linked phone — the common retroactive case) the user just verifies the stored one.
+        maybeOfferAdoptVerified(verified, saved);
+      }
     }
   } else if (saved !== "") {
     entry.country.value = ""; // the disabled placeholder — the explicit confirm-country state
@@ -1146,7 +1158,11 @@ function buildField(field) {
   // TM-930: the phone field grows a verify-and-link step — a "Send code" button, a gate-local
   // invisible reCAPTCHA host, a six-box OTP group (revealed on send), a resend link, and a
   // "Verified ✓" status line. Built with el()/attachOtpInput; the controllers live on `phoneVerify`.
-  const verifyNodes = field.field === "phone" ? buildPhoneVerify(id, describedBy) : [];
+  // TM-1009: only while the verified-phone requirement is ON — with the flag OFF (the shipped
+  // default) none of the verify controls exist and the phone step is collect-only. Every phoneVerify
+  // consumer null-guards its DOM handles, so the unbuilt state is safe.
+  const verifyNodes =
+    field.field === "phone" && verifiedPhoneRequired() ? buildPhoneVerify(id, describedBy) : [];
 
   const wrapper = el("div", { class: "tm-form-field" }, [
     el("label", { class: "tm-field-label", for: id, text: field.label }),
