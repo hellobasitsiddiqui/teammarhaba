@@ -390,7 +390,7 @@ public class UserService {
             changes.add(change("age", user.getAge(), update.age()));
             user.setAge(update.age());
         }
-        if (update.phone() != null && !Objects.equals(user.getPhone(), update.phone())) {
+        if (update.phone() != null && phoneChanged(user.getPhone(), update.phone())) {
             changes.add(change("phone", user.getPhone(), update.phone()));
             user.setPhone(update.phone());
         }
@@ -743,6 +743,46 @@ public class UserService {
         if (phone == null || !E164_PHONE.matcher(phone).matches()) {
             throw new BadRequestException("A phone number is required to complete onboarding");
         }
+    }
+
+    /**
+     * TM-1017: whether a {@code PATCH /me} phone value genuinely CHANGES the stored number, deciding
+     * whether the phone-changed branch in {@link #applyProfileFields} fires (and, under
+     * {@code app.phone.require-verified}, whether {@link #enforceVerifiedPhoneIfRequired} runs).
+     *
+     * <p>The rule: a <strong>format-only</strong> difference between two spellings of the SAME
+     * non-empty number is NOT a change. Both sides are canonicalised to digits only — the same
+     * normalisation the DB uniqueness index uses ({@code V48__dedup_phone_and_unique_index}:
+     * {@code regexp_replace(phone,'[^0-9]','','g')}), the web {@code canonicalE164}, and
+     * {@code AccountLinkPolicy.normalisePhone} — so a legacy-formatted stored number
+     * ({@code "+44 7700 900123"}) and the client's composed one ({@code "+447700900123"}) compare
+     * equal and a city-only (or same-number-reformatted) save is a no-op that never trips
+     * verified-phone enforcement for the unverified legacy cohort during the grace window.
+     *
+     * <p>The equal-canonical short-circuit is deliberately gated on a NON-EMPTY canonical value. A
+     * set-or-clear transition — {@code null}/empty ⇄ a real number, or the TM-188 clear where a
+     * client PATCHes {@code phone:""} onto a {@code null} row — has an empty canonical on at least one
+     * side; that must NOT be swallowed as "unchanged" (a clear from null to {@code ""} is a real
+     * write that round-trips as {@code ""}). For those we fall through to raw {@link Objects#equals},
+     * preserving the exact pre-TM-1017 set/clear behaviour. Only the same-non-empty-number case is
+     * relaxed.
+     */
+    private static boolean phoneChanged(String stored, String incoming) {
+        String canonicalStored = canonicalPhone(stored);
+        if (!canonicalStored.isEmpty() && canonicalStored.equals(canonicalPhone(incoming))) {
+            return false; // same real number, format-only difference → no change (no re-verify).
+        }
+        // Set/clear (empty canonical on a side) → keep the exact pre-TM-1017 raw comparison.
+        return !Objects.equals(stored, incoming);
+    }
+
+    /**
+     * TM-1017: the canonical (digits-only) key for a phone — stripping the leading {@code +} and every
+     * {@code [ ()./-]} separator, matching {@code V48__dedup_phone_and_unique_index}'s
+     * {@code regexp_replace(phone,'[^0-9]','','g')} exactly. Null-safe: {@code null} → {@code ""}.
+     */
+    private static String canonicalPhone(String phone) {
+        return phone == null ? "" : phone.replaceAll("[^0-9]", "");
     }
 
     /**
