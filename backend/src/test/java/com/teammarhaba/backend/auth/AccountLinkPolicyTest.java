@@ -88,8 +88,9 @@ class AccountLinkPolicyTest {
 
     @Test
     void emailLink_isProven_viaAVerifiedProviderEmail() throws Exception {
-        // A provider entry (e.g. Google/password) carrying the same address is also proof Firebase holds
-        // it against this uid — the primary email may differ but a provider proves control.
+        // A GOOGLE provider entry carrying the same address is proof — google.com verifies the email
+        // itself, so its presence means Firebase saw the user prove control. (The password provider is
+        // NOT sufficient — see emailLink_isRefused_forAnUnverifiedProviderEmail below, TM-990 review #2.)
         UserRecord record = mock(UserRecord.class);
         when(record.getEmail()).thenReturn(null);
         when(record.isEmailVerified()).thenReturn(false);
@@ -100,6 +101,42 @@ class AccountLinkPolicyTest {
         when(firebaseAuth.getUser(UID)).thenReturn(record);
 
         assertThat(policy.decideEmailLink(UID, EMAIL)).isEqualTo(AccountLinkPolicy.LinkDecision.LINK);
+    }
+
+    @Test
+    void emailLink_isRefused_forAnUnverifiedProviderEmail() throws Exception {
+        // TM-990 security-review finding #2 (fail-before / pass-after): a `password`-provider entry
+        // carries the email but that email can be UNVERIFIED, so it is NOT proof of control. Treating
+        // presence-on-a-provider as proof would converge an unverified email onto this uid = takeover.
+        // The account-level emailVerified is false here too, so nothing else vouches for it → REFUSE.
+        UserRecord record = mock(UserRecord.class);
+        when(record.getEmail()).thenReturn(EMAIL);
+        when(record.isEmailVerified()).thenReturn(false); // primary email unverified
+        UserInfo password = mock(UserInfo.class);
+        when(password.getProviderId()).thenReturn("password");
+        when(password.getEmail()).thenReturn(EMAIL);
+        when(record.getProviderData()).thenReturn(new UserInfo[] {password});
+        when(firebaseAuth.getUser(UID)).thenReturn(record);
+
+        assertThat(policy.decideEmailLink(UID, EMAIL))
+                .isEqualTo(AccountLinkPolicy.LinkDecision.REFUSE_UNVERIFIED);
+    }
+
+    @Test
+    void emailLink_isRefused_forAnArbitraryNonVerifyingProvider() throws Exception {
+        // Defence in depth: an unknown/arbitrary federated provider we haven't confirmed email-verifies
+        // is never trusted for the email-proof fallback (whitelist is google.com only until more are wired).
+        UserRecord record = mock(UserRecord.class);
+        when(record.getEmail()).thenReturn(null);
+        when(record.isEmailVerified()).thenReturn(false);
+        UserInfo other = mock(UserInfo.class);
+        when(other.getProviderId()).thenReturn("some-federated.example.com");
+        when(other.getEmail()).thenReturn(EMAIL);
+        when(record.getProviderData()).thenReturn(new UserInfo[] {other});
+        when(firebaseAuth.getUser(UID)).thenReturn(record);
+
+        assertThat(policy.decideEmailLink(UID, EMAIL))
+                .isEqualTo(AccountLinkPolicy.LinkDecision.REFUSE_UNVERIFIED);
     }
 
     // ── phone proof ──────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.UserInfo;
 import com.google.firebase.auth.UserRecord;
 import java.util.Locale;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -165,16 +166,30 @@ public class AccountLinkPolicy {
         }
     }
 
-    /** True iff any provider entry on the record carries {@code wantedEmail} as a verified email. */
+    /**
+     * Providers that authenticate the EMAIL itself, so an email they carry is proof of control.
+     * Google verifies the email at sign-in. The {@code password} provider does NOT — its carried
+     * email can be UNVERIFIED (the account-level {@code emailVerified} flag governs the primary email,
+     * checked separately in {@link #decideEmailLink}). Extend this deliberately only for providers
+     * Firebase genuinely email-verifies (e.g. when Apple/Facebook, parked TM-647/TM-868, are wired).
+     */
+    private static final Set<String> EMAIL_VERIFYING_PROVIDERS = Set.of("google.com");
+
+    /** True iff a provider that VERIFIES email carries {@code wantedEmail} on the record. */
     private static boolean hasVerifiedProviderEmail(UserRecord record, String wantedEmail) {
         UserInfo[] providers = record.getProviderData();
         if (providers == null) {
             return false;
         }
         for (UserInfo provider : providers) {
-            // A provider entry only appears once that provider has authenticated the user, so an email
-            // carried on it is one Firebase has seen the user prove control of via that provider.
-            if (wantedEmail.equals(normaliseEmail(provider.getEmail()))) {
+            // TM-990 security-review finding #2: only trust the email as proven when it comes from a
+            // provider that VERIFIES the email itself. A bare match on e.g. the `password` provider —
+            // whose email can be UNVERIFIED — is NOT proof of control; treating it as such would let an
+            // unverified email converge onto this uid, an account-takeover vector. (Presence on a
+            // provider entry only proves that provider authenticated the user, not that IT verified
+            // the email — the two are different for password/arbitrary federated providers.)
+            if (EMAIL_VERIFYING_PROVIDERS.contains(provider.getProviderId())
+                    && wantedEmail.equals(normaliseEmail(provider.getEmail()))) {
                 return true;
             }
         }
