@@ -323,14 +323,45 @@ public class EmailCodeService {
         return Math.max(pending.estimatedSize(), lastSent.estimatedSize());
     }
 
-    /** Look up the Firebase uid for {@code email}, creating the account on first sight. */
+    /**
+     * Resolve the Firebase uid for {@code email}, <strong>reusing</strong> an existing account for that
+     * email and creating one only on first sight.
+     *
+     * <p><strong>Account convergence, safely (TM-990).</strong> The person has just proven control of
+     * {@code email} by entering the single-use OTP for it, so the correct behaviour on a collision is
+     * to REUSE the existing Firebase account that owns this email — never to mint a second uid for the
+     * same address (which would fork one person into two accounts, the duplicate-account bug TM-306
+     * closes). {@link FirebaseAuth#getUserByEmail(String)} returns exactly that owning account, so a
+     * returning email user keeps their single uid across every email-code login.
+     *
+     * <p><strong>Why this reuse is takeover-safe.</strong> The email being resolved is the very one the
+     * caller just OTP-verified in this request — not a client-asserted string matched against some other
+     * account. So "reuse the account that owns this email" links the caller only to an account they have
+     * demonstrably controlled. (The account-takeover risk lives in the CROSS-provider case — binding a
+     * phone/Google identity to an email account on an UNVERIFIED match — which is refused by
+     * {@link AccountLinkPolicy}, not here.) The defensive equality check below makes the "same email"
+     * invariant explicit so a future refactor can't quietly hand back a uid for a different address.
+     */
     private String resolveOrCreateUid(String email) throws FirebaseAuthException {
         FirebaseAuth auth = firebaseAuth.getObject();
         try {
             UserRecord existing = auth.getUserByEmail(email);
+            // Defence-in-depth: getUserByEmail is documented to return the account owning this email,
+            // but assert it explicitly so convergence can never bind the caller to an account for a
+            // DIFFERENT address (belt-and-braces against an SDK/refactor surprise). Firebase lower-cases
+            // the stored email; compare case-insensitively against our already-normalised value.
+            String resolvedEmail = existing.getEmail();
+            if (resolvedEmail != null && !email.equalsIgnoreCase(resolvedEmail.trim())) {
+                throw new IllegalStateException(
+                        "resolveOrCreateUid: Firebase returned an account whose email does not match the "
+                                + "OTP-verified address — refusing to converge onto a mismatched account.");
+            }
             return existing.getUid();
         } catch (FirebaseAuthException e) {
             if (e.getAuthErrorCode() == com.google.firebase.auth.AuthErrorCode.USER_NOT_FOUND) {
+                // First sight: create the account. setEmailVerified(true) is justified — the OTP the
+                // user just passed IS proof they control this mailbox, so the new account starts with a
+                // verified email (which also makes the AccountLinkPolicy email-proof check pass for it).
                 UserRecord created = auth.createUser(new CreateRequest().setEmail(email).setEmailVerified(true));
                 return created.getUid();
             }
