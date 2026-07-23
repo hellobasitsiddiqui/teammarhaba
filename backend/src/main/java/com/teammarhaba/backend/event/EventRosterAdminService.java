@@ -64,8 +64,16 @@ public class EventRosterAdminService {
     /** Audit {@code target_type} for event rows (mirrors {@link EventAdminService#TARGET_EVENT}). */
     static final String TARGET_EVENT = "Event";
 
-    /** 400 copy when a capacity adjust carries a negative value (0 is a legitimate "close the door"). */
-    static final String CAPACITY_NEGATIVE = "Capacity cannot be negative.";
+    /**
+     * 400 copy when a capacity adjust carries a value below 1 (TM-964). Aligned to the create/edit form's
+     * {@code @Min(1)} so the roster adjust can never leave an event at capacity 0 — a 0 the edit form then
+     * prefills and rejects, blocking every unrelated edit. {@code null} still means "unlimited".
+     */
+    static final String CAPACITY_BELOW_MIN = "Capacity must be at least 1 (leave blank for unlimited).";
+
+    /** 409 copy when a roster action targets a CANCELLED event (TM-993/TM-967) — its history is frozen. */
+    static final String EVENT_CANCELLED_ROSTER =
+            "This event has been cancelled and its roster can no longer be changed.";
 
     /** 409 copy when a force-add would oversell a capacity-limited event (and no override was given). */
     static final String EVENT_FULL = "This event is full — raise the capacity or use the override to force-add.";
@@ -181,8 +189,9 @@ public class EventRosterAdminService {
      *       land until attendance drops under the new cap (the RSVP/claim verbs already read this exact
      *       capacity under the same lock). The returned {@link CapacityAdjustResult} carries the warning:
      *       how many attendees are over cap, and a free-spot figure clamped at {@code ≥ 0}.</li>
-     *   <li><b>{@code null} capacity</b> — make the event unlimited (removes the cap). {@code 0} is a
-     *       legitimate "no more spots" value; a negative value is a {@code 400}.</li>
+     *   <li><b>{@code null} capacity</b> — make the event unlimited (removes the cap). Any value below 1
+     *       (0 or negative) is a {@code 400} (TM-964): capacity 0 is not settable here, so it can never be
+     *       reached, keeping the roster adjust in lock-step with the create/edit form's {@code @Min(1)}.</li>
      * </ul>
      *
      * <p>Capacity-locked: takes the event {@code SELECT … FOR UPDATE} lock so the going/waitlist counts
@@ -193,8 +202,11 @@ public class EventRosterAdminService {
      */
     @Transactional
     public CapacityAdjustResult adjustCapacity(VerifiedUser admin, long eventId, Integer newCapacity) {
-        if (newCapacity != null && newCapacity < 0) {
-            throw new BadRequestException(CAPACITY_NEGATIVE);
+        // TM-964: reject any capacity < 1, aligning the roster adjust to the create/edit form's @Min(1).
+        // A 0 capacity is otherwise settable ONLY through this path, and once set the edit form prefills
+        // "0", errors on the @Min(1) field, and blocks every unrelated edit. `null` = unlimited (no cap).
+        if (newCapacity != null && newCapacity < 1) {
+            throw new BadRequestException(CAPACITY_BELOW_MIN);
         }
         Instant now = Instant.now();
         Event event = lockedEvent(eventId);
@@ -235,6 +247,13 @@ public class EventRosterAdminService {
      * the event lock — so this never deadlocks against a concurrent RSVP/claim/cancel on the same
      * user+event, and the freed-spot derivation is race-free.
      *
+     * <p><b>Frozen events are rejected (TM-993).</b> A <em>finished</em> event is a {@code 409}
+     * ({@code EVENT_ENDED_EDIT}, the same guard {@link #adjustCapacity}/{@link #forceAddAttendee} take) and
+     * a <em>cancelled</em> event is a {@code 409} ({@code EVENT_CANCELLED_ROSTER}): both keep attendance as
+     * immutable history, and evicting a finished-event GOING row would retroactively unlock the TM-907 name
+     * lock (derived live from {@code hasGoingAtFinishedEvent}). The guard runs before any mutation, so the
+     * frozen row is never touched.
+     *
      * @param targetUserId the {@code users.id} of the attendee to evict — must be an existing account
      */
     @Transactional
@@ -243,7 +262,18 @@ public class EventRosterAdminService {
         // User-then-event lock order (TM-423): a concurrent self-cancel/claim by the same target on the
         // same event takes the user lock first too, so evict can't ABBA-deadlock against it.
         users.findByIdForUpdate(targetUserId);
+        Instant now = Instant.now();
         Event event = lockedEvent(eventId);
+        // TM-993: evict enforces the SAME frozen-event guards its siblings (adjustCapacity / forceAddAttendee)
+        // do — otherwise evicting a finished-event GOING row deletes historical attendance and retroactively
+        // unlocks the TM-907 name lock (NameLockService derives it live from hasGoingAtFinishedEvent). A
+        // finished event is a 409 (mirrors the edit path); a CANCELLED event's kept history is likewise frozen.
+        if (phasePolicy.isFinished(event, now)) {
+            throw new ConflictException(EventAdminService.EVENT_ENDED_EDIT);
+        }
+        if (!event.isPublished()) {
+            throw new ConflictException(EVENT_CANCELLED_ROSTER);
+        }
 
         Optional<EventAttendance> existing = attendance.findByEventIdAndUserId(eventId, targetUserId);
         AttendanceState removedState = existing.map(EventAttendance::getState).orElse(null);
@@ -299,7 +329,9 @@ public class EventRosterAdminService {
      *
      * <p>Idempotent: force-adding a user already {@code GOING} returns their state unchanged (no re-audit
      * of a duplicate). Capacity-locked in user-then-event order (TM-423). A past (finished) event is frozen
-     * ({@code 409}); the same {@code EVENT_ENDED} guard as the edit path.
+     * ({@code 409} {@code EVENT_ENDED_EDIT}, the same guard as the edit path), and a CANCELLED event is
+     * frozen too ({@code 409} {@code EVENT_CANCELLED_ROSTER}, TM-967) — neither can be resurrected here,
+     * even under {@code override}.
      *
      * @param targetUserId the {@code users.id} of the existing user to add as GOING
      * @param override     bypass capacity + age + one-active-GOING when {@code true} (audited)
@@ -315,6 +347,12 @@ public class EventRosterAdminService {
         Event event = lockedEvent(eventId);
         if (phasePolicy.isFinished(event, now)) {
             throw new ConflictException(EventAdminService.EVENT_ENDED_EDIT);
+        }
+        // TM-967(a): a CANCELLED event has been called off — force-adding a GOING attendee to it (joining the
+        // chat, notifying "you're in") is nonsensical and would mutate a frozen record. Reject with a 409,
+        // even under override (a cancelled event, like a finished one, cannot be resurrected via the roster).
+        if (!event.isPublished()) {
+            throw new ConflictException(EVENT_CANCELLED_ROSTER);
         }
 
         long going = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);

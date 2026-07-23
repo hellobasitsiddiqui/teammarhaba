@@ -509,6 +509,24 @@ export function partitionEventsByPast(events = [], now = Date.now()) {
   return { upcoming, past };
 }
 
+/**
+ * Whether an event matches the admin list's status filter (TM-965). The filter values are the DERIVED
+ * lifecycle labels {@link eventLifecycle} emits (Visible / Hidden / Finished / Cancelled / Unlisted),
+ * plus the sentinel "ALL" which matches everything. Pure so it can be unit-tested without the DOM —
+ * the admin-events.js filter is a thin wrapper over this. Crucially it covers "Unlisted": before TM-965
+ * the console had no Unlisted option, so an unlisted event (past its visibility window but not yet
+ * started) matched no non-ALL filter and silently vanished from every filtered view.
+ *
+ * @param {object} event an EventResponse.
+ * @param {string} filter one of the STATUS_FILTERS values (a lifecycle label, or "ALL").
+ * @param {Date|number|string} [now]
+ * @returns {boolean}
+ */
+export function matchesStatusFilter(event, filter, now = Date.now()) {
+  if (!filter || filter === "ALL") return true;
+  return eventLifecycle(event, now).label === filter;
+}
+
 /** "Unlimited" when capacity is null/absent, otherwise the number as a string (blank = unlimited). */
 export function capacityLabel(capacity) {
   return capacity == null || capacity === "" ? "Unlimited" : String(capacity);

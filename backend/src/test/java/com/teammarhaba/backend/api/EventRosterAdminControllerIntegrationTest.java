@@ -114,6 +114,20 @@ class EventRosterAdminControllerIntegrationTest extends AbstractIntegrationTest 
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void zeroCapacityIsA400() throws Exception {
+        // TM-964: capacity 0 is rejected at the request edge (@Min(1) on AdjustCapacityRequest), aligned to
+        // the create/edit form. Before this, 0 passed bean validation (@Min(0)) and either set an invalid 0
+        // (the edit form then blocked all edits) or 500'd on the DB ck_events_capacity CHECK.
+        long id = seedEvent(2).getId();
+        mockMvc.perform(post("/api/v1/admin/events/{id}/capacity", id).with(admin("admin1"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"capacity\":0}"))
+                .andExpect(status().isBadRequest());
+        assertThat(events.findById(id).orElseThrow().getCapacity())
+                .as("capacity stays at 2, never becomes 0")
+                .isEqualTo(2);
+    }
+
     // ---------------------------------------------------------------- force-add via the endpoint
 
     @Test
