@@ -788,6 +788,12 @@
          false; clears itself once the token refreshes post-verification. Calls the resend-verification
          endpoint (TM-165). Inert when signed out / already verified. -->
     <script type="module" src="/assets/verify-banner.js"></script>
+    <!-- Retroactive phone re-verify GRACE notice (TM-992, decision C = grace-then-force): shows a
+         dismissible "verify your number by <deadline>" banner to any signed-in account whose stored phone
+         isn't the Firebase-verified one, while inside the config-driven grace window (or grace-only when
+         no deadline is set). AFTER the deadline the router hard-gates through #/onboarding instead, so the
+         banner is a nudge, not the gate. Inert when signed out / already verified / past the deadline. -->
+    <script type="module" src="/assets/phone-reverify-notice.js"></script>
     <!-- Site-wide alert banners (TM-243): mounts a banner host at the top of the app shell that polls
          GET /api/v1/alerts/active (~5 min) and renders each active, global, colour-coded notice on every
          route + inside the Android WebView. Colour by level via Paper theme tokens; ACKNOWLEDGE (sticky,

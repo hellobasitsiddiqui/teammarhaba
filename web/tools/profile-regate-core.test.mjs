@@ -156,25 +156,33 @@ test("needsVerifiedPhone fails OPEN on a null/undefined (degraded) /me — never
 
 // ---- 12. Source guard: the router actually CONSULTS needsPhoneNumber (the TM-880 wiring) ----------
 
-test("router.js gates isOnboarded on needsPhoneNumber AND needsVerifiedPhone AND keeps the degraded-/me fail-open", () => {
+test("router.js gates isOnboarded on needsPhoneNumber AND the reverify HARD_GATE decision AND keeps the degraded-/me fail-open", () => {
   // The whole ternary, pinned as one unit: a resolved /me is "onboarded" only when the flag is set
-  // AND no phone completion is needed (TM-880) AND the stored phone is Firebase-VERIFIED (TM-932 — the
-  // verified number comes from the uid-pinned `now.phoneNumber`, NOT /me); a degraded /me (null)
-  // resolves to true (fail open — not gated). Dropping EITHER phone term (the exact refactor risk
-  // TM-892 flagged for needsPhoneNumber, extended to needsVerifiedPhone) or flipping the `: true`
-  // fallback fails here, on the fast PR gate — the behavioural e2e (profile-regate.spec.mjs) only runs
-  // on main. NB: this pin is DELIBERATELY updated whenever the ternary's shape changes (TM-932 added
-  // the second term); it is a guard, not a straitjacket — extend it, don't delete it.
+  // AND no phone completion is needed (TM-880) AND the retroactive verified-phone re-gate is NOT in its
+  // HARD_GATE state (TM-992 — grace, then force: the verified-phone term only gates once the config
+  // deadline has passed; inside the grace window / with no deadline it is a no-op here, so the user isn't
+  // re-gated). A degraded /me (null) resolves to true (fail open — not gated). Dropping the phone-present
+  // term (the exact refactor risk TM-892 flagged) or the HARD_GATE guard, or flipping the `: true`
+  // fallback, fails here on the fast PR gate — the behavioural e2e (profile-regate.spec.mjs) only runs
+  // on main. NB: this pin is DELIBERATELY updated whenever the ternary's shape changes (TM-932 added the
+  // verified term; TM-992 replaced the raw term with the grace→force HARD_GATE guard); it is a guard,
+  // not a straitjacket — extend it, don't delete it.
   assert.match(
     ROUTER_SRC,
-    /isOnboarded\s*=\s*onboardedOutcome\.value\s*\?\s*Boolean\(onboardedOutcome\.value\.onboardingCompleted\)\s*&&\s*!needsPhoneNumber\(onboardedOutcome\.value\)\s*&&\s*!needsVerifiedPhone\(onboardedOutcome\.value,\s*now\.phoneNumber\)\s*:\s*true\s*;/,
+    /isOnboarded\s*=\s*onboardedOutcome\.value\s*\?\s*Boolean\(onboardedOutcome\.value\.onboardingCompleted\)\s*&&\s*!needsPhoneNumber\(onboardedOutcome\.value\)\s*&&\s*reverifyDecision\s*!==\s*ReverifyDecision\.HARD_GATE\s*:\s*true\s*;/,
     "router.js must compute isOnboarded as `value ? Boolean(value.onboardingCompleted) && " +
-      "!needsPhoneNumber(value) && !needsVerifiedPhone(value, now.phoneNumber) : true` — the TM-880 " +
-      "phone-present term, the TM-932 verified-phone term, and the degraded-/me fail-open are all " +
+      "!needsPhoneNumber(value) && reverifyDecision !== ReverifyDecision.HARD_GATE : true` — the TM-880 " +
+      "phone-present term, the TM-992 grace→force HARD_GATE guard, and the degraded-/me fail-open are all " +
       "load-bearing",
   );
-  // And BOTH terms must be the REAL shared rules, not local reimplementations that could drift from
-  // what the profile/onboarding forms enforce.
+  // needsVerifiedPhone must still be the REAL shared rule (fed into the reverify decision), not a local
+  // reimplementation that could drift from what the profile/onboarding forms enforce.
+  assert.match(
+    ROUTER_SRC,
+    /needsReverify:\s*needsVerifiedPhone\(onboardedOutcome\.value,\s*now\.phoneNumber\)/,
+    "router.js must feed needsVerifiedPhone(value, now.phoneNumber) into phoneReverifyDecision's " +
+      "needsReverify input — the verified number comes from the uid-pinned Firebase session, NOT /me",
+  );
   assert.match(
     ROUTER_SRC,
     /import\s*\{\s*needsPhoneNumber,\s*needsVerifiedPhone\s*\}\s*from\s*"\.\/profile-core\.js"\s*;/,

@@ -61,6 +61,18 @@ import { needsTermsAcceptance } from "./terms-gate.js";
 // re-gates too (the retroactive half of TM-923's strict "one verified number = one account"). Both
 // pure rules live in profile-core so they're unit-testable; both fail OPEN on a degraded /me.
 import { needsPhoneNumber, needsVerifiedPhone } from "./profile-core.js";
+// TM-992 (decision C = GRACE, then FORCE): the retroactive verified-phone re-gate is no longer an
+// immediate hard bounce. phoneReverifyDecision decides — from needsVerifiedPhone's outcome, a
+// CONFIG-DRIVEN deadline, and now — whether this entry is a soft nudge (grace) or a hard gate. The
+// verified-phone term only folds into isOnboarded once the decision is HARD_GATE (grace is over); a
+// GRACE_NUDGE leaves the user un-gated (the dismissible notice — phone-reverify-notice.js — handles the
+// nudge). SAFE DEFAULT: with no deadline configured the decision is grace-only, so we never lock an
+// existing user out before product sets a date.
+import {
+  phoneReverifyDecision,
+  parseReverifyDeadline,
+  ReverifyDecision,
+} from "./phone-reverify-core.js";
 import { shouldBounceNonAdmin } from "./admin-route-guard-core.js";
 import { enterHelp } from "./help.js";
 import { enterDiagnostics } from "./diagnostics.js";
@@ -279,6 +291,14 @@ let roleResolved = false;
 // guard. Fails OPEN (true = not gated) on a lookup error: a backend hiccup must never trap a user
 // behind the gate with no way through — the backend is still the real authority on what they can do.
 let isOnboarded = true;
+// TM-992: the retroactive phone re-verify DEADLINE (decision C = GRACE, then FORCE), a PROD-CONFIG value
+// (`window.TEAMMARHABA_CONFIG.phoneReverifyDeadline`, injected at deploy time like apiBaseUrl). Read
+// through this helper so it's a single seam and safe off-DOM. Absent/null (the committed default) means
+// GRACE-ONLY: phoneReverifyDecision never hard-gates without a real deadline, so we can't lock existing
+// users out before product picks a date. Product flips this to an ISO-8601 date to start the countdown.
+function reverifyDeadlineConfig() {
+  return (typeof window !== "undefined" && window.TEAMMARHABA_CONFIG?.phoneReverifyDeadline) || null;
+}
 // Whether the signed-in caller still needs to accept the current terms version (TM-170). Resolved
 // from GET /api/v1/me alongside onboarding on each auth change (the pure rule in terms-gate.js),
 // so the gate decision is synchronous in the guard. Fails CLOSED here? No — fails OPEN (false = not
@@ -1084,16 +1104,30 @@ async function resolveRoleThenGuard() {
   // phone is mandatory, enforced as a first-use completion gate on ALL users — the same #/onboarding
   // gate, which now collects the phone; needsPhoneNumber also catches a legacy country-ambiguous bare
   // number, reusing the TM-781 confirm-country rule) OR the stored phone is not the account's
-  // Firebase-VERIFIED number (TM-932: the retroactive re-gate — every existing account whose stored
-  // phone was never OTP-verified is routed through the verify gate on next entry, extending TM-880 to
-  // strict "one verified number = one account"). The verified number is NOT on /me (MeResponse carries
-  // only the self-reported phone); it lives on the Firebase user — sourced here from the uid-pinned
-  // `now` (currentUser() at line 1060, the same session the /me was resolved for), NOT a fresh
-  // currentUser() call. Still fails OPEN (true) on a degraded /me — both phone terms are no-ops then.
+  // Firebase-VERIFIED number AND the grace period for re-verifying it is OVER.
+  //
+  // TM-932 shipped the verified-phone re-gate as an IMMEDIATE hard bounce (folded needsVerifiedPhone
+  // straight into isOnboarded). TM-992 (decision C = GRACE, then FORCE) softens that: the verified-phone
+  // term only gates once phoneReverifyDecision says HARD_GATE — i.e. there IS a configured deadline and
+  // it has passed. Inside the grace window (or, the SAFE DEFAULT, when no deadline is configured at all)
+  // the decision is GRACE_NUDGE and this term is a no-op here — the user stays un-gated and only sees the
+  // dismissible nudge banner (phone-reverify-notice.js). So we never lock an existing user out before
+  // product picks a date, and we hard-gate exactly on/after it.
+  //
+  // The verified number is NOT on /me (MeResponse carries only the self-reported phone); it lives on the
+  // Firebase user — sourced here from the uid-pinned `now` (currentUser() at line 1060, the same session
+  // the /me was resolved for), NOT a fresh currentUser() call. Still fails OPEN (true) on a degraded /me:
+  // needsVerifiedPhone returns false on a null /me, so the reverify decision is NONE and every phone term
+  // is a no-op then.
+  const reverifyDecision = phoneReverifyDecision({
+    needsReverify: needsVerifiedPhone(onboardedOutcome.value, now.phoneNumber),
+    deadline: parseReverifyDeadline(reverifyDeadlineConfig()),
+    now: Date.now(),
+  });
   isOnboarded = onboardedOutcome.value
     ? Boolean(onboardedOutcome.value.onboardingCompleted) &&
       !needsPhoneNumber(onboardedOutcome.value) &&
-      !needsVerifiedPhone(onboardedOutcome.value, now.phoneNumber)
+      reverifyDecision !== ReverifyDecision.HARD_GATE
     : true;
   // Terms gate (TM-170): the SAME /me result tells us whether the user still needs to accept the
   // current terms version. The pure rule (terms-gate.js) fails open (false) on a null/degraded /me,
