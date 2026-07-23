@@ -78,7 +78,18 @@ import {
 // TM-1005: the grace banner's "Verify now" CTA lands on #/profile and announces itself via this shared
 // event (contract lives in the pure phone-reverify-core.js so the two halves can't drift); this module
 // listens and reveals + focuses the "Verify this number" affordance once the phone field has painted.
-import { PHONE_VERIFY_REQUEST_EVENT } from "./phone-reverify-core.js";
+// TM-1018: the cross-account collision predicate + the recovery-affordance copy come from the SAME pure
+// module the onboarding gate uses, so the "Is this your number? Contact support" escape hatch is
+// identical on both surfaces (and can't silently exist on only one — the bug for the retro cohort, whose
+// only reachable verify surface during the grace window is THIS profile form, not the bouncing gate).
+import {
+  PHONE_VERIFY_REQUEST_EVENT,
+  isPhoneCollision,
+  PHONE_RECOVERY_MAILTO,
+  PHONE_RECOVERY_PROMPT,
+  PHONE_RECOVERY_LINK_TEXT,
+  PHONE_RECOVERY_SUFFIX,
+} from "./phone-reverify-core.js";
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
 // CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
 import { COUNTRIES, flagOf } from "./countries.js";
@@ -244,6 +255,7 @@ const phoneVerify = {
   sendBtn: null,
   otpWrap: null, // the reveal-on-send wrapper (label + boxes + resend), hidden until a send
   statusEl: null, // the "Verified ✓" / helper line
+  recoveryEl: null, // TM-1018: the "this is my number → contact support" affordance, shown only on a collision
   recaptcha: null, // the profile-local invisible reCAPTCHA host
 };
 
@@ -326,6 +338,8 @@ function markPhoneVerified(e164) {
     phoneVerify.statusEl.classList.add("tm-phone-verified");
     phoneVerify.statusEl.textContent = "Verified ✓";
   }
+  // TM-1018: verified → any prior collision is resolved — retract the recovery affordance.
+  setPhoneRecoveryVisible(false);
 }
 
 /**
@@ -369,6 +383,9 @@ function unverifyPhone() {
     phoneVerify.statusEl.classList.remove("tm-phone-verified");
     phoneVerify.statusEl.textContent = "";
   }
+  // TM-1018: editing/re-sending is a fresh attempt (likely a DIFFERENT number) — retract the collision
+  // recovery affordance so it only ever shows against the number that actually collided (mirrors the gate).
+  setPhoneRecoveryVisible(false);
   refreshPhoneVerifyAffordance();
 }
 
@@ -509,9 +526,10 @@ async function sendPhoneCode() {
 /**
  * Confirm the OTP (auto-submit from the six-box widget) → link the credential to the signed-in account.
  * Collision (auth/credential-already-in-use) is the hard block: the boxes clear, the locked copy paints,
- * the phone stays unverified. On success the number is verified in the UI; the actual PATCH /me happens
- * on the form's own Save (unlike the gate, which PATCHes immediately) so the profile write stays one
- * atomic, user-driven save. Single-flight via phoneVerify.sending.
+ * the phone stays unverified, and the TM-1018 recovery affordance reveals (see below). On success the
+ * number is verified in the UI; a CHANGED number is ALSO PATCHed to /me immediately (TM-1018) so an
+ * abandoned form still has the verified phone on record — the rest of the form stays on the deferred Save.
+ * Single-flight via phoneVerify.sending.
  */
 async function confirmPhoneOtp(code) {
   if (phoneVerify.sending) return; // a confirm is already running — drop the re-entrant call
@@ -532,7 +550,7 @@ async function confirmPhoneOtp(code) {
   try {
     await confirmPhoneLink(phoneVerify.verificationId, code);
     // Linked + proven. Mark the number the code was ISSUED for (pending) — the guard above proved the
-    // input still matches it. The verified value is saved by the form's Save (collectPatch), not here.
+    // input still matches it.
     markPhoneVerified(pending);
     if (canonicalE164(pending) === phoneVerify.storedE164 && phoneVerify.storedE164 !== "") {
       // TM-1005: the user verified their CURRENT stored number (the "Verify this number" path). The
@@ -544,14 +562,32 @@ async function confirmPhoneOtp(code) {
       toast("Number verified ✓", { type: "success", timeout: 2500 });
       if (typeof window !== "undefined") window.tmPhoneReverifyNotice?.refresh?.();
     } else {
+      // TM-1018: a CHANGED number is now verified + linked. Persist it to /me IMMEDIATELY — exactly like
+      // the onboarding gate (onboarding.js confirmPhoneOtp) — so a user who abandons the form between the
+      // two forks (verified-at-Firebase vs stored-on-/me) doesn't leave the account with a verified
+      // phone Firebase knows but /me doesn't. The rest of the form still saves on the user-driven Save;
+      // only the verified phone is written eagerly. A failed PATCH is non-fatal: the credential is
+      // already linked (the number is theirs) and collectPatch re-sends the same value on the form Save,
+      // so we log and let the user save the composed phone with the rest — never a dead end.
+      try {
+        await updateMe({ phone: pending });
+      } catch (patchErr) {
+        console.warn("[profile] PATCH /me {phone} after link failed (non-fatal):", patchErr?.message ?? patchErr);
+      }
       toast("Number verified — save to update your profile.", { type: "success", timeout: 2500 });
     }
   } catch (err) {
     // A failed confirm keeps the number UNVERIFIED. Clear the boxes (the widget auto-submits on any
     // input that leaves all six filled, so a stale full set would resubmit on the first keystroke) and
-    // paint the mapped error. Collision paints the hard-block copy.
+    // paint the mapped error. Collision paints the hard-block copy AND reveals the recovery affordance.
     phoneVerify.otp?.clear();
     setFieldError("phone", phoneVerifyErrorCopy(err));
+    // TM-1018: a cross-account collision is a dead end without a merge path — reveal the same
+    // contact-support recovery affordance the onboarding gate shows (TM-987). During the grace window the
+    // gate bounces, so THIS profile form is the only reachable verify surface for the retro cohort; a
+    // user whose genuinely-owned number is stuck on an old account needs the escape hatch here too. Any
+    // OTHER error (bad/expired code, rate limit) hides it — those retry on this same account.
+    setPhoneRecoveryVisible(isPhoneCollision(err));
     phoneVerify.otp?.focus();
   } finally {
     phoneVerify.sending = false;
@@ -1683,6 +1719,26 @@ function buildPhoneVerify(id, describedBy) {
 
   const statusEl = el("p", { id: `${id}-verified`, class: "tm-field-hint tm-phone-status", role: "status", hidden: true });
 
+  // TM-1018: the cross-account collision recovery affordance — the SAME "Is this your number? Contact
+  // support" escape hatch the onboarding gate carries (TM-987), shared verbatim from phone-reverify-core
+  // so the two surfaces can't drift. Hidden until a verify collides ("already registered"); it's a
+  // mailto to support (the TM-987 runbook path) so a user whose genuinely-owned number is stuck on an
+  // old account isn't left at a dead end on the ONLY verify surface the retro cohort can reach during
+  // the grace window. Built with el() (textContent only — XSS-safe); the <a> is keyboard-reachable + SR-announced.
+  const recoveryEl = el(
+    "p",
+    { id: `${id}-recovery`, class: "tm-field-hint tm-phone-recovery", role: "status", hidden: true },
+    [
+      PHONE_RECOVERY_PROMPT,
+      el("a", {
+        class: "tm-phone-recovery-link",
+        href: PHONE_RECOVERY_MAILTO,
+        text: PHONE_RECOVERY_LINK_TEXT,
+      }),
+      PHONE_RECOVERY_SUFFIX,
+    ],
+  );
+
   // The profile-local invisible reCAPTCHA host — the login one (#recaptcha-container) lives in the login
   // view, which isn't mounted here. Firebase renders the invisible widget into this element.
   const recaptcha = el("div", { id: `${id}-recaptcha`, class: "tm-phone-recaptcha", "aria-hidden": "true" });
@@ -1696,6 +1752,7 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.sendBtn = sendBtn;
   phoneVerify.otpWrap = otpWrap;
   phoneVerify.statusEl = statusEl;
+  phoneVerify.recoveryEl = recoveryEl;
   phoneVerify.recaptcha = recaptcha;
   // The six-box widget auto-submits through confirmPhoneOtp on the sixth digit (TM-867 onComplete),
   // exactly like login.js's SMS step / the onboarding gate — no explicit verify click.
@@ -1703,7 +1760,12 @@ function buildPhoneVerify(id, describedBy) {
   phoneVerify.cooldown = attachResendCooldown({ button: resendBtn, codeNoun: "SMS code" });
   phoneVerify.built = true;
 
-  return [sendBtn, statusEl, otpWrap, recaptcha];
+  return [sendBtn, statusEl, recoveryEl, otpWrap, recaptcha];
+}
+
+/** Show/hide the TM-1018 cross-account collision recovery affordance (contact-support link). */
+function setPhoneRecoveryVisible(visible) {
+  if (phoneVerify.recoveryEl) phoneVerify.recoveryEl.hidden = !visible;
 }
 
 // A gear icon (paper-profile top bar). Decorative → aria-hidden; the link that wraps it carries the

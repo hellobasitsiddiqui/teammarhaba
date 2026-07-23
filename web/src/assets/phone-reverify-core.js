@@ -50,6 +50,53 @@ export const REVERIFY_CTA_TARGET = "#/profile";
  *  focuses the "Verify this number" affordance once the phone field has painted. */
 export const PHONE_VERIFY_REQUEST_EVENT = "tm:phone-verify-request";
 
+// ---- The cross-account collision recovery affordance (TM-987 / TM-1018) --------------------------
+//
+// When a re-gate-eligible user tries to verify a number that Firebase already has linked to ANOTHER
+// (historical) account, the link fails with auth/credential-already-in-use (or the sibling
+// account-exists-with-different-credential). That is a HARD BLOCK with no in-app merge path yet — so a
+// user whose number GENUINELY IS theirs (stuck on an old account) must not be left at a dead end.
+//
+// BOTH verify surfaces can hit this: the onboarding gate (TM-987) AND — for the retroactive cohort
+// during the grace window, when the router bounces #/onboarding — the PROFILE phone field (TM-1018).
+// The predicate + the exact copy live HERE, in the one pure module both surfaces already share, so the
+// affordance can't drift between the two (or silently exist on only one, which was the TM-1018 bug).
+// EVENTUAL in-app fix: TM-306(b) claim-transfer ("link with proof of both") would replace this manual
+// escape hatch; until then the mailto to support (the TM-987 runbook: Firebase unlink/merge) is it.
+
+/** The support inbox the recovery mailto targets — mirrors help.js's SUPPORT_EMAIL. */
+export const PHONE_RECOVERY_SUPPORT_EMAIL = "hello@10xai.co.uk";
+
+/** The prefilled subject line for the recovery mailto (so support can triage the number-stuck case). */
+export const PHONE_RECOVERY_SUBJECT = "Phone number stuck on another account";
+
+/** The lead-in copy before the support link ("Is this your number? " + link + suffix). Locked wording. */
+export const PHONE_RECOVERY_PROMPT = "Is this your number? ";
+
+/** The support-link text inside the recovery affordance. */
+export const PHONE_RECOVERY_LINK_TEXT = "Contact support";
+
+/** The copy after the support link, completing the sentence. */
+export const PHONE_RECOVERY_SUFFIX = " to move it to this account.";
+
+/** The ready-built mailto href for the recovery support link (subject URL-encoded). */
+export const PHONE_RECOVERY_MAILTO = `mailto:${PHONE_RECOVERY_SUPPORT_EMAIL}?subject=${encodeURIComponent(
+  PHONE_RECOVERY_SUBJECT,
+)}`;
+
+/**
+ * Whether a thrown auth error is the cross-account phone collision hard-block — the ONLY error that
+ * should reveal the contact-support recovery affordance. Every other verify error (bad/expired code,
+ * rate limit) is retryable on this same account and must NOT surface the support path.
+ *
+ * @param {{code?: string}|null|undefined} err the caught Firebase auth error.
+ * @returns {boolean} true only for auth/credential-already-in-use or account-exists-with-different-credential.
+ */
+export function isPhoneCollision(err) {
+  const code = err?.code;
+  return code === "auth/credential-already-in-use" || code === "auth/account-exists-with-different-credential";
+}
+
 /**
  * Parse a configured deadline into an epoch-ms number, or null when it is absent / unparseable.
  *

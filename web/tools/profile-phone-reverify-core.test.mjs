@@ -6,19 +6,25 @@
 // `phoneEditNeedsVerify(stored, composed, verifiedComposed)` decides whether a profile save must be
 // BLOCKED until the number now in the form has been Firebase OTP-verified + linked. The DOM half
 // (profile.js) delegates the save-block AND the "Send code" affordance to this rule, so pinning every
-// branch here is what guards the behaviour on the fast PR gate (profile.js can't be imported under
-// `node --test` — the Firebase CDN chain — so its verify wiring is proven behaviourally in
-// profile-edit-behaviour.test.mjs; THIS file locks the decision the wiring consults).
+// branch here is what guards the pure decision on the fast PR gate. profile.js can't be imported under
+// `node --test` (the Firebase CDN chain), so its verify WIRING is exercised separately, through the
+// eval'd-source harness in profile-edit-behaviour.test.mjs (send → confirm → PATCH, the collision
+// hard-block, the mid-flight edit-drop). This file locks only the pure decisions those paths consult —
+// it is NOT itself a proof of the wiring, so it must not be read as covering the DOM behaviour.
 //
 // FAIL-BEFORE / PASS-AFTER: on clean `main` (pre-TM-982) neither `phoneEditNeedsVerify` nor the shared
 // `canonicalE164` export exists — this file's `import { phoneEditNeedsVerify, canonicalE164 }` throws at
 // load, so the whole suite fails. With the TM-982 export present, every assertion below passes. That is
-// the regression proof: remove the rule and this file goes red.
+// the regression proof: remove the rule and this file goes red. (TM-1018 adds the shared collision
+// predicate below — same pattern: remove the export and the import throws at load.)
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { phoneEditNeedsVerify, canonicalE164 } from "../src/assets/profile-core.js";
+// TM-1018: the cross-account collision predicate is shared with the onboarding gate so the recovery
+// affordance can't drift or exist on only one surface. Import it here from the one pure home.
+import { isPhoneCollision } from "../src/assets/phone-reverify-core.js";
 
 // ---- canonicalE164: the shared canonicalisation the gate + the router now both use ----------------
 
@@ -94,4 +100,34 @@ test("setting a phone where none was stored treats it as a change requiring veri
   assert.equal(phoneEditNeedsVerify(null, "+447700900123", ""), true);
   // …and it saves once that exact number is verified.
   assert.equal(phoneEditNeedsVerify("", "+447700900123", "+447700900123"), false);
+});
+
+// ---- 6. The shared cross-account collision predicate (TM-1018) ------------------------------------
+//
+// isPhoneCollision decides ONE thing: is this the "already registered on another account" hard-block
+// that should reveal the contact-support recovery affordance? It must fire for EXACTLY the two Firebase
+// codes that mean a cross-account link clash — and for NOTHING else (a bad/expired code or rate-limit is
+// retryable on this same account and must never surface the support path). Both the onboarding gate and
+// the profile phone field import THIS one predicate, so a change here changes both surfaces together.
+
+test("isPhoneCollision fires for exactly the two cross-account collision codes (TM-1018)", () => {
+  assert.equal(isPhoneCollision({ code: "auth/credential-already-in-use" }), true, "the primary link clash");
+  assert.equal(
+    isPhoneCollision({ code: "auth/account-exists-with-different-credential" }),
+    true,
+    "the sibling clash code",
+  );
+});
+
+test("isPhoneCollision is false for retryable / unrelated errors — no false support-path (TM-1018)", () => {
+  // These are retryable on the SAME account — showing "contact support" would be wrong advice.
+  assert.equal(isPhoneCollision({ code: "auth/invalid-verification-code" }), false, "a wrong code is retryable");
+  assert.equal(isPhoneCollision({ code: "auth/code-expired" }), false, "an expired code is retryable");
+  assert.equal(isPhoneCollision({ code: "auth/too-many-requests" }), false, "a rate-limit is retryable");
+  assert.equal(isPhoneCollision({ code: "auth/network-request-failed" }), false, "a network blip is retryable");
+  // Defensive: a shapeless / codeless error is never a collision.
+  assert.equal(isPhoneCollision(null), false, "null");
+  assert.equal(isPhoneCollision(undefined), false, "undefined");
+  assert.equal(isPhoneCollision({}), false, "no code");
+  assert.equal(isPhoneCollision(new Error("boom")), false, "a plain Error with no code");
 });

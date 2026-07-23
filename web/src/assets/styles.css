@@ -2458,14 +2458,16 @@ h3,
     color: var(--accent);
 }
 
-/* TM-987: cross-account collision recovery affordance — shown under the phone field only when a
-   verify collides ("already registered"). A calm hint (not an error red) with an emphasised support
-   link, so a genuinely-owned-number user has a clear next step, not a dead end. */
-#onboarding-view .tm-phone-recovery {
+/* TM-987 / TM-1018: cross-account collision recovery affordance — shown under the phone field only when
+   a verify collides ("already registered"). A calm hint (not an error red) with an emphasised support
+   link, so a genuinely-owned-number user has a clear next step, not a dead end. UNSCOPED (not under
+   #onboarding-view) because the SAME affordance now also renders on the profile phone field — the only
+   reachable verify surface for the retro cohort during the grace window (TM-1018). */
+.tm-phone-recovery {
     margin-top: 0.4rem;
 }
 
-#onboarding-view .tm-phone-recovery-link {
+.tm-phone-recovery-link {
     color: var(--accent);
     font-weight: 600;
     text-decoration: underline;
