@@ -3223,6 +3223,51 @@ html {
         display: none;
     }
 
+    /* TM-963: the users console puts its BROADCAST select-all checkbox in the header row (a
+       `th.tm-check-cell` holding `#admin-select-all`). The blanket `thead { display:none }` above hid
+       it on a phone, so an admin could never select-all to send a broadcast. Keep the rest of the
+       header hidden (its column labels are already repeated per-cell via `td::before`), but bring back
+       JUST the header cell that carries the select-all, styled as a small labelled control strip above
+       the row cards. Scoped with `:has(.tm-check-cell)` so ONLY the users-console thead is revealed —
+       every other admin console (events / venues / interests) has no select-all cell, so its thead
+       stays fully hidden and its TM-935 stacking is untouched. (`:has()` is already used across this
+       stylesheet, so it's a supported selector on our WebView targets.) */
+    .tm-table thead:has(.tm-check-cell) {
+        display: block;
+        width: 100%;
+    }
+
+    /* Within that revealed header, hide every column-label th; only the select-all cell shows. */
+    .tm-table thead:has(.tm-check-cell) tr {
+        display: block;
+        width: 100%;
+    }
+
+    .tm-table thead:has(.tm-check-cell) th:not(.tm-check-cell) {
+        display: none;
+    }
+
+    /* The surviving select-all header becomes a full-width control strip: the checkbox plus a visible
+       "Select all" label (the column header text is gone on mobile, so the control needs its own
+       affordance). Sits above the stacked row cards and matches their card chrome. */
+    .tm-table thead:has(.tm-check-cell) th.tm-check-cell {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        margin-bottom: 0.75rem;
+        padding: 0.5rem 0.6rem;
+        border: var(--border-width) solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-card);
+    }
+
+    .tm-table thead:has(.tm-check-cell) th.tm-check-cell::after {
+        content: "Select all";
+        font-weight: 600;
+        color: var(--fg);
+    }
+
     .tm-table,
     .tm-table tbody,
     .tm-table tr,
@@ -3294,6 +3339,34 @@ html {
     .tm-table td.tm-actions {
         justify-content: stretch;
         flex-wrap: wrap;
+    }
+
+    /* TM-967: tidy the admin-events roster/capacity panel (the full-width `.tm-event-roster-row` that
+       drops in under an event) on a phone. It's a labelless full-width `td`, so the stacked-card rules
+       above (`tbody tr` card chrome + `td { display:flex; justify-content:space-between; text-align:
+       right }`) would wrap the whole panel in a second card border AND right-align its content. Undo
+       that for this row only: no card border/padding on the row, the cell is a plain block that keeps
+       the panel's own left-accent styling, and the panel content reads left-to-right like on desktop. */
+    .tm-table tbody tr.tm-event-roster-row {
+        border: none;
+        border-radius: 0;
+        margin-bottom: 0.75rem;
+        padding: 0;
+        background: transparent;
+    }
+
+    .tm-event-roster-row > td {
+        display: block;
+        text-align: left;
+        border-bottom: none;
+    }
+
+    /* The capacity/add-user inputs are capped to 8rem for a desktop toolbar row; on a phone let them
+       stretch to the panel width so they're comfortable to tap and type in. */
+    .tm-roster-capacity-input,
+    .tm-roster-adduser-input {
+        max-width: none;
+        flex: 1 1 auto;
     }
 
     /* Per-row action buttons: ≥44px tall and allowed to wrap so they never overflow the cell. */
