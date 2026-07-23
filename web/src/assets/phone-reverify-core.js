@@ -29,6 +29,27 @@ export const ReverifyDecision = Object.freeze({
   HARD_GATE: "hard-gate", // eligible AND the deadline has passed → route through the #/onboarding verify gate.
 });
 
+// ---- The grace-banner CTA contract (TM-1005) ----------------------------------------------------
+//
+// Where "Verify now" on the grace banner actually takes the user. It USED to hash-nav to #/onboarding —
+// a dead-end: during the grace window the router still counts the account as onboarded (the verified-
+// phone term only folds into the gate on HARD_GATE), so router.js's "onboarded user on #/onboarding"
+// guard bounced them straight back home and nothing ever offered a way to verify the UNCHANGED stored
+// number. The CTA now lands on the PROFILE (where the phone lives) and announces the intent via a DOM
+// CustomEvent; profile.js listens and reveals/focuses its TM-1005 "Verify this number" affordance —
+// the same startPhoneVerify → confirmPhoneLink OTP flow, no re-typing of the number required.
+//
+// Both halves (the notice that dispatches, the profile that listens) import these from HERE so the
+// route + event name are one shared, unit-testable contract that cannot drift apart.
+
+/** The hash route the grace banner's "Verify now" CTA navigates to — the profile, where the TM-1005
+ *  verify-current-number affordance lives (NOT #/onboarding, which bounces onboarded users). */
+export const REVERIFY_CTA_TARGET = "#/profile";
+
+/** The window CustomEvent the CTA dispatches after navigating; profile.js listens for it and reveals +
+ *  focuses the "Verify this number" affordance once the phone field has painted. */
+export const PHONE_VERIFY_REQUEST_EVENT = "tm:phone-verify-request";
+
 /**
  * Parse a configured deadline into an epoch-ms number, or null when it is absent / unparseable.
  *

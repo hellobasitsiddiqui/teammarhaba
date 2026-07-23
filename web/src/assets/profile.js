@@ -67,10 +67,18 @@ import {
   // TM-982: the pure "did the phone change, and if so is the new number verified?" gate — the profile
   // save is blocked while a CHANGED phone is unverified; an UNCHANGED phone is a no-op (no re-verify).
   phoneEditNeedsVerify,
+  // TM-1005: the pure "offer to verify the CURRENT, UNCHANGED stored number" rule — true when the
+  // stored phone is present but isn't the account's Firebase-verified one. Powers the "Verify this
+  // number" affordance (same OTP flow, no re-typing); never blocks a save.
+  phoneCurrentNeedsVerify,
   // TM-777 (I5): the pure next-day completeness-nudge decision (picked==1 + not-shown-today → CTA).
   // The max it targets is injected by the renderer from state.interestConfig (TM-778's shared config).
   nextDayInterestsNudge,
 } from "./profile-core.js";
+// TM-1005: the grace banner's "Verify now" CTA lands on #/profile and announces itself via this shared
+// event (contract lives in the pure phone-reverify-core.js so the two halves can't drift); this module
+// listens and reveals + focuses the "Verify this number" affordance once the phone field has painted.
+import { PHONE_VERIFY_REQUEST_EVENT } from "./phone-reverify-core.js";
 // Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
 // CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
 import { COUNTRIES, flagOf } from "./countries.js";
@@ -271,6 +279,18 @@ function phoneNeedsVerify() {
   return phoneEditNeedsVerify(phoneVerify.storedE164, composed, verified);
 }
 
+/**
+ * TM-1005: should the phone field offer "Verify this number" for the CURRENT, UNCHANGED stored phone?
+ * Pure decision delegated to profile-core.phoneCurrentNeedsVerify: true when the number in the form IS
+ * the stored one but that stored number is not the account's Firebase-verified phone (the exact
+ * needsVerifiedPhone eligibility — all email-code/admin accounts + pre-verify legacy accounts). This
+ * NEVER blocks a save (the TM-982 save gate is untouched); it only reveals the affordance that runs
+ * the same startPhoneVerify → confirmPhoneLink flow without the user re-typing their number.
+ */
+function phoneNeedsCurrentVerify() {
+  return phoneCurrentNeedsVerify(phoneVerify.storedE164, composedPhoneE164(), currentUser()?.phoneNumber);
+}
+
 /** Lock the picker + national input and paint the "Verified ✓" state (TM-982). Mirrors the gate. */
 function markPhoneVerified(e164) {
   const entry = shell?.fields.get("phone");
@@ -343,21 +363,82 @@ function unverifyPhone() {
   refreshPhoneVerifyAffordance();
 }
 
+/** The TM-1005 label for verifying the CURRENT, unchanged stored number (vs "Send code" on a change). */
+const PHONE_VERIFY_CURRENT_LABEL = "Verify this number";
+/** The TM-982 label for verifying a CHANGED number — the affordance's original wording. */
+const PHONE_VERIFY_CHANGED_LABEL = "Send code";
+
 /**
- * Reflect the current phone edit state onto the verify controls: the "Send code" button is shown only
- * when the composed number CHANGED and isn't yet verified/in-flight; an unchanged (or already-verified)
- * number hides it, so the common "edit only my city" save never sprouts a stray verify affordance.
- * Called after every phone edit + on prefill. No-op until the controls are built.
+ * Reflect the current phone edit state onto the verify controls. The verify button is shown in exactly
+ * two states, and its label tells them apart:
+ *   • the composed number CHANGED and isn't yet verified/in-flight (TM-982) → "Send code";
+ *   • the composed number is the UNCHANGED stored one but that stored phone was never Firebase-verified
+ *     (TM-1005 — phoneNeedsCurrentVerify: email-code/admin accounts + pre-verify legacy accounts) →
+ *     "Verify this number", the missing path out of the re-verify dead-end. Same OTP flow, no re-typing.
+ * A number that is unchanged AND account-verified hides the button, so the common "edit only my city"
+ * save never sprouts a stray verify affordance. Called after every phone edit + on prefill. No-op until
+ * the controls are built.
  */
 function refreshPhoneVerifyAffordance() {
   if (!phoneVerify.built || !phoneVerify.sendBtn) return;
   if (phoneVerify.verified || phoneVerifyInFlight()) return; // verified/in-flight controls own their own visibility
   const needsVerify = phoneNeedsVerify();
-  phoneVerify.sendBtn.hidden = !needsVerify;
+  // Evaluate the TM-1005 unchanged-but-unverified case only when the changed-number gate isn't already
+  // claiming the button — the two states are disjoint by construction (changed vs unchanged), but the
+  // short-circuit keeps the changed path's wording authoritative the moment an edit lands.
+  const needsCurrentVerify = !needsVerify && phoneNeedsCurrentVerify();
+  phoneVerify.sendBtn.hidden = !(needsVerify || needsCurrentVerify);
+  phoneVerify.sendBtn.textContent = needsCurrentVerify ? PHONE_VERIFY_CURRENT_LABEL : PHONE_VERIFY_CHANGED_LABEL;
   // An unchanged number clears any lingering verify prompt; a changed one gets a gentle nudge.
   if (!needsVerify) {
     if (shell?.fields.get("phone")?.error?.textContent === PHONE_VERIFY_PROMPT) setFieldError("phone", "");
   }
+  // TM-1005: if the grace banner's CTA asked us to surface the verify affordance, consume that request
+  // now that the button's visibility for the current state is settled.
+  consumePendingVerifyReveal();
+}
+
+// ---- TM-1005: banner-CTA → profile handoff ---------------------------------------------------
+// The grace banner (phone-reverify-notice.js) navigates to #/profile and dispatches
+// PHONE_VERIFY_REQUEST_EVENT. The profile usually hasn't painted yet at that moment (buildShell +
+// GET /me are async behind the route change), so the request is remembered here and consumed by the
+// first refreshPhoneVerifyAffordance() that runs with the affordance actually visible — scroll + focus
+// land the user straight on the "Verify this number" button. If the account turns out not to need
+// verification by the time the profile paints (e.g. verified on another device), the stale request is
+// dropped rather than left to hijack a later visit.
+let pendingVerifyReveal = false;
+
+/** Consume a pending banner-CTA reveal request: focus the verify affordance if it's visible, or drop
+ *  the request when the loaded profile no longer needs any phone verification. No-op otherwise. */
+function consumePendingVerifyReveal() {
+  if (!pendingVerifyReveal) return;
+  if (!phoneVerify.built || !phoneVerify.sendBtn) return;
+  // Only act while the profile is the VISIBLE route. The CTA's hash-nav routes asynchronously, so at
+  // dispatch time a STALE profile mount (from an earlier visit) may still be painted under a hidden
+  // #profile-view — consuming against that would focus a hidden node and eat the request before the
+  // rebuilt, visible profile ever sees it. Keep it pending until the view is actually showing.
+  const view = typeof document !== "undefined" ? document.getElementById("profile-view") : null;
+  if (!view || view.hidden) return;
+  if (!phoneVerify.sendBtn.hidden) {
+    pendingVerifyReveal = false;
+    // getAttribute (not .id) — the attribute is what buildPhoneVerify set, and it reads identically in
+    // the real DOM and the node-test fake elements (which don't reflect attributes onto properties).
+    focusOnPage(phoneVerify.sendBtn.getAttribute("id"));
+    return;
+  }
+  // Profile is loaded and the affordance (rightly) isn't showing → nothing to point at; drop the
+  // request so it can't surprise-focus the phone field on some later, unrelated repaint.
+  if (state.loaded && !phoneNeedsVerify() && !phoneNeedsCurrentVerify()) pendingVerifyReveal = false;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PHONE_VERIFY_REQUEST_EVENT, () => {
+    pendingVerifyReveal = true;
+    // Try immediately — the user may already be ON the profile (the banner renders there too), in
+    // which case the affordance is painted and focusable right now; otherwise the flag waits for the
+    // post-load refreshPhoneVerifyAffordance().
+    consumePendingVerifyReveal();
+  });
 }
 
 /** Disable/enable the phone verify controls while a send/confirm is in flight. */
@@ -444,7 +525,18 @@ async function confirmPhoneOtp(code) {
     // Linked + proven. Mark the number the code was ISSUED for (pending) — the guard above proved the
     // input still matches it. The verified value is saved by the form's Save (collectPatch), not here.
     markPhoneVerified(pending);
-    toast("Number verified — save to update your profile.", { type: "success", timeout: 2500 });
+    if (canonicalE164(pending) === phoneVerify.storedE164 && phoneVerify.storedE164 !== "") {
+      // TM-1005: the user verified their CURRENT stored number (the "Verify this number" path). The
+      // stored value is already right — there is nothing to save (collectPatch omits an unchanged
+      // phone), so don't tell them to. The account-level need is now met (currentUser().phoneNumber is
+      // this number), so ask the grace banner to re-check itself — it clears immediately instead of
+      // waiting for the next auth change. Loose global seam (not an import) — the notice module is a
+      // self-wiring singleton and this must stay a no-op wherever it isn't loaded (tests, native shells).
+      toast("Number verified ✓", { type: "success", timeout: 2500 });
+      if (typeof window !== "undefined") window.tmPhoneReverifyNotice?.refresh?.();
+    } else {
+      toast("Number verified — save to update your profile.", { type: "success", timeout: 2500 });
+    }
   } catch (err) {
     // A failed confirm keeps the number UNVERIFIED. Clear the boxes (the widget auto-submits on any
     // input that leaves all six filled, so a stale full set would resubmit on the first keystroke) and
@@ -1176,6 +1268,11 @@ async function save(event) {
     state.profile = updated;
     fillForm(updated);
     toast("Profile saved.", { type: "success" });
+    // TM-1005: a saved phone CHANGE alters what the re-verify grace banner should say (the new stored
+    // number was just verify-and-linked, TM-982, so the banner's "verify your phone" nag is now stale).
+    // Ask it to re-check itself instead of leaving it wrong until the next auth change. Loose global
+    // seam — a safe no-op wherever the notice module isn't loaded (tests, native shells).
+    if ("phone" in patch && typeof window !== "undefined") window.tmPhoneReverifyNotice?.refresh?.();
   } catch (err) {
     if (err instanceof ApiError && err.fieldErrors.length) {
       // Backend RFC-7807 validation: attach each message to its field; toast a summary for the rest.
