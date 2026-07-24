@@ -130,8 +130,28 @@ test("identitySummary uses the emoji glyph and an empty meta line when nothing i
 });
 
 test("identitySummary omits a missing city or age from the meta line", () => {
-  assert.equal(identitySummary({ firstName: "A", city: "Bath" }).metaLine, "Bath");
+  // Use an on-list city (TM-877 dropdown value) so this pins the "age missing → city alone" case
+  // without depending on off-list-city behaviour (guarded separately in the TM-1023 test below).
+  assert.equal(identitySummary({ firstName: "A", city: "London" }).metaLine, "London");
   assert.equal(identitySummary({ firstName: "A", age: 40 }).metaLine, "40");
+});
+
+// TM-1023: the identity meta line echoed WHATEVER string was stored in `city`, so an account whose
+// stored city is an off-list/junk value ("Location" — seen live as the literal header "Location · 32")
+// rendered it verbatim. The city dropdown (TM-877) can only ever store a CITY_OPTIONS value, so an
+// off-list stored value is garbage — it must be dropped from the meta line, letting profile.js's
+// existing empty-state fallback ("Add your city and age", shown when metaLine is "") take over. A
+// valid on-list city still renders exactly as before.
+test("identitySummary drops an off-list junk city from the meta line (TM-1023)", () => {
+  // The exact live regression: stored city "Location", age 32 → the header must NOT echo "Location".
+  const junk = identitySummary({ firstName: "A", city: "Location", age: 32 });
+  assert.ok(!junk.metaLine.includes("Location"), `off-list city must not appear in metaLine, got: ${junk.metaLine}`);
+  assert.equal(junk.metaLine, "32"); // only the age survives; profile.js shows the empty state when it's "" too
+  // An off-list city with no age → empty meta line → the "Add your city and age" empty state shows.
+  assert.equal(identitySummary({ firstName: "A", city: "Location" }).metaLine, "");
+  // A valid on-list city still renders exactly as today (with and without an age).
+  assert.equal(identitySummary({ firstName: "A", city: "London", age: 30 }).metaLine, "London · 30");
+  assert.equal(identitySummary({ firstName: "A", city: "London" }).metaLine, "London");
 });
 
 // TM-883: the identity header (and public preview) for a NAMED account — a /me carrying

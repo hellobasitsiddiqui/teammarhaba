@@ -64,7 +64,14 @@ export function identitySummary(me) {
   const short = first && last ? `${first} ${last[0].toUpperCase()}.` : full;
   const city = (m.city || "").trim();
   const age = Number.isFinite(m.age) && m.age > 0 ? m.age : null;
-  const metaLine = [city, age != null ? String(age) : ""].filter(Boolean).join(" · ");
+  // TM-1023: the meta line must never echo a junk/off-list city. The app's city dropdown (TM-877)
+  // only ever stores a CITY_OPTIONS value, so an off-list stored value ("Location", the literal
+  // header we saw live) is garbage — treat it as no city so the empty-state prompt ("Add your city
+  // and age", rendered by profile.js when metaLine is "") shows instead of surfacing the junk. A
+  // valid on-list city still renders exactly as before. `city` above is left as the raw stored value
+  // so other consumers are unchanged; only the meta line is guarded.
+  const metaCity = CITY_OPTIONS.includes(city) ? city : "";
+  const metaLine = [metaCity, age != null ? String(age) : ""].filter(Boolean).join(" · ");
   return {
     full,
     short,
