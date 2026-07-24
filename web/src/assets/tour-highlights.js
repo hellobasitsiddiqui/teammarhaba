@@ -31,6 +31,10 @@ export const SITE_HIGHLIGHTS = [
     title: "Admin hub",
     body: "Admins start here — one place linking every admin console: users, events, venues, interests, messages.",
   },
+  // TM-1024: the Take-a-tour launcher (#nav-help) was removed from the top nav when the desktop nav
+  // became the four tabs, so this callout's target no longer exists and tour.js auto-skips this step
+  // (it filters out any step whose target isn't rendered). Kept here (not silently deleted) so wave-help-1
+  // — which re-homes the tour launcher — can re-point it at the launcher's new home rather than rewrite it.
   { target: "#nav-help", title: "Need it again?", body: "Replay this tour (or this page's tour) anytime from here." },
   // TM-906: the closing step used to spotlight the top-nav sign-out button, which no longer exists —
   // sign-out moved to the Profile hub's menu (behind a confirm). The closer is re-anchored to the

@@ -156,29 +156,35 @@ test.describe("@responsive the account nav collapses behind a hamburger", () => 
     const nav = page.locator(".app-nav");
     const toggle = page.locator("#nav-toggle");
     // Post-TM-434 the hamburger is the UTILITY menu on mobile — the primary destinations moved to the
-    // bottom tab bar. The Help page link is a utility item that stays in it, so assert against that.
-    const helpLink = page.locator("#nav-help-link");
+    // bottom tab bar. TM-1024 removed the Help link from the nav (the desktop nav is now exactly the four
+    // tabs), so this test now asserts against the Admin link — a utility entry that stays in the hamburger
+    // for the admin we signed in as (Admin is NOT one of the four primary tabs, so it isn't hidden by the
+    // tm-has-tabbar rule the primary links get).
+    const adminLink = page.locator("#nav-admin");
 
-    // Collapsed by default: the menu group is not displayed, so the Help link isn't visible.
-    await expect(helpLink).toBeHidden();
+    // Collapsed by default: the menu group is not displayed, so the Admin link isn't visible.
+    await expect(adminLink).toBeHidden();
     await expect(nav).toHaveAttribute("data-nav-open", "false");
 
     // Open the menu → utility items become visible + aria-expanded reflects state.
     await toggle.click();
     await expect(nav).toHaveAttribute("data-nav-open", "true");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expectControlUsable(page, helpLink);
+    await expectControlUsable(page, adminLink);
 
-    // Exactly one primary nav on mobile (TM-434): the primary Events/Profile destinations now live in
-    // the bottom tab bar and are NOT duplicated inside the hamburger, so they stay hidden even when the
-    // menu is open.
-    await expect(page.locator(".app-nav-items > #nav-profile")).toBeHidden();
+    // Exactly one primary nav on mobile (TM-434 / TM-1024): the four primary tab destinations
+    // (Home · Events · Chat · Profile) now live in the bottom tab bar and are NOT duplicated inside the
+    // hamburger, so they stay hidden even when the menu is open.
+    await expect(page.locator(".app-nav-items > #nav-home")).toBeHidden();
     await expect(page.locator(".app-nav-items > #nav-events")).toBeHidden();
+    await expect(page.locator(".app-nav-items > #nav-chat")).toBeHidden();
+    await expect(page.locator(".app-nav-items > #nav-profile")).toBeHidden();
 
     // Clicking a utility item navigates AND closes the menu (TM-229 nav-toggle.js behaviour).
-    await helpLink.click();
+    await adminLink.click();
     await expect(nav).toHaveAttribute("data-nav-open", "false");
-    await expect(page.locator("#help-view")).toBeVisible();
+    // The Admin link opens the #/admin hub (TM-917), which mounts into #admin-hub-view.
+    await expect(page.locator("#admin-hub-view")).toBeVisible();
   });
 });
 

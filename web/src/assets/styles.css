@@ -1713,9 +1713,9 @@ h3,
 
 /* ===== Onboarding product tour (TM-135) ===== */
 
-.app-nav #nav-help {
-    cursor: pointer;
-}
+/* TM-1024: the top-nav Take-a-tour launcher (#nav-help) was removed when the desktop nav became the
+   four tabs, so its `.app-nav #nav-help { cursor: pointer }` rule is gone (it matched nothing). The
+   tour layer styling below is unchanged — re-homing the launcher is deferred to wave-help-1. */
 
 /* Full-screen tour layer. Only the blocker + callout capture pointer events. */
 .tm-tour {
@@ -5013,11 +5013,15 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     }
 
     /* Reconcile with the top-nav hamburger — AC: exactly ONE primary nav on mobile. The tab bar now
-       owns the primary destinations, so hide the DUPLICATE Events/Profile links inside the collapsed
-       hamburger while the bar is shown, leaving the hamburger as a small UTILITY menu (Help, Admin,
-       Sign out, avatar). The ids stay in the DOM (router still owns their gating `hidden`); this only
-       drops the on-screen duplication. Home + Chat were never top-nav links, so nothing to hide. */
+       owns the primary destinations, so hide the DUPLICATE top-nav tab links inside the collapsed
+       hamburger while the bar is shown, leaving the hamburger as a small UTILITY menu (Admin, avatar).
+       The ids stay in the DOM (router still owns their gating `hidden`); this only drops the on-screen
+       duplication. TM-1024 made the desktop top nav EXACTLY the four tabs — Home · Events · Chat ·
+       Profile — so ALL FOUR are hidden here now (Home + Chat are new top-nav links as of TM-1024, so
+       they join Events/Profile in this list; before, only Events/Profile existed to hide). */
+    body.tm-has-tabbar .app-nav-items > #nav-home,
     body.tm-has-tabbar .app-nav-items > #nav-events,
+    body.tm-has-tabbar .app-nav-items > #nav-chat,
     body.tm-has-tabbar .app-nav-items > #nav-profile {
         display: none;
     }

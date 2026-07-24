@@ -342,7 +342,9 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   }
 
   // ── STEP 9: open HELP + the annotated VISUAL guide (TM-255 / TM-178). ─────────────────────────
-  await clickNav(page, "#nav-help-link");
+  // TM-1024: the Help link was removed from the top nav (the desktop nav is now exactly the four tabs),
+  // but the #/help page/route stays — so reach it by a direct hash goto instead of a nav click.
+  await page.evaluate(() => (window.location.hash = "#/help"));
   const help = page.locator("#help-view");
   await expect(help).toBeVisible();
   await expect(help.getByRole("heading", { name: "Help" })).toBeVisible();
