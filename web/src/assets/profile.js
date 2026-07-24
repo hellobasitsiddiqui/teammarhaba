@@ -2072,13 +2072,13 @@ function buildShell(view) {
   ]);
 
   // ── Menu (paper-profile) ── the four wireframe rows plus an entry into the public-profile preview.
-  // My events + Sign out are real actions; Notifications / Privacy scroll to the relevant on-page
-  // control (no fabricated routes). Public profile → the additive #/profile/public preview.
+  // Sign out is a real action; Notifications / Privacy scroll to the relevant on-page control (no
+  // fabricated routes). Public profile → the additive #/profile/public preview. (TM-1028: the old
+  // "My events" row was removed — it just re-opened #/events, a plain duplicate of the Events tab.)
   const menuCard = pfCard(
     null,
     [
       el("nav", { class: "tm-pf-menu", "aria-label": "Profile menu" }, [
-        menuRow("My events", { to: "#/events" }),
         menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
         menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
         menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),

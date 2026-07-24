@@ -72,9 +72,10 @@ test("@profile the refreshed Profile hub shows the completeness ring, badges and
     )
     .toBeLessThanOrEqual(1);
 
-  // The paper-profile menu is present with a real "My events" destination and a public-profile entry.
-  await expect(page.getByRole("link", { name: /My events/ })).toBeVisible();
+  // The paper-profile menu is present (public-profile entry) and no longer carries the redundant
+  // "My events" row — it just duplicated the Events tab, removed in TM-1028.
   await expect(page.getByRole("link", { name: /Public profile/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /My events/ })).toHaveCount(0);
 });
 
 test("@profile a strength gap 'Add …' prompt still deep-links to its field (TM-881 preserved under TM-913)", async ({ page }) => {
