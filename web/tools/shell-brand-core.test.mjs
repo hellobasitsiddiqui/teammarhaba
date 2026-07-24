@@ -46,11 +46,21 @@ test("brand block hides on the signed-in Home feed (content-first, TM-908)", () 
   assert.equal(shellBrandHidden("#/home/feed"), true, "a Home sub-route matches via the prefix rule");
 });
 
-test("brand block stays on every other route (login/events/chat/admin unchanged)", () => {
-  // #/home is NOW self-headed (TM-908) so it is deliberately absent here — see the Home test above.
+test("brand block hides on the admin tab + its consoles (TM-1025)", () => {
+  // Admin is self-headed like Home/Profile: the hub renders <h1>Admin</h1> and each console its own
+  // heading, so the Circle wordmark/tagline/#status must not double-head above them.
+  assert.equal(shellBrandHidden("#/admin"), true, "the admin hub");
+  assert.equal(shellBrandHidden("#/admin/users"), true, "a console matches via the prefix rule");
+  assert.equal(shellBrandHidden("#/admin/events"), true);
+  assert.equal(shellBrandHidden("#/admin/messages/new"), true, "a deep console sub-route matches too");
+});
+
+test("brand block stays on every other route (login/events/chat unchanged)", () => {
+  // #/home and #/admin are NOW self-headed (TM-908 / TM-1025) so they are deliberately absent here —
+  // see the Home + admin tests above.
   // #/login stays shown: the signed-out auth landing card owns its own lockup and is unaffected.
   for (const route of ["#/login", "#/events", "#/events/42", "#/chat", "#/chat/7",
-    "#/admin", "#/admin/events", "#/help", "#/notifications", "#/diagnostics"]) {
+    "#/help", "#/notifications", "#/diagnostics"]) {
     assert.equal(shellBrandHidden(route), false, `expected the brand block to stay on ${route}`);
   }
 });
@@ -70,8 +80,8 @@ test("fails safe (shown) on junk input", () => {
 
 test("the self-headed route list is frozen and exactly the decided set", () => {
   assert.ok(Object.isFrozen(SELF_HEADED_ROUTES));
-  // #/home added by TM-908 (content-first Home); Events (#/events) is added by its own lane later.
-  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/onboarding", "#/terms"]);
+  // #/home added by TM-908 (content-first Home); #/admin by TM-1025; Events (#/events) added later.
+  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/admin", "#/onboarding", "#/terms"]);
 });
 
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
