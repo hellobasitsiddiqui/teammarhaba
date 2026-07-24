@@ -18,6 +18,9 @@ import {
   savedInterestLabels,
   interestChipsModel,
   interestsHint,
+  addChipModel,
+  ADD_CHIP_LABEL,
+  MANAGE_CHIP_LABEL,
   catalogueGroups,
   toggleInterest,
   selectionError,
@@ -114,6 +117,61 @@ test("interestChipsModel reports an empty saved set", () => {
   assert.equal(m.empty, true);
   assert.equal(m.count, 0);
   assert.equal(m.canAdd, true);
+});
+
+// ---- addChipModel + model.entry (TM-970: persistent picker entry, no dead-end at the cap) ------
+
+test("addChipModel: below the max the entry is the '＋ add' chip opening the picker", () => {
+  const e = addChipModel(1, 3); // 1 < 3
+  assert.equal(e.show, true);
+  assert.equal(e.label, ADD_CHIP_LABEL);
+  assert.equal(e.label, "＋ add");
+  assert.equal(e.action, "add");
+});
+
+test("addChipModel: AT the max the entry is STILL present, relabelled 'Manage' (no dead-end)", () => {
+  const e = addChipModel(3, 3); // 3 === max — old behaviour hid the chip entirely
+  assert.equal(e.show, true, "the picker entry must remain reachable at the cap so a user can swap");
+  assert.equal(e.label, MANAGE_CHIP_LABEL);
+  assert.equal(e.label, "Manage");
+  assert.equal(e.action, "manage");
+});
+
+test("addChipModel: OVER the max (since-lowered config) still offers Manage, not add", () => {
+  const e = addChipModel(4, 3);
+  assert.equal(e.show, true);
+  assert.equal(e.action, "manage");
+});
+
+test("addChipModel: an empty set still offers '＋ add'", () => {
+  const e = addChipModel(0, 3);
+  assert.equal(e.show, true);
+  assert.equal(e.action, "add");
+});
+
+test("addChipModel: a degenerate max of 0 hides the chip (nothing can ever be added or managed)", () => {
+  const e = addChipModel(0, 0);
+  assert.equal(e.show, false);
+});
+
+test("interestChipsModel surfaces the entry: '＋ add' below max, 'Manage' at max — always shown", () => {
+  // Below the max — unchanged '＋ add' behaviour (regression guard).
+  const below = interestChipsModel(SAVED, { min: 1, max: 3 }); // 2 < 3
+  assert.equal(below.entry.show, true);
+  assert.equal(below.entry.label, "＋ add");
+  assert.equal(below.entry.action, "add");
+
+  // AT the max — the entry is PRESENT and relabelled 'Manage' (the TM-970 fix: previously canAdd was
+  // false and the chip vanished, leaving no route to the picker to swap an interest).
+  const full = interestChipsModel(
+    [{ label: "Walking" }, { label: "Cycling" }, { label: "Hiking & rambling" }],
+    { min: 1, max: 3 },
+  );
+  assert.equal(full.atMax, true);
+  assert.equal(full.canAdd, false, "canAdd stays false at the cap (no more can be ADDED)");
+  assert.equal(full.entry.show, true, "but the entry point remains so the picker is reachable");
+  assert.equal(full.entry.label, "Manage");
+  assert.equal(full.entry.action, "manage");
 });
 
 // ---- interestsHint (replaces the old "coming soon" copy) --------------------------------------

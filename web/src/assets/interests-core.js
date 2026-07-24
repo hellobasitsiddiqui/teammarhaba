@@ -115,6 +115,7 @@ export function savedInterestLabels(interests) {
  *   empty: boolean,
  *   count: number,
  *   canAdd: boolean,
+ *   entry: {show: boolean, label: string, action: "add"|"manage"},
  *   atMin: boolean,
  *   atMax: boolean,
  *   hint: string
@@ -136,12 +137,43 @@ export function interestChipsModel(interests, { min = DEFAULT_INTEREST_MIN, max 
     chips,
     empty: count === 0,
     count,
-    // The add affordance shows whenever there's room for more (below max).
+    // The add affordance shows whenever there's room for more (below max). Retained for callers that
+    // still read the old flag — the state-adaptive `entry` below supersedes it for the render.
     canAdd: !atMax,
+    // TM-970: the ONE persistent entry point into the in-place picker. Its label adapts to state so
+    // there's never a dead-end at the cap (see addChipModel).
+    entry: addChipModel(count, max),
     atMin,
     atMax,
     hint: interestsHint(count, min, max),
   };
+}
+
+// TM-970: the fullwidth plus prefix on the below-max "add" chip (kept as the shipped glyph). The at-max
+// chip drops it — "Manage" is a mode switch, not an add.
+export const ADD_CHIP_LABEL = "＋ add";
+export const MANAGE_CHIP_LABEL = "Manage";
+
+/**
+ * The single, PERSISTENT entry-point chip into the in-place interests picker/manage view (TM-970),
+ * decided purely so it's unit-testable. Below the max it reads "＋ add" (open the picker to add more);
+ * AT the max it relabels to "Manage" — the SAME affordance routing to the SAME picker — so a user who's
+ * filled all their slots can still open it to remove/swap an interest. Hiding it at the cap (the old
+ * behaviour) left no way to reach the picker without first removing a chip: a dead-end.
+ *
+ * The chip is only hidden when the max itself is 0 (a degenerate config where no interest can ever be
+ * held) — otherwise there is always something to add OR to manage.
+ *
+ * @param {number} count the number of saved interests.
+ * @param {number} max the configured maximum selections.
+ * @returns {{show: boolean, label: string, action: "add"|"manage"}}
+ */
+export function addChipModel(count, max) {
+  if (max <= 0) return { show: false, label: "", action: "add" };
+  const atMax = count >= max;
+  return atMax
+    ? { show: true, label: MANAGE_CHIP_LABEL, action: "manage" }
+    : { show: true, label: ADD_CHIP_LABEL, action: "add" };
 }
 
 /** The card's helper line — honest guidance on the min/max, replacing the old "coming soon" copy. */
