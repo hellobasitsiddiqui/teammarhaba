@@ -25,8 +25,9 @@
 // chrome rework (TM-908 Home / TM-909 Events / TM-910 Profile): the walking-skeleton brand block
 // (the "Circle" wordmark, the "Find your people…" tagline, the "#status" line) is retired above the
 // Home feed so the feed's own "Events near you" heading is the first content. Events (`#/events`) is
-// still handled in its OWN lane (TM-909) and adds its route here when it lands. Chat / admin keep the
-// global brand chrome for now — extending to them is the same one-line SELF_HEADED addition.
+// still handled in its OWN lane (TM-909) and adds its route here when it lands. Admin joined here in
+// TM-1025 (its hub + consoles are all self-headed). Chat keeps the global brand chrome for now —
+// extending to it is the same one-line SELF_HEADED addition.
 
 /**
  * The routes whose screens own their full-page header, so the shell brand block must NOT paint
@@ -37,6 +38,11 @@
  *     own "Events near you" heading, so the walking-skeleton wordmark/tagline/#status must not paint
  *     above it. Only the SIGNED-IN Home is affected — the signed-out auth landing is a separate view
  *     (#auth-signed-out on #/login) with its own lockup, untouched by this route rule.
+ *   • `#/admin` — the admin hub + every console (`#/admin/*` via the prefix rule), added TM-1025.
+ *     The hub is self-headed (admin-hub.js `<h1>Admin</h1>`) and each console renders its own heading
+ *     (users `<h2>Users</h2>`, events/venues/interests/messages), so the global Circle
+ *     wordmark/tagline/#status must not double-head above them — matching Home (TM-908) / Profile
+ *     (TM-910).
  *   • `#/onboarding` — the first-run / phone completion gate ("Complete your profile" card,
  *     TM-250/TM-880). This is the tab-bar-less gate screen every phone-less account is re-routed
  *     to (mandatory phone, #587) — the screen the TM-885/TM-886 user report was actually looking
@@ -44,7 +50,7 @@
  *   • `#/terms` — the sibling first-run gate (TM-170), rendered as the same self-headed full-page
  *     card in the same gate chain; scoped together so the two gates can't drift apart visually.
  */
-export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/onboarding", "#/terms"]);
+export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/admin", "#/onboarding", "#/terms"]);
 
 /**
  * Whether the app-shell brand block (wordmark h1 + tagline + #status line) should be hidden for
