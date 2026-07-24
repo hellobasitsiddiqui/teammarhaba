@@ -6729,6 +6729,14 @@ button.tm-c-reaction {
     border-style: dashed;
     color: var(--muted);
 }
+/* TM-970: the at-max variant of the persistent entry chip — "Manage" (opens the same in-place picker
+   to remove/swap). It's not an ADD affordance, so it drops the dashed/muted look for a solid accent
+   outline that reads as an actionable control. Theme tokens only — no hard-coded colours. */
+.tm-pf-chip-manage {
+    border-style: solid;
+    border-color: var(--accent);
+    color: var(--accent);
+}
 /* Interests card (TM-778): the saved chips + ADD picker. A removable saved chip is a button carrying a
    "×"; the picker options are toggle chips reusing .tm-pf-chip / -on. Buttons reset the UA chrome so
    they read as chips, not form buttons. */

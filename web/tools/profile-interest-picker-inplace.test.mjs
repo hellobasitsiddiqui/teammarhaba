@@ -127,9 +127,12 @@ function loadProfileModule() {
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
     "  profileMembershipRow, profileManageAffordance, membershipEnabled,\n" +
     "} = globalThis.__TM860_DEPS__;\n";
-  // Seam (eval copy only): reach openInterestPicker + the module-private state so a test can seed the
-  // catalogue/config/profile the picker reads without walking the whole load() path.
-  const seam = "\nexport { openInterestPicker };\nexport function __getState(){ return state; }\n";
+  // Seam (eval copy only): reach openInterestPicker + paintInterests + the module-private state/shell so
+  // a test can seed the catalogue/config/profile the picker reads (and give the card a body to paint
+  // into) without walking the whole load() path.
+  const seam = "\nexport { openInterestPicker, paintInterests };\n" +
+    "export function __getState(){ return state; }\n" +
+    "export function __setShell(s){ shell = s; }\n";
   const code = preamble + withoutImports + seam;
   assert.doesNotMatch(code, /^import[\s\S]*?from/m, "all top-level imports must be replaced before eval");
 
@@ -350,4 +353,62 @@ test("TM-860: emptying the selection surfaces the min error + disables Save — 
   assert.equal(error.hidden, true, "the error hides again");
   assert.equal(error.textContent, "", "and its text is cleared");
   assert.equal(save.disabled, false, "Save re-enables on the same node");
+});
+
+// ── TM-970: paintInterests renders ONE persistent picker entry — "＋ add" below max, "Manage" AT max ──
+// FAIL-BEFORE (main): paintInterests only appended the entry chip `if (model.canAdd)`, so at 3/3 the
+// card had NO add/manage affordance and there was no way to reach the picker to swap an interest — a
+// dead-end. These tests paint the card at the cap and assert the entry chip IS present, reads "Manage",
+// and its onClick opens the SAME picker (a modal mounts). The below-max case still shows "＋ add".
+
+/** The visible label of a fake node — its own textContent plus any string (text-node) children. The
+ *  add/manage chip passes its label as a POSITIONAL string child (like ui.js el(...children)), which the
+ *  fake builder stores as a `{nodeType:3,data}` text node rather than on textContent. */
+function labelOf(node) {
+  const own = node.textContent || "";
+  const kids = (node._children || [])
+    .filter((k) => k && k.nodeType === 3)
+    .map((k) => k.data)
+    .join("");
+  return own + kids;
+}
+
+/** Seed state + paint the interests card into a fresh fake body; return the entry chip (if any). */
+function paintCard({ saved }) {
+  const st = profile.__getState();
+  st.interestConfig = { min: 1, max: 3 };
+  st.interestCatalogue = CATALOGUE;
+  st.interestsSaving = false;
+  st.profile = { interests: saved };
+  const body = fakeEl("div");
+  profile.__setShell({ interestsBody: body });
+  profile.paintInterests(st.profile);
+  const [entry] = findByClass(body, "tm-pf-chip-add");
+  return { body, entry };
+}
+
+test("TM-970: at the max the card shows a persistent 'Manage' entry that OPENS the picker", () => {
+  const { entry } = paintCard({ saved: ["Hiking", "Cycling", "Baking"] }); // 3/3 = max
+  assert.ok(entry, "at the cap the picker entry chip MUST still be rendered (no dead-end)");
+  assert.equal(labelOf(entry), "Manage", "the at-max entry is relabelled 'Manage'");
+  assert.equal(entry.getAttribute("aria-label"), "Manage interests");
+  assert.ok(entry._classes.has("tm-pf-chip-manage"), "carries the -manage style modifier");
+  assert.equal(typeof entry.onClick, "function", "the entry is wired to a click handler");
+
+  // Clicking it opens the SAME in-place picker (a modal mounts) — the whole point: reachable at max.
+  const before = MODALS.length;
+  entry.onClick();
+  assert.equal(MODALS.length, before + 1, "clicking 'Manage' opens the interests picker modal");
+});
+
+test("TM-970: below the max the entry is unchanged — '＋ add', opens the picker", () => {
+  const { entry } = paintCard({ saved: ["Hiking"] }); // 1/3 < max
+  assert.ok(entry, "the add entry chip renders below the max");
+  assert.equal(labelOf(entry), "＋ add", "below the max the entry is still the '＋ add' chip");
+  assert.equal(entry.getAttribute("aria-label"), "Add interests");
+  assert.ok(!entry._classes.has("tm-pf-chip-manage"), "no -manage modifier below the max");
+
+  const before = MODALS.length;
+  entry.onClick();
+  assert.equal(MODALS.length, before + 1, "clicking '＋ add' opens the same picker modal");
 });

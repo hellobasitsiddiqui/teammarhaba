@@ -995,10 +995,13 @@ function paintStrengthNudge(node, strength) {
 // ---- interests card (TM-778) -----------------------------------------------------------------
 
 /**
- * Repaint the Interests card body from a MeResponse: one removable chip per saved interest plus an
- * "＋ add" affordance (when below the max). Reads the saved interests off `profile.interests` and the
- * min/max bounds off `state.interestConfig` (best-effort GET config, else defaults). Purely a map over
- * the unit-tested `interestChipsModel` — the add/remove behaviour + min/max gating live there.
+ * Repaint the Interests card body from a MeResponse: one removable chip per saved interest plus the
+ * single PERSISTENT entry chip into the in-place picker (TM-970). Below the max the chip reads "＋ add";
+ * AT the max it relabels to "Manage" — the SAME control opening the SAME picker — so a user with all
+ * slots filled can still open it to remove/swap (previously the chip vanished at the cap, dead-ending
+ * the only route to the picker). Reads the saved interests off `profile.interests` and the min/max
+ * bounds off `state.interestConfig` (best-effort GET config, else defaults). Purely a map over the
+ * unit-tested `interestChipsModel` — the label/visibility decision lives in `addChipModel` there.
  */
 function paintInterests(profile) {
   const body = shell?.interestsBody;
@@ -1031,15 +1034,21 @@ function paintInterests(profile) {
       chips.append(el("span", { class: "tm-pf-chip tm-pf-chip-on" }, [emojiSpan, el("span", { text: chip.label })]));
     }
   }
-  // The "＋ add" chip opens the catalogue picker; hidden once the max is reached.
-  if (model.canAdd) {
+  // The persistent entry chip into the in-place picker (TM-970): "＋ add" below the max, "Manage" at
+  // the max — same control, same picker, so there's never a dead-end where the only route to swap an
+  // interest is hidden. The at-max variant carries a -manage modifier for its distinct (non-dashed)
+  // styling. Label + action come from the unit-tested addChipModel via model.entry.
+  if (model.entry.show) {
     chips.append(
       el("button", {
         type: "button",
-        class: "tm-pf-chip tm-pf-chip-add",
+        class: model.entry.action === "manage"
+          ? "tm-pf-chip tm-pf-chip-add tm-pf-chip-manage"
+          : "tm-pf-chip tm-pf-chip-add",
+        "aria-label": model.entry.action === "manage" ? "Manage interests" : "Add interests",
         disabled: state.interestsSaving,
         onClick: openInterestPicker,
-      }, "＋ add"),
+      }, model.entry.label),
     );
   }
   body.append(chips);
