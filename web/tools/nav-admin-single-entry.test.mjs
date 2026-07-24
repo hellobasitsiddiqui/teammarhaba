@@ -52,7 +52,7 @@ test("router.js no longer references the removed per-console admin links (TM-937
 });
 
 // Every account-nav entry is an anchor with a `nav-…` id and visible text; collect (id -> text).
-// (Buttons like #nav-help / the avatar #nav-avatar carry no link label, so the `<a>` filter skips them.)
+// (Non-anchor entries like the avatar #nav-avatar carry no link label, so the `<a>` filter skips them.)
 function navLinks() {
   const links = [];
   const re = /<a id="(nav-[^"]+)"[^>]*>([^<]+)<\/a>/g;

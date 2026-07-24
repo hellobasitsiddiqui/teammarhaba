@@ -557,17 +557,20 @@ function render() {
   const navAdmin = $("nav-admin");
   const navProfile = $("nav-profile");
   if (navSignIn) navSignIn.hidden = signedIn;
-  // The Help-page link (TM-255) is normally always shown (public, signed-in or out), but is hidden
-  // while the first-login gate is up so a gated user can't side-step it via the nav (the guard also
-  // bounces them back to the gate, but hiding the link keeps the gated nav clean).
-  const navHelpLink = $("nav-help-link");
-  if (navHelpLink) navHelpLink.hidden = gated;
-  // The Events link (TM-396) shows for any signed-in, onboarded user (hidden while gated).
+  // The primary top-nav destinations (TM-1024) are exactly the four bottom-tab-bar tabs (tabbar-core.js
+  // TABS: Home · Events · Chat · Profile) plus Admin — one reveal rule for the whole set, matching how
+  // the tab bar is gated (shouldShowTabbar): shown for any signed-in, onboarded (un-gated) user, hidden
+  // signed-out and while EITHER first-run gate is up. Keeping the top nav on the same tab list means the
+  // desktop nav and the mobile bottom bar can't drift (a drift-guard test pins it).
+  // The Home link (TM-1024 / TABS[home]).
+  const navHome = $("nav-home");
+  if (navHome) navHome.hidden = !signedIn || gated;
+  // The Events link (TM-396 / TABS[events]) shows for any signed-in, onboarded user (hidden while gated).
   const navEvents = $("nav-events");
   if (navEvents) navEvents.hidden = !signedIn || gated;
-  // The Notifications link (TM-515) follows the same rule — any signed-in, onboarded user.
-  const navNotifications = $("nav-notifications");
-  if (navNotifications) navNotifications.hidden = !signedIn || gated;
+  // The Chat link (TM-1024 / TABS[chat]) follows the same rule — any signed-in, onboarded user.
+  const navChat = $("nav-chat");
+  if (navChat) navChat.hidden = !signedIn || gated;
   // The Membership link (TM-480 screen, wired live TM-606) — shown for any signed-in, onboarded user, but
   // ONLY while the membership feature flag is on (config.flags.membership, shipped OFF). Hidden signed-out,
   // while gated, and whenever the flag is off, so it stays inert until the flag flips (TM-478).

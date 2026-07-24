@@ -109,20 +109,23 @@
             </button>
             <div id="nav-items" class="app-nav-items">
                 <a id="nav-signin" href="#/login" hidden>Sign in</a>
-                <!-- Help page link (TM-255): always shown — the #/help guide is static content safe
-                     for signed-in and signed-out visitors alike. Distinct from #nav-help below, which
-                     is the TM-135 tour-REPLAY menu (signed-in only); this is the standalone Help page.
-                     A plain hash-link, so nav-toggle.js closes the mobile menu on click like the others. -->
-                <a id="nav-help-link" href="#/help">Help</a>
-                <!-- Events entry point (TM-396): shown by router.js for any signed-in, onboarded user.
-                     Sits alongside Profile (the bottom-nav idea TM-386 stays parked). -->
+                <!-- Primary top-nav destinations (TM-1024): on DESKTOP this row IS the primary nav, and
+                     it must be EXACTLY the four bottom-tab-bar tabs (tabbar-core.js TABS) in the same
+                     locked order — Home · Events · Chat · Profile — plus Admin for admins. Keeping the
+                     two nav surfaces to the one tab list means the desktop top nav and the mobile bottom
+                     bar can never drift (a drift-guard unit test pins it: web/tools/top-nav-matches-tabs.test.mjs).
+                     Each link is revealed by router.js for a signed-in, onboarded (un-gated) user. On
+                     MOBILE these links stay hidden inside the hamburger — the bottom tab bar (tabbar.js)
+                     is the primary nav there, so they aren't duplicated. -->
+                <!-- Home (TM-1024): matches TABS[home] → #/home. -->
+                <a id="nav-home" href="#/home" hidden>Home</a>
+                <!-- Events (TM-396 / TABS[events]): shown by router.js for any signed-in, onboarded user. -->
                 <a id="nav-events" href="#/events" hidden>Events</a>
-                <!-- Notifications feed (TM-515): the grouped #/notifications screen (paper-notifications
-                     wireframe). Shown by router.js for any signed-in, onboarded user — the entry point
-                     for the feed the bottom nav (4 locked tabs) has no room for; the wireframe shows it
-                     as a pushed screen with a back-to-home button. -->
-                <a id="nav-notifications" href="#/notifications" hidden>Notifications</a>
-                <!-- Edit-profile link (TM-167): shown by router.js for any signed-in user. -->
+                <!-- Chat (TM-1024 / TABS[chat]): the event group-chat surface (#/chat). Placeholder route
+                     today (TM-434 "coming soon" stub) until the real chat lands (TM-433); the link is the
+                     same either way. -->
+                <a id="nav-chat" href="#/chat" hidden>Chat</a>
+                <!-- Edit-profile link (TM-167 / TABS[profile]): shown by router.js for any signed-in user. -->
                 <a id="nav-profile" href="#/profile" hidden>Profile</a>
                 <!-- Membership link (TM-480 screen, wired live TM-606): the #/membership tier-management
                      screen. Kept `hidden` and revealed by router.js only for a signed-in, onboarded user
@@ -142,9 +145,12 @@
                      top-nav links (events/venues/interests/messages) were removed in TM-937 since the
                      hub's rows now cover them. The console ROUTES themselves are unchanged. -->
                 <a id="nav-admin" href="#/admin" hidden>Admin</a>
-                <!-- Help / replay tours (TM-135): tours.js shows this when signed in + opens a menu
-                     to re-run the whole-site walkthrough or the current page's tour. -->
-                <button id="nav-help" type="button" hidden aria-label="Take a tour">Take a tour</button>
+                <!-- Take-a-tour launcher REMOVED from the top nav (TM-1024): the desktop top nav is now
+                     exactly the four tabs (+ Admin), so the tour-replay button no longer lives here. The
+                     tour code itself is unchanged and degrades gracefully with the button gone (tours.js
+                     wireHelp() no-ops when #nav-help is absent; tour.js skips any step whose target has
+                     vanished). Re-homing the tour launcher is deferred to wave-help-1; being unlaunchable
+                     from the nav in the interim is accepted (the #/help page + its visual guide stay). -->
                 <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
                 <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
                 <!-- Sign out (TM-906): removed from the top nav entirely — the ONLY sign-out entry is

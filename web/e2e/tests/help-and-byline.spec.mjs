@@ -59,14 +59,15 @@ test.describe("@help Help section (TM-255)", () => {
     await expect(help.locator(".tm-guide-notes li").first()).toBeVisible();
   });
 
-  test("Help is reachable from the nav link (signed out)", async ({ page }) => {
+  test("Help stays reachable by route for a signed-out visitor (TM-1024)", async ({ page }) => {
+    // TM-1024: the desktop top nav became exactly the four tabs, so the Help *nav link* (#nav-help-link)
+    // was removed — but the #/help page/route deliberately stays reachable for anyone, signed in or out.
+    // This test used to click the nav link; it now proves the route still resolves from a signed-out
+    // start (a hash goto is what a bookmark / footer link / in-page link into Help exercises).
     await page.goto("/#/login");
     await expect(page.locator("#auth-signed-out")).toBeVisible();
 
-    // The Help-page nav link is always shown (public), distinct from the signed-in tour-replay button.
-    const navHelp = page.locator("#nav-help-link");
-    await expect(navHelp).toBeVisible();
-    await navHelp.click();
+    await page.evaluate(() => (window.location.hash = "#/help"));
 
     await expect(page.locator("#help-view")).toBeVisible();
     expect(page.url()).toContain("#/help");
