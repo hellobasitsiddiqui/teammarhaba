@@ -190,12 +190,15 @@ async function createFreshUngatedAccount() {
   // now route this account through the #/onboarding verify gate and hide the nav, failing the sign-in
   // assertions. Mirrors how global-setup seeds the personas (verified-by-construction).
   const phone = uniqueTestPhone();
+  // TM-909: also seed city=London (matching createEvent's default city) so the now-city-scoped Events
+  // tab shows this account's London events when the test browses the list (step below). Without it the
+  // account has no city and the content-first tab renders its no-city empty state, hiding the event.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, city: "London" }),
   });
-  if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+  if (!phoneRes.ok) throw new Error(`seed phone/city failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
   await emulatorAuth().updateUser(uid, { phoneNumber: phone }); // TM-932: verify-link the same number
 
   // 4) Clear the first-run onboarding gate (TM-250) so the browser sign-in lands straight in the app.

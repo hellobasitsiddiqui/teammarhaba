@@ -79,6 +79,10 @@ const LOCALE = (typeof navigator !== "undefined" && navigator.language) || "en-G
 // re-pointed (without a refetch) when the "browse other cities" switcher picks another city. The heading
 // AND the card scope both derive from it via events-core `cityScopedListModel`, so they always agree.
 const state = { cards: [], filter: "all", city: null };
+// The list fetch page size (TM-909). The backend caps GET /events at MAX_SIZE=100 and the Events tab
+// filters by city client-side, so we request the whole visible-now page rather than the default 20 —
+// otherwise the soonest-20 across all cities could omit the viewer's city entirely (see renderList).
+const EVENTS_LIST_PAGE_SIZE = 100;
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
@@ -161,7 +165,13 @@ async function renderList(view) {
   let data;
   let me = null;
   try {
-    [data, me] = await Promise.all([listEvents(), loadMe()]);
+    // Fetch the full catalogue page (size = the backend MAX_SIZE, 100), NOT the default 20: the city
+    // scope is filtered CLIENT-SIDE (TM-909, no backend city param for MVP), so a small default page
+    // could exclude a city's events entirely — the soonest-20 across ALL cities might contain none of
+    // the viewer's city — and the tab would wrongly show its empty state. Fetching the whole visible-now
+    // set makes the client filter correct for the current small catalogue. (A backend `city` param is
+    // the scale-correct fix — TM-1040 follow-up.)
+    [data, me] = await Promise.all([listEvents({ size: EVENTS_LIST_PAGE_SIZE }), loadMe()]);
   } catch (err) {
     if (mine !== renderToken) return;
     errorBlock(view, core.EVENTS_NEUTRAL_HEADING, "Couldn't load events. Please try again.", () => renderList(view));
