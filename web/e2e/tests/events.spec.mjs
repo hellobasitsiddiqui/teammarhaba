@@ -126,6 +126,10 @@ async function signIn(page, account) {
 async function browseToEvent(page, id) {
   await clickNav(page, "#nav-events");
   await expect(page.locator("#events-view")).toBeVisible();
+  // Content-first Events chrome (TM-909): the tab heads with the viewer's city (seeded "London"), and the
+  // walking-skeleton brand block (wordmark/tagline/#status) is retired above it — the twin of Home (TM-908).
+  await expect(page.locator(".tm-event-head h2")).toContainText("London");
+  await expect(page.locator("main.app > h1")).toBeHidden();
   await expect(page.locator('[data-testid="events-list"]')).toBeVisible();
   const card = page.locator(`[data-testid="event-card"][data-event-id="${id}"]`);
   await expect(card).toBeVisible();
@@ -372,4 +376,48 @@ test("@events @waitlist join the waitlist on a full event, then claim the promot
 
   // It persisted: the waiter now holds a GOING row (promoted off the waitlist by claiming).
   await assertAttendanceState(event.id, EVENT_WAITER.email, "GOING");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// TEST 3 — content-first city scope (TM-909): the tab heads with the viewer's city and lists only that
+// city's events; a "browse other cities" switch re-scopes to a city that has events.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+test("@events content-first tab is scoped to the viewer's city, with a browse-other-cities switch", async ({ page }, testInfo) => {
+  const shot = stepShot(page, testInfo, "events-city");
+  const stamp = Date.now();
+
+  // The ADMIN creates an event in ANOTHER city (Sharjah) — it must be scoped OUT of a London viewer's
+  // default view, then reachable via the "browse other cities" switch.
+  const adminHeaders = await authHeadersFor(ADMIN);
+  const sharjah = await createEvent(adminHeaders, {
+    heading: `e2e Sharjah meetup ${stamp}`,
+    city: "Sharjah",
+    capacity: 10,
+  });
+  expect(sharjah.id).toBeTruthy();
+
+  // Sign in as the seeded London goer and open the Events tab.
+  await signIn(page, EVENT_GOER);
+  await clickNav(page, "#nav-events");
+  await expect(page.locator("#events-view")).toBeVisible();
+
+  // Content-first chrome: the heading is the viewer's city; the brand block is retired above it.
+  await expect(page.locator(".tm-event-head h2")).toContainText("London");
+  await expect(page.locator("main.app > h1")).toBeHidden();
+  await shot("london-scope");
+
+  // The Sharjah event is scoped OUT of the London view (heading + list always agree — no TM-662 mismatch).
+  const sharjahCard = page.locator(`[data-testid="event-card"][data-event-id="${sharjah.id}"]`);
+  await expect(sharjahCard).toHaveCount(0);
+
+  // The "browse other cities" switch offers Sharjah; tapping it re-scopes the tab to Sharjah.
+  const switchRow = page.locator('[data-testid="events-city-switch"]');
+  await expect(switchRow).toBeVisible();
+  const sharjahBtn = switchRow.locator('button[data-city="sharjah"]');
+  await expect(sharjahBtn).toBeVisible();
+  await sharjahBtn.click();
+
+  await expect(page.locator(".tm-event-head h2")).toContainText("Sharjah");
+  await expect(sharjahCard).toBeVisible();
+  await shot("sharjah-switched");
 });

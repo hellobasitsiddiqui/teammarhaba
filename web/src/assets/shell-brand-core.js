@@ -24,10 +24,11 @@
 // TM-886 ("extend to Home/Events if design retires the block there") landed for Home in the top-
 // chrome rework (TM-908 Home / TM-909 Events / TM-910 Profile): the walking-skeleton brand block
 // (the "Circle" wordmark, the "Find your people…" tagline, the "#status" line) is retired above the
-// Home feed so the feed's own "Events near you" heading is the first content. Events (`#/events`) is
-// still handled in its OWN lane (TM-909) and adds its route here when it lands. Admin joined here in
-// TM-1025 (its hub + consoles are all self-headed). Chat keeps the global brand chrome for now —
-// extending to it is the same one-line SELF_HEADED addition.
+// Home feed so the feed's own "Events near you" heading is the first content. Events (`#/events`,
+// TM-909) NOW opts in too: its content-first rework retires the brand block so the tab's own city
+// heading (`me.city`) is the first content. Admin joined here in TM-1025 (its hub + consoles are all
+// self-headed). Chat keeps the global brand chrome for now — extending to it is the same one-line
+// SELF_HEADED addition.
 
 /**
  * The routes whose screens own their full-page header, so the shell brand block must NOT paint
@@ -38,6 +39,10 @@
  *     own "Events near you" heading, so the walking-skeleton wordmark/tagline/#status must not paint
  *     above it. Only the SIGNED-IN Home is affected — the signed-out auth landing is a separate view
  *     (#auth-signed-out on #/login) with its own lockup, untouched by this route rule.
+ *   • `#/events` — the signed-in Events tab (TM-396). Content-first (TM-909): the browse surface leads
+ *     with its own city heading (`me.city`), so the walking-skeleton wordmark/tagline/#status must not
+ *     paint above it — the twin of Home (TM-908). The event detail (`#/events/{id}`) is covered by the
+ *     same prefix rule.
  *   • `#/admin` — the admin hub + every console (`#/admin/*` via the prefix rule), added TM-1025.
  *     The hub is self-headed (admin-hub.js `<h1>Admin</h1>`) and each console renders its own heading
  *     (users `<h2>Users</h2>`, events/venues/interests/messages), so the global Circle
@@ -50,7 +55,7 @@
  *   • `#/terms` — the sibling first-run gate (TM-170), rendered as the same self-headed full-page
  *     card in the same gate chain; scoped together so the two gates can't drift apart visually.
  */
-export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/admin", "#/onboarding", "#/terms"]);
+export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/events", "#/admin", "#/onboarding", "#/terms"]);
 
 /**
  * Whether the app-shell brand block (wordmark h1 + tagline + #status line) should be hidden for
