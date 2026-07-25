@@ -3,11 +3,11 @@ package com.teammarhaba.backend.chat;
 import java.util.Set;
 
 /**
- * The server-side <b>allow-list</b> of reaction glyphs (TM-989) — the single source of truth for which
- * emojis a react (add) may persist. It mirrors the web client's canonical picker set,
- * {@code REACTION_EMOJIS} in {@code web/src/assets/chat-core.js}
- * ({@code ["👍", "❤️", "😂", "🎉", "🙌"]}), so the server accepts exactly what the client can offer and
- * nothing else.
+ * The server-side <b>allow-list</b> of reaction glyphs (TM-989; expanded from five to ten in TM-1049) —
+ * the single source of truth for which emojis a react (add) may persist. It mirrors the web client's
+ * canonical picker set, {@code REACTION_EMOJIS} in {@code web/src/assets/chat-core.js}
+ * ({@code ["👍", "❤️", "😂", "🎉", "🙌", "😮", "😢", "🔥", "👏", "🙏"]}), so the server accepts exactly
+ * what the client can offer and nothing else.
  *
  * <p><b>Why an allow-list.</b> Before this, a reaction {@code emoji} was only length-bounded
  * ({@code @Size(max = 32)}) and trim-normalised — any thread member could persist thousands of
@@ -29,11 +29,11 @@ final class ReactionEmojis {
      * variation selector, matching how the client and {@link MessageReactionService#DEFAULT_EMOJI}
      * store it.
      */
-    static final Set<String> ALLOWED = Set.of("👍", "❤️", "😂", "🎉", "🙌");
+    static final Set<String> ALLOWED = Set.of("👍", "❤️", "😂", "🎉", "🙌", "😮", "😢", "🔥", "👏", "🙏");
 
     /**
      * The per-user, per-message cap on <b>distinct</b> reactions, deliberately set to the allow-list
-     * size ({@link #ALLOWED}{@code .size()} = 5): a member may react with every allowed emoji on a
+     * size ({@link #ALLOWED}{@code .size()} = 10): a member may react with every allowed emoji on a
      * message, but no more — there is nothing legitimate beyond one of each. Exceeding it on the add
      * path is a {@code 400}.
      */
