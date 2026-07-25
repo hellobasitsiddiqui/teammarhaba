@@ -239,6 +239,12 @@ test("@events browse an event, RSVP to it (going), then un-RSVP", async ({ page 
   await expect(detail.locator('[data-testid="event-when"]')).toBeVisible();
   await expect(detail.locator('[data-testid="event-location"]')).toBeVisible();
   await expect(page.locator(".tm-event-hero")).toBeVisible(); // the event image/placeholder hero
+  // TM-827-B honest scarcity copy: a fresh cap-10 event has 0 going and 10 spots left, so the detail
+  // must NOT announce emptiness ("Be the first to go" / "No one's going yet"), must show NO going count
+  // (goingBadge → "" at zero), and — with ≥3 spots remaining — no scarcity line.
+  await expect(detail.getByText("Be the first to go")).toHaveCount(0);
+  await expect(detail.getByText("No one's going yet")).toHaveCount(0);
+  await expect(detail.locator('[data-testid="event-going-count"]')).toHaveCount(0);
   await shot("detail");
 
   // ── STEP 2: RSVP → the confirm dialog → land GOING. ───────────────────────────────────────────

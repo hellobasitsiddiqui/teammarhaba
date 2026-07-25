@@ -206,10 +206,14 @@ export function myStateChip(myState) {
   return null;
 }
 
-/** The "N going" badge copy — warm empty-copy at zero. */
+/**
+ * The "N going" badge copy. Honest social-proof (TM-827-B): a zero count renders NOTHING ("") — never
+ * "Be the first to go" or any copy that announces emptiness. Callers must skip an empty badge rather
+ * than render an empty element (AC: no empty badge in the DOM).
+ */
 export function goingBadge(goingCount) {
   const n = firstNumber(goingCount) ?? 0;
-  if (n <= 0) return "Be the first to go";
+  if (n <= 0) return "";
   return `${n} going`;
 }
 
@@ -780,8 +784,31 @@ export function listCtaState(item, nowMs = Date.now()) {
  * @returns {{going: string, spots: string}}
  */
 export function attendanceSummary(detail) {
-  const cap = firstNumber(detail?.capacity);
-  return { going: goingBadge(detail?.goingCount), spots: cap == null ? "" : `${cap} spots` };
+  return { going: goingBadge(detail?.goingCount), spots: scarcityLine(detail) };
+}
+
+/**
+ * Honest scarcity copy (TM-827-B): a BUCKET derived from `remaining = capacity − going`, never an exact
+ * count and never anything that implies emptiness. Single source, shared by {@link attendanceSummary}
+ * and {@link listCountPill}'s "Full" so the card, count pill and detail summary always agree.
+ *
+ *   remaining ≥ 3 → ""  ·  2 → "Last few spots left"  ·  1 → "Last spot left"  ·  0 → "Full"
+ *
+ * Because it fires ONLY at low remaining, it can't leak a low GOING count — a cap-2 event with 0 going
+ * legitimately reads "Last few spots left" (a small event, not "nobody came"). Unlimited/unknown
+ * capacity (`capacity == null`) → "" (no scarcity line).
+ * @param {?{capacity?:*, goingCount?:*}} item  an EventCard or EventDetail
+ * @returns {string}
+ */
+export function scarcityLine(item) {
+  const cap = firstNumber(item?.capacity);
+  if (cap == null) return ""; // unlimited/unknown capacity → never a scarcity line
+  const going = firstNumber(item?.goingCount) ?? 0;
+  const remaining = cap - going;
+  if (remaining <= 0) return "Full";
+  if (remaining === 1) return "Last spot left";
+  if (remaining === 2) return "Last few spots left";
+  return ""; // ≥3 remaining → no scarcity line
 }
 
 /**

@@ -385,11 +385,14 @@ function eventCard(card, { live, past = false }) {
       el("h3", { class: "tm-event-card-title", text: card.heading || "Untitled event" }),
       el("p", { class: "tm-event-meta", text: meta }),
       el("div", { class: "tm-event-card-row" }, [
-        el("span", {
-          class: `tm-event-pill${pill.full ? " tm-event-pill-full" : ""}`,
-          "data-testid": "event-going-count",
-          text: pill.label,
-        }),
+        // Zero-going renders NO pill (goingBadge → ""); never an empty badge (TM-827-B AC3).
+        pill.label
+          ? el("span", {
+              class: `tm-event-pill${pill.full ? " tm-event-pill-full" : ""}`,
+              "data-testid": "event-going-count",
+              text: pill.label,
+            })
+          : null,
         // A state LABEL styled like the wireframe button (not itself interactive — the card link owns
         // the tap). // reconcile with TM-511 component library (button).
         el("span", { class: `tm-event-cta tm-event-cta-${cta.variant}`, "aria-hidden": "true", text: cta.label }),
@@ -712,18 +715,24 @@ function attendeesSection(detail) {
   }
   if (overflow > 0) strip.append(el("span", { class: "tm-event-avatar tm-event-avatar-more", text: `+${overflow}` }));
 
-  // The wireframe's attendees row: the avatar strip beside "8 going · 12 spots". The going badge keeps
-  // its `event-going-count` testid/copy; "· M spots" is appended when capacity is finite; the waitlist
-  // badge follows when there's a queue.
+  // The wireframe's attendees row: the avatar strip beside "8 going · Last few spots left". The going
+  // badge keeps its `event-going-count` testid/copy but is OMITTED at zero going (goingBadge → "", no
+  // empty badge — TM-827-B AC3); the honest scarcity bucket follows (only at low remaining, never an
+  // exact count), separated by "· " only when a going badge precedes it; the waitlist badge follows.
   const countLine = el("p", { class: "tm-event-att-summary" }, [
-    el("span", { class: "tm-badge tm-event-going", "data-testid": "event-going-count", text: summary.going }),
-    summary.spots ? el("span", { class: "tm-muted tm-event-spots", text: ` · ${summary.spots}` }) : null,
+    summary.going
+      ? el("span", { class: "tm-badge tm-event-going", "data-testid": "event-going-count", text: summary.going })
+      : null,
+    summary.spots
+      ? el("span", { class: "tm-muted tm-event-spots", text: summary.going ? ` · ${summary.spots}` : summary.spots })
+      : null,
     waitBadge ? el("span", { class: "tm-badge tm-event-waitlist", "data-testid": "event-waitlist-count", text: waitBadge }) : null,
   ]);
 
+  // No "No one's going yet — you could be the first." line (TM-827-B): never announce emptiness. When
+  // there are no attendee avatars the row simply carries the (possibly scarcity-only) count line.
   return el("section", { class: "tm-event-attendees" }, [
     el("div", { class: "tm-event-att-head" }, [attendees.length ? strip : null, countLine]),
-    attendees.length ? null : el("p", { class: "tm-muted", text: "No one's going yet — you could be the first." }),
   ]);
 }
 

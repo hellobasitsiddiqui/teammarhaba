@@ -42,6 +42,7 @@ import {
   listCountPill,
   listCtaState,
   attendanceSummary,
+  scarcityLine,
   eventFilters,
   filterCards,
   browseListModel,
@@ -136,8 +137,11 @@ test("myStateChip: GOING / WAITLISTED render; NONE + unknown → null", () => {
   assert.equal(myStateChip(undefined), null);
 });
 
-test("goingBadge / waitlistBadge: counts + warm empty copy + pluralisation", () => {
-  assert.equal(goingBadge(0), "Be the first to go");
+test("goingBadge / waitlistBadge: counts, silent at zero (no emptiness copy), pluralisation", () => {
+  // TM-827-B: zero going renders NOTHING — never "Be the first to go" (announces emptiness).
+  assert.equal(goingBadge(0), "");
+  assert.equal(goingBadge(null), "");
+  assert.equal(goingBadge(undefined), "");
   assert.equal(goingBadge(1), "1 going");
   assert.equal(goingBadge(12), "12 going");
   assert.equal(waitlistBadge(0), "");
@@ -538,7 +542,8 @@ test("listCountPill: 'N going' normally, 'Full' when full and not already GOING"
   assert.deepEqual(listCountPill({ goingCount: 12, capacity: 12, myState: "NONE" }), { label: "Full", full: true });
   // A full event I'm already GOING to still shows my "N going" count, not "Full".
   assert.deepEqual(listCountPill({ goingCount: 12, capacity: 12, myState: "GOING" }), { label: "12 going", full: false });
-  assert.deepEqual(listCountPill({ goingCount: 0, capacity: 5 }), { label: "Be the first to go", full: false });
+  // TM-827-B: zero going → empty label (the card omits the pill entirely); never "Be the first to go".
+  assert.deepEqual(listCountPill({ goingCount: 0, capacity: 5 }), { label: "", full: false });
 });
 
 test("listCtaState: mirrors the wireframe button states", () => {
@@ -559,10 +564,35 @@ test("listCtaState: a past event is read-only 'Ended' — wins even over a stale
   assert.deepEqual(listCtaState({ status: "FINISHED", myState: "GOING" }, NOON_UTC), { label: "Ended", variant: "ended" });
 });
 
-test("attendanceSummary: leads with the going badge; '· spots' only for finite capacity", () => {
-  assert.deepEqual(attendanceSummary({ goingCount: 8, capacity: 12 }), { going: "8 going", spots: "12 spots" });
+test("attendanceSummary: going badge + an honest scarcity bucket (never an exact spot count)", () => {
+  // TM-827-B: `spots` is the scarcity BUCKET, never "N spots". cap 12 / 8 going → 4 remaining → no line.
+  assert.deepEqual(attendanceSummary({ goingCount: 8, capacity: 12 }), { going: "8 going", spots: "" });
+  // Unlimited capacity → no going-derived scarcity line.
   assert.deepEqual(attendanceSummary({ goingCount: 3, capacity: null }), { going: "3 going", spots: "" });
-  assert.deepEqual(attendanceSummary({ goingCount: 0, capacity: 5 }), { going: "Be the first to go", spots: "5 spots" });
+  // Zero going → no going badge AND (cap 5 → 5 remaining) no scarcity line; never "Be the first to go".
+  assert.deepEqual(attendanceSummary({ goingCount: 0, capacity: 5 }), { going: "", spots: "" });
+  // Low remaining surfaces the bucket even at low going (small-event case is accepted).
+  assert.deepEqual(attendanceSummary({ goingCount: 0, capacity: 2 }), { going: "", spots: "Last few spots left" });
+  assert.deepEqual(attendanceSummary({ goingCount: 9, capacity: 10 }), { going: "9 going", spots: "Last spot left" });
+  assert.deepEqual(attendanceSummary({ goingCount: 10, capacity: 10 }), { going: "10 going", spots: "Full" });
+});
+
+test("scarcityLine: neutral/silent buckets from remaining = capacity − going (TM-827-B)", () => {
+  // ≥3 remaining → no line.
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 0 }), "");
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 7 }), "");
+  // Low remaining buckets.
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 8 }), "Last few spots left"); // 2 left
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 9 }), "Last spot left"); // 1 left
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 10 }), "Full"); // 0 left
+  assert.equal(scarcityLine({ capacity: 10, goingCount: 12 }), "Full"); // over capacity → Full
+  // Small event: a cap-2 event with 0 going legitimately reads "Last few spots left" (not "nobody came").
+  assert.equal(scarcityLine({ capacity: 2, goingCount: 0 }), "Last few spots left");
+  // Unlimited / unknown capacity → never a scarcity line.
+  assert.equal(scarcityLine({ capacity: null, goingCount: 0 }), "");
+  assert.equal(scarcityLine({ capacity: undefined, goingCount: 5 }), "");
+  assert.equal(scarcityLine({}), "");
+  assert.equal(scarcityLine(null), "");
 });
 
 test("eventFilters: always offers All, plus data-backed status chips only when ≥1 matches", () => {
