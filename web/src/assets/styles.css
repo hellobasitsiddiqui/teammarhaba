@@ -4954,6 +4954,12 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     /* Below the toasts (1000), modal/dialog backdrops (1100) and the top-nav dropdown (1500) so a
        dialog/menu always sits over the bar; above ordinary page content. */
     z-index: 900;
+    /* TM-1042: constrain the fixed bar to the same clamp band as the .app column and centre it, so on
+       wide viewports it sits under the column instead of stretching full-bleed. left:0 + right:0 + an
+       explicit width + margin-inline:auto centres a fixed element; on phones min(100%, …) resolves to
+       100% so the bar spans the full width exactly as before (native/WebView byte-identical). */
+    width: min(100%, var(--app-max));
+    margin-inline: auto;
     grid-template-columns: repeat(4, 1fr);
     align-items: stretch;
     background: var(--surface);
@@ -5050,40 +5056,39 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 }
 
 /*
- * Reveal on mobile only (mirrors the .app-nav-toggle breakpoint: ≤ 33rem ≈ 528px). Shown as a 4-col
- * grid only when the router has un-hidden the bar (session eligible); desktop keeps display:none.
+ * TM-1042: reveal the bar at ALL widths (was gated to ≤ 33rem). The tab bar is now the single primary
+ * nav on every viewport, centred in the same clamp band as the .app column (the width rule on
+ * .app-tabbar above). Shown as a grid only when the router has un-hidden the bar — session eligible,
+ * `shouldShowTabbar` in tabbar-core.js, UNCHANGED — so signed-out + gate screens keep display:none.
  */
-@media (max-width: 33rem) {
-    .app-tabbar:not([hidden]) {
-        display: grid;
-    }
+.app-tabbar:not([hidden]) {
+    display: grid;
+}
 
-    /* Reconcile with the top-nav hamburger — AC: exactly ONE primary nav on mobile. The tab bar now
-       owns the primary destinations, so hide the DUPLICATE top-nav tab links inside the collapsed
-       hamburger while the bar is shown, leaving the hamburger as a small UTILITY menu (Admin, avatar).
-       The ids stay in the DOM (router still owns their gating `hidden`); this only drops the on-screen
-       duplication. TM-1024 made the desktop top nav EXACTLY the four tabs — Home · Events · Chat ·
-       Profile — so ALL FOUR are hidden here now (Home + Chat are new top-nav links as of TM-1024, so
-       they join Events/Profile in this list; before, only Events/Profile existed to hide). */
-    body.tm-has-tabbar .app-nav-items > #nav-home,
-    body.tm-has-tabbar .app-nav-items > #nav-events,
-    body.tm-has-tabbar .app-nav-items > #nav-chat,
-    body.tm-has-tabbar .app-nav-items > #nav-profile {
-        display: none;
-    }
+/* Exactly ONE primary nav at every width: the bar owns the primary destinations, so hide the DUPLICATE
+   top-nav tab links while the bar is shown (previously only ≤ 33rem). TM-1024 made the desktop top nav
+   EXACTLY the four tabs — Home · Events · Chat · Profile — so all four are hidden here. (The remaining
+   top-nav utility items are removed outright by TM-1043, which deletes .app-nav; until then this keeps
+   desktop from showing two navs.) The ids stay in the DOM — the router still owns their gating
+   `hidden`; this only drops the on-screen duplication. */
+body.tm-has-tabbar .app-nav-items > #nav-home,
+body.tm-has-tabbar .app-nav-items > #nav-events,
+body.tm-has-tabbar .app-nav-items > #nav-chat,
+body.tm-has-tabbar .app-nav-items > #nav-profile {
+    display: none;
+}
 
-    /* Keep page content clear of the fixed bar: add its height (+ safe-area inset) to the app's
-       bottom padding, but ONLY while the bar is shown so signed-out / desktop layouts are unchanged.
-       ~4.75rem covers the 3.25rem tap rows + label + top indicator with a little breathing room. */
-    body.tm-has-tabbar .app {
-        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
-    }
+/* Keep page content clear of the fixed bar at every width: add its height (+ safe-area inset) to the
+   app's bottom padding while the bar is shown (signed-out / gate layouts, which have no bar, are
+   unchanged). ~4.75rem covers the 3.25rem tap rows + label + top indicator with breathing room. */
+body.tm-has-tabbar .app {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+}
 
-    /* No layout jump when the on-screen keyboard opens: tabbar.js sets this while a text field is
-       focused, so the fixed bar is dropped and can't overlap the input or force a reflow. */
-    body.tm-tabbar-kbd-open .app-tabbar {
-        display: none;
-    }
+/* No layout jump when the on-screen keyboard opens: tabbar.js sets this while a text field is focused,
+   so the fixed bar is dropped and can't overlap the input or force a reflow — at all widths now. */
+body.tm-tabbar-kbd-open .app-tabbar {
+    display: none;
 }
 
 /* Hand-drawn edge when the sketchy toggle is on (TM-529) — the same #wobble-soft skin the nav / cards
