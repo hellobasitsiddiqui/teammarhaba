@@ -5056,26 +5056,13 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 }
 
 /*
- * TM-1042: reveal the bar at ALL widths (was gated to ≤ 33rem). The tab bar is now the single primary
- * nav on every viewport, centred in the same clamp band as the .app column (the width rule on
- * .app-tabbar above). Shown as a grid only when the router has un-hidden the bar — session eligible,
+ * TM-1042: reveal the bar at ALL widths (was gated to ≤ 33rem). The tab bar is now the primary nav on
+ * every viewport, centred in the same clamp band as the .app column (the width rule on .app-tabbar
+ * above). Shown as a grid only when the router has un-hidden the bar — session eligible,
  * `shouldShowTabbar` in tabbar-core.js, UNCHANGED — so signed-out + gate screens keep display:none.
  */
 .app-tabbar:not([hidden]) {
     display: grid;
-}
-
-/* Exactly ONE primary nav at every width: the bar owns the primary destinations, so hide the DUPLICATE
-   top-nav tab links while the bar is shown (previously only ≤ 33rem). TM-1024 made the desktop top nav
-   EXACTLY the four tabs — Home · Events · Chat · Profile — so all four are hidden here. (The remaining
-   top-nav utility items are removed outright by TM-1043, which deletes .app-nav; until then this keeps
-   desktop from showing two navs.) The ids stay in the DOM — the router still owns their gating
-   `hidden`; this only drops the on-screen duplication. */
-body.tm-has-tabbar .app-nav-items > #nav-home,
-body.tm-has-tabbar .app-nav-items > #nav-events,
-body.tm-has-tabbar .app-nav-items > #nav-chat,
-body.tm-has-tabbar .app-nav-items > #nav-profile {
-    display: none;
 }
 
 /* Keep page content clear of the fixed bar at every width: add its height (+ safe-area inset) to the
@@ -5089,6 +5076,20 @@ body.tm-has-tabbar .app {
    so the fixed bar is dropped and can't overlap the input or force a reflow — at all widths now. */
 body.tm-tabbar-kbd-open .app-tabbar {
     display: none;
+}
+
+/* Hide the DUPLICATE top-nav tab links ONLY where the top nav collapses to the hamburger (≤ 33rem),
+   exactly as before. On DESKTOP the top nav (TM-1024's four tabs) is still the nav and MUST stay
+   visible: TM-1043 removes .app-nav outright, and the e2e specs still navigate via #nav-* at the
+   desktop viewport until TM-1044 migrates them — hiding them here would 404 ~20 nav-driven specs. So
+   B accepts a brief B→C interim where desktop shows both navs; TM-1043 ends it. */
+@media (max-width: 33rem) {
+    body.tm-has-tabbar .app-nav-items > #nav-home,
+    body.tm-has-tabbar .app-nav-items > #nav-events,
+    body.tm-has-tabbar .app-nav-items > #nav-chat,
+    body.tm-has-tabbar .app-nav-items > #nav-profile {
+        display: none;
+    }
 }
 
 /* Hand-drawn edge when the sketchy toggle is on (TM-529) — the same #wobble-soft skin the nav / cards
