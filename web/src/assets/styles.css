@@ -96,6 +96,14 @@
     --border-width: 2px;
     --page-bg: var(--g1);         /* off-white paper (the sketchy grid layers on top via `body`) */
 
+    /* ── App shell (TM-1041) ──────────────────────────────────────────────────────────────────────
+       The single Revolut-style column. `--app-max` is a responsive clamp band — full-width on phones
+       (≤~420px), 420–480px on laptops, hard-capped at 480px; every route inherits it via `.app`.
+       `--app-canvas` is the neutral page background the centred column sits on at wide viewports (inert
+       on phones, where the column fills the screen). Design baseline stays 390px. */
+    --app-max: clamp(420px, 40vw, 480px);
+    --app-canvas: color-mix(in srgb, var(--g3) 55%, var(--white));
+
     /* ── Shape scale (TM-211) ──────────────────────────────────────────────────────────────────
        The remaining radii used across the UI, named so the corners can be reshaped at once. These
        are the crisp clean-Paper corners; the sketchy toggle swaps in irregular ones. (Geometric
@@ -419,7 +427,6 @@ body {
 /* Auth UI (TM-106) */
 .auth {
     margin: 1.75rem auto 0;
-    max-width: 22rem;
     text-align: left;
 }
 
@@ -904,6 +911,7 @@ body {
         --surface-card: #202020;
         --muted: rgba(230, 230, 230, 0.62);
         --page-bg: #1a1a1a;
+        --app-canvas: #121212;   /* neutral canvas a touch deeper than the paper column, in the dark */
     }
 
     body {
@@ -1862,11 +1870,11 @@ h3,
 
 /* Same shell width/alignment as the admin console so the two protected pages feel consistent. */
 .profile-view {
-    /* TM-665: use 100% (not 96vw) of the padded main.app content box. main.app already adds side
-       padding, so 96vw (wider than main's content box on a narrow phone) overflowed it and broke the
-       `margin: auto` centring — the cards pinned ~14px off-centre. 100% fills the content box and
-       centres symmetrically inside main's padding. (Desktop is unchanged: 48rem still caps first.) */
-    width: min(48rem, 100%);
+    /* TM-665/TM-1041: fill 100% of the padded main.app content box. The page width is now the single
+       shared .app clamp band (--app-max), so this view no longer sets its own desktop cap (the old 48rem
+       is ≥ the 480px column ceiling → inert). 100% fills the content box and centres symmetrically inside
+       main's padding, matching every other route. */
+    width: 100%;
     margin: 1.5rem auto 0;
     text-align: left;
 }
@@ -1875,7 +1883,8 @@ h3,
    user does this one thing; reuses the shared .tm-form-* primitives for the fields/actions, and the
    theme tokens (--surface-card / spacing) so it follows clean + doodle skins automatically. */
 .onboarding-view {
-    width: min(34rem, 96vw);
+    /* TM-1041: inherit the shared .app clamp band (--app-max) instead of a self-set 96vw/34rem width. */
+    width: 100%;
     margin: 1.5rem auto 0;
     text-align: left;
 }
@@ -2868,8 +2877,8 @@ h3,
    (the modal-overflow bug, TM-421). Constrain to a comfortable reading column rather than stretching to
    the full console width; the "← Events" header reuses .tm-admin-head. */
 .tm-event-form-page {
+    /* TM-1041: the shared .app clamp band caps the page width now (the old 44rem is ≥ the 480px ceiling). */
     margin-top: 1.25rem;
-    max-width: 44rem;
 }
 
 /* Two short fields side by side (start/end, visibility, capacity/reveal, age min/max); collapses to
@@ -2897,7 +2906,6 @@ h3,
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface-card);
-    max-width: 34rem;
 }
 
 .tm-config-title {
@@ -3033,9 +3041,28 @@ html {
 }
 
 .app {
-    width: 100%;
-    max-width: 100vw;
+    /* TM-1041: the single Revolut-style column — a responsive clamp band (--app-max): full-width on
+       phones (≤~420px, clamp inert → native/WebView unchanged), 420–480px on laptops, capped at 480px.
+       `min(100%, …)` guarantees it never exceeds the viewport (replaces the old max-width:100vw guard;
+       html{overflow-x:hidden} stays as the backstop). Every route inherits this one width. */
+    width: min(100%, var(--app-max));
+    margin-inline: auto;
     overflow-wrap: break-word;
+}
+
+/* TM-1041: Revolut-style neutral canvas. On viewports wider than the column the page background reads
+   as a neutral canvas and the centred column paints the paper app surface (--surface), so the column
+   reads as the app — a plain centred column, no device frame or bezel. Inert at/below phone width
+   (28rem ≈ 448px): there the column fills the viewport and body stays --page-bg, so phones + the native
+   WebView shells are byte-identical. */
+@media (min-width: 28rem) {
+    body {
+        background: var(--app-canvas);
+    }
+
+    .app {
+        background: var(--surface);
+    }
 }
 
 /* --- Nav: hamburger scaffolding (TM-229) -------------------------------------------------------
@@ -5065,8 +5092,8 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
  * ---------------------------------------------------------------------------------------------- */
 .chat-view,
 .notifications-view {
+    /* TM-1041: page width is the shared .app clamp band now (the old 32rem cap is ≥ the 480px ceiling). */
     margin: 1.5rem auto 0;
-    max-width: 32rem;
     width: 100%;
     /* The app shell (.app) centres text; these screens are left-aligned like the wireframes. The
        empty state re-centres itself below. */
@@ -7537,7 +7564,6 @@ a.tm-pf-go:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
-    max-width: 44rem;
 }
 
 /* A section divider heading ("Message" / "Audience") — quieter than the page <h2>. */
@@ -8013,7 +8039,6 @@ a.tm-pf-go:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    max-width: 44rem;
     padding: 1rem 1.1rem;
     border: var(--border-width) solid var(--border);
     border-radius: var(--radius);
