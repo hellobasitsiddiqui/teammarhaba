@@ -467,6 +467,34 @@ export function directionsModel(detail, platform = MAPS_PLATFORM.WEB, nowMs = Da
   return { show: Boolean(href), href, label: DIRECTIONS_LABEL };
 }
 
+/** The three states the event-detail map slot can be in (TM-827-A). */
+export const MAP_SLOT = Object.freeze({ DIRECTIONS: "directions", PLACEHOLDER: "placeholder", NONE: "none" });
+
+/**
+ * The pure model for the event-detail MAP SLOT (TM-827-A) — the single decision the DOM shell renders,
+ * so all three branches are unit-tested in plain Node:
+ *   • DIRECTIONS  — revealed AND somewhere to point → the real platform-correct "Open in Maps" link
+ *                   (carries the {@link directionsModel} result verbatim; unchanged from TM-487).
+ *   • PLACEHOLDER — pre-reveal → a generic paper-map illustration + the reveal-countdown caption
+ *                   ({@link locationView}'s `note`). Leaks NOTHING geographic (TM-408): the server has
+ *                   already withheld `locationText`/`mapUrl`/`onlineUrl`, and the illustration is static.
+ *   • NONE        — revealed but nowhere to point (an online-only event with no venue query) → render
+ *                   nothing here; the "Join online" affordance lives in the location section, not the map.
+ * @param {Object} detail   the EventDetail
+ * @param {"IOS"|"ANDROID"|"WEB"|string} [platform="WEB"]  device platform (push-env `platformFor()`)
+ * @param {number} [nowMs=Date.now()]
+ * @returns {{kind:string, directions?:{show:boolean,href:?string,label:string}, caption?:string}}
+ */
+export function mapSlotModel(detail, platform = MAPS_PLATFORM.WEB, nowMs = Date.now()) {
+  const directions = directionsModel(detail, platform, nowMs);
+  if (directions.show) return { kind: MAP_SLOT.DIRECTIONS, directions };
+  // Not showing a directions link: either pre-reveal (placeholder) or revealed-but-nowhere (none).
+  if (locationView(detail, nowMs).revealed === false) {
+    return { kind: MAP_SLOT.PLACEHOLDER, caption: locationView(detail, nowMs).note || "" };
+  }
+  return { kind: MAP_SLOT.NONE };
+}
+
 // ------------------------------------------------------------------ eligibility gates
 
 /** Normalize the event's age band from any of the plausible field shapes; null when there is none. */

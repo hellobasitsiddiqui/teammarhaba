@@ -245,6 +245,12 @@ test("@events browse an event, RSVP to it (going), then un-RSVP", async ({ page 
   await expect(detail.getByText("Be the first to go")).toHaveCount(0);
   await expect(detail.getByText("No one's going yet")).toHaveCount(0);
   await expect(detail.locator('[data-testid="event-going-count"]')).toHaveCount(0);
+  // TM-827-A reveal-aware map: this event's venue is not yet revealed (future start, 24h reveal window),
+  // so the map slot shows the paper-map placeholder + reveal caption — NOT the old empty text box, and
+  // NO "Open in Maps" directions link (that is strictly post-reveal, TM-487).
+  await expect(detail.locator('[data-testid="event-map-placeholder"]')).toBeVisible();
+  await expect(detail.locator('[data-testid="event-map-placeholder"]')).toContainText("Exact location revealed");
+  await expect(detail.locator('[data-testid="event-map-link"]')).toHaveCount(0);
   await shot("detail");
 
   // ── STEP 2: RSVP → the confirm dialog → land GOING. ───────────────────────────────────────────
