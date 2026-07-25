@@ -122,10 +122,11 @@ test("homeCardModel: encodes the id into the detail href", () => {
   assert.equal(homeCardModel({ id: "a b/c" }, CTX).href, "#/events/a%20b%2Fc");
 });
 
-test("homeCardModel: GOING card carries the 'Going ✓' state + warm zero-going copy", () => {
+test("homeCardModel: GOING card carries the 'Going ✓' state; zero-going shows no count (TM-827-B)", () => {
   const model = homeCardModel({ id: 9, heading: "Sunday walk", myState: "GOING", goingCount: 0 }, CTX);
   assert.deepEqual(model.state, { kind: "going", label: "Going ✓" });
-  assert.equal(model.going, "Be the first to go");
+  // Shared goingBadge: zero going renders nothing on Home too (the feed card omits the empty count).
+  assert.equal(model.going, "");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

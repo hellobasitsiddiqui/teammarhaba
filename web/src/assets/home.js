@@ -228,7 +228,8 @@ function feedCard(model) {
       el("p", { class: "tm-home-meta" }, [clockIcon(), el("span", { text: model.when })]),
       el("p", { class: "tm-home-meta" }, [pinIcon(), el("span", { text: model.where })]),
       el("div", { class: "tm-home-card-row" }, [
-        el("span", { class: "tm-home-going", "data-testid": "home-going-count", text: model.going }),
+        // Zero-going renders NO count (goingBadge → "", TM-827-B); never an empty badge.
+        model.going ? el("span", { class: "tm-home-going", "data-testid": "home-going-count", text: model.going }) : null,
         el("span", { class: `tm-home-state tm-home-state-${model.state.kind}`, text: model.state.label }),
       ]),
     ],
