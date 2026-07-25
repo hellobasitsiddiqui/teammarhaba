@@ -39,10 +39,16 @@ test("corner-bell applies on the signed-in Home feed (content-first, TM-908)", (
   assert.equal(bellPinnedToCorner("#/home/feed"), true, "a Home sub-route matches via the prefix rule");
 });
 
-test("corner-bell stays OFF every other route (login/events/chat/admin unchanged in this lane)", () => {
-  // #/home is NOW corner-belled (TM-908) so it is deliberately absent here — see the Home test above.
-  // Events (#/events, TM-909) takes the treatment in its OWN lane, so it stays false until it adds it.
-  for (const route of ["#/login", "#/events", "#/events/42", "#/chat", "#/chat/7",
+test("corner-bell applies on the content-first Events tab and its detail (TM-909)", () => {
+  assert.equal(bellPinnedToCorner("#/events"), true, "the Events browse tab");
+  assert.equal(bellPinnedToCorner("#/events/42"), true, "an event detail matches via the prefix rule");
+});
+
+test("corner-bell stays OFF every other route (login/chat/admin unchanged in this lane)", () => {
+  // #/home (TM-908) and #/events (TM-909) are NOW corner-belled so they are deliberately absent here —
+  // see the Home + Events tests above. #/admin is self-headed (shell-brand) but keeps its own nav, so it
+  // does NOT take the corner-bell treatment.
+  for (const route of ["#/login", "#/chat", "#/chat/7",
     "#/admin", "#/admin/events", "#/help", "#/notifications", "#/onboarding", "#/terms", "#/diagnostics"]) {
     assert.equal(bellPinnedToCorner(route), false, `expected corner-bell OFF on ${route}`);
   }
@@ -62,8 +68,8 @@ test("fails safe (off) on junk input", () => {
 
 test("the corner-bell route list is frozen and the shared consumption point", () => {
   assert.ok(Object.isFrozen(CORNER_BELL_ROUTES));
-  // #/home added by TM-908 (content-first Home); Events (#/events) is added by its own lane later.
-  assert.deepEqual([...CORNER_BELL_ROUTES], ["#/profile", "#/home"]);
+  // #/home added by TM-908 (content-first Home); #/events by TM-909 (this lane).
+  assert.deepEqual([...CORNER_BELL_ROUTES], ["#/profile", "#/home", "#/events"]);
 });
 
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
@@ -101,7 +107,7 @@ function fakeDoc({ withToggle = true, withItems = true, withNav = true } = {}) {
   };
 }
 
-test("updateCornerBell hides the hamburger + pins the class on #/profile and restores on #/events", () => {
+test("updateCornerBell hides the hamburger + pins the class on #/profile and restores on #/chat", () => {
   const doc = fakeDoc();
   updateCornerBell({ route: "#/profile" }, doc);
   assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Profile");
@@ -112,10 +118,10 @@ test("updateCornerBell hides the hamburger + pins the class on #/profile and res
   assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned");
 
   // Navigating to a non-corner route un-hides the toggle + drops the class (render() reruns this on
-  // every hashchange/auth change), so leaving the corner route returns to the normal nav. #/events is
-  // chosen deliberately: #/home is now corner-belled (TM-908) and would keep the class, so it can no
-  // longer stand in for a "normal nav restored" route here.
-  updateCornerBell({ route: "#/events" }, doc);
+  // every hashchange/auth change), so leaving the corner route returns to the normal nav. #/chat is
+  // chosen deliberately: #/home (TM-908) and #/events (TM-909) are now corner-belled and would keep the
+  // class, so Chat is the only tab route that can still stand in for a "normal nav restored" route here.
+  updateCornerBell({ route: "#/chat" }, doc);
   assert.equal(doc.toggle.hidden, false);
   assert.equal(doc.items.hidden, false);
   assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), false);
@@ -126,6 +132,13 @@ test("updateCornerBell also hides the hamburger + pins the class on the signed-i
   updateCornerBell({ route: "#/home" }, doc);
   assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Home");
   assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned on Home");
+});
+
+test("updateCornerBell hides the hamburger + pins the class on the content-first Events tab (TM-909)", () => {
+  const doc = fakeDoc();
+  updateCornerBell({ route: "#/events" }, doc);
+  assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Events");
+  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned on Events");
 });
 
 test("updateCornerBell also covers the public-profile sub-route", () => {

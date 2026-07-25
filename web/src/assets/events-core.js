@@ -816,6 +816,80 @@ export function filterCards(cards, key, nowMs = Date.now()) {
   }
 }
 
+// ------------------------------------------------------------------ content-first city scope (TM-909)
+
+/**
+ * Normalise a city for comparison: trim + collapse inner whitespace + lowercase, so cosmetic
+ * differences ("Mk" vs "mk", " Milton  Keynes ") never split the same place into two. Returns "" for a
+ * blank/missing value (an unknown city matches nothing). Mirrors home-core.js `cityKey` so the Events
+ * tab (TM-909) and the Home "near you" feed (TM-662) agree on what "same city" means.
+ * @param {?string} value
+ * @returns {string}
+ */
+function cityKey(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * An event card's location key = its APPROXIMATE `city` (always exposed, even before the exact-venue
+ * reveal of TM-408), falling back to `locationText` only when `city` is absent. Mirrors home-core.
+ * @param {?{city?:string, locationText?:string}} card
+ * @returns {string}
+ */
+function cardCityKey(card) {
+  return cityKey(card?.city) || cityKey(card?.locationText);
+}
+
+/** The neutral Events-tab heading when the viewer's city is unknown (no `me.city` on record). */
+export const EVENTS_NEUTRAL_HEADING = "Events near you";
+
+/**
+ * The distinct cities that currently have events (TM-909) — the options the "browse other cities"
+ * switcher offers. Keyed by the normalised city, carrying the first-seen display label + a count,
+ * sorted alphabetically by label. Cards with no city at all are skipped.
+ * @param {Array} cards the full listing (EventCard[])
+ * @returns {Array<{key:string, label:string, count:number}>}
+ */
+export function eventCities(cards) {
+  const list = Array.isArray(cards) ? cards : [];
+  const byKey = new Map();
+  for (const c of list) {
+    const key = cardCityKey(c);
+    if (!key) continue;
+    const label = (String(c?.city ?? "").trim() || String(c?.locationText ?? "").trim());
+    const entry = byKey.get(key);
+    if (entry) entry.count += 1;
+    else byKey.set(key, { key, label, count: 1 });
+  }
+  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * The content-first Events tab is scoped to ONE city (TM-909): the viewer's own `me.city` by default,
+ * or whichever city the "browse other cities" switcher selects. This is the single pure model the view
+ * renders its heading AND its card scope from, so the two can never disagree (the TM-662 heading/list
+ * mismatch this design explicitly avoids). No backend param — the filter is client-side over the full
+ * listing the browse endpoint already returns.
+ *
+ * @param {Array} cards           the full listing (EventCard[])
+ * @param {?string} selectedCity  the active city (me.city, or a switcher pick); null/blank = unknown
+ * @returns {{ city: ?string, heading: string, hasCity: boolean, scoped: Array, others: Array<{key,label,count}> }}
+ *   • city    — the resolved display city (trimmed), or null when unknown
+ *   • heading — the tab heading: the city name, else the neutral {@link EVENTS_NEUTRAL_HEADING}
+ *   • hasCity — whether a city is actually selected (false → the no-city empty/browse path)
+ *   • scoped  — the cards in that city (empty array when no city is selected)
+ *   • others  — the OTHER cities that have events (for the browse-other-cities switcher)
+ */
+export function cityScopedListModel(cards, selectedCity) {
+  const list = Array.isArray(cards) ? cards : [];
+  const key = cityKey(selectedCity);
+  const hasCity = key !== "";
+  const scoped = hasCity ? list.filter((c) => cardCityKey(c) === key) : [];
+  const others = eventCities(list).filter((c) => c.key !== key);
+  const city = hasCity ? String(selectedCity).trim() : null;
+  return { city, heading: city || EVENTS_NEUTRAL_HEADING, hasCity, scoped, others };
+}
+
 /**
  * The browse-list render model for a set of cards at a given filter (TM-535). paintList (the DOM shell)
  * has to tell apart THREE "how do I render this list?" outcomes, and getting them apart is exactly the

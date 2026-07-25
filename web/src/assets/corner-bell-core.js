@@ -37,11 +37,11 @@
  *   • `#/home` — the signed-in Home feed ("Events near you" heading, TM-512/TM-908). Content-first:
  *     with the brand block retired, the floating nav row is removed and the bell corner-pinned so the
  *     feed heading is the first content, mirroring Profile.
- *
- * Events (`#/events`, TM-909) is handled in its OWN lane and adds its route here when it lands —
- * this list is the shared consumption point.
+ *   • `#/events` — the signed-in Events tab (TM-909). Content-first: the brand block is retired
+ *     (shell-brand-core), so the floating nav row is removed and the bell corner-pinned, making the
+ *     tab's own city heading the first content — the twin of Home. `#/events/{id}` matches via prefix.
  */
-export const CORNER_BELL_ROUTES = Object.freeze(["#/profile", "#/home"]);
+export const CORNER_BELL_ROUTES = Object.freeze(["#/profile", "#/home", "#/events"]);
 
 /**
  * Whether the corner-bell chrome applies for `route`: the floating hamburger + nav-items row is

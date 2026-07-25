@@ -145,11 +145,11 @@ test("@profile-shell the brand block is restored when leaving the profile (scopi
   await expect(page.locator("#profile-view")).toBeVisible();
   await expect(page.locator("main.app > h1")).toBeHidden();
 
-  // Leaving Profile restores the brand block on a still-branded tab. Home is now self-headed too
-  // (TM-908 content-first), so verify the restoration on Events — which keeps the brand block —
-  // proving the block was SCOPED off Profile, not deleted.
-  await page.click("#tab-events");
-  await expect(page.locator("#events-view")).toBeVisible();
+  // Leaving Profile restores the brand block on a still-branded tab. Home (TM-908) and Events (TM-909)
+  // are now content-first / self-headed too, so Chat is the only remaining tab that keeps the brand
+  // block — verify the restoration there, proving the block was SCOPED off Profile, not deleted.
+  await page.click("#tab-chat");
+  await expect(page.locator("#chat-view")).toBeVisible();
   await expect(page.locator("main.app > h1")).toBeVisible();
   await expect(page.locator("main.app > .tagline")).toBeVisible();
 });

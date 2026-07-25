@@ -75,7 +75,10 @@ const LOCALE = (typeof navigator !== "undefined" && navigator.language) || "en-G
 // immediately on return, rather than showing a stale "add your age" until a reload.
 // `filter` is the active browse chip (TM-513) — persisted across list re-paints so switching a chip
 // doesn't refetch, and reset to "all" whenever it's no longer one of the offered (data-backed) chips.
-const state = { cards: [], filter: "all" };
+// `city` is the content-first scope (TM-909): initialised to the viewer's `me.city` on each list fetch,
+// re-pointed (without a refetch) when the "browse other cities" switcher picks another city. The heading
+// AND the card scope both derive from it via events-core `cityScopedListModel`, so they always agree.
+const state = { cards: [], filter: "all", city: null };
 // Monotonic guard so a slow fetch that resolves after the user has navigated away can't paint stale
 // content over the new view (mirrors the router's settle-or-fallback discipline).
 let renderToken = 0;
@@ -94,6 +97,7 @@ let commandInFlight = false;
 export function resetEventsCache() {
   state.cards = [];
   state.filter = "all";
+  state.city = null;
   renderToken++;
 }
 onSignedOut(resetEventsCache);
@@ -150,33 +154,89 @@ function errorBlock(view, title, message, onRetry) {
 
 async function renderList(view) {
   const mine = ++renderToken;
-  loadingBlock(view, "Events");
+  loadingBlock(view, core.EVENTS_NEUTRAL_HEADING);
+  // Fetch the listing and /me together (TM-909). /me is BEST-EFFORT — it only supplies the scope city
+  // for the content-first heading + city filter; loadMe() degrades to null (city "unknown") on failure,
+  // so it never rejects and the catch below only fires on a listing-load failure.
   let data;
+  let me = null;
   try {
-    data = await listEvents();
+    [data, me] = await Promise.all([listEvents(), loadMe()]);
   } catch (err) {
     if (mine !== renderToken) return;
-    errorBlock(view, "Events", "Couldn't load events. Please try again.", () => renderList(view));
+    errorBlock(view, core.EVENTS_NEUTRAL_HEADING, "Couldn't load events. Please try again.", () => renderList(view));
     console.warn("[events] list load failed:", err?.message ?? err);
     return;
   }
   if (mine !== renderToken) return;
 
   state.cards = Array.isArray(data?.items) ? data.items : [];
+  // Reset the scope to the viewer's own city on every fresh entry (a switcher pick only lasts within a
+  // paint session); null/blank city → the no-city empty/browse path.
+  state.city = (me?.city || "").trim() || null;
   paintList(view);
 }
 
 /**
- * The friendly "no events" empty state (the wireframe's calendar doodle + warm copy). Shared by the two
- * paths that have genuinely nothing to browse — zero cards, or an unfiltered listing that bucketed out to
- * nothing (TM-535) — so both surface the same `events-empty` testid the golden-path + events specs look
- * for, rather than a dead-end filter note.
+ * The content-first "no events here" empty state (TM-909) — the wireframe's calendar doodle + warm copy,
+ * scoped to the viewer's city. Surfaces the same `events-empty` testid the golden-path + events specs
+ * look for. Two shapes:
+ *   • a known city with nothing on → "No events in <city> yet";
+ *   • no city set at all → the neutral "Events near you" heading copy.
+ * In both cases, when OTHER cities have events, it carries the "browse other cities" switcher so the user
+ * is never dead-ended (the required TM-909 fallback affordance).
  */
-function eventsEmptyState() {
-  return el("div", { class: "tm-empty", "data-testid": "events-empty" }, [
-    doodle("calendar", { class: "tm-doodle-empty", title: "No upcoming events" }),
-    el("p", { class: "tm-empty-title", text: "No upcoming events" }),
-    el("p", { class: "tm-muted", text: "Check back soon — new meetups land here first." }),
+function cityEmptyState(view, cityModel) {
+  const title = cityModel.hasCity ? `No events in ${cityModel.city} yet` : "Events near you";
+  const hasOthers = cityModel.others.length > 0;
+  const block = el("div", { class: "tm-empty", "data-testid": "events-empty" }, [
+    doodle("calendar", { class: "tm-doodle-empty", title }),
+    el("p", { class: "tm-empty-title", text: title }),
+    el("p", {
+      class: "tm-muted",
+      text: hasOthers
+        ? "Nothing here just yet — try another city below."
+        : "Check back soon — new meetups land here first.",
+    }),
+  ]);
+  const switcher = cityBrowseControl(view, cityModel.others);
+  if (switcher) block.append(switcher);
+  return block;
+}
+
+/**
+ * The "browse other cities" switcher (TM-909): a labelled row of the OTHER cities that currently have
+ * events, each a button that re-points the tab's scope to that city (heading + list update in place, no
+ * refetch). Shared by the empty state and the foot of a non-empty city list. Returns null when there is
+ * no other city to offer, so callers can omit it cleanly.
+ */
+function cityBrowseControl(view, others) {
+  if (!Array.isArray(others) || !others.length) return null;
+  const chips = el("div", { class: "tm-event-city-switch-chips" });
+  for (const c of others) {
+    chips.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "tm-btn tm-btn-sm tm-event-city-btn",
+          dataset: { city: c.key },
+          onClick: () => {
+            // Re-point the scope to the picked city (buttons only ever offer OTHER cities, so this is
+            // always a real change). Reset the chip so a stale Going/Waitlisted filter doesn't hide the
+            // new city's list, then repaint from the cached cards — no refetch.
+            state.city = c.label;
+            state.filter = "all";
+            paintList(view);
+          },
+        },
+        `${c.label} (${c.count})`,
+      ),
+    );
+  }
+  return el("div", { class: "tm-event-city-switch", "data-testid": "events-city-switch" }, [
+    el("span", { class: "tm-muted tm-event-city-switch-label", text: "Browse other cities" }),
+    chips,
   ]);
 }
 
@@ -187,21 +247,28 @@ function eventsEmptyState() {
  */
 function paintList(view) {
   const now = Date.now();
-  const filters = core.eventFilters(state.cards, now);
-  // The active chip might no longer be offered (data changed under it) → fall back to All.
+  // Content-first city scope (TM-909): the heading AND the card list both derive from the ONE city
+  // model, so they can never disagree. `scoped` is the viewer-city subset of the full listing.
+  const cityModel = core.cityScopedListModel(state.cards, state.city);
+  const scoped = cityModel.scoped;
+
+  const filters = core.eventFilters(scoped, now);
+  // The active chip might no longer be offered (data changed / city switched under it) → fall back to All.
   if (!filters.some((f) => f.key === state.filter)) state.filter = "all";
 
-  clear(view).append(headerBar("Events"));
+  // The tab heading is the viewer's city (TM-909) — no literal "Events" title, no brand block above it
+  // (retired via shell-brand-core / corner-bell-core route opt-in).
+  clear(view).append(headerBar(cityModel.heading));
 
-  // The core decides which of the three list states this is (see events-core `browseListModel`).
-  const { kind, happeningNow, upcoming, past } = core.browseListModel(state.cards, state.filter, now);
+  // The core decides which of the three list states this is (see events-core `browseListModel`), over
+  // the city-scoped subset.
+  const { kind, happeningNow, upcoming, past } = core.browseListModel(scoped, state.filter, now);
 
-  // Nothing to show for the UNFILTERED listing — no cards at all, or everything bucketed out (e.g. every
-  // event has finished; `listingBuckets` drops finished events defensively). There are no chips to offer,
-  // so this is the friendly empty state, NEVER the dead-end "No events match this filter" note (TM-535).
-  // Uses the same `events-empty` testid the golden-path + events specs look for.
+  // Nothing to show for this city's UNFILTERED listing — the viewer's city has no upcoming events, or no
+  // city is set at all. Show the city-aware empty state + the "browse other cities" switcher so the user
+  // is never dead-ended. Uses the same `events-empty` testid the golden-path + events specs look for.
   if (kind === "empty") {
-    view.append(eventsEmptyState());
+    view.append(cityEmptyState(view, cityModel));
     return;
   }
 
@@ -239,6 +306,10 @@ function paintList(view) {
     for (const c of past) list.append(eventCard(c, { live: false, past: true }));
   }
   view.append(list);
+  // Foot-of-list "browse other cities" switcher (TM-909) — lets a user whose own city is quiet still
+  // hop to another city that has events, without leaving the tab. Omitted when no other city has any.
+  const switcher = cityBrowseControl(view, cityModel.others);
+  if (switcher) view.append(switcher);
 }
 
 /**

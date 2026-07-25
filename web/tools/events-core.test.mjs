@@ -45,6 +45,9 @@ import {
   eventFilters,
   filterCards,
   browseListModel,
+  cityScopedListModel,
+  eventCities,
+  EVENTS_NEUTRAL_HEADING,
   ENTITLEMENT_DECISION,
   requiresPaidCheckout,
   isViewingEventDetail,
@@ -735,4 +738,98 @@ test("isViewingEventDetail: blank/absent hash or id never matches", () => {
 
 test("isViewingEventDetail: a malformed %-escape falls back to the raw segment (no throw)", () => {
   assert.equal(isViewingEventDetail("#/events/%E0%A4%A", "%E0%A4%A"), true);
+});
+
+// ── content-first city scope (TM-909) ─────────────────────────────────────────────────────────────
+
+test("eventCities: distinct cities with counts, sorted by label, skipping city-less cards", () => {
+  const cards = [
+    { id: 1, city: "London" },
+    { id: 2, city: "London" },
+    { id: 3, city: "Sharjah" },
+    { id: 4, city: "  " }, // blank → skipped
+    { id: 5 }, // no city, no locationText → skipped
+  ];
+  assert.deepEqual(eventCities(cards), [
+    { key: "london", label: "London", count: 2 },
+    { key: "sharjah", label: "Sharjah", count: 1 },
+  ]);
+});
+
+test("eventCities: normalises case/whitespace so one place isn't split, and falls back to locationText", () => {
+  const cards = [
+    { id: 1, city: "Milton  Keynes" },
+    { id: 2, city: " milton keynes " },
+    { id: 3, locationText: "Milton Keynes" }, // city absent → keyed off locationText
+  ];
+  const cities = eventCities(cards);
+  assert.equal(cities.length, 1, "the three collapse into one city");
+  assert.equal(cities[0].key, "milton keynes");
+  assert.equal(cities[0].count, 3);
+});
+
+test("eventCities: junk input yields an empty list", () => {
+  assert.deepEqual(eventCities(null), []);
+  assert.deepEqual(eventCities(undefined), []);
+  assert.deepEqual(eventCities("nope"), []);
+});
+
+test("cityScopedListModel: a known city heads with its name and scopes the list to it", () => {
+  const cards = [
+    { id: 1, city: "London" },
+    { id: 2, city: "London" },
+    { id: 3, city: "Sharjah" },
+  ];
+  const m = cityScopedListModel(cards, "London");
+  assert.equal(m.city, "London");
+  assert.equal(m.heading, "London");
+  assert.equal(m.hasCity, true);
+  assert.deepEqual(m.scoped.map((c) => c.id), [1, 2], "only London cards");
+  assert.deepEqual(m.others, [{ key: "sharjah", label: "Sharjah", count: 1 }], "others excludes the selected city");
+});
+
+test("cityScopedListModel: the city match is case/whitespace-insensitive; the heading keeps the viewer's own spelling", () => {
+  const cards = [
+    { id: 1, city: "London" },
+    { id: 2, city: "LONDON" },
+  ];
+  const m = cityScopedListModel(cards, " london ");
+  assert.equal(m.heading, "london", "heading is the trimmed viewer value, not the card's casing");
+  assert.deepEqual(m.scoped.map((c) => c.id), [1, 2], "both London cards match despite casing");
+  assert.deepEqual(m.others, [], "no other city");
+});
+
+test("cityScopedListModel: no city set → neutral heading, empty scope, every city offered to browse", () => {
+  const cards = [
+    { id: 1, city: "London" },
+    { id: 2, city: "Sharjah" },
+  ];
+  for (const noCity of [null, undefined, "", "   "]) {
+    const m = cityScopedListModel(cards, noCity);
+    assert.equal(m.city, null);
+    assert.equal(m.heading, EVENTS_NEUTRAL_HEADING);
+    assert.equal(m.heading, "Events near you");
+    assert.equal(m.hasCity, false);
+    assert.deepEqual(m.scoped, [], "nothing is scoped when no city is selected");
+    assert.deepEqual(m.others.map((c) => c.key), ["london", "sharjah"], "all cities are browse options");
+  }
+});
+
+test("cityScopedListModel: a known-but-quiet city → empty scope, other cities still offered", () => {
+  const cards = [
+    { id: 1, city: "Sharjah" },
+    { id: 2, city: "Karachi" },
+  ];
+  const m = cityScopedListModel(cards, "London");
+  assert.equal(m.heading, "London", "heading still names the viewer's city");
+  assert.equal(m.hasCity, true);
+  assert.deepEqual(m.scoped, [], "no London events");
+  assert.deepEqual(m.others.map((c) => c.label), ["Karachi", "Sharjah"], "the cities that DO have events");
+});
+
+test("cityScopedListModel: junk card input degrades to an empty, no-throw model", () => {
+  const m = cityScopedListModel(null, "London");
+  assert.equal(m.heading, "London");
+  assert.deepEqual(m.scoped, []);
+  assert.deepEqual(m.others, []);
 });

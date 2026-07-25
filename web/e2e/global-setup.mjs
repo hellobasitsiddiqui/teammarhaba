@@ -101,13 +101,20 @@ async function provisionInBackend({ email, password, phone }) {
   // persona's number is unique, the always-on index accepts all nine seeds (the old shared
   // +447700900123 409'd on the second account). Idempotent: re-PATCHing a persona with its OWN number
   // is a no-op against the index (its own row already holds that normalized number).
+  //
+  // TM-909: also seed `city: "London"` on the row. The content-first Events tab now scopes its heading
+  // AND its list to the viewer's `me.city` (client-side over the full listing), and the seeded events
+  // default to city "London" (events-api.mjs createEvent). API-provisioned accounts skip the onboarding
+  // form (where a real user picks their TM-877 city), so without this they'd have no city and the Events
+  // tab would render the no-city empty state instead of the seeded London events — breaking the browse
+  // journey. "London" is a valid TM-877 list city and matches the seed, mirroring a real London user.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, city: "London" }),
   });
   if (!phoneRes.ok) {
-    throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+    throw new Error(`seed phone/city failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
   }
 
   // Un-gate the seeded account (TM-250): mark first-run onboarding complete so the gate is bypassed.

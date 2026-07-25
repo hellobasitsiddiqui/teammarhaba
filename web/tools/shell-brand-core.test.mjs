@@ -55,11 +55,16 @@ test("brand block hides on the admin tab + its consoles (TM-1025)", () => {
   assert.equal(shellBrandHidden("#/admin/messages/new"), true, "a deep console sub-route matches too");
 });
 
-test("brand block stays on every other route (login/events/chat unchanged)", () => {
-  // #/home and #/admin are NOW self-headed (TM-908 / TM-1025) so they are deliberately absent here —
-  // see the Home + admin tests above.
+test("the content-first Events tab and its detail are self-headed (TM-909)", () => {
+  assert.equal(shellBrandHidden("#/events"), true, "the Events browse tab");
+  assert.equal(shellBrandHidden("#/events/42"), true, "an event detail matches via the prefix rule");
+});
+
+test("brand block stays on every other route (login/chat unchanged)", () => {
+  // #/home, #/admin and #/events are NOW self-headed (TM-908 / TM-1025 / TM-909) so they are deliberately
+  // absent here — see the Home + admin + Events tests above.
   // #/login stays shown: the signed-out auth landing card owns its own lockup and is unaffected.
-  for (const route of ["#/login", "#/events", "#/events/42", "#/chat", "#/chat/7",
+  for (const route of ["#/login", "#/chat", "#/chat/7",
     "#/help", "#/notifications", "#/diagnostics"]) {
     assert.equal(shellBrandHidden(route), false, `expected the brand block to stay on ${route}`);
   }
@@ -80,8 +85,8 @@ test("fails safe (shown) on junk input", () => {
 
 test("the self-headed route list is frozen and exactly the decided set", () => {
   assert.ok(Object.isFrozen(SELF_HEADED_ROUTES));
-  // #/home added by TM-908 (content-first Home); #/admin by TM-1025; Events (#/events) added later.
-  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/admin", "#/onboarding", "#/terms"]);
+  // #/home added by TM-908 (content-first Home); #/events by TM-909; #/admin by TM-1025.
+  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/events", "#/admin", "#/onboarding", "#/terms"]);
 });
 
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
@@ -106,14 +111,15 @@ function fakeDoc({ withStatus = true } = {}) {
   };
 }
 
-test("updateShellBrand hides all three brand elements on #/profile and restores them on #/events", () => {
+test("updateShellBrand hides all three brand elements on #/profile and restores them on #/chat", () => {
   const doc = fakeDoc();
   updateShellBrand({ route: "#/profile" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
   // Navigating to a route that still shows the block restores it (render() reruns this on every
-  // hashchange/auth change). #/events is chosen deliberately: #/home is now self-headed (TM-908) and
-  // would keep the block hidden, so it can no longer stand in for a "block restored" route here.
-  updateShellBrand({ route: "#/events" }, doc);
+  // hashchange/auth change). #/chat is chosen deliberately: #/home (TM-908) and #/events (TM-909) are
+  // now self-headed and would keep the block hidden, so Chat is the only tab route that can still stand
+  // in for a "block restored" route here.
+  updateShellBrand({ route: "#/chat" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [false, false, false]);
 });
 
@@ -121,6 +127,15 @@ test("updateShellBrand also hides the block on the signed-in Home feed (TM-908)"
   const doc = fakeDoc();
   updateShellBrand({ route: "#/home" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
+});
+
+test("updateShellBrand hides the block on the content-first Events tab and its detail (TM-909)", () => {
+  const doc = fakeDoc();
+  updateShellBrand({ route: "#/events" }, doc);
+  assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
+  const doc2 = fakeDoc();
+  updateShellBrand({ route: "#/events/42" }, doc2);
+  assert.deepEqual([doc2.h1.hidden, doc2.tagline.hidden, doc2.status.hidden], [true, true, true]);
 });
 
 test("updateShellBrand skips missing elements and a missing document without throwing", () => {
