@@ -56,3 +56,33 @@ test("per-view page widths were consolidated onto the shell column (no self-set 
     ".profile-view (and peers) must inherit the .app clamp band, not set their own min(48rem, 100%) width",
   );
 });
+
+// ── TM-1042 (ticket B): the bottom tab bar is the single nav at ALL widths, constrained to the band ──
+
+test("the tab bar is constrained to the shell clamp band (centred, not full-bleed)", () => {
+  // Scope to the `.app-tabbar` base rule block (up to its line-start closing brace) rather than a
+  // `[^}]*` window — the block's own comment contains a `[hidden]{…}` brace that would truncate it.
+  const block = CSS.match(/\.app-tabbar\s*\{[\s\S]*?\n\}/);
+  assert.ok(block, ".app-tabbar base rule must exist");
+  assert.match(
+    block[0],
+    /width:\s*min\(\s*100%\s*,\s*var\(--app-max\)\s*\)/,
+    ".app-tabbar must set width: min(100%, var(--app-max)) so on wide viewports the fixed bar sits under " +
+      "the column, and on phones (min → 100%) spans full width unchanged",
+  );
+});
+
+test("the tab-bar reveal is unconditional — NOT gated behind the old ≤33rem query (TM-1042)", () => {
+  assert.match(
+    CSS,
+    /\.app-tabbar:not\(\[hidden\]\)\s*\{\s*display:\s*grid/,
+    "the router-gated reveal .app-tabbar:not([hidden]) { display: grid } must exist",
+  );
+  // Regression guard: the reveal must no longer be the first rule inside a (max-width: 33rem) query —
+  // that was the desktop-hides-the-bar gate B removes. The bar now shows at every width (router still
+  // decides WHEN via shouldShowTabbar), so a 33rem wrapper around the reveal would reintroduce the gate.
+  assert.ok(
+    !/@media\s*\(max-width:\s*33rem\)\s*\{\s*\.app-tabbar:not\(\[hidden\]\)/.test(CSS),
+    "the tab-bar reveal must not be wrapped in a @media (max-width: 33rem) block — it is unconditional now",
+  );
+});
