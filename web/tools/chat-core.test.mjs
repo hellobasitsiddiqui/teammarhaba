@@ -76,7 +76,12 @@ test("receiptState is defensive about bad / degenerate inputs", () => {
 });
 
 test("the reaction set + pickReaction produce a fresh single-select pill", () => {
-  assert.deepEqual([...REACTION_EMOJIS], ["👍", "❤️", "😂", "🎉", "🙌"]);
+  // Expanded from five to ten glyphs in TM-1049; the original five lead, then the five added ones.
+  assert.deepEqual(
+    [...REACTION_EMOJIS],
+    ["👍", "❤️", "😂", "🎉", "🙌", "😮", "😢", "🔥", "👏", "🙏"],
+  );
+  assert.equal(REACTION_EMOJIS.length, 10);
   // A "like" (👍) leads the picker so it's the prominent common reaction — no special like gesture.
   assert.equal(REACTION_EMOJIS[0], "👍");
   for (const emoji of REACTION_EMOJIS) assert.deepEqual(pickReaction(emoji), { emoji, count: 1 });

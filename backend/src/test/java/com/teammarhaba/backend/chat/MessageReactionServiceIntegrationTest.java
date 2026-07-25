@@ -343,12 +343,12 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         VerifiedUser member = member(thread.getId(), "allowed-member", MuteState.NONE);
         Long message = postMessage(thread.getId(), newUser("allowed-author"), "hi");
 
-        // Every glyph in the allow-list (including the default like ❤️) is accepted.
-        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌")) {
+        // Every glyph in the allow-list (including the default like ❤️) is accepted (10 since TM-1049).
+        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌", "😮", "😢", "🔥", "👏", "🙏")) {
             assertThat(service.react(member, message, emoji).reactions())
                     .anySatisfy(count -> assertThat(count.emoji()).isEqualTo(emoji));
         }
-        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(5);
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(10);
     }
 
     @Test
@@ -357,21 +357,28 @@ class MessageReactionServiceIntegrationTest extends AbstractIntegrationTest {
         VerifiedUser member = member(thread.getId(), "cap-member", MuteState.NONE);
         Long message = postMessage(thread.getId(), newUser("cap-author"), "hi");
 
-        // Fill the cap: one of each allowed emoji (the cap == allow-list size).
-        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌")) {
+        // Fill the cap right up to (but not over) the limit with NINE distinct allowed emojis, leaving
+        // one allowed glyph (🙏) deliberately un-held. The cap == allow-list size (10 since TM-1049), so
+        // one more distinct react is still legitimate at this point.
+        for (String emoji : List.of("👍", "❤️", "😂", "🎉", "🙌", "😮", "😢", "🔥", "👏")) {
             service.react(member, message, emoji);
         }
-        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(5);
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(9);
+
+        // Seed a DISTINCT legacy row directly (as a pre-allow-list value would have been persisted),
+        // pushing the caller to exactly the cap (10). Mirrors how the old cap test seeded its extra row.
+        reactions.saveAndFlush(MessageReaction.of(message, userIdOf(member), "🙈")); // legacy 10th distinct
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(10);
 
         // An idempotent re-react of an already-held emoji is still fine at the cap (adds no row).
-        assertThat(service.react(member, message, "👍").reactions()).hasSize(5);
+        assertThat(service.react(member, message, "👍").reactions()).hasSize(10);
 
-        // There is no 6th distinct allowed emoji to exceed the cap with a valid glyph, so drive the
-        // cap directly by seeding a 6th DISTINCT legacy row, then a further distinct allowed react is a
-        // 400. This proves the cap fires independently of (before adding) a new row.
-        reactions.saveAndFlush(MessageReaction.of(message, userIdOf(member), "🙈")); // legacy 6th distinct
-        assertThatThrownBy(() -> service.react(member, message, "😮")) // would be a 7th distinct → over cap
+        // Now a genuine NEW distinct react — with the still-un-held ALLOWED glyph 🙏 (so the allow-list
+        // gate passes and it is the cap, not the allow-list, that fires) — would be the 11th distinct
+        // reaction → rejected with a 400. This proves the cap fires before adding a new row.
+        assertThatThrownBy(() -> service.react(member, message, "🙏")) // would be an 11th distinct → over cap
                 .isInstanceOf(BadRequestException.class);
+        assertThat(reactions.findByMessageIdOrderByCreatedAtAscIdAsc(message)).hasSize(10); // nothing added
     }
 
     @Test

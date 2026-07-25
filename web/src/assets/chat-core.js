@@ -47,12 +47,25 @@ import { safeRoute } from "./notification-panel-core.js";
 import { EVENT_CHAT_ENTRY_LABEL } from "./events-core.js";
 
 /**
- * The five reaction emoji the picker offers (TM-462), in display order. The single source of truth
- * shared by the reaction UI and its tests. A "like" is deliberately just a common emoji — 👍 leads and
- * ❤️ follows, offered prominently at the head of the picker — so there is NO special like gesture; the
- * react button + this set is the whole affordance (the AC's "no double-tap-to-like").
+ * The ten reaction emoji the picker offers (TM-462, expanded from five in TM-1049), in display order.
+ * The single source of truth shared by the reaction UI and its tests. A "like" is deliberately just a
+ * common emoji — 👍 leads and ❤️ follows, offered prominently at the head of the picker — so there is
+ * NO special like gesture; the react button + this set is the whole affordance (the AC's
+ * "no double-tap-to-like"). The original five (👍 ❤️ 😂 🎉 🙌) lead, then the five added ones follow so
+ * the head of the picker is unchanged.
  */
-export const REACTION_EMOJIS = Object.freeze(["👍", "❤️", "😂", "🎉", "🙌"]);
+export const REACTION_EMOJIS = Object.freeze([
+  "👍",
+  "❤️",
+  "😂",
+  "🎉",
+  "🙌",
+  "😮",
+  "😢",
+  "🔥",
+  "👏",
+  "🙏",
+]);
 
 /**
  * The inline reaction-pill data produced when a picker emoji is chosen for a message. A fresh react is
