@@ -58,6 +58,11 @@ import {
   EVENT_FORMAT_ONLINE,
   formatFromEvent,
   mapUrlPreviewState,
+  startChips,
+  endChips,
+  visibleFromChips,
+  visibleUntilChips,
+  revealHourChips,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
@@ -787,7 +792,7 @@ const FORM_FIELDS = [
   { key: "visibilityStart", id: "event-visibility-start", label: "Visible from", type: "datetime-local", required: true, row: "visibility" },
   { key: "visibilityEnd", id: "event-visibility-end", label: "Visible until", type: "datetime-local", required: true, row: "visibility" },
   { key: "capacity", id: "event-capacity", label: "Capacity (optional)", type: "number", min: 1, row: "limits", hint: "Blank = unlimited." },
-  { key: "locationRevealHours", id: "event-reveal-hours", label: "Reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
+  { key: "locationRevealHours", id: "event-reveal-hours", label: "Location reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
   { key: "ageMin", id: "event-age-min", label: "Min age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
   { key: "ageMax", id: "event-age-max", label: "Max age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
   { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
@@ -887,27 +892,57 @@ function fillCitySelect(select, value) {
   select.value = saved;
 }
 
-/** The Coffee & X suggestion chips (TM-382): tap to prefill the heading, still fully editable after. */
-function buildChips(headingInput, onChange) {
+/**
+ * The generic `.tm-chips` / `.tm-chip` preset-chip primitive (TM-1064) — a row of tap-to-seed buttons.
+ * Each chip is `{ label, value }` (a bare string is shorthand for `{ label: s, value: s }`). Tapping a
+ * chip calls `onPick(value, chipEl)`; the caller decides what to do with the value (seed a field, then
+ * revalidate). Chips whose `value` is blank render DISABLED (a harmless no-op — used by the schedule
+ * chips whose value depends on an as-yet-blank Start). The chip keeps its `data-chip` = value so the
+ * heading e2e (TM-382) can still target `.tm-chip[data-chip="Coffee & Code"]`.
+ *
+ * @param {(string|{label:string,value:string})[]} chips
+ * @param {(value:string, chipEl:HTMLButtonElement)=>void} onPick
+ * @param {{ariaLabel?: string}} [opts]
+ * @returns {HTMLDivElement}
+ */
+function buildPresetChips(chips, onPick, { ariaLabel = "Suggestions" } = {}) {
   return el(
     "div",
-    { class: "tm-chips", role: "group", "aria-label": "Heading suggestions" },
-    CATEGORY_CHIPS.map((chip) =>
-      el(
+    { class: "tm-chips", role: "group", "aria-label": ariaLabel },
+    chips.map((c) => {
+      const chip = typeof c === "string" ? { label: c, value: c } : c;
+      const disabled = chip.value === "" || chip.value == null;
+      const btn = el(
         "button",
         {
           class: "tm-chip",
           type: "button",
-          dataset: { chip },
-          onClick: () => {
-            headingInput.value = chip;
-            headingInput.focus();
-            onChange();
-          },
+          dataset: { chip: chip.value },
+          disabled: disabled || null,
+          "aria-disabled": disabled ? "true" : null,
+          onClick: disabled ? null : () => onPick(chip.value, btn),
         },
-        chip,
-      ),
-    ),
+        chip.label,
+      );
+      return btn;
+    }),
+  );
+}
+
+/**
+ * The Coffee & X heading suggestion chips (TM-382) — now a thin wrapper over {@link buildPresetChips} so
+ * the primitive is shared with the scheduling chips (TM-1064). Behaviour-identical: tap to prefill the
+ * heading, focus it, still fully editable after.
+ */
+function buildChips(headingInput, onChange) {
+  return buildPresetChips(
+    CATEGORY_CHIPS,
+    (value) => {
+      headingInput.value = value;
+      headingInput.focus();
+      onChange();
+    },
+    { ariaLabel: "Heading suggestions" },
   );
 }
 
@@ -1396,6 +1431,47 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // exists — hides the Online URL for a new In-person event, or the physical trio for an Online one, and
   // seeds the Map URL preview from a prefilled value on an In-person edit-open (via applyFormatView).
   applyFormatView();
+
+  // Scheduling preset chips (TM-1064): a `.tm-chips` row under each datetime field + the reveal field,
+  // one-tap SEEDS the input (fields stay editable — the TM-382 contract) then re-validates so an ordering
+  // error clears/appears live. The datetime chips are ZONE-AWARE and, for the offset ones (Ends/Visible),
+  // read the CURRENT Start draft — so they're recomputed whenever the timezone or Start changes. A chip
+  // whose value is blank (e.g. "Ends +2h" before a Start is set) renders disabled (a harmless no-op).
+  const tzInput = fields.get("timezone").input;
+  const startInput = fields.get("startAt").input;
+  const scheduleChipRows = []; // { rebuild } per row — recomputed on tz/start change
+  const refreshScheduleChips = () => scheduleChipRows.forEach((r) => r.rebuild());
+  const mountChipsFor = (fieldKey, compute) => {
+    const holder = el("div", { class: "tm-chips-slot" });
+    const rebuild = () => {
+      const tz = tzInput.value;
+      const input = fields.get(fieldKey).input;
+      const row = buildPresetChips(compute(tz), (value) => {
+        if (value === "") return; // defensive: disabled chips don't fire, but never seed a blank
+        input.value = value;
+        revalidate(fieldKey);
+        // Seeding Start makes the Ends / Visible-from / Visible-until chips live (they read Start), and a
+        // reseed of any field can flip an ordering error — recompute EVERY row so they all stay current.
+        refreshScheduleChips();
+      }, { ariaLabel: `${fieldLabel(fieldKey)} presets` });
+      clear(holder).append(row);
+    };
+    rebuild();
+    scheduleChipRows.push({ rebuild });
+    // Mount the chip row directly under the field's control (inside its .tm-form-field wrapper).
+    const wrapper = byKey.get(fieldKey);
+    if (wrapper) wrapper.append(holder);
+    return holder;
+  };
+  mountChipsFor("startAt", (tz) => startChips(tz));
+  mountChipsFor("endAt", (tz) => endChips(startInput.value, tz));
+  mountChipsFor("visibilityStart", (tz) => visibleFromChips(startInput.value, tz));
+  mountChipsFor("visibilityEnd", (tz) => visibleUntilChips(startInput.value, tz));
+  mountChipsFor("locationRevealHours", () => revealHourChips());
+  // Start or timezone changing by hand shifts the offset/relative chips — recompute them all (the reveal
+  // chips are constant, but rebuilding every row is cheap and keeps a single code path).
+  tzInput.addEventListener("change", refreshScheduleChips);
+  startInput.addEventListener("input", refreshScheduleChips);
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.

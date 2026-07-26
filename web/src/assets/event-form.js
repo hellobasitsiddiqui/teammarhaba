@@ -263,6 +263,185 @@ export function mapUrlPreviewState(url, ok, raw) {
   return preview.hasContent ? { state: "preview", preview } : { state: "empty", preview };
 }
 
+// --- scheduling preset chips (TM-1064) --------------------------------------------------------
+//
+// The pure, zone-aware value helpers behind the create/edit form's "preset chips" — one-tap seeds for
+// the four datetime fields + the reveal-hours field. Each returns a value in the SAME shape the field
+// takes: the datetime helpers return a `<input type="datetime-local">` wall-clock string
+// ("YYYY-MM-DDTHH:mm") IN THE EVENT'S timezone (so it round-trips through zonedToUtcIso losslessly and
+// passes validateEventDraft), and the reveal chips are just the raw hour numbers. Kept pure (of the DOM)
+// so `node --test` can assert the zone maths on a NON-browser zone and across a DST boundary.
+//
+// Design notes:
+//   - "now"-relative chips (Starts, Visible-from Today/Tomorrow) take an optional `now` so tests are
+//     deterministic; production passes the real clock. They render `now` into the event zone, so a chip
+//     tapped at 23:50 London-time yields a London wall clock, not the browser's.
+//   - Offset chips that build on an existing field (Ends = start + Nh, Visible-until = 1h before start,
+//     Visible-from N before start) read the CURRENT startAt wall-clock draft and do the arithmetic via
+//     the UTC instant (zonedToUtcIso → shift real ms → utcIsoToZoned) so adding "1 hour" stays a real
+//     hour across a spring-forward/fall-back edge. They return "" (a harmless no-op) when start is blank.
+
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 3_600_000;
+
+/** Coerce a Date | number | ISO string to epoch ms, or NaN if unusable. */
+function toEpochMs(now) {
+  if (now instanceof Date) return now.getTime();
+  if (typeof now === "number") return now;
+  return new Date(now).getTime();
+}
+
+/**
+ * A UTC instant (epoch ms) rendered into `timeZone` as a datetime-local wall-clock string, or "" if the
+ * instant/zone is unusable. Thin wrapper over {@link utcIsoToZoned} for the epoch-ms callers below.
+ */
+function epochMsToZoned(ms, timeZone) {
+  if (!Number.isFinite(ms)) return "";
+  return utcIsoToZoned(new Date(ms).toISOString(), timeZone);
+}
+
+/**
+ * Shift an existing datetime-local wall-clock value (interpreted in `timeZone`) by `deltaMs` REAL
+ * milliseconds and render it back into the same zone. Real-ms (not naive string) arithmetic so "+1h"
+ * across a DST boundary lands on the correct wall clock (e.g. spring-forward skips the missing hour).
+ * Returns "" for a blank/unparseable value or an invalid zone — a safe no-op for the offset chips.
+ * @param {string} localValue "YYYY-MM-DDTHH:mm" in `timeZone`
+ * @param {number} deltaMs signed millisecond shift
+ * @param {string} timeZone IANA id
+ * @returns {string}
+ */
+export function shiftZonedLocal(localValue, deltaMs, timeZone) {
+  const iso = zonedToUtcIso(localValue, timeZone);
+  if (!iso) return "";
+  return epochMsToZoned(new Date(iso).getTime() + deltaMs, timeZone);
+}
+
+/**
+ * `now` rounded UP to the next 15-minute boundary, rendered as a datetime-local wall-clock in `timeZone`.
+ * Rounding is done on the ABSOLUTE instant (before zoning), so it's independent of the zone's offset —
+ * every IANA zone in real use is a whole number of minutes off UTC, so a 15-min-aligned instant is also
+ * 15-min-aligned on the wall clock. An already-aligned instant is returned unchanged (ceil is a no-op).
+ * @param {string} timeZone IANA id
+ * @param {Date|number|string} [now]
+ * @returns {string} "YYYY-MM-DDTHH:mm" in `timeZone`, or "" if the zone is invalid.
+ */
+export function startNow(timeZone, now = Date.now()) {
+  const t = toEpochMs(now);
+  if (!Number.isFinite(t)) return "";
+  const quarter = 15 * MS_PER_MINUTE;
+  const rounded = Math.ceil(t / quarter) * quarter;
+  return epochMsToZoned(rounded, timeZone);
+}
+
+/**
+ * Start-time preset chips: **Now** (rounds up to the next 15 min), **in 2h**, **in 4h** — each an
+ * absolute instant offset from `now`, rendered into the event zone. "Now" is the rounded base; "+2h"/
+ * "+4h" add real hours to that rounded base so they stay quarter-aligned and strictly after "Now".
+ * @param {string} timeZone IANA id
+ * @param {Date|number|string} [now]
+ * @returns {{label: string, value: string}[]}
+ */
+export function startChips(timeZone, now = Date.now()) {
+  const base = startNow(timeZone, now);
+  const baseIso = zonedToUtcIso(base, timeZone);
+  const baseMs = baseIso ? new Date(baseIso).getTime() : NaN;
+  return [
+    { label: "Now", value: base },
+    { label: "In 2h", value: epochMsToZoned(baseMs + 2 * MS_PER_HOUR, timeZone) },
+    { label: "In 4h", value: epochMsToZoned(baseMs + 4 * MS_PER_HOUR, timeZone) },
+  ];
+}
+
+/**
+ * End-time preset chips: **+1h / +2h / +4h** relative to the CURRENT start draft (`startLocal`, a
+ * wall-clock string in `timeZone`). Real-hour arithmetic so it's DST-correct. When start is blank/
+ * unparseable each value is "" — the caller renders those chips disabled and a tap is a no-op (AC:
+ * "Ends +2h with a blank start does nothing harmful").
+ * @param {string} startLocal the startAt field's current "YYYY-MM-DDTHH:mm" value (may be "")
+ * @param {string} timeZone IANA id
+ * @returns {{label: string, value: string}[]}
+ */
+export function endChips(startLocal, timeZone) {
+  return [1, 2, 4].map((h) => ({
+    label: `+${h}h`,
+    value: shiftZonedLocal(startLocal, h * MS_PER_HOUR, timeZone),
+  }));
+}
+
+/**
+ * Add `days` whole calendar days to a datetime-local value, KEEPING the wall-clock time of day (a
+ * date-arithmetic shift, not a real-ms one — "1 day before" means the same clock time the day before,
+ * even across a DST change). Returns "" for a blank/unparseable value.
+ */
+function shiftLocalDays(localValue, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(cleanText(localValue));
+  if (!m) return "";
+  const [, y, mo, d, h, mi] = m;
+  // Do the day maths in a UTC calendar (no zone — this is pure Gregorian date arithmetic on the wall
+  // clock), then re-stamp the same HH:mm. Using Date.UTC handles month/year rollover for us.
+  const shifted = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d) + days));
+  if (Number.isNaN(shifted.getTime())) return "";
+  const p = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(shifted)
+    .reduce((acc, x) => ((acc[x.type] = x.value), acc), {});
+  return `${p.year}-${p.month}-${p.day}T${h}:${mi}`;
+}
+
+/** Today's date in `timeZone` at `hhmm` (default 09:00), as a datetime-local value. */
+function todayAt(timeZone, now, hhmm = "09:00") {
+  const zonedNow = epochMsToZoned(toEpochMs(now), timeZone);
+  if (!zonedNow) return "";
+  return `${zonedNow.slice(0, 10)}T${hhmm}`;
+}
+
+/**
+ * "Visible from" preset chips: **Today**, **Tomorrow** (both at 09:00 local, relative to `now`), and
+ * **1 day before** / **1 week before** the START (relative to `startLocal`, keeping the start's time of
+ * day). The last two are "" (disabled) when start is blank. All rendered in `timeZone`.
+ * @param {string} startLocal the startAt field's current value (may be "")
+ * @param {string} timeZone IANA id
+ * @param {Date|number|string} [now]
+ * @returns {{label: string, value: string}[]}
+ */
+export function visibleFromChips(startLocal, timeZone, now = Date.now()) {
+  const today = todayAt(timeZone, now);
+  return [
+    { label: "Today", value: today },
+    { label: "Tomorrow", value: shiftLocalDays(today, 1) },
+    { label: "1 day before", value: shiftLocalDays(startLocal, -1) },
+    { label: "1 week before", value: shiftLocalDays(startLocal, -7) },
+  ];
+}
+
+/**
+ * "Visible until" preset chips: **1h before start** — a single chip that tracks the CURRENT start draft
+ * (real-hour shift, DST-correct). "" (disabled) when start is blank. This is a chip-only convenience, NOT
+ * a create default (blank visibility-end is still required from the admin unless they tap it).
+ * @param {string} startLocal the startAt field's current value (may be "")
+ * @param {string} timeZone IANA id
+ * @returns {{label: string, value: string}[]}
+ */
+export function visibleUntilChips(startLocal, timeZone) {
+  return [{ label: "1h before start", value: shiftZonedLocal(startLocal, -1 * MS_PER_HOUR, timeZone) }];
+}
+
+/**
+ * Location-reveal-hours preset chips: **1h / 24h** — the two common windows, just the raw hour numbers
+ * (the field is a bare number, not a datetime). Both are within [REVEAL_HOURS_MIN, REVEAL_HOURS_MAX].
+ * @returns {{label: string, value: string}[]}
+ */
+export function revealHourChips() {
+  return [
+    { label: "1h", value: "1" },
+    { label: "24h", value: "24" },
+  ];
+}
+
 // --- validation (mirrors the API's Bean Validation + cross-field rules) ------------------------
 
 /**
