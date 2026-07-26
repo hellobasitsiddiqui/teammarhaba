@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.user;
 
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -8,6 +9,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -121,4 +123,34 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Query("select count(u) from User u where u.enabled = true")
     long countActiveUsers();
+
+    /**
+     * Stamp {@code last_active_at = :when} on one account WITHOUT bumping the optimistic-lock
+     * {@code @Version} (TM-1031). This backs the {@code GET /me} liveness touch
+     * ({@link UserService#provisionAndTouch}).
+     *
+     * <p><strong>Why not a dirty-check update on the managed entity?</strong> The touch previously
+     * did {@code user.markActive(now)} and let Hibernate flush it on commit — which bumps
+     * {@code @Version}. Every authenticated read (including the signed-in page's own background
+     * {@code GET /me} traffic) then raced a concurrent {@code PATCH /me}: two version bumps on the
+     * same row, the loser's stale {@code @Version} → {@code ObjectOptimisticLockingFailureException}
+     * → a spurious {@code 409} on a perfectly valid profile save (the {@code profile-regate} e2e
+     * flake). A liveness heartbeat must never invalidate a concurrent, semantically-independent
+     * write, so it is a targeted single-column UPDATE keyed by id that leaves {@code version}
+     * untouched — no version bump, nothing for a concurrent PATCH to lose against.
+     *
+     * <p>Native SQL keyed by the surrogate id (never null for a persisted row); it doesn't go
+     * through the entity, so it neither reads {@code @Version} nor writes it.
+     *
+     * <p>{@code flushAutomatically = true} flushes any pending changes on the caller's entity BEFORE
+     * this runs, and {@code clearAutomatically = true} EVICTS the persistence context AFTER — so the
+     * managed {@code User} the caller was holding is detached and can no longer be dirty-flushed with
+     * a version bump on commit (that dirty-flush is precisely the race this method exists to kill).
+     * The caller re-reads a fresh, clean entity to get the new stamp.
+     *
+     * @return the number of rows updated (1 for an existing row, 0 if the id no longer maps to one)
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "UPDATE users SET last_active_at = :when WHERE id = :id", nativeQuery = true)
+    int touchLastActiveAt(@Param("id") Long id, @Param("when") Instant when);
 }
