@@ -121,6 +121,12 @@ import {
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
 // and "Manage" links to the membership screen when the feature flag is on.
 import { profileMembershipRow, profileManageAffordance, membershipEnabled } from "./membership-tier.js";
+// TM-1027: the unsaved-changes guard. The pure "is the form dirty?" and native-unload prompt text live
+// in profile-guard-core.js so they're unit-testable; this module exposes editFormIsDirty() (which the
+// router consults on every hash-nav via the restore-hash intercept) and arms a native `beforeunload`
+// off the same dirty signal. Dirty = collectPatch() non-empty OR a pending avatar upload OR an in-flight
+// phone verify; it clears after a successful save (collectPatch empties once the form re-fills from /me).
+import { isProfileDirty, BEFOREUNLOAD_PROMPT } from "./profile-guard-core.js";
 
 // The editable fields and their client-side rules, mirroring the backend's UpdateMeRequest bean
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
@@ -248,6 +254,11 @@ const state = {
 };
 
 let shell = null; // { form, fields: Map<key,{input, error, hint}>, save, summary } once built
+
+// TM-1027: true only while an avatar upload is transferring bytes (the "pending avatar" dirty term).
+// Avatar uploads persist to Firebase immediately, so this is ONLY the in-flight window — set true in
+// handlePickedFile before the upload and cleared in its finally. Read by editFormIsDirty().
+let avatarUploadInFlight = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -1281,6 +1292,51 @@ function collectPatch() {
   return patch;
 }
 
+/**
+ * TM-1027: does the current collectPatch() actually CHANGE anything versus the loaded profile?
+ *
+ * collectPatch() re-sends every non-blank text/select/phone field (it only omits blanks + an unchanged
+ * age/gender), so a freshly-loaded, populated form yields a NON-empty patch even when the user hasn't
+ * touched a thing. Using "patch non-empty" as the dirty signal would therefore false-positive on every
+ * existing profile. So dirty means the patch would genuinely alter a stored value: a field is a real
+ * change when its patched value differs from what's on `state.profile`. A brand-new field (not on the
+ * stored profile) with a value is a change; a re-sent identical value is not.
+ * @returns {boolean} true when at least one field in the patch differs from the stored profile.
+ */
+function patchChangesStoredProfile() {
+  const stored = state.profile || {};
+  const patch = collectPatch();
+  for (const [key, value] of Object.entries(patch)) {
+    // Compare as strings so a number age (36) and its stored form (36) match, and null/undefined stored
+    // (a field the account never set) never equals a real typed value → correctly reads as a change.
+    const before = stored[key];
+    if (before == null || String(before) !== String(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * TM-1027: is the edit form DIRTY — would leaving it now lose unsaved work? The router consults this on
+ * every attempted hash navigation (the restore-hash intercept) and it also backs the native
+ * `beforeunload`. Dirty = collectPatch() would actually change a stored field OR an avatar upload is
+ * in flight OR a phone OTP verify is between send-and-confirm.
+ *
+ * SAFE when the edit form isn't mounted (shell null, or the public-profile preview is showing, or /me
+ * hasn't loaded): there's nothing to lose, so it returns false and never touches the DOM. This is what
+ * the router calls, so it must never throw regardless of view state. The pure dirty rule itself lives in
+ * profile-guard-core.isProfileDirty; this thin wrapper just gathers the three live signals.
+ * @returns {boolean}
+ */
+export function editFormIsDirty() {
+  // No mounted edit form (public preview, mid-teardown, or /me not yet loaded) → nothing to lose.
+  if (!shell || !shell.fields || !state.loaded) return false;
+  return isProfileDirty({
+    patchNonEmpty: patchChangesStoredProfile(),
+    pendingAvatar: avatarUploadInFlight,
+    phoneVerifyInFlight: phoneVerifyInFlight(),
+  });
+}
+
 async function load() {
   state.loading = true;
   state.error = null;
@@ -1488,6 +1544,7 @@ function buildAvatar() {
     }
 
     busy(true);
+    avatarUploadInFlight = true; // TM-1027: navigating away mid-upload would abort it → guarded.
     setProgress(0);
     try {
       await uploadAvatar(file, setProgress);
@@ -1502,6 +1559,7 @@ function buildAvatar() {
       toast(msg, { type: "error" });
     } finally {
       busy(false);
+      avatarUploadInFlight = false; // TM-1027: upload settled (success or failure) — no longer pending.
       progress.hidden = true;
       progressBar.style.width = "0%";
     }
@@ -2499,5 +2557,21 @@ export function enterProfile(hash) {
 
 // Bridge for the router (which imports this) + ad-hoc use.
 if (typeof window !== "undefined") {
-  window.tmProfile = { enterProfile };
+  window.tmProfile = { enterProfile, editFormIsDirty };
+}
+
+// TM-1027: native `beforeunload` half of the unsaved-changes guard. When the edit form is dirty and the
+// user reloads / closes the tab / follows an EXTERNAL link, the browser shows its own generic "Leave
+// site?" prompt (the custom string is ignored by modern browsers, but a non-empty returnValue is still
+// required to ARM the dialog). In-app hash navigation (the tab bar + any #/ link) is covered separately
+// by the router's restore-hash intercept, which shows the styled confirmDialog — this native prompt is
+// only the last line of defence for leaving the app entirely. Registered ONCE at module load; the
+// handler reads the live dirty signal so it's inert whenever the form is clean or not mounted.
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("beforeunload", (event) => {
+    if (!editFormIsDirty()) return; // clean / not editing → let the unload proceed silently.
+    event.preventDefault();
+    event.returnValue = BEFOREUNLOAD_PROMPT; // arms the native prompt (string content is ignored).
+    return BEFOREUNLOAD_PROMPT;
+  });
 }
