@@ -2955,6 +2955,87 @@ h3,
     font-size: 0.8rem;
 }
 
+/* Event format selector (TM-1063) — In person / Online segmented radio group. Two equal-width options
+   that wrap to a comfortable tap size on a narrow phone; the checked one reads as the accent. */
+.tm-format-choices {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.tm-format-option {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1 1 8rem;
+    min-height: 44px; /* tap-target floor (TM-229) */
+    padding: 0.45rem 0.75rem;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    cursor: pointer;
+    font-weight: 600;
+}
+.tm-format-option:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.tm-format-option:has(.tm-format-radio:checked) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-card));
+}
+.tm-format-radio {
+    flex: none;
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* Map URL live preview (TM-1063) — a small advisory card / note under the Map URL field. Never blocks
+   Save; sits inside the "links" field row so it hides with the field in Online mode. */
+.tm-map-preview {
+    grid-column: 1 / -1; /* span the full links row rather than one column */
+    margin-top: 0.4rem;
+}
+.tm-map-preview:empty { margin-top: 0; }
+.tm-map-preview-broken,
+.tm-map-preview-empty {
+    margin: 0;
+    font-size: 0.8rem;
+}
+.tm-map-preview-broken { color: var(--muted); }
+.tm-map-preview-card {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    max-width: 22rem;
+    padding: 0.5rem 0.6rem;
+    border: var(--border-width) solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+}
+.tm-map-preview-img {
+    flex: 0 0 auto;
+    width: 3.5rem;
+    height: 3.5rem;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+}
+.tm-map-preview-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    line-height: 1.3;
+}
+.tm-map-preview-desc {
+    margin-top: 0.15rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
 /*
  * ===== Responsive mobile-web polish (TM-229) =====
  *

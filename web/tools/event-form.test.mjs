@@ -41,6 +41,11 @@ import {
   isPastEvent,
   partitionEventsByPast,
   matchesStatusFilter,
+  EVENT_FORMAT_INPERSON,
+  EVENT_FORMAT_ONLINE,
+  ONLINE_LOCATION_TEXT,
+  formatFromEvent,
+  mapUrlPreviewState,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -535,4 +540,125 @@ test("matchesStatusFilter: Visible / Hidden / Cancelled buckets", () => {
   assert.equal(matchesStatusFilter(hidden, "Hidden", now), true);
   assert.equal(matchesStatusFilter(cancelled, "Cancelled", now), true);
   assert.equal(matchesStatusFilter(visible, "Unlisted", now), false);
+});
+
+// --- format (In person / Online) — CLIENT-ONLY, no backend field (TM-1063) -------------------
+
+test("formatFromEvent infers Online from onlineUrl or a literal 'Online' locationText (TM-1063)", () => {
+  // A new event (no signals) defaults to In person.
+  assert.equal(formatFromEvent({}), EVENT_FORMAT_INPERSON);
+  assert.equal(formatFromEvent(null), EVENT_FORMAT_INPERSON);
+  // A physical location line, no online URL → In person.
+  assert.equal(formatFromEvent({ locationText: "Marhaba Cafe, 12 High St" }), EVENT_FORMAT_INPERSON);
+  // Either signal flips it to Online: an onlineUrl…
+  assert.equal(formatFromEvent({ onlineUrl: "https://meet.example/abc", locationText: "" }), EVENT_FORMAT_ONLINE);
+  // …or a literal "Online" location line (case-insensitive), even without an onlineUrl.
+  assert.equal(formatFromEvent({ locationText: "Online" }), EVENT_FORMAT_ONLINE);
+  assert.equal(formatFromEvent({ locationText: "  online  " }), EVENT_FORMAT_ONLINE);
+});
+
+test("validateEventDraft — Online requires an Online URL, not a physical Location (TM-1063)", () => {
+  // Online, with a URL but a blank Location, is valid (locationText is auto-filled "Online" on the wire).
+  const online = validateEventDraft(
+    validDraft({ format: EVENT_FORMAT_ONLINE, onlineUrl: "https://meet.example/abc", locationText: "" }),
+  );
+  assert.equal(online.canSave, true);
+  assert.equal(online.errors.locationText, undefined, "Online must not demand a physical Location");
+  // Online with NO onlineUrl fails on onlineUrl (and still not on locationText).
+  const noUrl = validateEventDraft(validDraft({ format: EVENT_FORMAT_ONLINE, onlineUrl: "", locationText: "" }));
+  assert.equal(noUrl.canSave, false);
+  assert.match(noUrl.errors.onlineUrl, /required/i);
+  assert.equal(noUrl.errors.locationText, undefined);
+});
+
+test("validateEventDraft — In person keeps today's rules (Location required, Online URL optional) (TM-1063)", () => {
+  // In person with a blank Location fails on locationText, NOT onlineUrl.
+  const noLoc = validateEventDraft(validDraft({ format: EVENT_FORMAT_INPERSON, locationText: "", onlineUrl: "" }));
+  assert.equal(noLoc.canSave, false);
+  assert.match(noLoc.errors.locationText, /required/i);
+  assert.equal(noLoc.errors.onlineUrl, undefined, "In person must not demand an Online URL");
+  // A missing format defaults to In person (back-compat with drafts that predate the selector).
+  const noFormat = validateEventDraft(validDraft({ locationText: "", onlineUrl: "" }));
+  assert.match(noFormat.errors.locationText, /required/i);
+});
+
+test("buildEventPayload — Online auto-fills locationText='Online', omits the physical trio (TM-1063)", () => {
+  const body = buildEventPayload(
+    validDraft({
+      format: EVENT_FORMAT_ONLINE,
+      onlineUrl: "https://meet.example/abc",
+      locationText: "",
+      mapUrl: "https://maps.example/xyz",
+      city: "London",
+      venueId: "7",
+    }),
+  );
+  // The server @NotBlank on locationText is satisfied by the auto-filled sentinel.
+  assert.equal(body.locationText, ONLINE_LOCATION_TEXT);
+  assert.equal(body.onlineUrl, "https://meet.example/abc");
+  // The physical fields are NOT sent for an Online event.
+  assert.equal("mapUrl" in body, false);
+  assert.equal("city" in body, false);
+  assert.equal("venueId" in body, false);
+});
+
+test("buildEventPayload — Online create submits with no physical location and passes server shape (TM-1063)", () => {
+  // Create-as-Online: the resulting body carries every required server field (heading/description/
+  // locationText/timezone + the instants) so it POSTs cleanly under the existing @NotBlank/@NotNull.
+  const body = buildEventPayload(
+    validDraft({ format: EVENT_FORMAT_ONLINE, onlineUrl: "https://meet.example/live", locationText: "", city: "", mapUrl: "" }),
+  );
+  for (const required of ["heading", "description", "locationText", "timezone", "startAt", "visibilityStart", "visibilityEnd"]) {
+    assert.ok(required in body, `${required} must be present for a valid POST`);
+  }
+  assert.equal(body.locationText, ONLINE_LOCATION_TEXT);
+});
+
+test("buildEventPayload — In person is unchanged (physical fields, no forced Online) (TM-1063)", () => {
+  const body = buildEventPayload(
+    validDraft({ format: EVENT_FORMAT_INPERSON, locationText: "Marhaba Cafe", mapUrl: "https://maps.example/abc", city: "London" }),
+  );
+  assert.equal(body.locationText, "Marhaba Cafe");
+  assert.equal(body.mapUrl, "https://maps.example/abc");
+  assert.equal(body.city, "London");
+});
+
+test("toFormModel carries the inferred client-only format for the edit prefill (TM-1063)", () => {
+  assert.equal(toFormModel({ onlineUrl: "https://meet.example/abc" }).format, EVENT_FORMAT_ONLINE);
+  assert.equal(toFormModel({ locationText: "Online" }).format, EVENT_FORMAT_ONLINE);
+  assert.equal(toFormModel({ locationText: "Marhaba Cafe" }).format, EVENT_FORMAT_INPERSON);
+  assert.equal(toFormModel({}).format, EVENT_FORMAT_INPERSON);
+});
+
+// --- Map URL preview state (TM-1063): broken = HTTP-unreachable ONLY, not "no OG data" -----------
+
+test("mapUrlPreviewState: blank URL → 'none' (nothing to draw)", () => {
+  assert.deepEqual(mapUrlPreviewState("", true, null), { state: "none", preview: null });
+  assert.deepEqual(mapUrlPreviewState("   ", false, { title: "x" }), { state: "none", preview: null });
+});
+
+test("mapUrlPreviewState: a NON-2xx response → 'broken' (unreachable/invalid URL)", () => {
+  const { state, preview } = mapUrlPreviewState("https://maps.example/abc", false, null);
+  assert.equal(state, "broken");
+  assert.equal(preview, null);
+});
+
+test("mapUrlPreviewState: reachable + OG title → 'preview' (draw the card)", () => {
+  const { state, preview } = mapUrlPreviewState(
+    "https://maps.example/abc",
+    true,
+    { url: "https://maps.example/abc", title: "Marhaba Cafe", description: "12 High St" },
+  );
+  assert.equal(state, "preview");
+  assert.equal(preview.title, "Marhaba Cafe");
+  assert.equal(preview.hasContent, true);
+});
+
+test("mapUrlPreviewState: reachable but NO OG data → 'empty', NEVER 'broken' (Maps consent pages) (TM-1063)", () => {
+  // The load-bearing rule: a reachable URL that carries no OpenGraph metadata (e.g. a Google Maps
+  // consent/interstitial page) is a VALID link — it must show a neutral "no rich preview" state, not a
+  // broken indicator. Only an HTTP-unreachable URL (non-2xx) is broken.
+  const { state, preview } = mapUrlPreviewState("https://maps.example/consent", true, { url: "https://maps.example/consent", title: null });
+  assert.equal(state, "empty");
+  assert.equal(preview.hasContent, false);
 });
