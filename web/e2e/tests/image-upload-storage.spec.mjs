@@ -123,6 +123,9 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "An event WITH an uploaded image — proves the Storage rules allow event-images/.");
   await page.fill("#event-location", "Marhaba Community Hall, 1 Test Street");
+  // TM-1066: the timezone selector moved under a collapsed "More options" <details>; open it first so
+  // the select is interactable.
+  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));
