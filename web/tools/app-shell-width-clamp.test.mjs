@@ -104,3 +104,39 @@ test("no live .app-nav CSS selector survives (TM-1043 — historical comments ar
     "no live .app-nav / .app-nav-toggle / .app-nav--corner-bell selector may remain in styles.css (TM-1043)",
   );
 });
+
+// ── TM-1044 (ticket D): breakpoint sweep — the shell is a single ≤480px column at every viewport, so the
+//    old desktop↔phone media queries that gated the top nav are gone, and no routed VIEW may re-introduce
+//    a page width wider than the column. (Intra-column COMPONENT widths are content sizing, exempt.) ──
+
+const NO_COMMENTS = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("the ≤33rem top-nav / hamburger breakpoint is gone (TM-1042/TM-1043 swept it)", () => {
+  // The tab bar reveals unconditionally (TM-1042) and the top nav is deleted (TM-1043), so NO
+  // `@media (max-width: 33rem)` — the old .app-nav-toggle / tab-bar-reveal gate — may remain.
+  assert.ok(
+    !/@media\s*\(\s*max-width:\s*33rem\s*\)/.test(NO_COMMENTS),
+    "no @media (max-width: 33rem) breakpoint may survive — the tab bar shows at all widths and the top nav is gone",
+  );
+});
+
+test("no routed VIEW re-introduces a page-width cap wider than the 480px column ceiling (TM-1044)", () => {
+  // Page-level routed views must inherit the .app clamp band, never set their own wider cap — that would
+  // reintroduce the per-route drift TM-1041 removed. Component widths (.tm-modal / .tm-toast /
+  // .tm-lock-card etc.) are content sizing and out of scope here.
+  const VIEWS = [".auth", ".profile-view", ".onboarding-view", ".chat-view", ".notifications-view", ".events-view"];
+  const offenders = [];
+  for (const sel of VIEWS) {
+    const block = NO_COMMENTS.match(new RegExp(`(?:^|\\n)\\s*${sel.replace(/\./g, "\\.")}\\s*\\{[\\s\\S]*?\\n\\}`));
+    if (!block) continue;
+    for (const decl of block[0].match(/(?:max-)?width:\s*[^;]+;/g) || []) {
+      const rem = /(\d+(?:\.\d+)?)\s*rem/.exec(decl);
+      if (rem && parseFloat(rem[1]) > 30) offenders.push(`${sel} → ${decl.trim()}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `routed views must inherit the ≤480px clamp band, not set a wider page cap: ${offenders.join(" ; ")}`,
+  );
+});
