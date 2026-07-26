@@ -1969,10 +1969,19 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
         // (upload → PATCH with imagePath) uploaded to Storage BEFORE the server could reject the edit —
         // so a past-event edit (409 EVENT_ENDED) left an ORPHANED storage object. Doing the PATCH first
         // means a rejected edit never uploads anything; a second PATCH carries the new image path.
-        await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
+        let updated = await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body });
         if (pending) {
           const { path } = await uploadEventImage(event.id, pending, image.setProgress);
-          await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body: { imagePath: path } });
+          updated = await eventApi(`/api/v1/admin/events/${event.id}`, { method: "PATCH", body: { imagePath: path } });
+        }
+        // TM-1076: reflect the server's just-saved EventResponse straight into the in-memory list row so the
+        // edit cache can't lag the save. onDone → loadEvents refetches too, but that's async — a re-open (or
+        // deep-link) that beats the refetch would otherwise read a STALE cached row (enterAdminEventForm
+        // prefers state.events), re-prefilling the form from pre-edit values. The console's mutate handlers
+        // (cancelEvent / saveCapacity) already splice the fresh row in for the same reason; do it here too.
+        if (updated && updated.id != null) {
+          const idx = state.events.findIndex((e) => String(e.id) === String(updated.id));
+          if (idx >= 0) state.events[idx] = updated;
         }
       }
 

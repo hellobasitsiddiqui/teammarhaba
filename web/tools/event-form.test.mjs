@@ -1057,3 +1057,26 @@ test("toFormModel maps a saved pricePence back to the form's £ amount for the e
   // A legacy response that never carried pricePence comes back "" (the control then defaults to Free).
   assert.equal(toFormModel({}).price, "");
 });
+
+// The FULL edit-prefill mapping chain the price control's initial active-chip rests on (TM-1076): an
+// EventResponse's pricePence → toFormModel().price (the £ string seeded into #event-price) → the £-string
+// buildPriceControl reverse-maps to an active chip. This pins BOTH halves so a regression in either — the
+// one that made the mobile e2e read the Custom chip as un-pressed for a saved £7.50 — is caught here,
+// viewport-independently. buildPriceControl computes `initialPence = round(Number(price)*100)` then
+// `active = penceToPriceChip(initialPence)`; we assert that composed result, the exact thing the DOM does.
+test("edit-prefill: a saved pricePence resolves to the SAME active chip the control lights (TM-1076)", () => {
+  const activeChipFor = (pricePence) => {
+    const price = toFormModel({ pricePence }).price; // the £ string seeded into #event-price
+    // Mirror buildPriceControl's initial-active computation exactly (empty → Free default).
+    if (price.trim() === "") return PRICE_DEFAULT_CHIP;
+    return penceToPriceChip(Math.round(Number(price.trim()) * 100));
+  };
+  assert.equal(activeChipFor(0), "Free (£0)");
+  assert.equal(activeChipFor(500), "£5");
+  assert.equal(activeChipFor(1000), "£10");
+  // The non-preset case the mobile e2e caught: a saved £7.50 (750) MUST light Custom, not a preset.
+  assert.equal(activeChipFor(750), PRICE_CHIP_CUSTOM);
+  assert.equal(activeChipFor(1), PRICE_CHIP_CUSTOM);
+  // A legacy response with no pricePence defaults to Free (never leaves the control with no active chip).
+  assert.equal(activeChipFor(null), PRICE_DEFAULT_CHIP);
+});
