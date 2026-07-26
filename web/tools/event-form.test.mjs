@@ -62,6 +62,13 @@ import {
   ageBandToMinMax,
   minMaxToAgeBand,
   deriveVenueTimezone,
+  PRICE_CHIP_CUSTOM,
+  PRICE_CHIP_PRESETS,
+  PRICE_DEFAULT_CHIP,
+  priceChipToPence,
+  penceToPriceChip,
+  penceToPounds,
+  poundsToPence,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -924,4 +931,129 @@ test("opening-message templates are 2-3 generic, non-blank starters within the c
   }
   // Frozen — the single source can't be mutated by a consumer.
   assert.throws(() => OPENING_MESSAGE_TEMPLATES.push("x"), TypeError);
+});
+
+// --- price control (TM-1076) -----------------------------------------------------------------
+// The Price field + its pure helpers. The load-bearing behaviour: DEFAULT = Free, and buildEventPayload
+// ALWAYS sends `pricePence` (0 for Free) so a form-created event is NEVER silently £5.
+
+test("price presets: Free is FIRST (the default) and the preset set is Free/£5/£10 (TM-1076)", () => {
+  assert.deepEqual(
+    PRICE_CHIP_PRESETS.map((p) => [p.label, p.pence]),
+    [["Free (£0)", 0], ["£5", 500], ["£10", 1000]],
+  );
+  // Free is the create default — the whole point of the ticket.
+  assert.equal(PRICE_DEFAULT_CHIP, "Free (£0)");
+  assert.equal(PRICE_CHIP_CUSTOM, "Custom");
+  // Frozen — the single source can't be mutated by a consumer.
+  assert.throws(() => PRICE_CHIP_PRESETS.push({ label: "£20", pence: 2000 }), TypeError);
+});
+
+test("priceChipToPence maps each preset label to its pence, Custom/unknown → null (TM-1076)", () => {
+  assert.equal(priceChipToPence("Free (£0)"), 0);
+  assert.equal(priceChipToPence("£5"), 500);
+  assert.equal(priceChipToPence("£10"), 1000);
+  // Custom (and anything else) carries no fixed value — the admin types a £ amount.
+  assert.equal(priceChipToPence("Custom"), null);
+  assert.equal(priceChipToPence("£99"), null);
+  assert.equal(priceChipToPence(""), null);
+});
+
+test("penceToPriceChip reverse-maps a saved price to its preset (TM-1076)", () => {
+  assert.equal(penceToPriceChip(0), "Free (£0)");
+  assert.equal(penceToPriceChip(500), "£5");
+  assert.equal(penceToPriceChip(1000), "£10");
+  // Accepts a numeric string too (the wire may carry either).
+  assert.equal(penceToPriceChip("500"), "£5");
+});
+
+test("penceToPriceChip falls back to Custom for a non-preset / invalid amount (TM-1076)", () => {
+  // A non-preset amount (£7.50) opens on Custom so the exact number stays visible + editable.
+  assert.equal(penceToPriceChip(750), "Custom");
+  assert.equal(penceToPriceChip(1), "Custom");
+  // null / blank / negative / non-integer → Custom (never a silent coerce to a preset).
+  assert.equal(penceToPriceChip(null), "Custom");
+  assert.equal(penceToPriceChip(""), "Custom");
+  assert.equal(penceToPriceChip(-100), "Custom");
+  assert.equal(penceToPriceChip("abc"), "Custom");
+});
+
+test("priceChipToPence ∘ penceToPriceChip round-trips every preset (TM-1076)", () => {
+  for (const p of PRICE_CHIP_PRESETS) {
+    assert.equal(penceToPriceChip(p.pence), p.label);
+    assert.equal(priceChipToPence(p.label), p.pence);
+  }
+});
+
+test("poundsToPence: £ amount → integer pence, rounds float error, rejects negatives/junk (TM-1076)", () => {
+  assert.equal(poundsToPence("0"), 0);
+  assert.equal(poundsToPence("5"), 500);
+  assert.equal(poundsToPence("10"), 1000);
+  // £7.50 → 750 (the ticket's worked example) — and the *100 float wobble is rounded away.
+  assert.equal(poundsToPence("7.50"), 750);
+  assert.equal(poundsToPence("7.5"), 750);
+  assert.equal(poundsToPence("0.01"), 1);
+  // A leading "£" and surrounding space are tolerated.
+  assert.equal(poundsToPence(" £12.34 "), 1234);
+  // Blank → null (the caller treats blank as Free / 0, not an error).
+  assert.equal(poundsToPence(""), null);
+  assert.equal(poundsToPence("   "), null);
+  // Negative / non-numeric / too-many-decimals → NaN (the caller surfaces the validation error).
+  assert.ok(Number.isNaN(poundsToPence("-5")));
+  assert.ok(Number.isNaN(poundsToPence("abc")));
+  assert.ok(Number.isNaN(poundsToPence("5.999")));
+  assert.ok(Number.isNaN(poundsToPence("1.2.3")));
+});
+
+test("penceToPounds: pence → £ string, whole pounds without decimals, else 2dp (TM-1076)", () => {
+  assert.equal(penceToPounds(0), "0");
+  assert.equal(penceToPounds(500), "5");
+  assert.equal(penceToPounds(1000), "10");
+  assert.equal(penceToPounds(750), "7.50");
+  assert.equal(penceToPounds(1), "0.01");
+  assert.equal(penceToPounds(null), "");
+  assert.equal(penceToPounds(""), "");
+});
+
+test("penceToPounds ∘ poundsToPence round-trips a range of amounts (TM-1076)", () => {
+  for (const pence of [0, 1, 500, 750, 1000, 1234]) {
+    assert.equal(poundsToPence(penceToPounds(pence)), pence);
+  }
+});
+
+// --- buildEventPayload ALWAYS sends pricePence (the £5-by-default fix) ------------------------
+
+test("buildEventPayload ALWAYS includes pricePence — an untouched (Free) control sends 0, not £5 (TM-1076)", () => {
+  // The AC: creating an event with the untouched control produces pricePence:0 (Free), NOT £5. On the
+  // untouched control the £ input carries "0" (the Free default the control seeds), so the payload is 0.
+  const body = buildEventPayload(validDraft({ price: "0" }));
+  assert.equal(body.pricePence, 0);
+  // Even with NO `price` key at all (a defensive draft), the payload must still carry pricePence — never
+  // omit it (an omitted price is exactly what makes the backend fall back to £5).
+  assert.ok("pricePence" in buildEventPayload(validDraft()));
+  assert.equal(buildEventPayload(validDraft()).pricePence, 0);
+});
+
+test("buildEventPayload maps each price chip / custom amount to its pence (TM-1076)", () => {
+  assert.equal(buildEventPayload(validDraft({ price: "0" })).pricePence, 0); // Free
+  assert.equal(buildEventPayload(validDraft({ price: "5" })).pricePence, 500); // £5
+  assert.equal(buildEventPayload(validDraft({ price: "10" })).pricePence, 1000); // £10
+  assert.equal(buildEventPayload(validDraft({ price: "7.50" })).pricePence, 750); // Custom
+});
+
+test("validateEventDraft rejects a negative / non-numeric custom price, accepts Free/blank (TM-1076)", () => {
+  assert.match(validateEventDraft(validDraft({ price: "-5" })).errors.price, /price/i);
+  assert.match(validateEventDraft(validDraft({ price: "abc" })).errors.price, /price/i);
+  // Free (0) and a blank (= Free) are valid; a good custom amount is valid.
+  assert.equal(validateEventDraft(validDraft({ price: "0" })).errors.price, undefined);
+  assert.equal(validateEventDraft(validDraft({ price: "" })).errors.price, undefined);
+  assert.equal(validateEventDraft(validDraft({ price: "7.50" })).errors.price, undefined);
+});
+
+test("toFormModel maps a saved pricePence back to the form's £ amount for the edit prefill (TM-1076)", () => {
+  assert.equal(toFormModel({ pricePence: 0 }).price, "0"); // Free re-opens as Free
+  assert.equal(toFormModel({ pricePence: 500 }).price, "5");
+  assert.equal(toFormModel({ pricePence: 750 }).price, "7.50"); // a custom amount round-trips
+  // A legacy response that never carried pricePence comes back "" (the control then defaults to Free).
+  assert.equal(toFormModel({}).price, "");
 });

@@ -132,11 +132,16 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.fill("#event-reveal-hours", "24"); // per-event location-reveal override (TM-408)
   // Age band (TM-1065): the two number inputs are behind a "Custom" chip now. 21-40 is a NON-preset band,
   // so tap Custom to reveal + fill them (a preset chip would set fixed numbers instead). The inputs are
-  // hidden until Custom is chosen, so this click is REQUIRED before the fills.
-  await page.click('.tm-chip[data-chip="Custom"]');
+  // hidden until Custom is chosen, so this click is REQUIRED before the fills. NOTE (TM-1076): the price
+  // control ALSO has a "Custom" chip, so scope the selector to the age band's own control (`.tm-age-band`)
+  // to avoid a strict-mode collision with the price Custom chip.
+  await page.click('.tm-age-band .tm-chip[data-chip="Custom"]');
   await expect(page.locator("#event-age-min")).toBeVisible();
   await page.fill("#event-age-min", "21"); // age band (TM-415 / TM-1065 Custom)
   await page.fill("#event-age-max", "40");
+  // Price (TM-1076): the control DEFAULTS to Free, so we leave it untouched here — the assertion in STEP 4
+  // that created.pricePence === 0 proves the untouched control produces a FREE event (not the old silent
+  // £5 fallback). The Custom-price path is exercised by the dedicated STEP 4b below.
   await shot("form");
 
   // ── STEP 4: save → assert the 201 EventResponse (the honest server result). ──────────────────────
@@ -144,12 +149,19 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
     (r) => r.url().includes("/api/v1/admin/events") && r.request().method() === "POST",
   );
   await page.click("#event-save");
-  const created = await (await createResponse).json();
+  const createResp = await createResponse;
+  // TM-1076: the POST body MUST carry an explicit pricePence:0 — an omitted price is exactly what made the
+  // backend fall back to £5 (Event.DEFAULT_PRICE_PENCE). Assert the wire body, not just the response.
+  expect(createResp.request().postDataJSON().pricePence).toBe(0);
+  const created = await createResp.json();
   expect(created.heading).toBe(HEADING);
   expect(created.city).toBe("London");
   expect(created.timezone).toBe("UTC");
   expect(created.capacity).toBe(20);
   expect(created.status).toBe("PUBLISHED");
+  // TM-1076: the untouched Price control defaulted to Free → the event is genuinely free, NOT the old
+  // silent £5. This is the load-bearing assertion of the ticket.
+  expect(created.pricePence).toBe(0);
   // The per-event reveal override rode through, and the API resolved an effective window (TM-408).
   expect(created.locationRevealHours).toBe(24);
   expect(typeof created.effectiveLocationRevealHours).toBe("number");
@@ -197,7 +209,7 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await client.connect();
   try {
     const { rows } = await client.query(
-      "SELECT heading, status, timezone, city, capacity FROM events WHERE heading = $1",
+      "SELECT heading, status, timezone, city, capacity, price_pence FROM events WHERE heading = $1",
       [EDITED_HEADING],
     );
     expect(rows).toHaveLength(1);
@@ -205,6 +217,89 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
     expect(rows[0].timezone).toBe("UTC");
     expect(rows[0].city).toBe("London");
     expect(rows[0].capacity).toBe(20);
+    // TM-1076: the untouched Price control defaulted to Free → the PERSISTED row is 0 pence, NOT the old
+    // silent £5 (500) default. Proven at the DB, not just the response.
+    expect(rows[0].price_pence).toBe(0);
+  } finally {
+    await client.end();
+  }
+});
+
+// TM-1076: a dedicated price-persist + edit-reopen path. A preset (£10) and a Custom amount (£7.50) each
+// persist as their pence, and re-opening the edit form lands on the SAVED price (the chip reflects it, and
+// the Custom amount is prefilled). Reuses the same sign-in + hub nav as the lifecycle test above.
+test("@admin @admin-events event price: presets + a custom amount persist and re-open on edit (TM-1076)", async ({ page }) => {
+  const HEADING_PRICE = `E2E Priced Event ${Date.now()}`;
+  const now = Date.now();
+  const start = new Date(now + 30 * 864e5);
+  const visStart = new Date(now - 864e5);
+  const visEnd = new Date(now + 60 * 864e5);
+
+  // Sign in as ADMIN + open the events console (same path as the lifecycle test).
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+  await openAdminHub(page);
+  await page.click('.admin-hub-row[href="#/admin/events"]');
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+
+  // New event — fill the minimum required fields + pick the £10 price preset.
+  await page.click("#admin-events-new");
+  await expect(page.locator("#event-form")).toBeVisible();
+  await page.fill("#event-heading", HEADING_PRICE);
+  await page.fill("#event-description", "Priced event for the TM-1076 e2e.");
+  await page.fill("#event-location", "Marhaba Cafe, 12 High St");
+  await page.locator("#event-more-options-toggle").click();
+  await page.locator("#event-timezone").selectOption("UTC");
+  await page.fill("#event-start", localValue(start));
+  await page.fill("#event-visibility-start", localValue(visStart));
+  await page.fill("#event-visibility-end", localValue(visEnd));
+  // Pick the £10 preset — scope to the price control so it can't collide with the age Custom chip.
+  await page.click('.tm-price-band .tm-chip[data-chip="£10"]');
+  const createResponse = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/admin/events") && r.request().method() === "POST",
+  );
+  await page.click("#event-save");
+  const createResp = await createResponse;
+  expect(createResp.request().postDataJSON().pricePence).toBe(1000); // £10 on the wire
+  const created = await createResp.json();
+  expect(created.pricePence).toBe(1000);
+
+  // Re-open the edit form → the £10 chip is reflected as active (the saved price re-opens).
+  await page.goto(`/#/admin/events/${created.id}/edit`);
+  await expect(page.locator("#event-form")).toBeVisible();
+  await expect(page.locator('.tm-price-band .tm-chip[data-chip="£10"]')).toHaveAttribute("aria-pressed", "true");
+
+  // Change to a Custom £7.50 → save → assert 750 pence persisted.
+  await page.click('.tm-price-band .tm-chip[data-chip="Custom"]');
+  await expect(page.locator("#event-price")).toBeVisible();
+  await page.fill("#event-price", "7.50");
+  const patchResponse = page.waitForResponse(
+    (r) => r.url().includes(`/api/v1/admin/events/${created.id}`) && r.request().method() === "PATCH",
+  );
+  await page.click("#event-save");
+  const patchResp = await patchResponse;
+  expect(patchResp.request().postDataJSON().pricePence).toBe(750); // £7.50 → 750 pence
+  const edited = await patchResp.json();
+  expect(edited.pricePence).toBe(750);
+
+  // Re-open once more → a non-preset amount opens on Custom with the exact £ value prefilled.
+  await page.goto(`/#/admin/events/${created.id}/edit`);
+  await expect(page.locator("#event-form")).toBeVisible();
+  await expect(page.locator('.tm-price-band .tm-chip[data-chip="Custom"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#event-price")).toHaveValue("7.50");
+
+  // DB check: the persisted row carries 750 pence (the custom amount), not the £5 default.
+  const client = new pg.Client(dbConfig);
+  await client.connect();
+  try {
+    const { rows } = await client.query("SELECT price_pence FROM events WHERE heading = $1", [HEADING_PRICE]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].price_pence).toBe(750);
   } finally {
     await client.end();
   }

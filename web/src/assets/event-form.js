@@ -141,6 +141,102 @@ export function minMaxToAgeBand(min, max) {
   return match ? match.label : AGE_BAND_CUSTOM;
 }
 
+// --- price control (TM-1076) ------------------------------------------------------------------
+//
+// Every form-created event used to become £5 silently: the form had NO price control, so it omitted
+// `pricePence`, and the backend fell back to Event.DEFAULT_PRICE_PENCE = 500 (£5). `pricePence:0` (free)
+// was unreachable from the UI. The Price control fixes this — it defaults to Free, and buildEventPayload
+// ALWAYS sends `pricePence` (0 for Free) so an event is never silently £5. The backend contract is
+// unchanged: Create/UpdateEventRequest already accept `pricePence` (@Min(0), integer pence, 0 = free),
+// and EventResponse already exposes it for the edit prefill.
+
+/** The Custom sentinel {@link penceToPriceChip} returns for any amount that isn't one of the presets. */
+export const PRICE_CHIP_CUSTOM = "Custom";
+
+/**
+ * The price preset chips (TM-1076) — the single configurable source of the tap-to-set prices the form
+ * offers, in display order. Each is `{ label, pence }`. **Free is FIRST so it is the create default**
+ * (the whole point of the ticket — a brand-new event is Free, not £5). A `Custom` chip (not in this
+ * list) reveals a free-text £ amount input for any other price. The mapping must stay 1:1 so
+ * {@link penceToPriceChip} can reverse-map a saved price back to its chip. Add/adjust a preset here.
+ */
+export const PRICE_CHIP_PRESETS = Object.freeze([
+  Object.freeze({ label: "Free (£0)", pence: 0 }),
+  Object.freeze({ label: "£5", pence: 500 }),
+  Object.freeze({ label: "£10", pence: 1000 }),
+]);
+
+/** The chip label that is selected by DEFAULT on a brand-new event (TM-1076) — Free. */
+export const PRICE_DEFAULT_CHIP = PRICE_CHIP_PRESETS[0].label;
+
+/**
+ * Map a price chip LABEL to its pence value (TM-1076). A preset label returns its fixed pence; the
+ * Custom sentinel (and anything else) returns null — Custom carries no fixed value, the admin types a
+ * £ amount which {@link poundsToPence} converts. Pure — no DOM. The inverse is {@link penceToPriceChip}.
+ *
+ * @param {string} chip a label from {@link PRICE_CHIP_PRESETS}, or "Custom" / anything unknown.
+ * @returns {?number} the preset's pence, or null for Custom / an unknown label.
+ */
+export function priceChipToPence(chip) {
+  const match = PRICE_CHIP_PRESETS.find((p) => p.label === cleanText(chip));
+  return match ? match.pence : null;
+}
+
+/**
+ * Reverse-map a saved `pricePence` to the price chip LABEL that matches it, or {@link PRICE_CHIP_CUSTOM}
+ * ("Custom") when NO preset matches (TM-1076) — e.g. a saved 750 (£7.50) opens on Custom showing 7.50.
+ * Accepts a number or a numeric string. A null/blank/non-integer/negative value falls back to Custom
+ * (an unusual-but-real price the admin should still see verbatim rather than have silently coerced).
+ * Pure — no DOM. The inverse is {@link priceChipToPence}.
+ *
+ * @param {number|string|null|undefined} pence
+ * @returns {string} a preset label from {@link PRICE_CHIP_PRESETS}, or "Custom".
+ */
+export function penceToPriceChip(pence) {
+  if (pence == null || cleanText(String(pence)) === "") return PRICE_CHIP_CUSTOM;
+  const n = parseIntOrNull(String(pence));
+  if (typeof n !== "number" || n < 0) return PRICE_CHIP_CUSTOM; // NaN / negative → Custom
+  const match = PRICE_CHIP_PRESETS.find((p) => p.pence === n);
+  return match ? match.label : PRICE_CHIP_CUSTOM;
+}
+
+/**
+ * A pence value → a £ amount STRING for the Custom £ input (TM-1076). Whole pounds render without a
+ * decimal (500 → "5"); a fractional amount keeps two places (750 → "7.50"). Returns "" for a
+ * null/blank/unparseable value so a Custom input opens empty rather than "NaN". Pure — no DOM.
+ *
+ * @param {number|string|null|undefined} pence
+ * @returns {string} the £ amount (no currency symbol), or "".
+ */
+export function penceToPounds(pence) {
+  if (pence == null || cleanText(String(pence)) === "") return "";
+  const n = parseIntOrNull(String(pence));
+  if (typeof n !== "number") return "";
+  const pounds = n / 100;
+  // Whole pounds without a trailing ".00"; otherwise two decimals (a real currency amount).
+  return Number.isInteger(pounds) ? String(pounds) : pounds.toFixed(2);
+}
+
+/**
+ * A £ amount STRING (what the Custom input holds) → integer pence (TM-1076), the @Min(0) integer the API
+ * stores. "5" → 500, "7.50" → 750, "0" → 0. Accepts an optional leading "£" and surrounding space. Rounds
+ * to the nearest whole pence to absorb float error (7.50 * 100 = 749.9999… → 750). Returns:
+ *   - null  for a BLANK amount (the caller decides the default — the Free chip already carries 0),
+ *   - NaN   for a non-numeric OR NEGATIVE amount (the caller surfaces the validation error).
+ * Pure — no DOM.
+ *
+ * @param {string} pounds the £ amount the admin typed (may carry a "£" / spaces).
+ * @returns {?number} integer pence, or null (blank) / NaN (invalid).
+ */
+export function poundsToPence(pounds) {
+  const raw = cleanText(pounds).replace(/^£/, "").trim();
+  if (raw === "") return null;
+  // A GBP amount: optional whole part, optional up-to-2-decimal part. Reject anything else (letters,
+  // extra dots, more than 2 dp, a leading minus → negative price is never valid).
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return NaN;
+  return Math.round(Number(raw) * 100);
+}
+
 /**
  * The "Coffee & X" suggestion chips (TM-382) — the single configurable list the create/edit form
  * offers as tap-to-prefill heading suggestions. Editable after a tap (they only seed the field), and
@@ -630,6 +726,12 @@ export function validateEventDraft(draft = {}, { requireForCreate = true } = {})
     errors.locationRevealHours = `Must be between ${REVEAL_HOURS_MIN} and ${REVEAL_HOURS_MAX} hours.`;
   }
 
+  // Price (TM-1076): a £ amount → integer pence, @Min(0). Free carries "0"; the presets seed a valid
+  // amount; only a Custom hand-typed value can be invalid. poundsToPence returns NaN for a negative or
+  // non-numeric amount (a blank Custom is treated as "0"/Free by buildEventPayload, so blank ≠ error).
+  const pence = poundsToPence(draft.price);
+  if (Number.isNaN(pence)) errors.price = "Enter a price like 5 or 7.50 (0 for free), no negatives.";
+
   // Age band (TM-415): both optional (blank = all ages). Each an integer in [13, 120] when present,
   // and — the load-bearing rule — age_min ≤ age_max when BOTH are set.
   const ageMin = parseIntOrNull(draft.ageMin);
@@ -724,6 +826,13 @@ export function buildEventPayload(draft = {}) {
   // Forward-compatible age band (TM-415) — ignored by the server until that ticket persists them.
   putInt("ageMin");
   putInt("ageMax");
+  // Price (TM-1076): ALWAYS send `pricePence` — the whole point of the ticket. An omitted price makes the
+  // backend fall back to DEFAULT_PRICE_PENCE = 500 (£5), so a form-created event was silently £5. We send
+  // an explicit integer pence (0 for Free) so an event is NEVER silently £5. A blank/invalid £ amount
+  // resolves to 0 (Free) rather than being omitted — validation blocks a genuinely invalid Custom amount
+  // before submit, so this fallback only ever applies to blank (= Free).
+  const pence = poundsToPence(draft.price);
+  body.pricePence = typeof pence === "number" && pence >= 0 ? pence : 0;
   return body;
 }
 
@@ -802,6 +911,10 @@ export function toFormModel(event = {}) {
     locationRevealHours: event.locationRevealHours == null ? "" : String(event.locationRevealHours),
     ageMin: event.ageMin == null ? "" : String(event.ageMin),
     ageMax: event.ageMax == null ? "" : String(event.ageMax),
+    // Price (TM-1076): the saved `pricePence` rendered back into the form's £ amount (0 → "0" = Free). The
+    // price control reverse-maps this to a chip (or Custom) via penceToPriceChip. A null/absent price (a
+    // legacy response that never carried it) comes back "" — the control then opens on Free by default.
+    price: event.pricePence == null ? "" : penceToPounds(event.pricePence),
     imagePath: str(event.imagePath),
     // CLIENT-ONLY format (TM-1063), inferred from the event's own signals (onlineUrl / "Online"
     // locationText) — the backend carries no format field. Seeds the form's In person/Online selector.

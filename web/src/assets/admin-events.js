@@ -71,6 +71,12 @@ import {
   OPENING_MESSAGE_TEMPLATES,
   ageBandToMinMax,
   minMaxToAgeBand,
+  PRICE_CHIP_CUSTOM,
+  PRICE_CHIP_PRESETS,
+  PRICE_DEFAULT_CHIP,
+  priceChipToPence,
+  penceToPriceChip,
+  penceToPounds,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
@@ -807,6 +813,11 @@ const FORM_FIELDS = [
   // "customage" row groups them two-up INSIDE that control's reveal region.
   { key: "ageMin", id: "event-age-min", label: "Min age", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "customage" },
   { key: "ageMax", id: "event-age-max", label: "Max age", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "customage" },
+  // Price (TM-1076): the £ amount input. Like the age inputs it stays in FORM_FIELDS (so readDraft /
+  // validateEventDraft / server-error routing key off `price`) but is RE-HOMED inside the price control
+  // (buildPriceControl), revealed only when the "Custom" price chip is chosen. The preset chips (Free /
+  // £5 / £10) seed it and hide it; Custom reveals it. DEFAULT selection = Free.
+  { key: "price", id: "event-price", label: "Custom price (£)", type: "number", min: 0, step: "0.01" },
   { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
 ];
 
@@ -843,7 +854,10 @@ function buildField(field, fields) {
       maxLength: field.maxLength,
       min: field.min,
       max: field.max,
-      inputmode: field.type === "number" ? "numeric" : null,
+      step: field.step,
+      // A stepped number (the price £ amount, TM-1076) accepts decimals → "decimal" keypad; a whole-number
+      // field keeps the "numeric" keypad.
+      inputmode: field.type === "number" ? (field.step ? "decimal" : "numeric") : null,
       "aria-describedby": describedBy,
     });
   }
@@ -1366,6 +1380,119 @@ function buildAgeBandControl({ minInput, maxInput, customRow }, initialMin, init
 }
 
 /**
+ * The price control (TM-1076) — one control that replaces the absent price field that made every
+ * form-created event silently £5. It offers the preset chips (Free (£0) / £5 / £10) plus a **Custom**
+ * chip that reveals a free-text £ amount input for any other price. Built on the shared
+ * {@link buildPresetChips} primitive, mirroring the age-band control.
+ *
+ * DEFAULT selection = **Free** — a brand-new, untouched control resolves to `pricePence:0`, so creating an
+ * event with the control untouched produces a FREE event, not £5 (the whole point of the ticket).
+ *
+ * The £ input is the SAME `#event-price` input FORM_FIELDS built (passed in via `priceInput`), so
+ * `readDraft` / `validateEventDraft` / server-error routing are untouched: a preset chip just SEEDS that
+ * input (via {@link priceChipToPence} → pounds) and hides it; Custom reveals it. On open it reverse-maps
+ * the current £ draft to a preset ({@link penceToPriceChip}), falling back to Custom for a non-preset
+ * amount (e.g. a saved £7.50) so the exact number stays visible + editable.
+ *
+ * A server `pricePence` validation error is routed here (via `revealForError`) so it renders on the
+ * price control's own error node and forces Custom open — it can never hide behind a collapsed reveal.
+ *
+ * @param {HTMLInputElement} priceInput the FORM_FIELDS-built #event-price £ amount input.
+ * @param {string} initialPrice the £ value already seeded into the input (draft/prefill; "" on create).
+ * @param {() => void} onChange called after a chip pick seeds the input (the caller revalidates).
+ * @returns {{node: HTMLElement, revealForError: (message: string) => void, clearError: () => void}}
+ */
+function buildPriceControl(priceInput, initialPrice, onChange) {
+  // The chip set = the presets + a trailing Custom chip. Each chip's data-chip is its label so a chip is
+  // targetable by copy (e.g. `.tm-chip[data-chip="Free (£0)"]` / `.tm-chip[data-chip="Custom"]` in the e2e).
+  const chipDefs = [...PRICE_CHIP_PRESETS.map((p) => p.label), PRICE_CHIP_CUSTOM];
+  // Reverse-map the initial £ amount to a chip. On CREATE the input is blank → penceToPriceChip("") =
+  // Custom, so we explicitly default to Free (the ticket's DEFAULT) when there's nothing to map.
+  const initialPence = initialPrice.trim() === "" ? null : Math.round(Number(initialPrice.trim()) * 100);
+  let active = initialPrice.trim() === "" ? PRICE_DEFAULT_CHIP : penceToPriceChip(initialPence);
+
+  const error = el("p", { id: "event-price-error", class: "tm-field-error", role: "alert", hidden: true });
+  const chipsHolder = el("div", { class: "tm-chips-slot" });
+  // The reveal region wraps the £ input; shown only for Custom.
+  const reveal = el("div", { class: "tm-price-custom", hidden: true }, [priceInput.closest(".tm-form-field") || priceInput]);
+
+  const paintActive = () => {
+    for (const btn of chipsHolder.querySelectorAll(".tm-chip")) {
+      const on = btn.dataset.chip === active;
+      btn.classList.toggle("tm-chip-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    reveal.hidden = active !== PRICE_CHIP_CUSTOM;
+  };
+
+  const pick = (label) => {
+    active = label;
+    if (label === PRICE_CHIP_CUSTOM) {
+      // Custom keeps whatever number is already in the input (don't wipe an admin's typed amount).
+      paintActive();
+      priceInput.focus();
+    } else {
+      // Seed the £ input with the preset's amount so the draft (and buildEventPayload) carries it — even
+      // though the input is hidden, readDraft reads its value, so Free MUST seed "0" here.
+      priceInput.value = penceToPounds(priceChipToPence(label));
+      paintActive();
+    }
+    error.hidden = true;
+    error.textContent = "";
+    onChange();
+  };
+
+  const chips = buildPresetChips(chipDefs, (value) => pick(value), { ariaLabel: "Price" });
+  chipsHolder.append(chips);
+
+  // On CREATE (blank input) the default chip is Free — SEED "0" into the input so the untouched control
+  // resolves to pricePence:0 (not a blank the payload would floor to 0 anyway, but explicit = correct and
+  // keeps readDraft honest). On EDIT the input already carries the prefilled amount; leave it.
+  if (initialPrice.trim() === "" && active !== PRICE_CHIP_CUSTOM) {
+    priceInput.value = penceToPounds(priceChipToPence(active));
+  }
+  paintActive();
+
+  // Typing in the custom input can change which preset the number represents — keep the active chip in
+  // sync (e.g. typing 5 by hand lights the "£5" chip) WITHOUT collapsing the reveal.
+  const syncFromInput = () => {
+    const raw = priceInput.value.trim();
+    const pence = raw === "" ? null : Math.round(Number(raw) * 100);
+    const mapped = Number.isFinite(pence) ? penceToPriceChip(pence) : PRICE_CHIP_CUSTOM;
+    for (const btn of chipsHolder.querySelectorAll(".tm-chip")) {
+      const on = active === PRICE_CHIP_CUSTOM ? btn.dataset.chip === PRICE_CHIP_CUSTOM : btn.dataset.chip === mapped;
+      btn.classList.toggle("tm-chip-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+  priceInput.addEventListener("input", syncFromInput);
+
+  const node = el("div", { class: "tm-form-field tm-price-band", dataset: { field: "price" } }, [
+    el("span", { class: "tm-field-label", id: "event-price-label", text: "Price" }),
+    chipsHolder,
+    el("p", { class: "tm-muted tm-field-hint", text: "What attendees pay. Free by default — tap a preset, or Custom to set an exact amount." }),
+    reveal,
+    error,
+  ]);
+
+  return {
+    node,
+    // A server pricePence error → force Custom open + render on the control's own error node so it's never
+    // hidden behind a collapsed reveal.
+    revealForError: (message) => {
+      active = PRICE_CHIP_CUSTOM;
+      paintActive();
+      error.textContent = message || "";
+      error.hidden = !message;
+    },
+    clearError: () => {
+      error.textContent = "";
+      error.hidden = true;
+    },
+  };
+}
+
+/**
  * Build the create/edit event form as a detached DOM subtree (no shell) — the SAME fields, validation,
  * Coffee & X chips, image control and read-back the modal used; only the surrounding shell changed
  * from a modal() to a full page (TM-426). `mode` is "create" (event=null) or "edit" (event = the
@@ -1404,6 +1531,13 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const ageRowIndex = customAgeRow ? layout.indexOf(customAgeRow) : -1;
   if (ageRowIndex >= 0) layout.splice(ageRowIndex, 1);
 
+  // Price (TM-1076): pull the standalone #event-price £ field OUT of the top-level layout — it's re-homed
+  // inside the price control's Custom reveal (built below). We splice the control into the layout at the
+  // position the £ field occupied.
+  const priceFieldNode = byKey.get("price") || null;
+  const priceFieldIndex = priceFieldNode ? layout.indexOf(priceFieldNode) : -1;
+  if (priceFieldIndex >= 0) layout.splice(priceFieldIndex, 1);
+
   const image = buildImageControl(event);
   // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
   let venuePicker = null;
@@ -1420,6 +1554,10 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // The age-band control (TM-1065) is built after the model prefill; setFieldError routes ageMin/ageMax
   // errors onto its own error node (via this mutable ref) so they stay visible on the band control.
   let ageBand = null;
+  // The price control (TM-1076) is built after the model prefill; setFieldError routes `price` errors onto
+  // its own error node (via this mutable ref) so they stay visible on the control (its £ input lives in a
+  // Custom reveal, so a bare field error could otherwise hide behind a collapsed reveal).
+  let priceControl = null;
 
   // Format selector (TM-1063) — CLIENT-ONLY view state, no backend field. In person → show the physical
   // cluster (Location + Venue + City + Map URL) and hide Online URL; Online → show Online URL only. The
@@ -1449,6 +1587,13 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     if ((key === "ageMin" || key === "ageMax") && ageBand) {
       if (message) ageBand.revealForError(message);
       else ageBand.clearError();
+    }
+    // Price (TM-1076): the £ input lives inside the price control's Custom reveal, so mirror its error onto
+    // the control's own error node — and force the reveal open — so a server (or live) `price`/`pricePence`
+    // error can never hide behind a collapsed reveal. Clearing it clears the control error too.
+    if (key === "price" && priceControl) {
+      if (message) priceControl.revealForError(message);
+      else priceControl.clearError();
     }
     // Timezone (TM-1066) now lives under the "More options" <details>; a server OR live error on it force-
     // opens the disclosure so it's never hidden behind a collapsed section. Clearing it leaves the
@@ -1622,6 +1767,18 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const limitsIdx = limitsRow ? layout.indexOf(limitsRow) : -1;
   if (limitsIdx >= 0) layout.splice(limitsIdx + 1, 0, ageBand.node);
   else layout.push(ageBand.node);
+
+  // Price (TM-1076): build the control now the #event-price input carries any prefill value (blank on
+  // create → the control defaults to Free and seeds "0"; a saved £ amount on edit → reverse-maps to a chip
+  // or Custom). It re-homes the £ field inside its Custom reveal. Splice its node right after the age band.
+  priceControl = buildPriceControl(
+    fields.get("price").input,
+    fields.get("price").input.value,
+    () => revalidate("price"),
+  );
+  const ageBandIdx = layout.indexOf(ageBand.node);
+  if (ageBandIdx >= 0) layout.splice(ageBandIdx + 1, 0, priceControl.node);
+  else layout.push(priceControl.node);
 
   // Format selector (TM-1063): sits ABOVE the location cluster. Spliced in just before the Location
   // field so it reads "choose In person/Online, then the fields that apply".
