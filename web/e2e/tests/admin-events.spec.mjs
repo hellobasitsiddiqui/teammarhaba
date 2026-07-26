@@ -127,7 +127,12 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.fill("#event-visibility-end", localValue(visEnd));
   await page.fill("#event-capacity", "20");
   await page.fill("#event-reveal-hours", "24"); // per-event location-reveal override (TM-408)
-  await page.fill("#event-age-min", "21"); // age band (TM-415)
+  // Age band (TM-1065): the two number inputs are behind a "Custom" chip now. 21-40 is a NON-preset band,
+  // so tap Custom to reveal + fill them (a preset chip would set fixed numbers instead). The inputs are
+  // hidden until Custom is chosen, so this click is REQUIRED before the fills.
+  await page.click('.tm-chip[data-chip="Custom"]');
+  await expect(page.locator("#event-age-min")).toBeVisible();
+  await page.fill("#event-age-min", "21"); // age band (TM-415 / TM-1065 Custom)
   await page.fill("#event-age-max", "40");
   await shot("form");
 

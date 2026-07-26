@@ -19,6 +19,7 @@ import {
   URL_MAX,
   CITY_MAX,
   CAPACITY_MIN,
+  OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
   AGE_MIN_BOUND,
@@ -53,6 +54,13 @@ import {
   visibleUntilChips,
   revealHourChips,
   shiftZonedLocal,
+  AGE_DEFAULT_MIN,
+  AGE_DEFAULT_MAX,
+  AGE_BAND_CUSTOM,
+  AGE_BAND_PRESETS,
+  OPENING_MESSAGE_TEMPLATES,
+  ageBandToMinMax,
+  minMaxToAgeBand,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -802,4 +810,83 @@ test("shiftZonedLocal is real-ms and null-safe (TM-1064)", () => {
   assert.equal(shiftZonedLocal("2026-07-10T10:00", 90 * 60 * 1000, KHI), "2026-07-10T11:30");
   assert.equal(shiftZonedLocal("", 3600000, KHI), "");
   assert.equal(shiftZonedLocal("2026-07-10T10:00", 3600000, "Not/AZone"), "");
+});
+
+// --- age band: preset ⇄ min/max mapping + Custom fallback (TM-1065) ---------------------------
+
+test("age-band presets drop 13-17 and the create default is 18-99 (TM-1065)", () => {
+  // Attendees are 18–99 (TM-884): no under-18 preset, and the create default is the whole adult range.
+  assert.equal(AGE_DEFAULT_MIN, 18);
+  assert.equal(AGE_DEFAULT_MAX, 99);
+  assert.equal(AGE_BAND_CUSTOM, "Custom");
+  const labels = AGE_BAND_PRESETS.map((b) => b.label);
+  assert.deepEqual(labels, ["18-30", "21-35", "30+", "All ages"]);
+  // No preset is below 18 (13-17 dropped), and none IS the Custom sentinel.
+  for (const b of AGE_BAND_PRESETS) {
+    if (b.min != null) assert.ok(b.min >= 18, `${b.label} min must be >= 18`);
+    assert.notEqual(b.label, AGE_BAND_CUSTOM);
+  }
+  // Frozen so no consumer can mutate the single source.
+  assert.throws(() => AGE_BAND_PRESETS.push({ label: "x", min: 1, max: 2 }), TypeError);
+});
+
+test("ageBandToMinMax maps each preset label to its min/max strings (TM-1065)", () => {
+  assert.deepEqual(ageBandToMinMax("18-30"), { min: "18", max: "30" });
+  assert.deepEqual(ageBandToMinMax("21-35"), { min: "21", max: "35" });
+  // Open-ended "30+" → no max; "All ages" → neither bound.
+  assert.deepEqual(ageBandToMinMax("30+"), { min: "30", max: "" });
+  assert.deepEqual(ageBandToMinMax("All ages"), { min: "", max: "" });
+  // The Custom sentinel and any unknown label carry no fixed numbers.
+  assert.deepEqual(ageBandToMinMax("Custom"), { min: "", max: "" });
+  assert.deepEqual(ageBandToMinMax("not-a-band"), { min: "", max: "" });
+  assert.deepEqual(ageBandToMinMax(""), { min: "", max: "" });
+});
+
+test("minMaxToAgeBand reverse-maps a saved band to its preset (TM-1065)", () => {
+  // Each preset must round-trip: preset → min/max → back to the same preset.
+  for (const b of AGE_BAND_PRESETS) {
+    assert.equal(minMaxToAgeBand(b.min, b.max), b.label, `${b.label} must reverse-map to itself`);
+  }
+  // Editing an 18-30 event opens on that preset (numbers or numeric strings both work).
+  assert.equal(minMaxToAgeBand(18, 30), "18-30");
+  assert.equal(minMaxToAgeBand("18", "30"), "18-30");
+  // "30+" is min-only; "All ages" is both absent (null / "" / undefined all read as absent).
+  assert.equal(minMaxToAgeBand(30, null), "30+");
+  assert.equal(minMaxToAgeBand("30", ""), "30+");
+  assert.equal(minMaxToAgeBand(null, null), "All ages");
+  assert.equal(minMaxToAgeBand("", undefined), "All ages");
+});
+
+test("minMaxToAgeBand falls back to Custom for a non-preset band (TM-1065)", () => {
+  // The load-bearing fallback: a saved 25-40 is NOT a preset → Custom (the form reveals 25/40).
+  assert.equal(minMaxToAgeBand(25, 40), AGE_BAND_CUSTOM);
+  // The 18-99 create default is also a non-preset band → Custom.
+  assert.equal(minMaxToAgeBand(AGE_DEFAULT_MIN, AGE_DEFAULT_MAX), AGE_BAND_CUSTOM);
+  // A half-open band that matches no preset (e.g. max-only, or a min that isn't a preset min).
+  assert.equal(minMaxToAgeBand(null, 40), AGE_BAND_CUSTOM);
+  assert.equal(minMaxToAgeBand(22, 35), AGE_BAND_CUSTOM); // 21-35 is the preset, not 22-35
+  // Present-but-unparseable input on either side is a real (odd) band → Custom, never a preset match.
+  assert.equal(minMaxToAgeBand("abc", 30), AGE_BAND_CUSTOM);
+});
+
+test("ageBandToMinMax ∘ minMaxToAgeBand round-trips every preset (TM-1065)", () => {
+  for (const b of AGE_BAND_PRESETS) {
+    const { min, max } = ageBandToMinMax(b.label);
+    assert.equal(minMaxToAgeBand(min, max), b.label);
+  }
+});
+
+test("opening-message templates are 2-3 generic, non-blank starters within the cap (TM-1065)", () => {
+  assert.ok(OPENING_MESSAGE_TEMPLATES.length >= 2 && OPENING_MESSAGE_TEMPLATES.length <= 3);
+  for (const t of OPENING_MESSAGE_TEMPLATES) {
+    assert.equal(typeof t, "string");
+    assert.ok(t.trim().length > 0, "template must be non-blank");
+    // Each must fit the field cap so a tap can never over-fill the textarea.
+    assert.ok(t.length <= OPENING_MESSAGE_MAX);
+    // A tapped template seeds a valid draft (no openingMessage error).
+    const { errors } = validateEventDraft(validDraft({ openingMessage: t }));
+    assert.equal(errors.openingMessage, undefined);
+  }
+  // Frozen — the single source can't be mutated by a consumer.
+  assert.throws(() => OPENING_MESSAGE_TEMPLATES.push("x"), TypeError);
 });
