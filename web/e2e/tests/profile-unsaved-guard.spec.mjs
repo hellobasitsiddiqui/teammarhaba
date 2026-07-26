@@ -32,7 +32,9 @@ async function openProfile(page) {
   );
   await expect(page.locator("#tab-profile")).toBeVisible();
   await page.click("#tab-profile");
-  await expect(page.locator("#profile-form")).toBeVisible();
+  // Wait for the profile VIEW to mount — not #profile-form, which lives inside the Edit-profile section
+  // that defaults COLLAPSED (TM-879), so it's `hidden` until we expand it just below.
+  await expect(page.locator("#profile-view")).toBeVisible();
   await meLoaded;
 
   // The "Edit profile" section is a collapsible accordion, default COLLAPSED (TM-879) — its panel is
