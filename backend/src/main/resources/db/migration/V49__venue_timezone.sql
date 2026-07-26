@@ -1,0 +1,14 @@
+-- V49__venue_timezone — optional IANA timezone on a venue (TM-1067, epic Events MVP)
+--
+-- A venue is a reusable place (V41). The event-create form (TM-1066, later) will inherit a default
+-- timezone from the venue an event references, so an admin doesn't retype the zone each time. This
+-- slice only adds the column + threads it through the venues console/API; nothing consumes it yet.
+--
+--   timezone  Optional IANA timezone id, e.g. "Europe/London". The app validates it is a real IANA
+--             zone when present (CreateVenueRequest/UpdateVenueRequest @AssertTrue, the same idiom as
+--             events.timezone on CreateEventRequest). NULLABLE so every existing venue row backfills to
+--             NULL (no timezone recorded before this column existed) — a venue with no timezone simply
+--             offers no default to inherit. VARCHAR(64) matches the entity's @Size(max = 64) (the same
+--             cap events.timezone uses); Hibernate runs validate-only, so the DDL type must match the
+--             Venue mapping exactly.
+ALTER TABLE venues ADD COLUMN timezone VARCHAR(64);

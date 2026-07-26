@@ -17,6 +17,8 @@
 //     shape), omitting blank optionals;
 //   - toVenueFormModel(): a VenueResponse → the form's field values for the edit prefill.
 
+import { isValidTimeZone } from "./event-form.js";
+
 // --- field caps (mirror Create/UpdateVenueRequest, TM-519) ------------------------------------
 
 /** Name cap — mirrors CreateVenueRequest.name @Size(max = 160). */
@@ -33,6 +35,8 @@ export const NOTES_MAX = 5000;
 export const DETAIL_MAX = 1000;
 /** Minimum capacity — mirrors CreateVenueRequest.capacity @Min(1); blank = unspecified. */
 export const CAPACITY_MIN = 1;
+/** Timezone cap — mirrors CreateVenueRequest.timezone @Size(max = 64); blank = no default (TM-1067). */
+export const TIMEZONE_MAX = 64;
 /** Latitude bounds — mirror CreateVenueRequest.latitude @DecimalMin/@DecimalMax(-90..90). */
 export const LAT_MIN = -90;
 export const LAT_MAX = 90;
@@ -122,6 +126,11 @@ export function validateVenueDraft(draft = {}, { requireForCreate = true } = {})
   const io = cleanText(draft.indoorOutdoor);
   if (io !== "" && !INDOOR_OUTDOOR_OPTIONS.includes(io)) errors.indoorOutdoor = "Choose indoor, outdoor, or mixed.";
 
+  // Timezone: optional; when present it must be a real IANA zone id (mirrors the server @AssertTrue on
+  // CreateVenueRequest/Venue, the same rule as events.timezone). Blank = no default to inherit (TM-1067).
+  const tz = cleanText(draft.timezone);
+  if (tz !== "" && !isValidTimeZone(tz)) errors.timezone = "Choose a valid time zone.";
+
   return { errors, canSave: Object.keys(errors).length === 0 };
 }
 
@@ -160,6 +169,7 @@ export function buildVenuePayload(draft = {}) {
   putText("accessibility");
   putText("parking");
   putText("indoorOutdoor");
+  putText("timezone");
   putInt("capacity");
   putFloat("latitude");
   putFloat("longitude");
@@ -181,6 +191,7 @@ export const CLEARABLE_OPTIONAL_VENUE_FIELDS = [
   "accessibility",
   "parking",
   "indoorOutdoor",
+  "timezone",
   "capacity",
   "latitude",
   "longitude",
@@ -226,6 +237,7 @@ export function toVenueFormModel(venue = {}) {
     accessibility: str(venue.accessibility),
     parking: str(venue.parking),
     indoorOutdoor: str(venue.indoorOutdoor),
+    timezone: str(venue.timezone),
     photoPath: str(venue.photoPath),
   };
 }

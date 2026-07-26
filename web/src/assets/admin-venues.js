@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, stackableTable, toast } from "./ui.js";
+import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadVenueImage, validateVenueImageFile, MAX_VENUE_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import {
@@ -34,12 +34,14 @@ import {
   NOTES_MAX,
   DETAIL_MAX,
   CAPACITY_MIN,
+  TIMEZONE_MAX,
   validateVenueDraft,
   buildVenuePayload,
   clearedOptionalVenueFields,
   toVenueFormModel,
   venueImageRef,
 } from "./admin-venues-core.js";
+import { isValidTimeZone } from "./event-form.js";
 import { ADMIN_VENUES_ROUTE, adminVenueNewHash, adminVenueEditHash } from "./admin-venues-route.js";
 import { clampPage } from "./admin-paging-core.js";
 import { statsCards } from "./admin-stats-core.js";
@@ -491,6 +493,7 @@ const FORM_FIELDS = [
   { key: "mapUrl", id: "venue-map-url", label: "Map URL (optional)", type: "url", maxLength: URL_MAX },
   { key: "capacity", id: "venue-capacity", label: "Capacity (optional)", type: "number", min: CAPACITY_MIN, row: "details", hint: "Headline capacity of the place." },
   { key: "indoorOutdoor", id: "venue-indoor-outdoor", label: "Indoor / outdoor (optional)", type: "select", options: INDOOR_OUTDOOR_CHOICES, row: "details" },
+  { key: "timezone", id: "venue-timezone", label: "Time zone (optional)", type: "timezone", maxLength: TIMEZONE_MAX, hint: "The venue's local IANA zone. The event-create form inherits it as a default." },
   { key: "accessibility", id: "venue-accessibility", label: "Accessibility (optional)", type: "textarea", maxLength: DETAIL_MAX, hint: "Step-free access, accessible toilets, etc." },
   { key: "parking", id: "venue-parking", label: "Parking (optional)", type: "textarea", maxLength: DETAIL_MAX },
   { key: "notes", id: "venue-notes", label: "Notes / directions (optional)", type: "textarea", maxLength: NOTES_MAX },
@@ -517,6 +520,10 @@ function buildField(field, fields) {
       { id: field.id, class: "tm-input", "aria-describedby": describedBy },
       (field.options || []).map(([value, label]) => el("option", { value, text: label })),
     );
+  } else if (field.type === "timezone") {
+    // An empty <select>; the full IANA option list is populated by the caller (buildVenueForm) via the
+    // shared ui.js fillTimeZoneOptions — the same helper the events console uses (TM-1067).
+    input = el("select", { id: field.id, class: "tm-input", "aria-describedby": describedBy });
   } else {
     input = el("input", {
       id: field.id,
@@ -533,9 +540,34 @@ function buildField(field, fields) {
   const hint = field.hint ? el("p", { id: hintId, class: "tm-muted tm-field-hint", text: field.hint }) : null;
   fields.set(field.key, { input, error });
 
+  // The timezone field gets a "Use mine" filler beside it (the admin-events.js/profile.js pattern) —
+  // one tap drops in the browser's zone. The IANA option list is populated later by buildVenueForm.
+  const control =
+    field.type === "timezone"
+      ? el("div", { class: "tm-field-fill" }, [
+          input,
+          el(
+            "button",
+            {
+              class: "tm-btn tm-btn-sm",
+              type: "button",
+              onClick: () => {
+                const guess = guessTimeZone();
+                if (guess && isValidTimeZone(guess)) {
+                  ensureZoneOption(input, guess);
+                  input.value = guess;
+                  input.dispatchEvent(new Event("change"));
+                }
+              },
+            },
+            "Use mine",
+          ),
+        ])
+      : input;
+
   return el("div", { class: "tm-form-field", dataset: { field: field.key } }, [
     el("label", { class: "tm-field-label", for: field.id, text: field.label }),
-    input,
+    control,
     hint,
     error,
   ]);
@@ -708,13 +740,23 @@ function buildVenueForm({ mode, venue = null, onDone, onCancel }) {
   for (const f of FORM_FIELDS) {
     const input = fields.get(f.key).input;
     input.addEventListener("input", () => revalidate(f.key));
-    if (f.type === "select") input.addEventListener("change", () => revalidate(f.key));
+    if (f.type === "select" || f.type === "timezone") input.addEventListener("change", () => revalidate(f.key));
   }
 
-  // Prefill from the existing venue (edit).
+  // Timezone is OPTIONAL for a venue (unlike an event, which requires one): default to blank ("no
+  // default to inherit") rather than guessing. Populate the full IANA list via the shared ui.js helper,
+  // then prepend a blank "(none)" option and preselect it (or the venue's saved zone on edit).
+  const tzInput = fields.get("timezone").input;
+  const savedZone = venue ? toVenueFormModel(venue).timezone : "";
+  fillTimeZoneOptions(tzInput, savedZone);
+  tzInput.prepend(el("option", { value: "", text: "(none — no default)" }));
+  tzInput.value = savedZone || "";
+
+  // Prefill from the existing venue (edit). Timezone is handled above (it needs its options first).
   if (venue) {
     const model = toVenueFormModel(venue);
     for (const f of FORM_FIELDS) {
+      if (f.key === "timezone") continue;
       const v = model[f.key];
       if (v != null && v !== "") fields.get(f.key).input.value = v;
     }

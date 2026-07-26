@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, stackableTable, toast } from "./ui.js";
+import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
@@ -39,7 +39,6 @@ import {
   AGE_MIN_BOUND,
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
-  guessTimeZone,
   isValidTimeZone,
   validateEventDraft,
   buildEventPayload,
@@ -90,14 +89,6 @@ const COLUMNS = [
   { key: "status", label: "Status", sortable: true },
   { key: "attendance", label: "Going / Waitlist", sortable: false },
   { key: "capacity", label: "Capacity", sortable: false },
-];
-
-// Fallback timezone shortlist if Intl.supportedValuesOf isn't available (older engines). The real list
-// is the full IANA set; this just keeps the picker usable everywhere.
-const FALLBACK_ZONES = [
-  "UTC", "Europe/London", "Europe/Paris", "Europe/Istanbul", "America/New_York", "America/Los_Angeles",
-  "America/Sao_Paulo", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo",
-  "Australia/Sydney",
 ];
 
 const state = {
@@ -874,29 +865,6 @@ function buildField(field, fields) {
     hint,
     error,
   ]);
-}
-
-/** Make sure `zone` is a selectable option in a timezone <select> (defensive for a non-listed id). */
-function ensureZoneOption(select, zone) {
-  if (!zone) return;
-  if (![...select.options].some((o) => o.value === zone)) {
-    select.append(el("option", { value: zone, text: zone }));
-  }
-}
-
-/** Populate a timezone <select> with the full IANA set (or the fallback), preselecting `selected`. */
-function fillTimeZoneOptions(select, selected) {
-  let zones;
-  try {
-    zones = Intl.supportedValuesOf("timeZone");
-  } catch {
-    zones = null;
-  }
-  if (!Array.isArray(zones) || !zones.length) zones = FALLBACK_ZONES.slice();
-  const chosen = (selected || guessTimeZone() || "UTC").trim();
-  if (chosen && !zones.includes(chosen)) zones = [chosen, ...zones];
-  clear(select).append(...zones.map((z) => el("option", { value: z, text: z, selected: z === chosen })));
-  select.value = chosen;
 }
 
 /**
