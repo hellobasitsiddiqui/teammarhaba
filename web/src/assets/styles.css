@@ -1116,7 +1116,16 @@ h3,
 
 /* Console shell */
 .admin-console {
-    width: min(72rem, 96vw);
+    /* TM-1074: FILL the (widened) `.app` content box rather than set an own `min(72rem, 96vw)` width.
+       `.app` is padded (2rem each side on desktop, 0.85rem on phones, + safe-area), so an own 72rem
+       width was WIDER than `.app`'s padded content box (72rem − 2×padding) and overflowed `.app` to the
+       right — `html/body{overflow-x:hidden}` clipped the leak (so `document.scrollWidth` didn't grow and
+       it read as "content flush/cut off at the right edge"). Filling to 100% makes `.app`'s padding the
+       symmetric gutter on BOTH sides. The desktop wide column comes from `.app`'s widened --app-max
+       (`.app:has(> .admin-console…)`, min-width:30rem); on phones `.app` is full-width so this is 100%
+       of the phone content box — unchanged from the pre-fix 96vw there. */
+    width: 100%;
+    max-width: 100%;
     margin: 1.5rem auto 0;
     text-align: left;
 }
@@ -3132,23 +3141,27 @@ html {
 }
 
 /* TM-1074: the admin surface is a WIDE column. All 6 admin views are `<section class="admin-console">`
-   direct children of `main.app`, each rendered by unhiding it (the router toggles [hidden]). The
-   console content wants `min(72rem, 96vw)` (~1152px) but the shell above clamps `.app` to the phone
-   band (--app-max ≤480px) — so the wider `.admin-console` child overflowed the centred column to the
-   RIGHT (TM-1074 screenshot). Fix: when `.app` is showing a visible admin console, re-point `--app-max`
-   to the admin width so `.app` (which reads `min(100%, var(--app-max))`) grows to fit it. `.admin-console`
-   itself keeps `width: min(72rem, 96vw)` and both stay centred (`.app { margin-inline: auto }`), so the
-   admin surface is a coherent wide column centred in the viewport with no horizontal overflow. Non-admin
-   routes never match this `:has`, so they stay on the phone clamp — Home/Events/Chat/Profile unchanged.
-   `:has()` is already relied on across this shell (e.g. `.app:has(#auth-signed-out…)`, the sticky-header
-   and users-console rules), so it is an accepted mechanism here.
+   direct children of `main.app`, each rendered by unhiding it (the router toggles [hidden]). The admin
+   surface wants ~72rem (~1152px) but the shell above clamps `.app` to the phone band (--app-max ≤480px)
+   — so the wide admin content overflowed the centred column to the RIGHT (TM-1074 screenshot). Fix has
+   TWO parts: (1) when `.app` is showing a visible admin console, re-point `--app-max` to the admin width
+   so `.app` (which reads `min(100%, var(--app-max))`) GROWS to ~72rem; (2) `.admin-console` FILLS that
+   widened `.app` content box (`width/max-width: 100%`, see its own rule above) instead of setting its own
+   72rem — an own 72rem is wider than `.app`'s PADDED content box (72rem − 2×padding) and would still
+   overflow `.app` to the right by the padding amount (clipped by `overflow-x:hidden`, so `scrollWidth`
+   never grows and it reads as "content flush/cut off at the right edge"). Filling to 100% makes `.app`'s
+   padding the symmetric gutter on BOTH sides; the column stays centred (`.app { margin-inline: auto }`),
+   so the admin surface is a coherent wide column centred in the viewport with no horizontal overflow.
+   Non-admin routes never match this `:has`, so they stay on the phone clamp — Home/Events/Chat/Profile
+   unchanged. `:has()` is already relied on across this shell (e.g. `.app:has(#auth-signed-out…)`, the
+   sticky-header and users-console rules), so it is an accepted mechanism here.
 
    DESKTOP-ONLY (min-width: 30rem): below the phone-polish breakpoint the admin surface stays FULL-WIDTH
    like every other route — `.app` keeps the clamp band (`min(100%, 420px)` → 100% on a ≤480px phone) and
-   `.admin-console` (min(72rem, 96vw) → 96vw) sits inside it. Widening --app-max on a phone would instead
-   SHRINK `.app` to 96vw and then the phone `.app` padding (0.85rem each side) would squeeze the 96vw
-   console → a few px of right-overflow (the exact phone regression this gate avoids). So the widen only
-   applies once there is real horizontal room, above the phone band. */
+   `.admin-console` fills it (100%). Widening --app-max on a phone would instead SHRINK `.app` to 96vw and
+   the phone `.app` padding (0.85rem each side) would then squeeze the console → a few px of right-overflow
+   (the exact phone regression this gate avoids). So the widen only applies once there is real horizontal
+   room, above the phone band. */
 @media (min-width: 30rem) {
     .app:has(> .admin-console:not([hidden])) {
         --app-max: min(72rem, 96vw);

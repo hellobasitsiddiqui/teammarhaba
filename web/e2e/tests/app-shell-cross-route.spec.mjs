@@ -39,10 +39,44 @@ async function readGeo(page) {
       const el = document.querySelector(sel);
       if (!el) return null;
       const b = el.getBoundingClientRect();
-      return { left: Math.round(b.left), width: Math.round(b.width), top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) };
+      return { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width), top: Math.round(b.top), bottom: Math.round(b.bottom), height: Math.round(b.height) };
     };
+
+    // .app's CONTENT box (inside its padding) — the region a child may actually occupy. Overflow is when
+    // a child's right edge exceeds appContent.right (clipped by overflow-x:hidden, so scrollWidth alone
+    // misses it). We compute the content box from the border-box rect minus the resolved padding.
+    const app = document.querySelector("main.app");
+    let appContent = null;
+    if (app) {
+      const b = app.getBoundingClientRect();
+      const cs = getComputedStyle(app);
+      const pl = parseFloat(cs.paddingLeft) || 0;
+      const pr = parseFloat(cs.paddingRight) || 0;
+      appContent = { left: Math.round(b.left + pl), right: Math.round(b.right - pr), width: Math.round(b.width - pl - pr), padLeft: Math.round(pl), padRight: Math.round(pr) };
+    }
+
+    // The visible admin console + the RIGHTMOST edge reached by ANY of its descendants (a wide child
+    // like the ~680px .tm-table would leak past the console even if the console box itself fit). This is
+    // the element-level overflow check the body-scrollWidth check can't see under overflow-x:hidden.
+    const console = document.querySelector(".admin-console:not([hidden])");
+    let adminConsole = null;
+    let maxChildRight = null;
+    if (console) {
+      const b = console.getBoundingClientRect();
+      adminConsole = { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width) };
+      let mx = b.right;
+      for (const el of console.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.right > mx) mx = r.right;
+      }
+      maxChildRight = Math.round(mx);
+    }
+
     return {
       app: rect("main.app"),
+      appContent,
+      adminConsole,
+      maxChildRight,
       bar: rect("#app-tabbar"),
       viewportH: window.innerHeight,
       viewportW: window.innerWidth,
@@ -107,31 +141,54 @@ test("@app-shell content is TOP-aligned and the column FILLS the viewport height
   }
 });
 
-test("@app-shell the admin surface is a WIDE centred column with NO horizontal overflow (TM-1074)", async ({ page }) => {
-  await signIn(page, ADMIN);
-  await expect(page.locator("#tab-admin")).toBeVisible();
+// TM-1074: the admin surface must sit WITHIN `.app`'s content box with a symmetric gutter — NOT flush to
+// / past the column edge. The `.admin-console` (and its widest descendant, e.g. the ~680px `.tm-table`)
+// right edge must be ≤ `.app` content-box right (`.app.right − paddingRight`), and there must be a real
+// left gutter too. This catches the element-level overflow that `overflow-x:hidden` clips (so
+// document.scrollWidth misses it). Run at 1440 AND 1920, on the hub AND a POPULATED events console.
+for (const width of [1440, 1920]) {
+  test(`@app-shell the admin surface fits WITHIN the column content box with symmetric gutters at ${width}px, hub + populated console (TM-1074)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await signIn(page, ADMIN);
+    await expect(page.locator("#tab-admin")).toBeVisible();
 
-  for (const route of ADMIN_ROUTES) {
-    await goToRoute(page, route);
-    // The active admin console is visible inside the shell.
-    await expect(page.locator(".admin-console:not([hidden])").first()).toBeVisible();
-    const g = await readGeo(page);
-    expect(g.app, `main.app must exist on ${route}`).toBeTruthy();
+    for (const route of ADMIN_ROUTES) {
+      await goToRoute(page, route);
+      await expect(page.locator(".admin-console:not([hidden])").first()).toBeVisible();
+      // For the events console, wait until rows have rendered so the wide `.tm-table` is actually laid
+      // out (a populated console is the real overflow risk — the ~680px table must also fit).
+      if (route === "#/admin/events") {
+        await page.locator(".admin-console:not([hidden]) .tm-table").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+      }
 
-    // WIDE: the admin shell is materially wider than the ≤480px phone band (it widened to fit
-    // .admin-console = min(72rem, 96vw)). At 1440px that's ~1152px (72rem), well over 480.
-    expect(g.app.width, `admin column on ${route} must be WIDE (widened past the phone band)`).toBeGreaterThan(600);
+      const g = await readGeo(page);
+      expect(g.app, `main.app must exist on ${route}@${width}`).toBeTruthy();
+      expect(g.appContent, `.app content box must resolve on ${route}@${width}`).toBeTruthy();
+      expect(g.adminConsole, `.admin-console must be visible on ${route}@${width}`).toBeTruthy();
 
-    // CENTRED: equal gutters left and right — the wide column sits centred in the viewport, not
-    // left-shifted. left margin ≈ (viewportW - width) / 2.
-    const expectedGutter = (g.viewportW - g.app.width) / 2;
-    expect(Math.abs(g.app.left - expectedGutter), `admin column must be centred on ${route} (left ${g.app.left} vs expected gutter ${Math.round(expectedGutter)})`).toBeLessThanOrEqual(2);
+      // WIDE: the admin shell is materially wider than the ≤480px phone band.
+      expect(g.app.width, `admin column on ${route}@${width} must be WIDE (widened past the phone band)`).toBeGreaterThan(600);
 
-    // NO horizontal overflow: the document must not scroll sideways — the whole TM-1074 bug was the
-    // wide console overflowing the clamped column to the RIGHT (html{overflow-x:hidden} hid it, so it
-    // read as a misaligned/clipped surface). scrollWidth must not exceed clientWidth.
-    expect(g.scrollW, `NO horizontal overflow on ${route} (scrollWidth ${g.scrollW} must not exceed clientWidth ${g.clientW})`).toBeLessThanOrEqual(g.clientW + 1);
-    // And the column itself must not spill past the right viewport edge.
-    expect(g.app.left + g.app.width, `admin column right edge must stay within the viewport on ${route}`).toBeLessThanOrEqual(g.viewportW + 1);
-  }
-});
+      // CENTRED column: equal gutters left/right against the viewport.
+      const colGutter = (g.viewportW - g.app.width) / 2;
+      expect(Math.abs(g.app.left - colGutter), `admin column must be centred on ${route}@${width} (left ${g.app.left} vs expected ${Math.round(colGutter)})`).toBeLessThanOrEqual(2);
+
+      // ELEMENT-LEVEL CONTAINMENT (the guard that bites under overflow-x:hidden):
+      // (a) the console's right edge must not exceed .app's content-box right edge.
+      expect(g.adminConsole.right, `.admin-console right (${g.adminConsole.right}) must stay within .app content-box right (${g.appContent.right}) on ${route}@${width} — no right leak past the column`).toBeLessThanOrEqual(g.appContent.right + 1);
+      // (b) NO descendant (e.g. the wide .tm-table) may leak past the content box right either.
+      expect(g.maxChildRight, `widest admin descendant right (${g.maxChildRight}) must stay within .app content-box right (${g.appContent.right}) on ${route}@${width} — no child leaks past the column`).toBeLessThanOrEqual(g.appContent.right + 1);
+      // (c) SYMMETRIC left gutter: the console's left must sit at/after .app's content-box left (a real
+      //     gutter on the left too, not left-shifted to hide the right overflow).
+      expect(g.adminConsole.left, `.admin-console left (${g.adminConsole.left}) must sit at/after .app content-box left (${g.appContent.left}) on ${route}@${width}`).toBeGreaterThanOrEqual(g.appContent.left - 1);
+      // (d) gutters on BOTH sides of the console within the content box are within 2px of each other
+      //     (centred, symmetric — not flush to one edge).
+      const leftGap = g.adminConsole.left - g.appContent.left;
+      const rightGap = g.appContent.right - g.adminConsole.right;
+      expect(Math.abs(leftGap - rightGap), `console gutters must be symmetric on ${route}@${width} (left gap ${leftGap} vs right gap ${rightGap})`).toBeLessThanOrEqual(2);
+
+      // And still no document-level horizontal scroll.
+      expect(g.scrollW, `NO horizontal page scroll on ${route}@${width} (scrollWidth ${g.scrollW} vs clientWidth ${g.clientW})`).toBeLessThanOrEqual(g.clientW + 1);
+    }
+  });
+}

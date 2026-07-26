@@ -295,11 +295,24 @@ test("the admin surface widens the shell clamp via .app:has(> .admin-console:not
     ".app:has(> .admin-console:not([hidden])) must re-point --app-max to min(72rem, 96vw) so the admin " +
       "column fits inside the shell (no right overflow) — gated on a VISIBLE admin console only (TM-1074)",
   );
-  // .admin-console keeps its own wide width — the shell now accommodates it rather than clipping it.
+  // .admin-console FILLS the widened .app content box (width/max-width: 100%) rather than setting its
+  // own 72rem width — an own 72rem is WIDER than .app's padded content box and overflows right (clipped
+  // by overflow-x:hidden). Filling to 100% makes .app's padding the symmetric gutter, no leak.
+  const adminBlock = NO_COMMENTS.match(/\.admin-console\s*\{[\s\S]*?\n\}/);
+  assert.ok(adminBlock, ".admin-console rule must exist");
   assert.match(
-    NO_COMMENTS,
-    /\.admin-console\s*\{[^}]*width:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
-    ".admin-console must keep width: min(72rem, 96vw) (the widened shell accommodates it) (TM-1074)",
+    adminBlock[0],
+    /width:\s*100%/,
+    ".admin-console must fill the widened .app content box (width: 100%), not set its own 72rem (which overflows .app's padded content box) (TM-1074)",
+  );
+  assert.match(
+    adminBlock[0],
+    /max-width:\s*100%/,
+    ".admin-console must cap at max-width: 100% so it can never exceed the .app content box (TM-1074)",
+  );
+  assert.ok(
+    !/width:\s*min\(\s*72rem\s*,\s*96vw\s*\)/.test(adminBlock[0]),
+    ".admin-console must NOT set its own min(72rem, 96vw) width — that overflowed .app's padded content box (TM-1074)",
   );
   // The base clamp token is UNCHANGED — non-admin routes stay on the phone band (the :has scopes the
   // widen to the .app subtree only; #app-tabbar + non-admin routes read the untouched :root token).

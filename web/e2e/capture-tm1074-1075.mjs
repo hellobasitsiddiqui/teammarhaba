@@ -53,9 +53,11 @@ const EVENTS = {
   page: 0, size: 100, totalElements: 2, totalPages: 1,
 };
 
-// Admin users/events lists — a couple of rows so the wide .tm-table renders (the TM-1074 overflow source).
+// Admin users/events lists — a few rows so the wide .tm-table renders (the TM-1074 overflow source).
+// The backend PagedResponse envelope field is `items` (NOT `content`) — see api/PagedResponse.java and
+// capture-chat-foundation.mjs. The admin page-walk (admin-page-walk-core.js) reads `envelope.items`.
 const ADMIN_USERS = {
-  content: [
+  items: [
     { id: 1, email: "admin@example.com", displayName: "Ada Admin", role: "ADMIN", enabled: true, createdAt: soon(-30, 9, 0), city: "London" },
     { id: 2, email: "sam@example.com", displayName: "Sam Member", role: "MEMBER", enabled: true, createdAt: soon(-10, 9, 0), city: "London" },
     { id: 3, email: "jo@example.com", displayName: "Jo Member", role: "MEMBER", enabled: false, createdAt: soon(-5, 9, 0), city: "Milton Keynes" },
@@ -63,11 +65,12 @@ const ADMIN_USERS = {
   page: 0, size: 100, totalElements: 3, totalPages: 1,
 };
 const ADMIN_EVENTS = {
-  content: [
+  items: [
     { id: 101, heading: "Coffee & Football meetup", startAt: soon(3, 9, 10), city: "London", status: "PUBLISHED", capacity: 20, goingCount: 8 },
     { id: 102, heading: "Board games night", startAt: soon(5, 19, 0), city: "London", status: "PUBLISHED", capacity: 30, goingCount: 12 },
+    { id: 103, heading: "Sunrise hike & breakfast", startAt: soon(6, 6, 30), city: "London", status: "PUBLISHED", capacity: 15, goingCount: 5 },
   ],
-  page: 0, size: 100, totalElements: 2, totalPages: 1,
+  page: 0, size: 100, totalElements: 3, totalPages: 1,
 };
 
 const json = (route, body, status = 200) =>
@@ -118,6 +121,7 @@ const VIEWS = [
 const VIEWPORTS = [
   { label: "390", width: 390, height: 844, mobile: true },
   { label: "1440", width: 1440, height: 900, mobile: false },
+  { label: "1920", width: 1920, height: 1080, mobile: false },
 ];
 
 async function main() {
