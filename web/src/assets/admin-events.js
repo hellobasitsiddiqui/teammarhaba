@@ -1330,6 +1330,9 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // "Location required" can't block Save after switching to Online.
   const physicalKeys = ["locationText", "mapUrl", "city"];
   let mapPreviewRef = null; // set once buildMapUrlPreview runs (below); toggled with the physical cluster
+  // The Online URL field's <label>: its text is state-dependent (TM-1063). The field is optional in
+  // In-person mode (hidden) but REQUIRED in Online mode — so the label must not read "(optional)" then.
+  const onlineUrlLabel = byKey.get("onlineUrl").querySelector(".tm-field-label");
   const applyFormatView = () => {
     const online = currentFormat === EVENT_FORMAT_ONLINE;
     for (const key of physicalKeys) {
@@ -1347,6 +1350,9 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     }
     byKey.get("onlineUrl").hidden = !online;
     if (!online) setFieldError("onlineUrl", ""); // drop a stale online-url error when hidden
+    // Reflect the field's REAL state in its label: required (the joining link) in Online mode, optional
+    // otherwise — so the label never lies (TM-1063 follow-up). No "(optional)" while it's required.
+    if (onlineUrlLabel) onlineUrlLabel.textContent = online ? "Online URL (required)" : "Online URL (optional)";
   };
   const setFormat = (next) => {
     const normalised = next === EVENT_FORMAT_ONLINE ? EVENT_FORMAT_ONLINE : EVENT_FORMAT_INPERSON;
