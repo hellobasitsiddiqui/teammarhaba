@@ -72,7 +72,8 @@ class UserInterestReplaceSnapshotIntegrationTest extends AbstractIntegrationTest
     private UserInterest pick(VerifiedUser caller, String label) {
         userService.updateProfile(
                 caller,
-                new ProfileUpdate(null, null, null, null, null, null, null, null, null, null, null, List.of(label)));
+                new ProfileUpdate(
+                        null, null, null, null, null, null, null, null, null, null, null, null, List.of(label)));
         User user = users.findByFirebaseUid(caller.uid()).orElseThrow();
         List<UserInterest> saved = userInterestRepo.findByUserId(user.getId());
         assertThat(saved).hasSize(1);
@@ -83,7 +84,8 @@ class UserInterestReplaceSnapshotIntegrationTest extends AbstractIntegrationTest
     private void saveInterests(VerifiedUser caller, List<String> labels) {
         userService.updateProfile(
                 caller,
-                new ProfileUpdate(null, null, null, null, null, null, null, null, null, null, null, labels));
+                new ProfileUpdate(
+                        null, null, null, null, null, null, null, null, null, null, null, null, labels));
     }
 
     /** How many PROFILE_UPDATED audit rows this caller's account has accrued (change-detection oracle). */

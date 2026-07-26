@@ -104,7 +104,7 @@ async function seed(account) {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
     body: JSON.stringify({ firstName: account.admin ? "Ada" : "Sam", lastName: account.admin ? "Admin" : "User",
-      city: "London", age: 30, phone: "+447700900123" }),
+      city: "London", age: 30, phone: "+447700900123", gender: "PREFER_NOT_TO_SAY" }), // TM-955: required on record
   });
   if (!patchRes.ok) throw new Error(`seed profile failed: ${patchRes.status} ${await patchRes.text()}`);
 

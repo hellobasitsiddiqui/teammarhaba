@@ -204,7 +204,7 @@ class NameLockIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-locked-onboard"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Renamed Person\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700901401\"}"))
+                                + "\"phone\":\"+447700901401\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.detail").value(NameLockedException.DETAIL));
 

@@ -155,8 +155,10 @@ export async function completeInterestsStep(page) {
  * is actually left (the view swaps to the interests step, or — on a catalogue-fetch skip — closes).
  *
  * @param {import('@playwright/test').Page} page
- * @param {{name?: string, location?: string, age?: (string|number), phone?: string, phoneE164?: string}}
- *   [profile] the required fields. `phone` is the NATIONAL number (composed with the GB-default
+ * @param {{name?: string, location?: string, age?: (string|number), phone?: string, phoneE164?: string,
+ *   gender?: string}}
+ *   [profile] the required fields. `gender` is the enum value (FEMALE/MALE/PREFER_NOT_TO_SAY, TM-955).
+ *   `phone` is the NATIONAL number (composed with the GB-default
  *   picker's +dial); `phoneE164` is the E.164 the emulator sent the OTP to — defaults to the GB
  *   composition of `phone` (strip a leading trunk 0 + non-digits, prefix +44). Pass an explicit
  *   `phoneE164` when the picker isn't GB. location must be a TM-877 list city (TM-898). Sensible
@@ -171,7 +173,14 @@ export async function completeOnboarding(page, profile = {}) {
   // would make a second caller (or a re-run against a non-wiped emulator) collide. Callers that must
   // assert a specific stored E.164 pass their own `phone` (+ `phoneE164` for a non-GB picker).
   const defaultNational = `7700 9${String(Date.now()).slice(-5).padStart(5, "0")}`;
-  const { name = "E2E Tester", location = "London", age = 30, phone = defaultNational } = profile;
+  const {
+    name = "E2E Tester",
+    location = "London",
+    age = 30,
+    phone = defaultNational,
+    // TM-955: the gate's required gender bucket (enum value). Neutral default for a fixture walk.
+    gender = "PREFER_NOT_TO_SAY",
+  } = profile;
   // The E.164 the OTP was texted to. GB default: drop a leading trunk 0 + any spacing, prefix +44.
   const phoneE164 = profile.phoneE164 ?? `+44${String(phone).replace(/\D/g, "").replace(/^0/, "")}`;
 
@@ -187,6 +196,10 @@ export async function completeOnboarding(page, profile = {}) {
     await page.fill("#onboarding-name", name);
     await page.selectOption("#onboarding-location", location);
     await page.fill("#onboarding-age", String(age));
+    // TM-955: gender is now a REQUIRED gate field (a closed-enum <select>) — pick a value or the gate's
+    // validateAll blocks the submit. Defaults to PREFER_NOT_TO_SAY (a neutral, always-valid choice);
+    // callers that must assert a specific stored gender pass their own `gender`.
+    await page.selectOption("#onboarding-gender", gender);
 
     // TM-930: the gate now requires the phone to be OTP-VERIFIED before it submits. Once verified the
     // national input is read-only (locked) and the Send button is hidden — so only fill + verify the

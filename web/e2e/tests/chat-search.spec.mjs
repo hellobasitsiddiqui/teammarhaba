@@ -124,7 +124,7 @@ async function createFreshUngatedAccount() {
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, gender: "PREFER_NOT_TO_SAY" }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
   await emulatorAuth().updateUser(uid, { phoneNumber: phone }); // TM-932: verify-link the same number

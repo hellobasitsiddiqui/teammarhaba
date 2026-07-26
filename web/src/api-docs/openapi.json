@@ -1579,6 +1579,10 @@
           "firstName" : {
             "type" : "string"
           },
+          "gender" : {
+            "enum" : [ "FEMALE", "MALE", "PREFER_NOT_TO_SAY" ],
+            "type" : "string"
+          },
           "interests" : {
             "items" : {
               "$ref" : "#/components/schemas/InterestResponse"
@@ -1795,6 +1799,10 @@
             "minimum" : 18,
             "type" : "integer"
           },
+          "gender" : {
+            "enum" : [ "FEMALE", "MALE", "PREFER_NOT_TO_SAY" ],
+            "type" : "string"
+          },
           "location" : {
             "maxLength" : 255,
             "minLength" : 1,
@@ -1814,7 +1822,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "age", "location", "name", "phone" ],
+        "required" : [ "age", "gender", "location", "name", "phone" ],
         "type" : "object"
       },
       "OrderView" : {
@@ -2581,6 +2589,10 @@
             "maxLength" : 255,
             "minLength" : 0,
             "pattern" : "^$|^(?=.*\\p{L})[\\p{L}\\p{M} .'’-]+$",
+            "type" : "string"
+          },
+          "gender" : {
+            "enum" : [ "FEMALE", "MALE", "PREFER_NOT_TO_SAY" ],
             "type" : "string"
           },
           "interests" : {

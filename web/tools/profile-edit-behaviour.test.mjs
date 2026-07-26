@@ -182,6 +182,8 @@ function loadProfileModule(deps) {
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
+    // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
+    "  GENDER_OPTIONS, GENDER_VALUES,\n" +
     "  splitE164, composeE164, canonicalE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  phoneEditNeedsVerify,\n" +
     // TM-1005: the pure "offer to verify the CURRENT, unchanged stored number" rule + the banner-CTA
@@ -325,6 +327,10 @@ const deps = {
   // select options / off-list preservation tests prove the shipped rules.
   CITY_OPTIONS: core.CITY_OPTIONS,
   cityChoiceError: core.cityChoiceError,
+  // TM-955: the REAL shared gender buckets + membership set, so the FIELDS gender <select> and
+  // fillForm's stored-value selection run the shipped data under Node.
+  GENDER_OPTIONS: core.GENDER_OPTIONS,
+  GENDER_VALUES: core.GENDER_VALUES,
   // The TM-781 phone-picker pure logic + country data — the REAL implementations, so these tests
   // prove the shipped split/compose/default rules through the renderer's own wiring.
   splitE164: core.splitE164,
@@ -600,6 +606,59 @@ test("validateField: an empty value is always allowed (clearing a field is never
   assert.equal(profile.validateField(field("age"), ""), "");
   assert.equal(profile.validateField(field("phone"), "   "), "");
   assert.equal(profile.validateField(field("firstName"), ""), "");
+});
+
+// ---- gender field on the profile edit form (TM-955) -------------------------------------------
+
+test("the gender field is a SELECT of the three buckets behind a 'not set' placeholder (TM-955)", () => {
+  // Fail-before/pass-after: on clean main there is no gender field at all; with TM-955 the edit form
+  // carries a gender <select> whose values mirror the backend Gender enum, behind a blank "not set"
+  // placeholder (so a legacy null-gender account shows blank rather than being defaulted to a bucket).
+  const gender = field("gender");
+  assert.ok(gender, "the edit form now has a gender field");
+  assert.equal(gender.type, "select", "gender is a dropdown, not free text");
+  assert.deepEqual(
+    gender.options.map(([value]) => value),
+    ["", "FEMALE", "MALE", "PREFER_NOT_TO_SAY"],
+    "a blank 'not set' placeholder plus exactly the three backend enum buckets",
+  );
+});
+
+test("fillForm selects the stored gender bucket; a null-gender legacy account shows blank (TM-955)", async () => {
+  await withFakeDocumentAsync(async () => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMembershipImpl = async () => ({});
+
+    // A stored bucket is selected on load.
+    getMeImpl = async () => ({ firstName: "Ada", gender: "FEMALE" });
+    await profile.load();
+    assert.equal(shell.fields.get("gender").input.value, "FEMALE", "the stored gender is selected");
+
+    // A legacy account with NO gender (null) shows the blank placeholder, never a defaulted bucket.
+    getMeImpl = async () => ({ firstName: "Ada", gender: null });
+    profile.fillForm({ firstName: "Ada", gender: null });
+    assert.equal(shell.fields.get("gender").input.value, "", "a null-gender account shows blank, not a bucket");
+
+    // An unknown/garbage stored value also falls back to blank (never silently selects a bucket).
+    profile.fillForm({ firstName: "Ada", gender: "WHATEVER" });
+    assert.equal(shell.fields.get("gender").input.value, "", "an unknown stored value falls back to blank");
+  });
+});
+
+test("collectPatch sends a chosen gender, and OMITS blank so a null gender is never overwritten (TM-955)", () => {
+  // A real choice is sent as the enum value…
+  let shell = makeShell({ firstName: "Ada", gender: "MALE" });
+  profile.__setShell(shell);
+  assert.equal(profile.collectPatch().gender, "MALE", "a chosen gender is sent as its enum value");
+
+  // …but the blank "not set" placeholder is OMITTED — opening the form on a legacy null-gender account
+  // and saving an unrelated field must never write a gender (blank = no change, like city/phone).
+  shell = makeShell({ firstName: "Ada", gender: "" });
+  profile.__setShell(shell);
+  const patch = profile.collectPatch();
+  assert.ok(!("gender" in patch), "a blank gender is omitted (untouched = no change, never overwrites null)");
 });
 
 // ---- identitySummaryDoesNotRenderNameAsHtml ---------------------------------------------------

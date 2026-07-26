@@ -30,6 +30,9 @@ import {
   interestCount,
   nextDayInterestsNudge,
   INTERESTS_MAX_FALLBACK,
+  GENDER_OPTIONS,
+  GENDER_VALUES,
+  genderChoiceError,
 } from "../src/assets/profile-core.js";
 
 // The real Profile field shapes profile.js feeds validateProfileField (TM-162) — so these tests
@@ -741,4 +744,46 @@ test("strengthRingGeometry: the arc offset tracks the real profileStrength().per
   assert.equal(empty.percent, 0);
   assert.equal(strengthRingGeometry(full.percent).dashoffset, 0);
   assert.equal(strengthRingGeometry(empty.percent).dashoffset, strengthRingGeometry(0).circumference);
+});
+
+// ── Gender buckets + required-choice validator (TM-955) ─────────────────────────────────────────
+
+test("GENDER_OPTIONS / GENDER_VALUES: mirror the backend Gender enum exactly (FEMALE/MALE/PREFER_NOT_TO_SAY)", () => {
+  // The values are the enum NAMEs the backend accepts — the profile form + the onboarding gate both
+  // build their <select> from this ONE list, so they can never disagree on the allowed set.
+  assert.deepEqual(
+    GENDER_OPTIONS.map(([value]) => value),
+    ["FEMALE", "MALE", "PREFER_NOT_TO_SAY"],
+  );
+  // Every option carries a human label distinct from the raw enum value.
+  for (const [value, label] of GENDER_OPTIONS) {
+    assert.equal(typeof label, "string");
+    assert.notEqual(label, "");
+    assert.notEqual(label, value, "the label must be human copy, not the raw enum token");
+  }
+  assert.deepEqual([...GENDER_VALUES].sort(), ["FEMALE", "MALE", "PREFER_NOT_TO_SAY"]);
+});
+
+test("genderChoiceError: the required gate rule — a blank/absent choice is rejected", () => {
+  // TM-955: the onboarding gate demands a choice (mirroring mandatory phone). The blank placeholder,
+  // whitespace, null and undefined all fail with the friendly copy.
+  for (const blank of ["", "   ", null, undefined]) {
+    assert.notEqual(genderChoiceError(blank), "", `blank (${JSON.stringify(blank)}) must be rejected`);
+  }
+});
+
+test("genderChoiceError: every valid bucket passes — including 'prefer not to say' as a real CHOICE", () => {
+  // "Prefer not to say" SATISFIES the requirement — it's a deliberate choice, not the null/never-chose
+  // state — so it must pass the gate rule exactly like FEMALE/MALE.
+  for (const value of ["FEMALE", "MALE", "PREFER_NOT_TO_SAY"]) {
+    assert.equal(genderChoiceError(value), "", `${value} must be accepted`);
+  }
+});
+
+test("genderChoiceError: an unknown bucket is rejected (closed enum)", () => {
+  // The backend Gender enum is closed — a value outside the set can never persist, so the client
+  // rejects it up front rather than round-tripping to a 400.
+  for (const bad of ["OTHER", "female", "nonbinary", "M"]) {
+    assert.notEqual(genderChoiceError(bad), "", `${bad} must be rejected`);
+  }
 });

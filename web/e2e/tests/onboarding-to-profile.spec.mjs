@@ -123,6 +123,7 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await page.fill("#onboarding-name", displayName);
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", String(age));
+  await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
   await page.fill("#onboarding-phone", gateNational);
   // TM-930: verify the phone (Firebase OTP verify + link) before the gate submits.
   await verifyGatePhone(page, gateE164);

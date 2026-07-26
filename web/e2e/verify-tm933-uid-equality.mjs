@@ -60,7 +60,7 @@ async function main() {
   await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone: linkedPhone }),
+    body: JSON.stringify({ phone: linkedPhone, gender: "PREFER_NOT_TO_SAY" }),
   });
   await fetch(`${API_BASE_URL}/api/v1/me/onboarding-complete`, { method: "POST", headers: authed });
   if (me0.currentTermsVersion) {

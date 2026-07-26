@@ -75,6 +75,7 @@ async function fillGateProfile(page, { name, location = "London", age = 30, phon
     await page.fill("#onboarding-name", name);
     await page.selectOption("#onboarding-location", location);
     await page.fill("#onboarding-age", String(age));
+    await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
     await page.fill("#onboarding-phone", phone);
     await expect(page.locator("#onboarding-name")).toHaveValue(name);
     await expect(page.locator("#onboarding-phone")).toHaveValue(phone);
