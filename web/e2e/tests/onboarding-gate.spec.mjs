@@ -67,7 +67,7 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await expect(page.locator("#onboarding-form")).toBeVisible();
   await expect(page.locator("#auth-signed-in")).toBeHidden();
   // The in-app nav links are suppressed while gated, so the user can't side-step it.
-  await expect(page.locator("#nav-profile")).toBeHidden();
+  await expect(page.locator("#tab-profile")).toBeHidden();
 
   // Validation: submitting empty surfaces required-field errors and does NOT let the user through.
   await page.click("#onboarding-form button[type=submit]");
@@ -123,7 +123,7 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await expect(page.locator("#onboarding-view")).toBeHidden();
   await expect(page.locator("#terms-view")).toBeHidden();
-  await expect(page.locator("#nav-profile")).toBeVisible();
+  await expect(page.locator("#tab-profile")).toBeVisible();
 
   // It persisted: name → display_name, location → city, age, the composed E.164 phone (TM-880),
   // and the onboarding flag are on the row.
@@ -156,5 +156,5 @@ test("@onboarding a returning, already-onboarded user is NOT gated and lands str
   await expectSignedIn(page);
   // Not gated: the onboarding view never shows; the app (admin nav, signed-in home) is reachable.
   await expect(page.locator("#onboarding-view")).toBeHidden();
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
 });

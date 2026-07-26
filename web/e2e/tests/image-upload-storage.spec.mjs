@@ -58,25 +58,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop
- *  width. Copied from admin-events/golden-path so the spec is project-agnostic across projects. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-/** Click a nav link/button by id, opening the hamburger first when needed. */
-async function clickNav(page, selector) {
-  await openNav(page);
-  const item = page.locator(selector);
-  await expect(item).toBeVisible();
-  await item.click();
+/** Click a primary destination by its bottom-tab id. TM-1043 removed the top .app-nav and its
+ *  hamburger, so the bottom tab bar (#app-tabbar) is the single nav at every width — a tab click
+ *  works from any route, with no hamburger to open. */
+async function clickNav(page, tabSelector) {
+  const tab = page.locator(tabSelector);
+  await expect(tab).toBeVisible();
+  await tab.click();
 }
 
 /** A `<input type="datetime-local">` value ("YYYY-MM-DDTHH:mm") from a Date's UTC parts — paired with
@@ -94,8 +82,7 @@ async function signInAsAdmin(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await openNav(page); // phone: the admin nav link lives behind the hamburger — open it before asserting
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
@@ -119,7 +106,7 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   await signInAsAdmin(page);
 
   // ── STEP 2: open the events console via the hub (TM-937), then the New-event form (TM-426). ──────
-  await clickNav(page, "#nav-admin");
+  await clickNav(page, "#tab-admin");
   await page.click('.admin-hub-row[href="#/admin/events"]');
   await expect(page.locator("#admin-events-view")).toBeVisible();
   await page.click("#admin-events-new");

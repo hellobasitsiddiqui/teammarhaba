@@ -109,11 +109,11 @@ import { updateFooter } from "./footer.js";
 // that own their full-page header (Profile + the first-run gates) — the pure rule lives in
 // shell-brand-core.js (unit-tested); this is its DOM bridge.
 import { updateShellBrand } from "./shell-brand.js";
-// Corner-bell chrome (TM-910): on the self-headed surfaces (Profile now; Home/Events add their route
-// in their own lanes) remove the floating hamburger + nav-items row and pin the notification bell to
-// the top-right corner, so the screen's own heading is the first content. Router-driven like the
-// shell-brand block above; the pure route rule lives in corner-bell-core.js (unit-tested), this is
-// its DOM bridge.
+// Corner-bell chrome (TM-910 → TM-1043): the bell is now standalone fixed chrome (#app-topbar),
+// statically corner-pinned by CSS on every route — the old .app-nav row is gone, so the bridge is a
+// deliberate no-op. The seam is KEPT (router-driven like the shell-brand block above) so any future
+// route-scoped bell treatment plugs back into render() without re-plumbing; the always-true rule
+// lives in corner-bell-core.js (unit-tested), this is its DOM bridge.
 import { updateCornerBell } from "./corner-bell.js";
 import { updateChatTabBadge } from "./chat-tab-badge.js";
 import { updateNotificationBell } from "./notification-bell.js";
@@ -551,10 +551,10 @@ function render() {
   if (receiptsView) receiptsView.hidden = route !== RECEIPTS;
 
   // While EITHER first-run gate is up — not-yet-onboarded (TM-250) or terms not accepted (TM-170) —
-  // suppress the in-app nav links so the user can't side-step the gate; only the public Help link
-  // stays (so they can read the terms). NB (TM-906): sign-out moved to the Profile hub, which a
-  // GATED user cannot reach — so while gated there is currently no sign-out affordance at all
-  // (deliberate per TM-906's "profile is the only entry"; revisit if the gates need an escape).
+  // suppress the in-app navigation (the tab bar + bell below) so the user can't side-step the gate.
+  // NB (TM-906): sign-out lives on the Profile hub, which a GATED user cannot reach — so while gated
+  // there is currently no sign-out affordance at all (deliberate per TM-906's "profile is the only
+  // entry"; revisit if the gates need an escape).
   const gated = signedIn && (!isOnboarded || needsTerms);
 
   // Canonical auth-state signal (TM-906): a `data-auth` attribute on <body>, flipped on every render
@@ -564,43 +564,9 @@ function render() {
   // reshuffles. Values: "signed-in" | "signed-out"; absent only before the first render.
   document.body.dataset.auth = signedIn ? "signed-in" : "signed-out";
 
-  // Nav reflects auth state: a sign-in link when signed out. (The top-nav sign-out control was
-  // REMOVED in TM-906 — sign-out now lives ONLY on the Profile hub's menu row, behind a confirm.)
-  const navSignIn = $("nav-signin");
-  const navAdmin = $("nav-admin");
-  const navProfile = $("nav-profile");
-  if (navSignIn) navSignIn.hidden = signedIn;
-  // The primary top-nav destinations (TM-1024) are exactly the four bottom-tab-bar tabs (tabbar-core.js
-  // TABS: Home · Events · Chat · Profile) plus Admin — one reveal rule for the whole set, matching how
-  // the tab bar is gated (shouldShowTabbar): shown for any signed-in, onboarded (un-gated) user, hidden
-  // signed-out and while EITHER first-run gate is up. Keeping the top nav on the same tab list means the
-  // desktop nav and the mobile bottom bar can't drift (a drift-guard test pins it).
-  // The Home link (TM-1024 / TABS[home]).
-  const navHome = $("nav-home");
-  if (navHome) navHome.hidden = !signedIn || gated;
-  // The Events link (TM-396 / TABS[events]) shows for any signed-in, onboarded user (hidden while gated).
-  const navEvents = $("nav-events");
-  if (navEvents) navEvents.hidden = !signedIn || gated;
-  // The Chat link (TM-1024 / TABS[chat]) follows the same rule — any signed-in, onboarded user.
-  const navChat = $("nav-chat");
-  if (navChat) navChat.hidden = !signedIn || gated;
-  // The Membership link (TM-480 screen, wired live TM-606) — shown for any signed-in, onboarded user, but
-  // ONLY while the membership feature flag is on (config.flags.membership, shipped OFF). Hidden signed-out,
-  // while gated, and whenever the flag is off, so it stays inert until the flag flips (TM-478).
-  const navMembership = $("nav-membership");
-  if (navMembership) navMembership.hidden = !(signedIn && membershipEnabled()) || gated;
-  // The My-tickets / receipts link (TM-481 screen, wired live TM-624) — same rule as the Membership link:
-  // shown for a signed-in, onboarded user ONLY while the membership flag is on, hidden signed-out / while
-  // gated / whenever the flag is off. This replaces the reveal membership-receipts.js used to do on its
-  // own at boot (which ignored the signed-out + gated states), so it now respects them like every other link.
-  const navReceipts = $("nav-receipts");
-  if (navReceipts) navReceipts.hidden = !(signedIn && membershipEnabled()) || gated;
-  // The edit-profile link shows for any signed-in, onboarded user (TM-167; hidden while gated).
-  if (navProfile) navProfile.hidden = !signedIn || gated;
-  // The admin link shows only for a signed-in, onboarded ADMIN (TM-133; hidden while gated). It
-  // opens the #/admin hub (TM-917) — the single top-nav admin entry since TM-937 removed the
-  // per-console links (events/venues/interests/messages); consoles are reached via the hub's rows.
-  if (navAdmin) navAdmin.hidden = !(signedIn && isAdmin) || gated;
+  // The top .app-nav account row was DELETED in TM-1043 (the bottom tab bar is the single primary
+  // nav at every width, TM-1042) — the per-link #nav-* reveals that lived here are gone with it.
+  // The Home-card admin shortcut below is NOT a nav element, so it keeps its reveal.
   const homeAdminLink = $("home-admin-link");
   if (homeAdminLink) homeAdminLink.hidden = !(signedIn && isAdmin) || gated;
 
@@ -608,9 +574,9 @@ function render() {
   // nav — show it only for a signed-in, un-gated user (the CSS breakpoint restricts it to mobile), and
   // light the tab matching the current route. Driven from here so the tab bar shares router's single
   // source of truth (no second hashchange/auth listener). Hidden while EITHER first-run gate is up, so
-  // a gated user can't side-step the gate via a tab. `isAdmin` (the verified TM-110 role claim, the
-  // same flag the top-nav Admin link uses) adds the admin-only fifth tab (TM-915) — it fails safe to
-  // false until resolveRoleThenGuard settles, so no admin tab flashes for a non-admin.
+  // a gated user can't side-step the gate via a tab. `isAdmin` (the verified TM-110 role claim)
+  // adds the admin-only fifth tab (TM-915) — it fails safe to false until resolveRoleThenGuard
+  // settles, so no admin tab flashes for a non-admin.
   updateTabbar({ signedIn, gated, route, isAdmin });
 
   // Chat-tab unread badge (TM-439): the unread pill over the bottom-nav Chat tab, gated to the SAME
@@ -642,11 +608,11 @@ function render() {
   // driven for the same single-source-of-truth reason as the tab bar / footer above.
   updateShellBrand({ route });
 
-  // Corner-bell chrome (TM-910): on the self-headed surfaces (Profile) drop the floating hamburger +
-  // nav-items row and pin the bell top-right, so the screen's own heading ("Profile") is the first
-  // content. Same single-source-of-truth reason as updateShellBrand above (render() reruns on every
-  // hashchange + auth change). The bell's own signed-in/gated visibility stays owned by
-  // updateNotificationBell() — this only relocates the already-visible bell.
+  // Corner-bell seam (TM-910 → TM-1043): retained, but the bell is now STATICALLY corner-pinned by
+  // CSS (.app-topbar) on every route — the .app-nav row it used to relocate is gone, so the bridge
+  // is a deliberate no-op. Kept wired for the same single-source-of-truth reason as updateShellBrand
+  // above: any future route-scoped bell treatment plugs back in here without re-plumbing render().
+  // The bell's own signed-in/gated visibility stays owned by updateNotificationBell().
   updateCornerBell({ route });
 }
 

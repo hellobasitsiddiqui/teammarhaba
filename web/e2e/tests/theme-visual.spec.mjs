@@ -89,7 +89,7 @@ test.describe("@theme authenticated pages render under Paper", () => {
     // HOME.
     await page.evaluate(() => (window.location.hash = "#/home"));
     await expect(page.locator("#auth-signed-in")).toBeVisible();
-    await expectControlUsable(page, page.locator("#nav-profile"));
+    await expectControlUsable(page, page.locator("#tab-profile"));
 
     // PROFILE — wait for the async GET /me populate before asserting (TM-198).
     const meLoaded = page.waitForResponse(

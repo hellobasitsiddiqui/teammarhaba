@@ -2,9 +2,10 @@
 // the CI glob `node --test web/tools/*.test.mjs`.
 //
 // THE BUG: on the native shell, a foreground push made notification-center.js (the TM-374 recovery
-// bell) self-mount a `#tm-notif-bell` button (class `.tm-notif-bell`) into `nav.app-nav` — right next
-// to the TM-455 static `#nav-notif-bell` (which carries the SAME `.tm-notif-bell` class). Two
-// identical bells side-by-side.
+// bell) self-mount a `#tm-notif-bell` button (class `.tm-notif-bell`) into the top chrome — right
+// next to the TM-455 static `#nav-notif-bell` (which carries the SAME `.tm-notif-bell` class). Two
+// identical bells side-by-side. (Since TM-1043 the mount host is the standalone `div.app-topbar`
+// band — the old `nav.app-nav` row is deleted — and this fixture mirrors that.)
 //
 // THE FIX (TM-561): when the static bell is present it owns the header notification-bell surface, so
 // the recovery bell no longer mounts. The foreground-push REFRESH is kept — notifyForegroundPush
@@ -111,7 +112,7 @@ class FakeElement {
 let doc; // reset per test
 let dispatched; // captured `tm:notification` events
 
-/** Fresh document/window globals + a `nav.app-nav` under body. Returns the nav. */
+/** Fresh document/window globals + a `div.app-topbar` (the TM-1043 bell band) under body. Returns it. */
 function freshDom({ withStaticBell }) {
   const body = new FakeElement("body");
   doc = {
@@ -125,8 +126,8 @@ function freshDom({ withStaticBell }) {
     removeEventListener() {},
   };
 
-  const nav = new FakeElement("nav");
-  nav.className = "app-nav";
+  const nav = new FakeElement("div");
+  nav.className = "app-topbar";
   body.append(nav);
 
   if (withStaticBell) {

@@ -10,8 +10,9 @@
 // the Firebase user themselves (it stays the single source of truth — no payload is carried), and
 // having zero imports keeps this module loadable under plain `node --test` like the *-core modules.
 //
-// Current subscribers: nav-avatar.js (the nav chip) and profile.js (the avatar control's preview +
-// the identity header / strength hub). Announcer: profile.js's upload success path.
+// Current subscribers: profile.js (the avatar control's preview + the identity header / strength
+// hub). (nav-avatar.js — the old top-nav chip — was deleted with the .app-nav in TM-1043.)
+// Announcer: profile.js's upload success path.
 
 /** The registered listeners. A Set so double-subscribing the same fn is a no-op, not a double-fire. */
 const listeners = new Set();

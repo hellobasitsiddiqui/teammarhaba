@@ -28,8 +28,8 @@ test("@profile the refreshed Profile hub shows the completeness ring, badges and
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await expect(page.locator("#nav-profile")).toBeVisible();
-  await page.click("#nav-profile");
+  await expect(page.locator("#tab-profile")).toBeVisible();
+  await page.click("#tab-profile");
 
   // The refreshed hub container + the paper-profile cards render.
   await expect(page.locator(".tm-pf")).toBeVisible();
@@ -84,8 +84,8 @@ test("@profile a strength gap 'Add …' prompt still deep-links to its field (TM
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await expect(page.locator("#nav-profile")).toBeVisible();
-  await page.click("#nav-profile");
+  await expect(page.locator("#tab-profile")).toBeVisible();
+  await page.click("#tab-profile");
   await expect(page.locator(".tm-pf")).toBeVisible();
   await meLoaded;
 
@@ -110,10 +110,10 @@ test("@profile the public-profile preview (#/profile/public) renders the paper-p
   // De-flake (TM-590): don't deep-link straight after sign-in. The router navigates off #/login on the
   // auth change using fail-safe cached values, THEN resolves /me + the first-run gates and re-guards; a
   // hash set into that window is clobbered by the router's own post-sign-in navigation, so we never land
-  // on #/profile/public (fails, then passes on retry once the session is warm). #nav-profile is un-hidden
+  // on #/profile/public (fails, then passes on retry once the session is warm). #tab-profile is un-hidden
   // only once signed-in AND un-gated AND role-resolved (router.js render()), so it's the "app-ready"
   // signal — the same gate the hub test above and profile-edit's openProfile wait on before navigating.
-  await expect(page.locator("#nav-profile")).toBeVisible();
+  await expect(page.locator("#tab-profile")).toBeVisible();
 
   // Navigate to the additive public-profile preview route. Arm the mount GET /me (the preview shell
   // fills from it) BEFORE navigating — the TM-198 populate-timing pattern.

@@ -124,8 +124,8 @@ async function openProfileForm(page) {
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await expect(page.locator("#nav-profile")).toBeVisible();
-  await page.click("#nav-profile");
+  await expect(page.locator("#tab-profile")).toBeVisible();
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 }
@@ -169,7 +169,7 @@ test("@profile a name-locked user sees read-only name fields with an explanation
 
   // Now induce the lock (one reliability strike) and RELOAD in place so a fresh mount GET /me reports
   // nameLocked. We're already on #/profile, so we wait for the RELOAD's own /me — NOT openProfileForm,
-  // whose #nav-profile click fires no new /me when already on the profile route (that hangs the wait).
+  // whose #tab-profile click fires no new /me when already on the profile route (that hangs the wait).
   await strike(email);
   const meAfterLock = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",

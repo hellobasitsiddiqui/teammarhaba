@@ -33,23 +33,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Open the account nav if collapsed behind the hamburger (phone width); a no-op at desktop width. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-async function clickNav(page, selector) {
-  await openNav(page);
-  const item = page.locator(selector);
-  await expect(item).toBeVisible();
-  await item.click();
+/** Click a primary destination by its bottom-tab id. TM-1043 removed the top .app-nav and its
+ *  hamburger, so the bottom tab bar (#app-tabbar) is the single nav at every width — a tab click
+ *  works from any route, with no hamburger to open. */
+async function clickNav(page, tabSelector) {
+  const tab = page.locator(tabSelector);
+  await expect(tab).toBeVisible();
+  await tab.click();
 }
 
 /** Remove the throwaway selection this spec seeds (keyed on the ADMIN account + the seed label). */
@@ -89,8 +79,7 @@ test("@admin @admin-interests the console shows a 'Selected by' count+percent fo
   await page.click("#try-another-btn");
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
-  await openNav(page);
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
   // ── STEP 2: seed a selection of the "Yoga" catalogue label for the ADMIN's own account (DB seam).
@@ -111,7 +100,7 @@ test("@admin @admin-interests the console shows a 'Selected by' count+percent fo
   }
 
   // ── STEP 3: open the interests console via the admin hub. ──────────────────────────────────────
-  await clickNav(page, "#nav-admin");
+  await page.click("#tab-admin");
   await page.click('.admin-hub-row[href="#/admin/interests"]');
   await expect(page.locator("#admin-interests-view")).toBeVisible();
   await expect(page.locator("#admin-interests-table")).toBeVisible();

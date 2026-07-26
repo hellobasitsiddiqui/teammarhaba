@@ -15,9 +15,9 @@
 // TM-374 foreground path — so a push that lands while the app is open BUMPS the badge immediately (the
 // TM-374 "foreground push missed" fix, now reflected on the primary header bell too).
 //
-// The static markup (the #nav-notif-bell button + its .tm-notif-badge chip) lives in index.html so it
-// inherits the .app-nav quiet-action look and stays in the top-right next to the hamburger when the
-// nav collapses on narrow screens; this module owns only its behaviour. All the count/badge maths
+// The static markup (the #nav-notif-bell button + its .tm-notif-badge chip) lives in index.html,
+// inside the standalone .app-topbar band (TM-1043) that pins it to the top-right of the app clamp
+// band on every route; this module owns only its behaviour. All the count/badge maths
 // lives in the pure, node-tested notification-bell-core.js. XSS-safe: textContent only, no innerHTML.
 //
 // Relationship to notification-center.js (TM-374): that is the native-only foreground-push RECOVERY

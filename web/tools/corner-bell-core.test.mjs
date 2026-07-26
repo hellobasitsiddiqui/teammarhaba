@@ -1,62 +1,41 @@
-// Corner-bell chrome tests (TM-910). Framework-free — Node's built-in test runner, picked up by the
-// CI glob `node --test web/tools/*.test.mjs`.
+// Corner-bell chrome tests (TM-910 → TM-1043). Framework-free — Node's built-in test runner,
+// picked up by the CI glob `node --test web/tools/*.test.mjs`.
 //
-// THE CHANGE (TM-910, at 390px): the Profile surface is already self-headed (shell-brand-core hides
-// the walking-skeleton wordmark), so the only remaining top chrome above the "Profile" heading is
-// the floating account-nav row — the hamburger toggle (#nav-toggle) plus the notification bell that
-// rides beside it on narrow screens. This ticket removes that floating row on Profile and pins the
-// bell to the top-right corner, so "Profile" is the first content.
-//
-// THE MECHANISM (mirrors shell-brand): router.js's render() drives the chrome through the pure
-// corner-bell-core.js rule via the corner-bell.js DOM bridge — the same router-driven single-source-
-// of-truth mechanism as the shell-brand block / tab bar / footer. These tests pin
-//   (1) the pure rule's truth table (fail-before if #/profile ever stops matching),
-//   (2) the DOM bridge's `hidden`-attribute + class behaviour against a minimal fake document,
-//   (3) the router wiring (source-level, like shell-brand-core.test.mjs — router.js can't be
-//       imported under `node --test`: it sits on the api.js → Firebase CDN import chain).
+// THE CHANGE (TM-1043): the top .app-nav (hamburger + account links) is deleted; the notification
+// bell is now standalone fixed chrome (#app-topbar, index.html) pinned top-right of the app clamp
+// band by static CSS on EVERY route. The old per-route CORNER_BELL_ROUTES decision is retired, so:
+//   (1) the pure rule bellPinnedToCorner() is TRUE for every real route (fail-safe false on junk) —
+//       any future re-introduction of route-scoped bell chrome must consciously edit rule + test;
+//   (2) the DOM bridge updateCornerBell() is a deliberate no-op that must NEVER query the DOM —
+//       the nav/toggle elements it used to move no longer exist and must not be resurrected;
+//   (3) router.js's render() still drives the seam (source-level assert, like
+//       shell-brand-core.test.mjs — router.js can't be imported under `node --test`: it sits on
+//       the api.js → Firebase CDN import chain).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CORNER_BELL_ROUTES, bellPinnedToCorner } from "../src/assets/corner-bell-core.js";
+import { bellPinnedToCorner } from "../src/assets/corner-bell-core.js";
 import { updateCornerBell } from "../src/assets/corner-bell.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // --- (1) the pure rule -------------------------------------------------------------------------------
 
-test("corner-bell applies on the Profile screens (TM-910)", () => {
-  assert.equal(bellPinnedToCorner("#/profile"), true);
-  assert.equal(bellPinnedToCorner("#/profile/public"), true, "the public preview is a profile sub-route");
-});
-
-test("corner-bell applies on the signed-in Home feed (content-first, TM-908)", () => {
-  // Home opts in: the floating nav row is removed and the bell corner-pinned so the "Events near
-  // you" heading is the first content. A Home sub-route (`#/home/...`) matches via the prefix rule.
-  assert.equal(bellPinnedToCorner("#/home"), true);
-  assert.equal(bellPinnedToCorner("#/home/feed"), true, "a Home sub-route matches via the prefix rule");
-});
-
-test("corner-bell applies on the content-first Events tab and its detail (TM-909)", () => {
-  assert.equal(bellPinnedToCorner("#/events"), true, "the Events browse tab");
-  assert.equal(bellPinnedToCorner("#/events/42"), true, "an event detail matches via the prefix rule");
-});
-
-test("corner-bell stays OFF every other route (login/chat/admin unchanged in this lane)", () => {
-  // #/home (TM-908) and #/events (TM-909) are NOW corner-belled so they are deliberately absent here —
-  // see the Home + Events tests above. #/admin is self-headed (shell-brand) but keeps its own nav, so it
-  // does NOT take the corner-bell treatment.
-  for (const route of ["#/login", "#/chat", "#/chat/7",
-    "#/admin", "#/admin/events", "#/help", "#/notifications", "#/onboarding", "#/terms", "#/diagnostics"]) {
-    assert.equal(bellPinnedToCorner(route), false, `expected corner-bell OFF on ${route}`);
+test("the bell is corner-pinned on EVERY real route (TM-1043 — the .app-nav row is gone)", () => {
+  for (const route of [
+    "#/profile", "#/profile/public",
+    "#/home", "#/home/feed",
+    "#/events", "#/events/42",
+    "#/login", "#/chat", "#/chat/7",
+    "#/admin", "#/admin/events",
+    "#/help", "#/notifications", "#/onboarding", "#/terms", "#/diagnostics",
+    "#/membership", "#/receipts",
+  ]) {
+    assert.equal(bellPinnedToCorner(route), true, `expected corner-bell ON for ${route}`);
   }
-});
-
-test("prefix matching is a real sub-path, not a string prefix", () => {
-  // A hypothetical "#/profiles" route must NOT match "#/profile" (same rule shape as tabbar-core).
-  assert.equal(bellPinnedToCorner("#/profiles"), false);
 });
 
 test("fails safe (off) on junk input", () => {
@@ -66,98 +45,44 @@ test("fails safe (off) on junk input", () => {
   assert.equal(bellPinnedToCorner(42), false);
 });
 
-test("the corner-bell route list is frozen and the shared consumption point", () => {
-  assert.ok(Object.isFrozen(CORNER_BELL_ROUTES));
-  // #/home added by TM-908 (content-first Home); #/events by TM-909 (this lane).
-  assert.deepEqual([...CORNER_BELL_ROUTES], ["#/profile", "#/home", "#/events"]);
-});
-
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
 
-/** Minimal fake nav DOM: the <nav.app-nav>, the hamburger toggle, and the collapsible items group. */
-function fakeDoc({ withToggle = true, withItems = true, withNav = true } = {}) {
-  const classNames = new Set();
-  const nav = withNav
-    ? {
-        classList: {
-          toggle(name, force) {
-            const on = force === undefined ? !classNames.has(name) : Boolean(force);
-            if (on) classNames.add(name);
-            else classNames.delete(name);
-            return on;
-          },
-          contains: (name) => classNames.has(name),
-        },
-      }
-    : null;
-  const toggle = withToggle ? { hidden: false } : null;
-  const items = withItems ? { hidden: false } : null;
+/**
+ * Spy document: records every DOM lookup. The TM-1043 bridge must never query the DOM — the
+ * nav.app-nav / #nav-toggle elements it used to relocate are deleted, so ANY lookup here would mean
+ * the bridge is resurrecting nav meddling against elements that no longer exist.
+ */
+function spyDoc() {
+  const calls = [];
   return {
-    nav,
-    toggle,
-    items,
+    calls,
     querySelector(sel) {
-      return sel === "nav.app-nav" ? nav : null;
+      calls.push(["querySelector", sel]);
+      return null;
     },
     getElementById(id) {
-      if (id === "nav-toggle") return toggle;
-      if (id === "nav-items") return items;
+      calls.push(["getElementById", id]);
       return null;
     },
   };
 }
 
-test("updateCornerBell hides the hamburger + pins the class on #/profile and restores on #/chat", () => {
-  const doc = fakeDoc();
-  updateCornerBell({ route: "#/profile" }, doc);
-  assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Profile");
-  // #nav-items is deliberately LEFT ALONE — the desktop inline nav (and #nav-profile within it) must
-  // stay visible on #/profile at wide widths (onboarding-to-profile e2e asserts it); on mobile it's
-  // already the collapsed display:none dropdown, so hiding only the toggle removes the floating row.
-  assert.equal(doc.items.hidden, false, "the account-links group is untouched (stays visible on desktop)");
-  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned");
-
-  // Navigating to a non-corner route un-hides the toggle + drops the class (render() reruns this on
-  // every hashchange/auth change), so leaving the corner route returns to the normal nav. #/chat is
-  // chosen deliberately: #/home (TM-908) and #/events (TM-909) are now corner-belled and would keep the
-  // class, so Chat is the only tab route that can still stand in for a "normal nav restored" route here.
-  updateCornerBell({ route: "#/chat" }, doc);
-  assert.equal(doc.toggle.hidden, false);
-  assert.equal(doc.items.hidden, false);
-  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), false);
+test("updateCornerBell is a no-op bridge: never throws and NEVER queries the DOM (TM-1043)", () => {
+  const doc = spyDoc();
+  assert.doesNotThrow(() => updateCornerBell({ route: "#/profile" }, doc));
+  assert.doesNotThrow(() => updateCornerBell({ route: "#/chat" }, doc));
+  assert.deepEqual(doc.calls, [], "the bridge must not touch the DOM — the .app-nav chrome is gone");
 });
 
-test("updateCornerBell also hides the hamburger + pins the class on the signed-in Home feed (TM-908)", () => {
-  const doc = fakeDoc();
-  updateCornerBell({ route: "#/home" }, doc);
-  assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Home");
-  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned on Home");
-});
-
-test("updateCornerBell hides the hamburger + pins the class on the content-first Events tab (TM-909)", () => {
-  const doc = fakeDoc();
-  updateCornerBell({ route: "#/events" }, doc);
-  assert.equal(doc.toggle.hidden, true, "hamburger toggle hidden on Events");
-  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true, "corner-bell class pinned on Events");
-});
-
-test("updateCornerBell also covers the public-profile sub-route", () => {
-  const doc = fakeDoc();
-  updateCornerBell({ route: "#/profile/public" }, doc);
-  assert.equal(doc.toggle.hidden, true);
-  assert.equal(doc.nav.classList.contains("app-nav--corner-bell"), true);
-});
-
-test("updateCornerBell skips missing elements and a missing document without throwing", () => {
-  assert.doesNotThrow(() => updateCornerBell({ route: "#/profile" }, fakeDoc({ withToggle: false })));
-  assert.doesNotThrow(() => updateCornerBell({ route: "#/profile" }, fakeDoc({ withNav: false })));
+test("updateCornerBell tolerates a missing document and junk state without throwing", () => {
   assert.doesNotThrow(() => updateCornerBell({ route: "#/profile" }, null));
-  assert.doesNotThrow(() => updateCornerBell(undefined, fakeDoc()));
+  assert.doesNotThrow(() => updateCornerBell(undefined, spyDoc()));
+  assert.doesNotThrow(() => updateCornerBell({}, spyDoc()));
 });
 
 // --- (3) the router wiring (source-level guard) ------------------------------------------------------
 
-test("router.js render() drives the corner-bell chrome (TM-910 wiring)", () => {
+test("router.js render() drives the corner-bell seam (TM-910 wiring, kept through TM-1043)", () => {
   const routerSrc = readFileSync(join(HERE, "../src/assets/router.js"), "utf8");
   assert.match(
     routerSrc,

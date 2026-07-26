@@ -31,12 +31,12 @@ import { ADMIN, TARGET } from "../fixtures.mjs";
 // another way"), the tour-suppression beforeEach, the seeded ADMIN/TARGET accounts, real DOM-id
 // selectors, and @tag naming. It rides the existing main + manual-dispatch e2e workflow (never the PR
 // gate), like its siblings. Runs under the default desktop `chromium` project (its filename isn't in the
-// mobile testMatch), so #nav-admin toBeVisible() is a valid "role resolved" signal (as admin-walkthrough
+// mobile testMatch), so #tab-admin toBeVisible() is a valid "role resolved" signal (as admin-walkthrough
 // uses it).
 
 /**
  * Sign in as the seeded ADMIN via the real Firebase Auth emulator flow, and wait until the ADMIN role
- * has actually RESOLVED (not merely "signed in"). The desktop "role resolved" signal is #nav-admin
+ * has actually RESOLVED (not merely "signed in"). The "role resolved" signal is #tab-admin
  * becoming visible: the router removes its `hidden` attribute only once the session is signed-in AND
  * the ADMIN role has resolved from GET /api/v1/me (admin-walkthrough.spec relies on the same signal).
  * Waiting for it proves the FIRST, warm session is fully role-resolved before we then force the COLD
@@ -52,7 +52,7 @@ async function signInAsAdmin(page) {
   await page.click("#signin-btn");
   // Signed in AND ADMIN role resolved (admin nav only un-hides for ROLE_ADMIN once /me has resolved).
   await expectSignedIn(page);
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
 }
 
 // Suppress the first-run product tour (its dimmed overlay would cover the controls under test). Same
@@ -105,7 +105,7 @@ test.describe("@nav-races admin deep-link / reload bounce race (TM-733)", () => 
     // ...and NO spurious "Admins only." error toast was raised. That toast is the exact papercut the fix
     //    removed: pre-fix the reload bounced the admin to Home AND toasted this. Poll a beat so a
     //    late-firing toast (if the bug regressed) would be caught, then assert it never appears.
-    await expect(page.locator("#nav-admin")).toBeVisible(); // role has re-resolved post-reload
+    await expect(page.locator("#tab-admin")).toBeVisible(); // role has re-resolved post-reload
     await expect(
       page.locator("#tm-toasts .tm-toast-error", { hasText: "Admins only." }),
     ).toHaveCount(0);

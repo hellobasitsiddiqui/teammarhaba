@@ -110,7 +110,7 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   // The hash was redirected to the gate, and the in-app nav (incl. the Profile link) is suppressed so
   // the user can't side-step the gate back to the page they wanted.
   await expect(page).toHaveURL(/#\/onboarding$/);
-  await expect(page.locator("#nav-profile")).toBeHidden();
+  await expect(page.locator("#tab-profile")).toBeHidden();
 
   // Validation: an empty submit surfaces required-field errors and does NOT release the user.
   await page.click("#onboarding-form button[type=submit]");
@@ -156,7 +156,7 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await expect(page.locator("#terms-view")).toBeHidden();
   await expect(page.locator("#profile-form")).toBeVisible();
   // The nav Profile link is back now the gates are cleared.
-  await expect(page.locator("#nav-profile")).toBeVisible();
+  await expect(page.locator("#tab-profile")).toBeVisible();
 
   // The onboarding-supplied identity actually populates the Profile hub (paper-profile): since TM-883
   // the captured name also seeds first/last name ("Fresh User <run>" → "Fresh" / "User <run>"), so the

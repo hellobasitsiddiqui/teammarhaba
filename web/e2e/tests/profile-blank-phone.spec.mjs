@@ -45,7 +45,7 @@ test("@profile saving with a blank phone input PRESERVES the stored phone (TM-88
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await page.click("#nav-profile");
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 

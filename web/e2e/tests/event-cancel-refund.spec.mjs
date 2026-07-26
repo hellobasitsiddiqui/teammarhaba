@@ -104,25 +104,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop width.
- *  Copied from the sibling specs so this stays project-agnostic if it's ever opted into mobile-chromium. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-/** Click a nav link/button by id, opening the hamburger first when needed. */
-async function clickNav(page, selector) {
-  await openNav(page);
-  const item = page.locator(selector);
-  await expect(item).toBeVisible();
-  await item.click();
+/** Click a primary destination by its bottom-tab id. TM-1043 removed the top .app-nav and its
+ *  hamburger, so the bottom tab bar (#app-tabbar) is the single nav at every width — a tab click
+ *  works from any route, with no hamburger to open. */
+async function clickNav(page, tabSelector) {
+  const tab = page.locator(tabSelector);
+  await expect(tab).toBeVisible();
+  await tab.click();
 }
 
 /** Sign in a seeded, un-gated account via the email+password ("Try another way") flow — the same path the
@@ -195,7 +183,7 @@ test("@membership @payments admin cancel of a paid event refunds the paid attend
   // money-bearing order whose money the admin cancel must later return. ────────────────────────────────────
   await signIn(page, EVENT_GOER);
   await shot("goer-signed-in");
-  await clickNav(page, "#nav-events");
+  await clickNav(page, "#tab-events");
   await expect(page.locator("#events-view")).toBeVisible();
   const card = page.locator(`[data-testid="event-card"][data-event-id="${event.id}"]`);
   await expect(card).toBeVisible();

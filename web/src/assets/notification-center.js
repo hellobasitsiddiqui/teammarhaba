@@ -20,9 +20,10 @@
 //      opening it marks everything read.
 //
 // RETIRED WHEN THE STATIC BELL IS PRESENT (TM-561): the TM-455 static header bell (#nav-notif-bell,
-// static in index.html) + the TM-456 panel now own the header notification-bell surface. When that
-// static bell is in the DOM this recovery bell no longer mounts — otherwise TWO identical
-// .tm-notif-bell controls render side-by-side in nav.app-nav on the native shell (the duplicate this
+// static in index.html — since TM-1043 inside the standalone .app-topbar band) + the TM-456 panel
+// now own the header notification-bell surface. When that static bell is in the DOM this recovery
+// bell no longer mounts — otherwise TWO identical .tm-notif-bell controls render side-by-side in
+// the top chrome on the native shell (the duplicate this
 // module used to create on first foreground push). Only the duplicate BELL is dropped: the
 // foreground-push REFRESH is kept (notifyForegroundPush still dispatches the `tm:notification` event
 // that the static bell re-fetches its server-backed badge on) and the persistent card still shows.
@@ -102,18 +103,20 @@ function staticBellPresent() {
 }
 
 /**
- * The nav bell button, created on demand as a DIRECT child of the account nav (not inside
- * #nav-items) so it stays visible next to the hamburger when the nav collapses on narrow screens —
- * where the native shell (the only surface that gets foreground pushes) always is. Self-mounting
- * like ui.js's toastHost / verify-banner's host, so index.html needs no changes; router.js never
- * touches it (it only manages its own known ids).
+ * The recovery bell button, created on demand inside the standalone top chrome band (.app-topbar,
+ * the TM-1043 home of the header bell — the old nav.app-nav row is gone) so it rides the top-right
+ * corner where the native shell (the only surface that gets foreground pushes) always is.
+ * Self-mounting like ui.js's toastHost / verify-banner's host, so index.html needs no changes;
+ * router.js never touches it (it only manages its own known ids). In practice this stays retired
+ * while the static #nav-notif-bell exists (staticBellPresent above) — this mount seam is the
+ * fallback if the static bell is ever removed.
  * @param {boolean} create whether to create the bell if it doesn't exist yet.
  * @returns {?HTMLElement}
  */
 function bellHost(create) {
   let bell = document.getElementById(BELL_ID);
   if (bell || !create) return bell;
-  const nav = document.querySelector("nav.app-nav");
+  const nav = document.querySelector(".app-topbar");
   if (!nav) return null;
   bell = el(
     "button",

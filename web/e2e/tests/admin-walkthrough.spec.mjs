@@ -23,16 +23,16 @@ test("@admin admin signs in, disables a user via the console, and the change per
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
 
-  // 3. Authenticated: body[data-auth] flips + admin nav appears (admin nav only shows for ROLE_ADMIN).
+  // 3. Authenticated: body[data-auth] flips + admin tab appears (admin tab only shows for ROLE_ADMIN).
   await expectSignedIn(page);
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
   // ...and the sign-in form is actually gone — guards TM-141: the `hidden` attribute the router
   // sets must really hide it (a class `display` rule used to override `[hidden]`, leaving it shown).
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
-  // 4. Open the admin layer, then the users console via the hub (TM-917: #nav-admin now opens the
+  // 4. Open the admin layer, then the users console via the hub (TM-917: #tab-admin now opens the
   //    #/admin hub; the users console moved to #/admin/users, reached by the hub's Users row).
-  await page.click("#nav-admin");
+  await page.click("#tab-admin");
   await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });

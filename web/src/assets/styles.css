@@ -390,39 +390,9 @@ body {
     }
 }
 
-/* Account nav (TM-109) */
-.app-nav {
-    display: flex;
-    justify-content: center;
-    gap: 0.5rem;
-    margin: 0.5rem 0 0;
-    min-height: 1.5rem;
-}
-
-.app-nav a {
-    color: var(--accent);
-    font-weight: 600;
-    text-decoration: none;
-}
-
-.app-nav a:hover {
-    text-decoration: underline;
-}
-
-.app-nav button {
-    padding: 0.4rem 0.9rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--accent);
-    background: transparent;
-    border: var(--border-width) solid var(--accent-line);
-    border-radius: var(--radius);
-    cursor: pointer;
-}
-
-.app-nav button:hover {
-    background: var(--accent-soft);
-}
+/* Account nav (TM-109) REMOVED in TM-1043 — the bottom tab bar (.app-tabbar) is the single primary
+ * nav at every width; the notification bell moved to the standalone .app-topbar (see the
+ * "Standalone corner bell" section below). */
 
 /* Auth UI (TM-106) */
 .auth {
@@ -932,7 +902,6 @@ body {
 h2,
 h3,
 .auth button,
-.app-nav button,
 .tm-btn {
     font-family: var(--font-display);
     letter-spacing: 0.3px;
@@ -1045,7 +1014,7 @@ h3,
 [data-sketchy="on"] .field input,
 [data-sketchy="on"] .tm-input,
 [data-sketchy="on"] .auth button,
-[data-sketchy="on"] .app-nav button,
+[data-sketchy="on"] .tm-notif-bell,
 [data-sketchy="on"] .tm-btn,
 [data-sketchy="on"] .auth-mark,
 /* Login/auth Paper reskin decorative marks (paper-splash / paper-signin): the boot + brand accent
@@ -1090,7 +1059,7 @@ h3,
     [data-sketchy="on"] .field input,
     [data-sketchy="on"] .tm-input,
     [data-sketchy="on"] .auth button,
-    [data-sketchy="on"] .app-nav button,
+    [data-sketchy="on"] .tm-notif-bell,
     [data-sketchy="on"] .tm-btn,
     /* Login/auth reskin decorative marks — drop the decorative wobble under reduced-motion (mirror). */
     [data-sketchy="on"] .boot-squiggle,
@@ -1112,24 +1081,6 @@ h3,
     [data-sketchy="on"] hr {
         filter: none;
     }
-}
-
-.app-nav {
-    display: flex;
-    gap: var(--space-4);
-    justify-content: center;
-    align-items: center;
-    margin-bottom: var(--space-4);
-}
-
-.app-nav a,
-.app-nav button {
-    color: var(--accent);
-    background: none;
-    border: none;
-    font: inherit;
-    cursor: pointer;
-    text-decoration: none;
 }
 
 .home-links {
@@ -1721,9 +1672,9 @@ h3,
 
 /* ===== Onboarding product tour (TM-135) ===== */
 
-/* TM-1024: the top-nav Take-a-tour launcher (#nav-help) was removed when the desktop nav became the
-   four tabs, so its `.app-nav #nav-help { cursor: pointer }` rule is gone (it matched nothing). The
-   tour layer styling below is unchanged — re-homing the launcher is deferred to wave-help-1. */
+/* TM-1024: the Take-a-tour launcher (#nav-help) was removed with its old top-nav home (and TM-1043
+   later deleted the top nav entirely), so no launcher rule remains here. The tour layer styling
+   below is unchanged — re-homing the launcher is deferred to wave-help-1. */
 
 /* Full-screen tour layer. Only the blocker + callout capture pointer events. */
 .tm-tour {
@@ -2020,25 +1971,8 @@ h3,
     transition: width 0.15s ease;
 }
 
-/* Round avatar shown in the account nav (TM-166), reflecting the user's photoURL. */
-.tm-nav-avatar {
-    display: inline-grid;
-    place-items: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 50%;
-    overflow: hidden;
-    background: var(--surface-2);
-    border: var(--border-width) solid var(--border);
-    font-size: 1rem;
-    vertical-align: middle;
-}
-
-.tm-nav-avatar-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
+/* The account-nav avatar (.tm-nav-avatar, TM-166) was removed in TM-1043 with the top .app-nav —
+   its host #nav-avatar + nav-avatar.js are gone. Profile's own avatar surfaces are unaffected. */
 
 .tm-form-grid {
     display: grid;
@@ -3025,9 +2959,10 @@ h3,
  * ===== Responsive mobile-web polish (TM-229) =====
  *
  * Foundation of the Mobile epic: make every view usable at phone widths (≈320–430px) and inside
- * the Android/iOS WebView wrappers, WITHOUT a framework — vanilla CSS plus the tiny nav-toggle.js.
+ * the Android/iOS WebView wrappers, WITHOUT a framework — vanilla CSS only.
  * This EXTENDS the existing 640px / 32rem media queries above (per the ticket: extend, don't
- * restart); it adds the nav hamburger, tap-target floors, and the small-screen breakpoints.
+ * restart); it adds tap-target floors and the small-screen breakpoints. (The TM-229 nav hamburger
+ * scaffolding that lived here was deleted in TM-1043 along with the top .app-nav.)
  *
  * It is theme-agnostic: every rule uses the same `var(--token)`s the components already read, so it
  * holds under any accent + both toggle states alike (no hard-coded colours, no per-theme forks).
@@ -3062,128 +2997,6 @@ html {
 
     .app {
         background: var(--surface);
-    }
-}
-
-/* --- Nav: hamburger scaffolding (TM-229) -------------------------------------------------------
-   These rules are layout-only and inert on wide screens (the toggle stays display:none until the
-   narrow breakpoint below reveals it). #nav-items is the collapsible group; on wide screens it's a
-   normal inline row that flows with the rest of the nav. */
-.app-nav {
-    flex-wrap: wrap;
-    position: relative;
-}
-
-.app-nav-items {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-/* The hamburger button: a 44px square tap target, drawn with three CSS bars (no icon font/asset).
-   Hidden on wide screens; the narrow breakpoint flips it to inline-grid. */
-.app-nav-toggle {
-    display: none;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    color: var(--accent);
-    background: transparent;
-    border: var(--border-width) solid var(--accent-line);
-    border-radius: var(--radius);
-    cursor: pointer;
-}
-
-.app-nav-toggle:hover {
-    background: var(--accent-soft);
-}
-
-.app-nav-toggle-bars,
-.app-nav-toggle-bars::before,
-.app-nav-toggle-bars::after {
-    display: block;
-    width: 20px;
-    height: 2px;
-    background: currentColor;
-    border-radius: 2px;
-}
-
-.app-nav-toggle-bars {
-    position: relative;
-}
-
-.app-nav-toggle-bars::before,
-.app-nav-toggle-bars::after {
-    content: "";
-    position: absolute;
-    left: 0;
-}
-
-.app-nav-toggle-bars::before {
-    top: -6px;
-}
-
-.app-nav-toggle-bars::after {
-    top: 6px;
-}
-
-/*
- * --- Nav breakpoint: collapse the row into a hamburger menu (≤ 33rem ≈ 528px) ------------------
- * Below this, the nav stacks behind the toggle (matches the matchMedia("min-width:33rem") in
- * nav-toggle.js). The toggle appears; #nav-items becomes an absolutely-positioned dropdown card
- * that only shows when nav-toggle.js sets [data-nav-open="true"] on the nav.
- */
-@media (max-width: 33rem) {
-    .app-nav-toggle {
-        display: inline-grid;
-    }
-
-    .app-nav-items {
-        position: absolute;
-        top: calc(100% + 0.4rem);
-        right: 0;
-        z-index: 1500;
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.25rem;
-        min-width: 12rem;
-        max-width: min(16rem, 90vw);
-        padding: 0.4rem;
-        background: var(--surface);
-        border: var(--border-width) solid var(--border);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-menu);
-    }
-
-    /* Collapsed by default; nav-toggle.js opens it. An empty menu (signed out, nothing to show but
-       the Sign-in link) still behaves — the link is the only visible child. */
-    .app-nav:not([data-nav-open="true"]) .app-nav-items {
-        display: none;
-    }
-
-    /* Inside the dropdown, every item is a full-width ≥44px tap row, left-aligned like a menu. */
-    .app-nav-items > a,
-    .app-nav-items > button {
-        display: flex;
-        align-items: center;
-        width: 100%;
-        min-height: 44px;
-        padding: 0.5rem 0.6rem;
-        border-radius: var(--radius-sm);
-        text-align: left;
-    }
-
-    .app-nav-items > a:hover,
-    .app-nav-items > button:hover {
-        background: var(--surface-2);
-        text-decoration: none;
-    }
-
-    /* The nav avatar sits inline with a label-less row; give it room and centre it. */
-    .app-nav-items > .tm-nav-avatar {
-        align-self: center;
-        margin: 0.15rem auto;
     }
 }
 
@@ -4112,12 +3925,12 @@ html {
    only once the device has ever received a foreground push, so the plain web build renders exactly
    as before. */
 
-/* The bell rides as a direct child of .app-nav (next to the hamburger on narrow screens, where the
-   native shell lives) and inherits the .app-nav button quiet-action look; this just squares it up
-   to the same 44px tap target as .app-nav-toggle and anchors the badge.
+/* The bell is a 44px square tap target that anchors the badge. It used to inherit its quiet-action
+   look (accent ink, no background/border) from the `.app-nav a, .app-nav button` rules; with the
+   .app-nav gone (TM-1043) those properties live here so it never regresses to UA button chrome.
    NOTE (TM-455): the primary header bell (#nav-notif-bell, notification-bell.js) reuses these
    .tm-notif-bell / .tm-notif-badge classes — it's the always-on, server-feed-backed bell shown for
-   any signed-in, onboarded user; the TM-374 bell above is the native-only foreground-push recovery
+   any signed-in, onboarded user; the TM-374 bell is the native-only foreground-push recovery
    bell. Both share this look intentionally. Its glyph is an inline SVG, sized by its own attributes. */
 .tm-notif-bell {
     position: relative;
@@ -4127,94 +3940,56 @@ html {
     height: 44px;
     padding: 0;
     line-height: 1;
+    color: var(--accent);
+    background: none;
+    border: none;
+    cursor: pointer;
 }
 
-/* --- Corner-bell chrome (TM-910) --------------------------------------------------------------
- * On the self-headed surfaces (Profile now; Home/Events via their own lanes) corner-bell.js hides
- * the floating hamburger (#nav-toggle) and adds `.app-nav--corner-bell` here, leaving just the
- * notification bell in the account-nav row.
- *
- * MOBILE-SCOPED (≤ 33rem — the SAME breakpoint the hamburger + collapsed nav use): the floating row
- * only exists on the phone viewport (above it the nav is a normal inline row and #nav-items carries
- * the account links — kept intact so a desktop user, and e2e like onboarding-to-profile, still see
- * #nav-profile on #/profile). Below the breakpoint #nav-items is the COLLAPSED dropdown (display:none
- * until the — now hidden — toggle opens it), so the row is just the lone bell. The nav is lifted OUT
- * of normal flow and pinned to the top-right corner (see the rule below) so the screen's own heading
- * ("Profile") is the FIRST content and the bell rides the heading's top-right band WITHOUT overlapping
- * the heading's own control (the Profile diagnostics gear, .tm-pf-gear, in the profile-view below).
- * All CSS, no per-screen markup; route-agnostic so the TM-908/909 lanes reuse it by adding their route. */
-@media (max-width: 33rem) {
-    /* TM-910 fix (heading-first, AC1): take the nav OUT of normal flow and pin it to the top-right
-       corner of .app's padding box (.app becomes the positioned ancestor via :has()). With the nav no
-       longer occupying a ~44px row, the screen's own heading ("Profile", the .tm-pf-topbar <h2> in
-       #profile-view) flows to the TOP and is the FIRST content — not the second row below a bell band.
-       The bell overlays the top-right corner, clustering onto the heading's band; the topbar reserves
-       right room the width of the bell so the .tm-pf-gear sits just left of it (one top-right cluster,
-       no overlap). Offsets mirror the ≤30rem .app phone padding (incl. the TM-295 safe-area insets). */
-    .app:has(.app-nav--corner-bell) {
-        position: relative;
-    }
-
-    .app-nav.app-nav--corner-bell {
-        position: absolute;
-        top: calc(1.1rem + env(safe-area-inset-top));
-        right: calc(0.85rem + env(safe-area-inset-right));
-        z-index: 2;
-        justify-content: flex-end;
-        gap: 0;
-        min-height: 0;
-        margin: 0;
-    }
-
-    /* The screen normally leaves a 1.5rem top margin below the nav row (.profile-view margin-top).
-       With the nav lifted out of flow and pinned to the app's content-top band, that margin no longer
-       clears a nav row — it just drops the heading a whole 1.5rem BELOW the corner bell, so the bell
-       reads as a band ABOVE the heading (AC1's exact failure: titleTop > bellTop). Collapse it under
-       the corner-bell so the heading rises to the app's content top and shares the bell's band — the
-       heading is then genuinely the FIRST content, with the bell riding its top-right. Scoped to the
-       corner-bell state so desktop / wide (normal nav row) keep the breathing margin. */
-    .app:has(.app-nav--corner-bell) #profile-view.profile-view {
-        margin-top: 0;
-    }
-
-    .app:has(.app-nav--corner-bell) #profile-view .tm-pf-topbar {
-        padding-right: calc(44px + var(--space-2));
-    }
+/* --- Standalone corner bell (TM-1043) ----------------------------------------------------------
+ * The top .app-nav is gone; the bell is route-independent fixed chrome pinned top-right of the SAME
+ * clamp band as the .app column / #app-tabbar (width: min(100%, var(--app-max)), centred — NOT the
+ * raw viewport corner on desktop), with safe-area insets. The band itself is click-transparent;
+ * only the bell takes pointer events. Visibility stays on the button's `hidden` attribute, owned by
+ * updateNotificationBell() (signed-in + un-gated), so signed-out/gated screens show nothing. */
+.app-topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 900; /* same layer as the tab bar: under toasts (1000) + modals (1100) */
+    width: min(100%, var(--app-max));
+    margin-inline: auto;
+    display: flex;
+    justify-content: flex-end;
+    /* ~1.1rem = the established corner-bell top position (TM-910). A tighter 0.5rem sat the bell ~10px
+       higher, which pushed the profile identity header past the "content-first" geometry invariant
+       (profile-shell.spec.mjs: identityTop <= bellBottom + bellHeight). */
+    padding-top: calc(1.1rem + env(safe-area-inset-top));
+    padding-right: calc(0.85rem + env(safe-area-inset-right));
+    pointer-events: none;
 }
 
-/* === TM-908 Home corner-bell additive block (self-contained; append-only) =====================
- * The Home lane's slice of the corner-bell heading-first fix. The corner-bell mechanism itself
- * (lift the nav out of flow + pin the bell top-right) is fully shared from the TM-910 block above and
- * is triggered on Home the moment corner-bell-core adds `#/home` to CORNER_BELL_ROUTES — this block
- * ONLY handles the two Home-specific bits the shared rule can't know about, mirroring what TM-910 did
- * for #profile-view (the .profile-view margin collapse + the .tm-pf-topbar right-padding):
- *
- *   1. The signed-in Home feed is #auth-signed-in inside the `.auth` wrapper, and `.auth` carries a
- *      `margin: 1.75rem auto 0` top margin. With the nav lifted out of flow (shared rule) that margin
- *      no longer clears a nav row — it just drops the "Events near you" heading a whole 1.75rem BELOW
- *      the corner bell, so the bell reads as a band ABOVE the heading (the same AC failure TM-910 hit
- *      on Profile: titleTop > bellTop). Collapse it to 0 under the corner-bell state so the heading
- *      rises to the app's content top and shares the bell's band — genuinely the FIRST content.
- *
- *   2. The heading row (.tm-home-head) has no right-hand control of its own (unlike Profile's gear),
- *      so it would otherwise run full-width UNDER the corner bell. Reserve right room the width of the
- *      bell (44px + gutter) so a longer "Events near you"-style heading/subtitle can never collide
- *      with or slide beneath the pinned bell — one clean top-right cluster.
- *
- * Both are scoped to `.app:has(.app-nav--corner-bell)` AND the ≤33rem (phone) breakpoint, exactly
- * like the TM-910 rules, so desktop / wide (normal inline nav row) keep their breathing margin and
- * full-width heading. `#auth-signed-in` keys the margin rule to the SIGNED-IN Home panel only (never
- * the signed-out #auth-signed-out login card, which lives on #/login and is unaffected). */
-@media (max-width: 33rem) {
-    .app:has(.app-nav--corner-bell) .auth:has(#auth-signed-in:not([hidden])) {
-        margin-top: 0;
-    }
-
-    .app:has(.app-nav--corner-bell) #auth-signed-in .tm-home-head {
-        padding-right: calc(44px + var(--space-2));
-    }
+.app-topbar > .tm-notif-bell {
+    pointer-events: auto;
 }
-/* === end TM-908 Home corner-bell block ======================================================== */
+
+/* Headings keep clear of the overlaid bell (replaces the route-scoped
+ * .app:has(.app-nav--corner-bell) reservations — now unconditional at every width). */
+#profile-view .tm-pf-topbar,
+#auth-signed-in .tm-home-head {
+    padding-right: calc(44px + var(--space-2));
+}
+
+/* Heading-first (TM-908/TM-910 ACs, now route-independent): with no nav row in flow, collapse the
+ * old row-clearing top margins so the screen heading shares the bell's band, not a band below it. */
+#profile-view.profile-view {
+    margin-top: 0;
+}
+
+.auth:has(#auth-signed-in:not([hidden])) {
+    margin-top: 0;
+}
 
 /* Unread count chip: the .tm-badge-role-admin colour language (accent fill, on-accent text) shrunk
    to a corner pill. The --page-bg ring separates it from whatever sits behind the nav. */
@@ -4947,11 +4722,10 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 }
 
 /* ================================================================================================
- * Bottom navigation bar (TM-434) — the PRIMARY mobile navigation: Home · Events · Chat · Profile.
+ * Bottom navigation bar (TM-434) — the PRIMARY navigation: Home · Events · Chat · Profile.
  *
- * A fixed, full-width strip in the bottom thumb-zone, shown only on narrow / mobile + native
- * (WebView) viewports for a signed-in, un-gated user. DESKTOP / wide viewports never show it (base
- * `display:none`) and keep the top `.app-nav`, so there is exactly ONE primary nav per width. Styled
+ * A fixed strip in the bottom thumb-zone, shown at EVERY width for a signed-in, un-gated user
+ * (TM-1042). The top .app-nav was deleted in TM-1043, so this bar is the SINGLE primary nav. Styled
  * purely with theme tokens (var(--token)) so it renders across any accent + both toggle states + dark, and
  * folds in env(safe-area-inset-bottom) so it clears the iPhone home indicator / Android gesture nav.
  * ============================================================================================== */
@@ -4964,8 +4738,8 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     left: 0;
     right: 0;
     bottom: 0;
-    /* Below the toasts (1000), modal/dialog backdrops (1100) and the top-nav dropdown (1500) so a
-       dialog/menu always sits over the bar; above ordinary page content. */
+    /* Below the toasts (1000) and modal/dialog backdrops (1100) so a dialog/menu always sits over
+       the bar; above ordinary page content. Same layer as the top .app-topbar bell band. */
     z-index: 900;
     /* TM-1042: constrain the fixed bar to the same clamp band as the .app column and centre it, so on
        wide viewports it sits under the column instead of stretching full-bleed. left:0 + right:0 + an
