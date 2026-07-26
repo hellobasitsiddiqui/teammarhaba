@@ -33,6 +33,10 @@ import {
   GENDER_OPTIONS,
   GENDER_VALUES,
   genderChoiceError,
+  PROFILE_SECTIONS,
+  profileSectionsStateKey,
+  resolveSectionState,
+  toggleSectionState,
 } from "../src/assets/profile-core.js";
 
 // The real Profile field shapes profile.js feeds validateProfileField (TM-162) — so these tests
@@ -786,4 +790,126 @@ test("genderChoiceError: an unknown bucket is rejected (closed enum)", () => {
   for (const bad of ["OTHER", "female", "nonbinary", "M"]) {
     assert.notEqual(genderChoiceError(bad), "", `${bad} must be rejected`);
   }
+});
+
+// ── Collapsible profile sections (TM-879) — the pure disclosure model ──────────────────────────────
+// These guard the section catalogue + defaults, the per-user localStorage key, and the resolve/toggle
+// state decisions the profile.js renderer maps to disclosure buttons/panels. Fail-before/pass-after:
+// each assertion pins a groomed contract (the exact default-open/collapsed layout, identity pinned,
+// Sign out never inside a collapsible, per-uid persistence) so a regression flips it red.
+
+test("PROFILE_SECTIONS: the groomed order + default open/collapsed states (TM-879)", () => {
+  // The exact catalogue order the hub renders (identity header is NOT in it — it's pinned separately).
+  assert.deepEqual(
+    PROFILE_SECTIONS.map((s) => s.id),
+    ["strength", "interests", "membership", "edit", "security", "appearance", "diagnostics"],
+    "sections render in the groomed order",
+  );
+  // The groomed defaults: strength + interests OPEN, everything else COLLAPSED.
+  const defaults = Object.fromEntries(PROFILE_SECTIONS.map((s) => [s.id, s.defaultOpen]));
+  assert.equal(defaults.strength, true, "Profile strength defaults OPEN");
+  assert.equal(defaults.interests, true, "Interests defaults OPEN");
+  assert.equal(defaults.membership, false, "Membership defaults COLLAPSED");
+  assert.equal(defaults.edit, false, "Edit profile defaults COLLAPSED");
+  assert.equal(defaults.security, false, "Security defaults COLLAPSED");
+  assert.equal(defaults.appearance, false, "Appearance defaults COLLAPSED");
+  assert.equal(defaults.diagnostics, false, "Diagnostics defaults COLLAPSED");
+});
+
+test("PROFILE_SECTIONS: the identity header is PINNED — never a collapsible section (TM-879)", () => {
+  // The identity/anchor header (avatar/name/city·age/email/phone/badges) is deliberately NOT in the
+  // collapsible catalogue — it's rendered pinned above the sections. Guard that it never sneaks in.
+  const ids = PROFILE_SECTIONS.map((s) => s.id);
+  for (const pinned of ["identity", "header", "id"]) {
+    assert.ok(!ids.includes(pinned), `the pinned identity header must not be a collapsible section (${pinned})`);
+  }
+});
+
+test("PROFILE_SECTIONS: the action rows (incl. Sign out) are NEVER a collapsible section (TM-879)", () => {
+  // Notifications / Public profile / Privacy / Sign out are action rows OUTSIDE the collapsible region
+  // so Sign out (the app's only sign-out entry, TM-906) can never end up hidden inside a collapsed
+  // section. None of those live in the section catalogue.
+  const ids = PROFILE_SECTIONS.map((s) => s.id);
+  for (const action of ["signout", "sign-out", "signOut", "notifications", "privacy", "menu", "actions", "public"]) {
+    assert.ok(!ids.includes(action), `action row '${action}' must not be a collapsible section (Sign out stays reachable)`);
+  }
+});
+
+test("profileSectionsStateKey: per-uid, versioned, anon fallback (TM-879)", () => {
+  assert.equal(profileSectionsStateKey("abc123"), "tm.profileSections.v1.abc123");
+  // Distinct uids → distinct keys, so one user's layout never leaks onto another on a shared device.
+  assert.notEqual(profileSectionsStateKey("userA"), profileSectionsStateKey("userB"));
+  // A falsy uid (signed-out / pre-load render) falls back to a stable "anon" key rather than crashing.
+  assert.equal(profileSectionsStateKey(""), "tm.profileSections.v1.anon");
+  assert.equal(profileSectionsStateKey(undefined), "tm.profileSections.v1.anon");
+  assert.equal(profileSectionsStateKey(null), "tm.profileSections.v1.anon");
+});
+
+test("resolveSectionState: nothing stored → the groomed defaults verbatim (TM-879)", () => {
+  const state = resolveSectionState(null);
+  assert.deepEqual(state, {
+    strength: true, interests: true, membership: false, edit: false,
+    security: false, appearance: false, diagnostics: false,
+  });
+  // A completely empty saved object is also just the defaults.
+  assert.deepEqual(resolveSectionState({}), state);
+});
+
+test("resolveSectionState: a saved override is layered over the defaults (TM-879)", () => {
+  // The user collapsed strength and expanded edit + security — those overrides win; the rest default.
+  const state = resolveSectionState({ strength: false, edit: true, security: true });
+  assert.equal(state.strength, false, "a saved collapse of a default-open section is honoured");
+  assert.equal(state.edit, true, "a saved expand of a default-collapsed section is honoured");
+  assert.equal(state.security, true);
+  assert.equal(state.interests, true, "an unmentioned section keeps its default (open)");
+  assert.equal(state.membership, false, "an unmentioned section keeps its default (collapsed)");
+  // Always a COMPLETE map — every catalogue section is present regardless of what was saved.
+  assert.deepEqual(Object.keys(state).sort(), PROFILE_SECTIONS.map((s) => s.id).sort());
+});
+
+test("resolveSectionState: a stale/unknown id or a non-boolean value is ignored (TM-879)", () => {
+  // A key from an earlier catalogue (a since-removed section) must not poison the map, and a non-boolean
+  // value (a corrupt blob, a stringy "true") must fall back to the section's default — a section always
+  // resolves to a real, known state rather than vanishing or carrying junk.
+  const state = resolveSectionState({ ghostSection: true, edit: "true", strength: 0, interests: null });
+  assert.ok(!("ghostSection" in state), "an unknown id is dropped");
+  assert.equal(state.edit, false, "a stringy 'true' is ignored → the default (collapsed) stands");
+  assert.equal(state.strength, true, "a numeric 0 is ignored → the default (open) stands");
+  assert.equal(state.interests, true, "a null is ignored → the default (open) stands");
+});
+
+test("toggleSectionState: flips one section, returns a complete NEW blob, never mutates input (TM-879)", () => {
+  const current = resolveSectionState(null); // defaults
+  const next = toggleSectionState(current, "edit"); // edit was collapsed → now open
+  assert.equal(next.edit, true, "toggling a collapsed section opens it");
+  assert.equal(current.edit, false, "the input state is not mutated");
+  assert.notStrictEqual(next, current, "a NEW object is returned");
+  // Every OTHER section is unchanged — an independent (not single-open) accordion.
+  assert.equal(next.strength, true);
+  assert.equal(next.interests, true);
+  assert.equal(next.membership, false);
+  // Toggling back closes it again.
+  assert.equal(toggleSectionState(next, "edit").edit, false, "toggling an open section collapses it");
+});
+
+test("toggleSectionState: independent (multi-open) — toggling one leaves the others' state intact (TM-879)", () => {
+  // Prove it is NOT a single-open accordion: opening a second section does not close the first.
+  let state = resolveSectionState(null); // strength + interests open
+  state = toggleSectionState(state, "membership", true); // open a 3rd
+  state = toggleSectionState(state, "security", true); //   open a 4th
+  assert.equal(state.strength, true, "the originally-open strength stays open");
+  assert.equal(state.interests, true, "the originally-open interests stays open");
+  assert.equal(state.membership, true);
+  assert.equal(state.security, true, "opening a section does NOT collapse the others (multi-open)");
+});
+
+test("toggleSectionState: an explicit `open` forces the value; an unknown id is a safe no-op (TM-879)", () => {
+  const current = resolveSectionState(null);
+  // Forcing open an already-open section is idempotent (stays open, not toggled shut).
+  assert.equal(toggleSectionState(current, "strength", true).strength, true);
+  // Forcing collapsed.
+  assert.equal(toggleSectionState(current, "strength", false).strength, false);
+  // An unknown id can't poison the blob — the state comes back a valid, complete default map.
+  const noop = toggleSectionState(current, "ghost");
+  assert.deepEqual(noop, current, "toggling an unknown section id is a no-op");
 });

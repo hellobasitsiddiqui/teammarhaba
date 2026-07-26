@@ -78,6 +78,11 @@ import {
   // TM-777 (I5): the pure next-day completeness-nudge decision (picked==1 + not-shown-today → CTA).
   // The max it targets is injected by the renderer from state.interestConfig (TM-778's shared config).
   nextDayInterestsNudge,
+  // TM-879: the pure collapsible-sections model — the section catalogue + defaults, the per-uid
+  // localStorage key, and the resolve/toggle-state decisions. profile.js is a thin renderer over it.
+  profileSectionsStateKey,
+  resolveSectionState,
+  toggleSectionState,
 } from "./profile-core.js";
 // TM-1005: the grace banner's "Verify now" CTA lands on #/profile and announces itself via this shared
 // event (contract lives in the pure phone-reverify-core.js so the two halves can't drift); this module
@@ -1885,6 +1890,172 @@ function pfCard(title, children, extraClass = "") {
   ]);
 }
 
+// ── Collapsible profile sections (TM-879) ──────────────────────────────────────────────────────────
+// The long Profile hub is reorganised into INDEPENDENTLY collapsible sections implementing the WAI-ARIA
+// Accordion pattern (https://www.w3.org/WAI/ARIA/apg/patterns/accordion/). NOT a single-open accordion:
+// any number of sections may be open at once, each toggled on its own. The pure model (section order +
+// defaults, the per-uid localStorage key, the resolve/toggle-state decisions) lives in profile-core.js
+// (PROFILE_SECTIONS / profileSectionsStateKey / resolveSectionState / toggleSectionState), so THIS half
+// is just the DOM wiring: a header <button aria-expanded aria-controls>, a role="region" panel, the
+// height animation (skipped under prefers-reduced-motion), and per-user state persistence.
+//
+// The identity header is PINNED above these sections (never collapsible — the screen's anchor), and the
+// action rows (Notifications / Public profile / Privacy / Sign out) live OUTSIDE the collapsible region
+// entirely, so Sign out (TM-906: the app's only sign-out entry) is ALWAYS visible/reachable.
+
+// The live per-section open/collapsed map for the current mount (sectionId → isOpen), plus handles to
+// each section's button + panel so a toggle can flip aria + hidden + the animation. Reset on each
+// buildShell (a fresh mount owns its own controls); resolved from the groomed defaults + saved state.
+let sectionState = {}; // { [id]: boolean } — the resolved open state (all catalogue sections)
+const sectionControls = new Map(); // id → { button, panel } for the current mount
+
+/** Does the user prefer reduced motion? True → skip the height animation (paint the final state at once).
+ *  Guarded for the non-browser test harness (no window.matchMedia) — defaults to "animate". */
+function prefersReducedMotion() {
+  try {
+    return Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch {
+    return false;
+  }
+}
+
+/** The persisted collapse state for the signed-in user, or null when nothing's stored / storage is
+ *  unreadable (private mode). try/catch-wrapped so a storage failure degrades to the defaults, never
+ *  breaks the page — the same posture as the interests-nudge persistence above. */
+function readSectionState() {
+  try {
+    const raw = localStorage.getItem(profileSectionsStateKey(currentUser()?.uid));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null; // storage unavailable or a corrupt blob — fall back to the groomed defaults.
+  }
+}
+
+/** Persist the full resolved collapse state under the per-uid key. Best-effort (private-mode safe). */
+function writeSectionState(state) {
+  try {
+    localStorage.setItem(profileSectionsStateKey(currentUser()?.uid), JSON.stringify(state));
+  } catch {
+    /* storage unavailable — the layout just won't persist across visits; non-fatal. */
+  }
+}
+
+/**
+ * Reflect a section's open/collapsed state onto its DOM: the header button's aria-expanded, the panel's
+ * `hidden` attribute (the WAI-ARIA "not exposed to AT / not in tab order when collapsed" contract), and
+ * the .tm-pf-open modifier the CSS chevron-rotation + max-height animation key off. When motion is NOT
+ * reduced, the panel animates between 0 and its content height; under prefers-reduced-motion it snaps.
+ * No-op for an unknown id (defensive). Does NOT persist — the caller decides when to write.
+ *
+ * @param {string} id the section id
+ * @param {boolean} open the new open state
+ */
+function applySectionOpen(id, open) {
+  const ctl = sectionControls.get(id);
+  if (!ctl) return;
+  const { button, panel } = ctl;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  // The panel is REMOVED from the a11y tree + tab order when collapsed (hidden), then revealed on open —
+  // the standard disclosure contract. The .tm-pf-open modifier drives the chevron rotation + the CSS
+  // max-height reveal; the `hidden` attribute is the real content gate (belt-and-braces with the CSS).
+  if (open) {
+    panel.hidden = false;
+    panel.classList.add("tm-pf-open");
+  } else {
+    panel.classList.remove("tm-pf-open");
+    panel.hidden = true;
+  }
+}
+
+/**
+ * Toggle one section open/collapsed (or force via `open`): update the resolved state, reflect it on the
+ * DOM, and persist the full blob so the layout is remembered per user. Pure state transition delegated
+ * to profile-core.toggleSectionState; this only wires it to the DOM + storage.
+ *
+ * @param {string} id the section id being toggled
+ * @param {boolean} [open] force a value; omitted = flip
+ */
+function toggleSection(id, open) {
+  sectionState = toggleSectionState(sectionState, id, open);
+  applySectionOpen(id, sectionState[id]);
+  writeSectionState(sectionState);
+}
+
+/**
+ * Build one collapsible section (WAI-ARIA Accordion): a header <button aria-expanded aria-controls> whose
+ * whole row is the ≥44px tap target (chevron on the right rotates on open), and a role="region"
+ * aria-labelledby panel holding the section's body. Registers the pair in `sectionControls` and paints
+ * the initial open/collapsed state from `sectionState[id]`. XSS-safe (el() only — textContent, never
+ * innerHTML). Returns the section element for the hub to append in catalogue order.
+ *
+ * @param {string} id a PROFILE_SECTIONS id (also the stable DOM-id stem: `profile-section-<id>`)
+ * @param {string} title the visible section heading
+ * @param {(HTMLElement|null)[]} body the panel's content nodes
+ * @param {string} [extraClass] an extra class for the panel (e.g. tm-pf-edit for the edit card layout)
+ * @returns {HTMLElement} the <section> to mount
+ */
+function collapsibleSection(id, title, body, extraClass = "") {
+  const open = sectionState[id] !== false; // defaults to open only where the catalogue says so
+  const btnId = `profile-section-${id}-btn`;
+  const panelId = `profile-section-${id}-panel`;
+
+  const chevron = el("span", { class: "tm-pf-sec-chev", "aria-hidden": "true", text: "›" });
+  // The whole header IS the disclosure button (≥44px hit target via CSS). aria-controls points at the
+  // panel; aria-expanded is kept in sync by applySectionOpen. A real <button> gives Enter/Space +
+  // keyboard focus for free (the APG accordion baseline).
+  const button = el(
+    "button",
+    {
+      id: btnId,
+      class: "tm-pf-sec-header",
+      type: "button",
+      "aria-controls": panelId,
+      "aria-expanded": open ? "true" : "false",
+      onClick: () => toggleSection(id),
+    },
+    [el("span", { class: "tm-pf-sec-title", text: title }), chevron],
+  );
+
+  // The panel is a labelled region (APG: the disclosed content is a region named by its header button),
+  // so a screen reader announces "<title> region" on entry. `hidden` when collapsed removes it from the
+  // a11y tree + tab order. `.tm-pf-panel-inner` wraps the body so the max-height animation clips cleanly.
+  const panel = el(
+    "div",
+    { id: panelId, class: `tm-pf-sec-panel${extraClass ? " " + extraClass : ""}`, role: "region", "aria-labelledby": btnId },
+    [el("div", { class: "tm-pf-panel-inner" }, Array.isArray(body) ? body : [body])],
+  );
+
+  sectionControls.set(id, { button, panel });
+  applySectionOpen(id, open);
+
+  return el("section", { class: "tm-pf-card tm-pf-sec", id: `profile-section-${id}` }, [button, panel]);
+}
+
+/**
+ * Expand the section a given DOM id lives inside, if it's collapsed — so a deep-link / focus jump (the
+ * strength-gap "Add …" prompts, the interests nudge CTA, the profile-menu row scrolls) still lands on a
+ * visible control even when its section defaults collapsed. Maps the well-known jump targets to their
+ * owning section; a target already visible (or in a pinned/always-open area) is a no-op. Called by
+ * focusOnPage before it scrolls, so the jump never focuses a hidden node.
+ *
+ * @param {string} targetId the DOM id focusOnPage is about to jump to
+ */
+function ensureSectionVisibleFor(targetId) {
+  // Every editable form field + the avatar controls live in the "edit" section; the interests card in
+  // "interests"; the Appearance/Diagnostics settings block in "appearance"/"diagnostics". The menu row
+  // "Privacy & my data" scrolls to #profile-settings which is inside the appearance section.
+  const SECTION_OF = {
+    "profile-interests": "interests",
+    "profile-settings": "appearance",
+  };
+  let section = SECTION_OF[targetId];
+  // Any form field / avatar control (profile-firstName, profile-city, profile-avatar-file, …) is in edit.
+  if (!section && (targetId.startsWith("profile-") && !targetId.startsWith("profile-section-"))) {
+    if (targetId !== "profile-badges" && targetId !== "profile-signout-row") section = "edit";
+  }
+  if (section && sectionControls.has(section) && sectionState[section] === false) toggleSection(section, true);
+}
+
 /** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action.
  *  `id` (optional) stamps a stable DOM id on the row — the sign-out row carries one (TM-906) so the
  *  e2e suite can drive the ONLY sign-out entry without coupling to label text. */
@@ -1896,8 +2067,12 @@ function menuRow(label, { to = null, onClick = null, muted = false, id = null } 
   return el("button", { ...props, type: "button", onClick }, [el("span", { text: label }), chev]);
 }
 
-/** Scroll a same-page element into view and focus it (Notifications / Privacy menu rows). */
+/** Scroll a same-page element into view and focus it (Notifications / Privacy menu rows, the strength-gap
+ *  jumps + interests nudge). TM-879: first EXPAND the collapsible section the target lives in (if any),
+ *  so a deep-link into a default-collapsed section (e.g. a strength "Add your city →" jumping into the
+ *  Edit-profile section) reveals the field before scrolling to it — a hidden node can't be focused. */
 function focusOnPage(id) {
+  ensureSectionVisibleFor(id);
   const node = document.getElementById(id);
   if (!node) return;
   node.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1928,6 +2103,12 @@ async function doSignOut() {
 // (so the shipped self-service edit e2e, which expects #profile-form on #/profile, stays green) and
 // rebuilt on each entry (matching the prior reload-on-entry lifecycle).
 function buildShell(view) {
+  // TM-879: resolve this mount's collapsible-section open/collapsed state — the groomed defaults
+  // (PROFILE_SECTIONS) with any per-user saved overrides layered on top (readSectionState). A fresh
+  // mount owns its own control map, so clear any prior mount's button/panel handles.
+  sectionControls.clear();
+  sectionState = resolveSectionState(readSectionState());
+
   const fields = new Map();
   const fieldNodes = FIELDS.map((field) => {
     const built = buildField(field);
@@ -2030,7 +2211,9 @@ function buildShell(view) {
     hidden: true,
     onClick: () => focusOnPage("profile-interests"),
   });
-  const strengthCard = pfCard("Profile strength", [
+  // TM-879: Profile strength is collapsible section #1 (default OPEN). Its body is the same ring +
+  // nudge + interests-CTA content, now inside a disclosure panel.
+  const strengthCard = collapsibleSection("strength", "Profile strength", [
     ring,
     // The nudge/"all set" line keeps its own row BELOW the ring (TM-913 agreed default: ring only, the
     // percent lives in the ring centre; the "complete"/gap copy stays here). barPct is the ring's centre
@@ -2047,7 +2230,8 @@ function buildShell(view) {
   // The body carries id="profile-interests" — the TM-777 (I5) deep-link target the strength-card nudge
   // CTA scrolls to via focusOnPage("profile-interests"), so that shared contract keeps working.
   const interestsBody = el("div", { class: "tm-pf-interests", id: "profile-interests" });
-  const interestsCard = pfCard("Interests", [interestsBody]);
+  // TM-879: Interests is collapsible section #2 (default OPEN).
+  const interestsCard = collapsibleSection("interests", "Interests", [interestsBody]);
 
   // ── Membership (paper-profile) ── the tier row reflects the caller's REAL membership (TM-643): the
   // sub text is painted from GET /me/membership in load() via paintMembership() (through the pure
@@ -2064,30 +2248,37 @@ function buildShell(view) {
     manage.kind === "link"
       ? el("a", { class: "tm-pf-go", href: manage.href, text: manage.label })
       : el("span", { class: "tm-tier-badge tm-tier-badge-soon", text: manage.label });
-  const membershipCard = pfCard(
-    null,
+  // TM-879: Membership is collapsible section #3 (default COLLAPSED). The tier row (sub text) + the
+  // Manage affordance live inside the disclosure panel; the "Membership" heading is the section header.
+  const membershipCard = collapsibleSection(
+    "membership",
+    "Membership",
     [
-      el("div", { class: "tm-pf-memb-main" }, [
-        el("h3", { class: "tm-pf-ctitle", text: "Membership" }),
-        membershipSub,
-      ]),
-      membershipManage,
+      el("div", { class: "tm-pf-memb-body" }, [membershipSub, membershipManage]),
     ],
     "tm-pf-memb",
   );
 
   // ── Edit profile (paper-edit-profile) ── the shipped self-service form, restyled into a kit card.
-  const editCard = pfCard("Edit profile", [form], "tm-pf-edit");
+  // TM-879: collapsible section #4 (default COLLAPSED). The panel keeps the tm-pf-edit layout class so
+  // the narrow-viewport containment rules (TM-665) still scope to the form's card.
+  const editCard = collapsibleSection("edit", "Edit profile", [form], "tm-pf-edit");
 
   // Security + Appearance settings blocks (TM-282 / TM-529) — self-rendering. Appearance = the Paper
-  // per-user controls (accent swatch + wavy/sketchy toggle), persisted server-side. Wrapped in a
-  // labelled block the "Privacy & my data" menu row scrolls to.
+  // per-user controls (accent swatch + wavy/sketchy toggle), persisted server-side. TM-879 splits the
+  // old single "settings block" into three INDEPENDENT collapsible sections (Security / Appearance /
+  // Diagnostics), each default COLLAPSED. The Appearance panel keeps id="profile-settings" so the
+  // "Privacy & my data" menu row (focusOnPage) still lands there.
   const security = buildSecuritySettings();
   const appearance = buildAppearanceSettings();
-  const settingsBlock = el("section", { class: "tm-pf-settings", id: "profile-settings" }, [
-    appearance,
-    security,
-    // QA diagnostics link (TM-297) — unobtrusive way into #/diagnostics (GPS / FCM token / plugins).
+  // ── Security (#5) ── the biometric/security settings block (self-rendering).
+  const securityCard = collapsibleSection("security", "Security", [security]);
+  // ── Appearance (#6) ── the Paper per-user controls; the panel carries id=profile-settings (the
+  // "Privacy & my data" scroll target — kept so that menu row still resolves).
+  const appearanceBody = el("div", { class: "tm-pf-settings", id: "profile-settings" }, [appearance]);
+  const appearanceCard = collapsibleSection("appearance", "Appearance", [appearanceBody]);
+  // ── Diagnostics / Debug (#7) ── the QA diagnostics link (TM-297) into #/diagnostics.
+  const diagnosticsCard = collapsibleSection("diagnostics", "Diagnostics", [
     el("p", { class: "tm-diag-link" }, [
       el("a", { class: "tm-btn tm-btn-sm", href: "#/diagnostics" }, "Diagnostics"),
     ]),
@@ -2125,15 +2316,21 @@ function buildShell(view) {
       el("h2", { class: "tm-pf-title visually-hidden" }, [doodle("host", { class: "tm-doodle-header", title: "Your profile" }), "Profile"]),
       el("a", { class: "tm-pf-gear", href: "#/diagnostics", "aria-label": "Diagnostics and settings" }, [gearIcon()]),
     ]),
+    // ── PINNED anchor: identity header + badges, never collapsible (the screen's anchor). ──
     idHeader,
     badges,
-    strengthCard,
-    interestsCard,
-    membershipCard,
+    // ── Load/error status (skeleton / retry) — outside the collapsibles so it's always visible. ──
     status,
-    editCard,
+    // ── Collapsible sections (TM-879), in the groomed order. Each collapses INDEPENDENTLY. ──
+    strengthCard, //     1 default OPEN
+    interestsCard, //    2 default OPEN
+    membershipCard, //   3 default COLLAPSED
+    editCard, //         4 default COLLAPSED
+    securityCard, //     5 default COLLAPSED
+    appearanceCard, //   6 default COLLAPSED
+    diagnosticsCard, //  7 default COLLAPSED
+    // ── Actions — NOT collapsible; Sign out MUST stay always-visible/reachable (TM-906). ──
     menuCard,
-    settingsBlock,
   ]);
   clear(view).append(root);
 

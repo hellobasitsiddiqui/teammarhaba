@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import { ADMIN } from "../fixtures.mjs";
 
 // Profile refresh (TM-514): the Profile screen was brought in line with the approved paper wireframes
@@ -33,10 +33,13 @@ test("@profile the refreshed Profile hub shows the completeness ring, badges and
 
   // The refreshed hub container + the paper-profile cards render.
   await expect(page.locator(".tm-pf")).toBeVisible();
+  // TM-879: "Profile strength" is now a collapsible-section HEADER (default OPEN) — its title is visible.
   await expect(page.getByText("Profile strength")).toBeVisible();
-  // The shipped account-state badges (TM-168) are preserved in the hub.
+  // The shipped account-state badges (TM-168) are preserved in the pinned identity area.
   await expect(page.locator("#profile-badges")).toBeVisible();
-  // The self-service edit form is inline on the SAME screen (preserved behaviour).
+  // TM-879: the self-service edit form now lives in the default-COLLAPSED Edit-profile section — expand
+  // it, then assert it renders inline on the SAME screen (preserved behaviour).
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 
@@ -131,7 +134,8 @@ test("@profile the public-profile preview (#/profile/public) renders the paper-p
   await expect(page.getByRole("button", { name: "Block or report" })).toBeVisible();
   await expect(page.getByLabel("Back to profile")).toBeVisible();
 
-  // Back to the hub — the edit form is there again.
+  // Back to the hub — the edit form is there again (inside the default-COLLAPSED Edit section; expand it).
   await page.getByLabel("Back to profile").click();
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
 });

@@ -771,3 +771,97 @@ export function nextDayInterestsNudge(
   const message = `You picked 1 interest - add ${remaining} more so people find you →`;
   return { show, count, max: resolvedMax, remaining, message };
 }
+
+// ── Collapsible Profile sections (TM-879) — pure disclosure model ───────────────────────────────
+// The long Profile hub is reorganised into INDEPENDENTLY collapsible sections (a WAI-ARIA Accordion
+// where each header is a disclosure button — NOT a single-open accordion: many sections may be open at
+// once). The identity header stays PINNED above them all, and the action rows (Notifications / Public
+// profile / Privacy / Sign out) stay OUTSIDE the collapsible region so Sign out is always reachable.
+//
+// This is the DOM-free half: the section catalogue (order + default open/collapsed), the per-user
+// localStorage key, and the pure "merge saved state over the defaults" + toggle decisions — so the
+// collapse behaviour is unit-tested in plain Node (web/tools/profile-core.test.mjs), and profile.js is
+// a thin renderer over it. The DOM half (buttons, aria wiring, height animation, prefers-reduced-motion)
+// lives in profile.js; the styling in styles.css.
+
+/**
+ * The collapsible Profile sections, in render order, each with its DEFAULT open/collapsed state
+ * (the groomed TM-879 defaults). This is the single source of truth the renderer maps to cards:
+ *   1 Profile strength — default OPEN     2 Interests — default OPEN
+ *   3 Membership — default COLLAPSED      4 Edit profile — default COLLAPSED
+ *   5 Security — default COLLAPSED        6 Appearance — default COLLAPSED
+ *   7 Diagnostics — default COLLAPSED
+ * The identity header is deliberately ABSENT (it's pinned, never a collapsible section); so are the
+ * action rows (they're never collapsible). Frozen so a consumer can't mutate the shared catalogue.
+ */
+export const PROFILE_SECTIONS = Object.freeze([
+  Object.freeze({ id: "strength", title: "Profile strength", defaultOpen: true }),
+  Object.freeze({ id: "interests", title: "Interests", defaultOpen: true }),
+  Object.freeze({ id: "membership", title: "Membership", defaultOpen: false }),
+  Object.freeze({ id: "edit", title: "Edit profile", defaultOpen: false }),
+  Object.freeze({ id: "security", title: "Security", defaultOpen: false }),
+  Object.freeze({ id: "appearance", title: "Appearance", defaultOpen: false }),
+  Object.freeze({ id: "diagnostics", title: "Diagnostics", defaultOpen: false }),
+]);
+
+/** The set of valid section ids (for validating a persisted key against a since-changed catalogue). */
+const PROFILE_SECTION_IDS = new Set(PROFILE_SECTIONS.map((s) => s.id));
+
+/** The map of section id → default open state, derived once from the catalogue. */
+const PROFILE_SECTION_DEFAULTS = Object.freeze(
+  Object.fromEntries(PROFILE_SECTIONS.map((s) => [s.id, s.defaultOpen])),
+);
+
+/**
+ * The per-user localStorage key the collapse state is persisted under. Follows the app's established
+ * per-uid keying convention (tour.js `tm.<feature>.v1.<uid>`, and this module's own interests-nudge
+ * key) so one user's expanded/collapsed layout never leaks onto another account on a shared device.
+ * A falsy uid falls back to "anon" (a signed-out / pre-load render), exactly like interestsNudgeKey.
+ *
+ * @param {string} [uid] the signed-in Firebase uid
+ * @returns {string} e.g. "tm.profileSections.v1.abc123"
+ */
+export function profileSectionsStateKey(uid) {
+  return `tm.profileSections.v1.${uid || "anon"}`;
+}
+
+/**
+ * The effective open/collapsed state for every section: the groomed DEFAULTS, with any per-user saved
+ * overrides layered on top. Only KNOWN section ids and real booleans from the saved blob are honoured
+ * — a stale key from an earlier catalogue (a since-removed section) or a corrupt value is ignored, so
+ * a section always falls back to its default rather than vanishing or crashing. Pure: takes the parsed
+ * saved object (or null when there's nothing stored / storage was unreadable) and returns a fresh map.
+ *
+ * @param {Record<string, boolean>|null|undefined} saved the parsed persisted state (or null/none)
+ * @returns {Record<string, boolean>} sectionId → isOpen, one entry per catalogue section
+ */
+export function resolveSectionState(saved) {
+  const state = { ...PROFILE_SECTION_DEFAULTS };
+  if (saved && typeof saved === "object") {
+    for (const [id, open] of Object.entries(saved)) {
+      // Only override a section we still know about, and only with a real boolean — anything else
+      // (a string "true", a renamed id, null) is dropped so the default stands.
+      if (PROFILE_SECTION_IDS.has(id) && typeof open === "boolean") state[id] = open;
+    }
+  }
+  return state;
+}
+
+/**
+ * The next persisted state after a user toggles one section: the current resolved state with that one
+ * section's open flag flipped (or set explicitly via `open`). Returns a NEW object (never mutates the
+ * input) covering ALL catalogue sections, so what's written to storage is always a complete, valid blob
+ * — a later `resolveSectionState` read reproduces exactly this layout. A toggle on an unknown id is a
+ * no-op (returns the state unchanged) so a bad caller can't poison the blob.
+ *
+ * @param {Record<string, boolean>} current the current resolved state (all sections)
+ * @param {string} id the section being toggled
+ * @param {boolean} [open] force a value; omitted = flip the current one
+ * @returns {Record<string, boolean>} the new complete state to persist
+ */
+export function toggleSectionState(current, id, open) {
+  const base = resolveSectionState(current); // normalise + guarantee all keys present
+  if (!PROFILE_SECTION_IDS.has(id)) return base;
+  const next = typeof open === "boolean" ? open : !base[id];
+  return { ...base, [id]: next };
+}

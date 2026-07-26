@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { API_BASE_URL, dbConfig, uniqueGateGbNumber } from "../fixtures.mjs";
@@ -155,6 +155,8 @@ test("@onboarding a brand-new user deep-linking #/profile is gated, onboards, an
   await expect(page).toHaveURL(/#\/profile$/);
   await expect(page.locator("#onboarding-view")).toBeHidden();
   await expect(page.locator("#terms-view")).toBeHidden();
+  // TM-879: the edit form is inside the default-COLLAPSED Edit-profile section — open it to see it.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   // The nav Profile link is back now the gates are cleared.
   await expect(page.locator("#tab-profile")).toBeVisible();

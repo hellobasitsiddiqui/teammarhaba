@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { API_BASE_URL, dbConfig, lettersOnlyStamp, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
-import { signOutViaProfile } from "../helpers/auth-state.mjs";
+import { signOutViaProfile, expandProfileSection } from "../helpers/auth-state.mjs";
 
 // Golden-path end-to-end journey (TM-341) — ONE long happy-path run that walks the whole core
 // experience in a single test, as living evidence the product works front-to-back:
@@ -178,6 +178,8 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
   await clickNav(page, "#tab-profile");
+  // TM-879: the edit form + avatar control live in the default-COLLAPSED Edit-profile section — open it.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 

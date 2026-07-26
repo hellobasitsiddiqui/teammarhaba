@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import { ADMIN } from "../fixtures.mjs";
 
 // Avatar upload round-trip (TM-166): sign in → open #/profile → pick an image for the avatar control →
@@ -31,6 +31,8 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
 
   // Open the self-service profile page; its avatar control is enabled (Storage emulator configured).
   await page.click("#tab-profile");
+  // TM-879: the avatar control lives inside the default-COLLAPSED Edit-profile section — expand it.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   const fileInput = page.locator("#profile-avatar-file");
   await expect(fileInput).toBeEnabled();
@@ -67,6 +69,8 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
   await page.reload();
   await expectSignedIn(page);
   await page.click("#tab-profile");
+  // TM-879: a reload re-mounts collapsed — re-expand Edit to reach the avatar control preview.
+  await expandProfileSection(page, "edit");
   await expect(page.locator(".tm-profile-avatar .tm-avatar-img")).toBeVisible();
   const afterReload = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
   expect(afterReload).toBe(photoURL);
@@ -79,6 +83,8 @@ test("@avatar re-uploading a second avatar keeps the image loading (TM-335 self-
   // uploads and asserts the final avatar's bytes are actually fetchable (not a dangling 404).
   await signIn(page);
   await page.click("#tab-profile");
+  // TM-879: the avatar control lives inside the default-COLLAPSED Edit-profile section — expand it.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   const fileInput = page.locator("#profile-avatar-file");
   await expect(fileInput).toBeEnabled();
@@ -128,6 +134,8 @@ test("@avatar re-uploading a second avatar keeps the image loading (TM-335 self-
 test("@avatar a non-image file is rejected client-side before any upload", async ({ page }) => {
   await signIn(page);
   await page.click("#tab-profile");
+  // TM-879: the avatar control lives inside the default-COLLAPSED Edit-profile section — expand it.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
 
   // The avatar preview reflects the user's current photoURL. The first test in this file uploaded an

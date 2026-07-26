@@ -6612,6 +6612,92 @@ button.tm-c-reaction {
     font-weight: 700;
 }
 
+/* ── Collapsible profile sections (TM-879) ──────────────────────────────────────────────────────
+ * The WAI-ARIA Accordion disclosure UI: a full-width header <button aria-expanded> (the whole row is
+ * the ≥44px tap target) with the section title on the left and a chevron on the right that rotates when
+ * open; a role="region" panel that collapses to zero height (and gets the `hidden` attribute) when
+ * closed. Each section collapses INDEPENDENTLY (not a single-open accordion). Theme tokens only. */
+.tm-pf-sec {
+    /* The card owns the border/shadow; the header + panel manage their own inner padding, so zero it
+       on the card itself so a collapsed section is a tidy title-only row with no empty padding band. */
+    padding: 0;
+    overflow: hidden;
+}
+.tm-pf-sec-header {
+    /* The whole header row is the disclosure button: reset the native button chrome, span the card,
+       and enforce a ≥44px tap target (touch-accessibility floor). */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    background: none;
+    border: none;
+    border-radius: var(--radius-lg);
+    font: inherit;
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+}
+.tm-pf-sec-header:hover {
+    background: var(--surface-2);
+}
+.tm-pf-sec-header:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.tm-pf-sec-title {
+    font-size: var(--fs-4);
+    font-weight: 700;
+}
+.tm-pf-sec-chev {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: var(--fs-5);
+    line-height: 1;
+    /* Chevron points right (›) when collapsed; rotates to point down when the section is open. */
+    transition: transform 0.2s ease;
+}
+.tm-pf-sec-header[aria-expanded="true"] .tm-pf-sec-chev {
+    transform: rotate(90deg);
+}
+/* The panel: a max-height reveal so it animates open/closed. The `hidden` attribute (set by the JS)
+   is the authoritative content gate for a11y + no-CSS fallback; the max-height animation is the
+   visual polish layered on top. When open the inner content defines the height. */
+.tm-pf-sec-panel {
+    padding: 0 var(--space-4);
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.25s ease;
+}
+.tm-pf-sec-panel.tm-pf-open {
+    /* A generous ceiling — larger than any real section (the edit form is the tallest) so the content
+       is never clipped, while still animating from 0. Content height governs the actual box. */
+    max-height: 200rem;
+    padding-bottom: var(--space-3);
+}
+.tm-pf-sec-panel[hidden] {
+    display: none;
+}
+/* prefers-reduced-motion: no height animation, no chevron spin — the panel snaps open/closed. */
+@media (prefers-reduced-motion: reduce) {
+    .tm-pf-sec-panel,
+    .tm-pf-sec-chev {
+        transition: none;
+    }
+}
+/* Membership panel body (TM-879): the tier row + Manage affordance sit in the disclosure panel now. */
+.tm-pf-memb-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
 /* Profile-strength completeness RING (paper-profile, TM-913) — the restyled completeness prompt as a
  * circular SVG progress ring (was a horizontal bar). The SVG fills the box; the percent is centred on
  * top via a grid overlay. Single accent colour at every strength level (paper aesthetic — no

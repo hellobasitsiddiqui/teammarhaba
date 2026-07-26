@@ -43,6 +43,26 @@ export async function expectSignedIn(page, opts = undefined) {
   await expect(page.locator(SIGNED_IN)).toBeAttached(opts);
 }
 
+/**
+ * Expand a collapsible Profile section (TM-879) if it isn't already open, so a spec can interact with
+ * content that now lives inside a default-COLLAPSED disclosure panel (edit / membership / security /
+ * appearance / diagnostics). The strength + interests sections default OPEN, so a spec touching those
+ * needs no call. Idempotent: clicking the header only when it reads aria-expanded="false", so calling
+ * it on an already-open section is a no-op. Waits for the panel to be un-hidden before returning.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {"strength"|"interests"|"membership"|"edit"|"security"|"appearance"|"diagnostics"} id
+ */
+export async function expandProfileSection(page, id) {
+  const header = page.locator(`#profile-section-${id}-btn`);
+  await expect(header).toBeVisible();
+  if ((await header.getAttribute("aria-expanded")) !== "true") {
+    await header.click();
+  }
+  await expect(header).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(`#profile-section-${id}-panel`)).toBeVisible();
+}
+
 /** Wait until the router has rendered a signed-OUT state (stronger than "not signed in": it also
  *  proves the router ran, so it can't pass vacuously before the first render). */
 export async function expectSignedOut(page, opts = undefined) {
