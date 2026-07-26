@@ -130,6 +130,10 @@ const TEXT_MAX = 255;
 // and rejects digits, so a purely numeric "name" can no longer save. The hint mirrors the age/phone
 // fields' pattern of telling the user the rule up front.
 const NAME_HINT = "Letters, spaces, hyphens and apostrophes only.";
+// TM-968: the WHY shown on a frozen name field. Surfaced as the input's native `title` (a
+// hover/focus tooltip, plain text via el() so it's XSS-safe) alongside the padlock adornment — a
+// short, per-field echo of the fuller below-form nameLockNote. Cleared when the field unlocks.
+const NAME_LOCK_TOOLTIP = "Locked after your first event — contact support to change it.";
 const FIELDS = [
   { key: "firstName", label: "First name", type: "text", maxLength: TEXT_MAX, autocomplete: "given-name", hint: NAME_HINT },
   { key: "lastName", label: "Last name", type: "text", maxLength: TEXT_MAX, autocomplete: "family-name", hint: NAME_HINT },
@@ -765,6 +769,16 @@ const LOCKABLE_NAME_KEYS = ["firstName", "lastName"];
  * both sets AND clears the read-only state, so an admin-corrected / unlocked profile repaints editable.
  * a11y: read-only is conveyed by the real {@code readOnly} property + {@code aria-readonly="true"} +
  * a {@code .tm-input-locked} class AND the visible note — never by colour alone.
+ *
+ * <p>TM-968 affordances (presentation-only, layered on the same per-field freeze branch):
+ *   • a padlock adornment — a CSS data-URI background on {@code .tm-input-locked} (no DOM change),
+ *     so simply toggling that class paints/removes the padlock;
+ *   • a WHY tooltip — the input's native {@code title} (hover/focus, plain text, XSS-safe) explaining
+ *     the lock, set on freeze and removed on unlock;
+ *   • the allowed-characters hint ({@code entry.hint}) is HIDDEN while the field is frozen (you can't
+ *     edit it, so an edit rule is noise) and UN-hidden the moment it unlocks (admin correction).
+ * The carve-out (locked-but-EMPTY) gets none of these — it isn't really locked, it's still settable
+ * once, so it keeps its hint and shows no padlock/tooltip, exactly like a fully unlocked field.
  */
 function applyNameLock(profile) {
   const locked = Boolean(profile?.nameLocked);
@@ -779,11 +793,17 @@ function applyNameLock(profile) {
     input.readOnly = freeze;
     if (freeze) {
       input.setAttribute("aria-readonly", "true");
-      input.classList.add("tm-input-locked");
+      input.classList.add("tm-input-locked"); // TM-968: also paints the padlock (CSS background)
+      input.setAttribute("title", NAME_LOCK_TOOLTIP); // TM-968: the WHY on hover/focus
+      // TM-968: an edit hint is noise on a field you can't edit — hide it while frozen.
+      if (entry.hint) entry.hint.hidden = true;
       anyFrozen = true;
     } else {
       input.removeAttribute("aria-readonly");
       input.classList.remove("tm-input-locked");
+      input.removeAttribute("title"); // TM-968: drop the tooltip when the field unlocks
+      // TM-968: restore the char-hint on unlock (admin correction) or on the empty carve-out field.
+      if (entry.hint) entry.hint.hidden = false;
     }
   }
   // The visible explanation shows only when at least one name field is actually frozen (a locked user
@@ -1699,7 +1719,9 @@ function buildField(field) {
     ...verifyNodes,
   ]);
   // `country` is only present for the phone field (TM-781) — undefined elsewhere.
-  return { wrapper, input, error, country };
+  // `hint` is the allowed-characters hint <p> (null for fields without one); TM-968 hides/shows it
+  // per the name-lock state, so it's kept on the entry rather than re-found by DOM id.
+  return { wrapper, input, error, country, hint };
 }
 
 /**
@@ -2114,7 +2136,7 @@ function buildShell(view) {
     const built = buildField(field);
     // `country` is the phone field's TM-781 picker (undefined for every other field) — kept in the
     // shell so validateField/collectPatch/fillPhoneField can read the selected iso2.
-    fields.set(field.key, { input: built.input, error: built.error, country: built.country });
+    fields.set(field.key, { input: built.input, error: built.error, country: built.country, hint: built.hint });
     return built.wrapper;
   });
 
