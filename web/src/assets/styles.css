@@ -43,6 +43,13 @@
     --g6: #3a3a3a;      /* strong secondary ink */
     --ink: #2b2b2b;     /* graphite pencil ink — the kit's primary "colour" */
 
+    /* Page-shade micro-ramp (TM-1073) — a soft cool-neutral shade behind every screen so the WHITE
+       content cards (--surface-card) pop against it. The hexes live HERE, in the primitive layer; the
+       semantic tokens (--page-bg / --surface / --surface-2 / --app-canvas) alias these via var(). */
+    --shade-1: #e9ebee;      /* page ground — the screen shade (phone body + desktop .app column) */
+    --shade-2: #e1e4e8;      /* recessed a step deeper — table header rows, segmented-tab track */
+    --shade-canvas: #dfe2e6; /* wide-viewport canvas the shade column sits on (a hair deeper again) */
+
     /* Spacing scale — 4px-based rhythm; the rem steps already used across the UI, named so screens
        and the shared component library (TM-511) share one spacing vocabulary. */
     --space-1: 0.25rem;
@@ -94,7 +101,7 @@
     --radius: 8px;
     --radius-lg: 12px;
     --border-width: 2px;
-    --page-bg: var(--g1);         /* off-white paper (the sketchy grid layers on top via `body`) */
+    --page-bg: var(--shade-1);    /* TM-1073: soft neutral shade behind every screen so the white content cards pop against it (was var(--g1) near-white) */
 
     /* ── App shell (TM-1041) ──────────────────────────────────────────────────────────────────────
        The single Revolut-style column. `--app-max` is a responsive clamp band — full-width on phones
@@ -102,7 +109,7 @@
        `--app-canvas` is the neutral page background the centred column sits on at wide viewports (inert
        on phones, where the column fills the screen). Design baseline stays 390px. */
     --app-max: clamp(420px, 40vw, 480px);
-    --app-canvas: color-mix(in srgb, var(--g3) 55%, var(--white));
+    --app-canvas: var(--shade-canvas); /* TM-1073: desktop canvas a hair deeper than the shade column so the column edge still reads at wide viewports */
 
     /* ── Shape scale (TM-211) ──────────────────────────────────────────────────────────────────
        The remaining radii used across the UI, named so the corners can be reshaped at once. These
@@ -862,12 +869,12 @@ body {
    prefers-color-scheme. These surface/border/muted tokens are part of the Paper contract; the
    inky `--border` is derived from the ink token so it tracks light/dark automatically (TM-529). */
 :root {
-    --surface: var(--g1);         /* off-white paper */
-    --surface-2: var(--g2);
+    --surface: var(--shade-1);    /* TM-1073: the app ground = the same soft shade (phone body + desktop .app column both read shade, not near-white) */
+    --surface-2: var(--shade-2);  /* recessed a step deeper than the shade ground (table header rows, segmented-tab track) */
     --border: color-mix(in srgb, var(--fg) 72%, transparent);  /* 2px inky Paper line */
     --muted: var(--g5);
     --danger: #b00020;
-    --surface-card: var(--white); /* crisp white cards so the sketchy grid shows through the page */
+    --surface-card: var(--white); /* crisp WHITE content cards so they pop against the shade page */
 }
 
 @media (prefers-color-scheme: dark) {

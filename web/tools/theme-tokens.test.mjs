@@ -86,20 +86,35 @@ test("Paper is the single theme: NO retired theme family is selectable (TM-529 A
   assert.equal(count('data-theme="sketch"'), 0, "the sketch theme must be fully removed");
 });
 
-test("the Paper base (:root) resolves its neutrals from the single ramp (not re-hard-coded hexes)", () => {
-  // Paper is folded onto :root and aliases the primitive ramp — the drift TM-510 removed stays removed.
+test("the Paper base (:root) resolves its neutrals from the ramp/shade primitives (not re-hard-coded hexes)", () => {
+  // Paper is folded onto :root and aliases the PRIMITIVE layer — the drift TM-510 removed stays removed.
+  // TM-1073 moved the page ground off near-white --g1 onto the --shade-* micro-ramp (soft shade so white
+  // cards pop); the aliasing contract is unchanged — semantic tokens still alias primitives via var().
   for (const decl of [
     "--fg: var(--ink);",
-    "--page-bg: var(--g1);",
-    "--surface: var(--g1);",
-    "--surface-2: var(--g2);",
+    "--page-bg: var(--shade-1);",
+    "--surface: var(--shade-1);",
+    "--surface-2: var(--shade-2);",
     "--surface-card: var(--white);",
     "--muted: var(--g5);",
   ]) {
-    assert.ok(CSS.includes(decl), `Paper base must alias the ramp: expected \`${decl}\``);
+    assert.ok(CSS.includes(decl), `Paper base must alias the primitives: expected \`${decl}\``);
   }
   // Paper's inky lines are 2px (the wireframe-kit weight), not the old 1px clean border.
   assert.match(CSS, /--border-width:\s*2px;/, "Paper border-width must be 2px");
+});
+
+test("the page-shade micro-ramp primitives are defined with their anchor hexes (TM-1073)", () => {
+  // The soft shade behind every screen lives in the primitive layer (one place); semantic tokens alias
+  // it. These are the anchor values Basit picked from the mockup ("Shade" — #e9ebee page ground).
+  const shade = {
+    "--shade-1": "#e9ebee", // page ground (--page-bg / --surface)
+    "--shade-2": "#e1e4e8", // recessed (--surface-2)
+    "--shade-canvas": "#dfe2e6", // wide-viewport canvas (--app-canvas)
+  };
+  for (const [name, value] of Object.entries(shade)) {
+    assert.match(CSS, new RegExp(`${name}:\\s*${value};`), `${name} must be defined as ${value}`);
+  }
 });
 
 test("the curated accent palette exists as tokens and --accent defaults to the teal swatch (TM-529)", () => {

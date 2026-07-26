@@ -159,3 +159,80 @@ test("bell-anchoring headers are sticky + the Chat header clears the bell (TM-10
     "the Chat header (.tm-chat-head) must reserve the 44px bell clearance (TM-1072)",
   );
 });
+
+// ── TM-1073: soft shade page background, white content cards. The page ground (--page-bg on the phone
+//    body, --surface on the wide-viewport .app column) is a LIGHT NEUTRAL SHADE so the WHITE content
+//    cards (--surface-card) pop against it. Pin: shade ground on both surfaces, cards stay white, and
+//    the shade is genuinely distinct from card-white (the whole point of the change). ──
+
+/** First (light-mode `:root`) value of a custom property — dark-mode overrides come later in the file. */
+function lightValue(prop) {
+  const m = NO_COMMENTS.match(new RegExp(`${prop.replace(/[-]/g, "\\-")}:\\s*([^;]+);`));
+  return m ? m[1].trim() : null;
+}
+/** Resolve a token to its underlying value, following one/more levels of `var(--x)` aliasing to the
+ *  primitive it points at (TM-1073 aliases --page-bg/--surface onto the --shade-* primitives). */
+function resolved(prop, depth = 0) {
+  const v = lightValue(prop);
+  const ref = v && /^var\(\s*(--[\w-]+)\s*\)$/.exec(v);
+  if (ref && depth < 6) return resolved(ref[1], depth + 1);
+  return v;
+}
+/** Parse a #rrggbb (or #rgb) hex into [r,g,b]; null for non-hex (e.g. var(...)). */
+function hex(v) {
+  if (!v) return null;
+  let m = /^#([0-9a-fA-F]{6})$/.exec(v);
+  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  m = /^#([0-9a-fA-F]{3})$/.exec(v);
+  if (m) return [0, 1, 2].map((i) => parseInt(m[1][i].repeat(2), 16));
+  return null;
+}
+
+test("the page ground is an explicit light shade, not near-white var(--g1) (TM-1073)", () => {
+  const pageBg = resolved("--page-bg");
+  const rgb = hex(pageBg);
+  assert.ok(rgb, `--page-bg (light) must resolve to an explicit shade hex, got '${pageBg}' — not var(--g1) near-white`);
+  assert.notEqual(pageBg, "#fafafa", "--page-bg must no longer resolve to --g1 (#fafafa) near-white (TM-1073)");
+  // A real but LIGHT shade: every channel visibly below white (≤245) yet still light (≥205).
+  assert.ok(
+    rgb.every((c) => c <= 245) && rgb.every((c) => c >= 205),
+    `--page-bg ${pageBg} must be a light neutral SHADE (all channels 205–245) so cards can pop without the page going dark`,
+  );
+});
+
+test("the .app column ground (--surface) matches the page shade (TM-1073)", () => {
+  // On wide viewports the centred column paints --surface; it must read the SAME shade as the phone
+  // body's --page-bg, so the shade treatment is identical on both surfaces (not near-white on desktop).
+  assert.equal(
+    resolved("--surface"),
+    resolved("--page-bg"),
+    "--surface (the wide-viewport .app column ground) must resolve to the same shade as --page-bg so every screen reads identically",
+  );
+});
+
+test("content cards stay pure white and pop against the shade (TM-1073)", () => {
+  assert.match(
+    NO_COMMENTS,
+    /--surface-card:\s*var\(--white\)\s*;/,
+    "--surface-card must stay var(--white) — the white content boxes that pop against the shade page",
+  );
+  // The invariant that makes the whole change worth doing: card-white ≠ page-shade.
+  assert.notEqual(
+    resolved("--surface-card"),
+    resolved("--page-bg"),
+    "the white card token must resolve to a different colour than the shade page token (otherwise cards don't pop) (TM-1073)",
+  );
+});
+
+test("the wide-viewport canvas stays at least as deep as the shade column (TM-1073)", () => {
+  // At desktop the column (shade) sits on --app-canvas; the canvas must be no lighter than the column
+  // so the column edge still reads (a lighter canvas would make the column look like a dark inset).
+  const canvas = hex(resolved("--app-canvas"));
+  const column = hex(resolved("--surface"));
+  assert.ok(canvas && column, "--app-canvas and --surface must both be explicit hexes for the depth check");
+  const lum = ([r, g, b]) => r + g + b;
+  assert.ok(
+    lum(canvas) <= lum(column),
+    "--app-canvas must be no lighter than the --surface column shade so the column edge reads at wide viewports (TM-1073)",
+  );
+});
