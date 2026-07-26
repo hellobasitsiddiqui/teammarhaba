@@ -78,8 +78,8 @@ export const SCREENS = [
     ],
     callouts: [
       { at: { x: 50, y: 49 }, side: "bottom", fromHighlight: "#me" },
-      { at: { x: 77, y: 12 }, side: "bottom", fromHighlight: "#nav-admin" },
-      { at: { x: 66, y: 12 }, side: "bottom", fromHighlight: "#nav-profile" },
+      { at: { x: 77, y: 12 }, side: "bottom", fromHighlight: "#tab-admin" },
+      { at: { x: 66, y: 12 }, side: "bottom", fromHighlight: "#tab-profile" },
     ],
   },
 ];

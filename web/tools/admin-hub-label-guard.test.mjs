@@ -77,17 +77,18 @@ test('index.html: the #admin-hub-view region announces "Admin hub" to assistive 
   );
 });
 
-test('tour-highlights.js: the #nav-admin site-tour coachmark describes the hub, not the users console', () => {
+test('tour-highlights.js: the #tab-admin site-tour coachmark describes the hub, not the users console', () => {
   const source = readFileSync(join(HERE, "../src/assets/tour-highlights.js"), "utf8");
   assert.ok(
     !source.includes('"Admin console"'),
-    "tour-highlights.js must not title any coachmark \"Admin console\" — #nav-admin opens the hub now",
+    "tour-highlights.js must not title any coachmark \"Admin console\" — #tab-admin opens the hub now",
   );
-  // The #nav-admin step exists and is titled for the hub.
-  const step = source.indexOf('target: "#nav-admin"');
-  assert.ok(step !== -1, "the site tour must still include a #nav-admin step");
+  // The admin step exists and is titled for the hub. TM-1043 re-pointed the coachmark from the deleted
+  // top-nav #nav-admin to the tab bar's admin tab #tab-admin.
+  const step = source.indexOf('target: "#tab-admin"');
+  assert.ok(step !== -1, "the site tour must still include a #tab-admin step");
   assert.ok(
     source.slice(step, step + 200).includes('"Admin hub"'),
-    'the #nav-admin coachmark must be titled "Admin hub"',
+    'the #tab-admin coachmark must be titled "Admin hub"',
   );
 });
