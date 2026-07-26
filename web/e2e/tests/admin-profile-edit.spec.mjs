@@ -22,7 +22,7 @@ test("@admin admin edits another user's profile fields via the console, and it p
   await expectSignedIn(page);
 
   // 2. Open the users console via the hub (TM-917).
-  await page.click("#nav-admin");
+  await page.click("#tab-admin");
   await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });

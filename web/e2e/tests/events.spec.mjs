@@ -33,9 +33,10 @@ import { authHeadersFor, createEvent, apiRsvp, apiCancelRsvp, resetAttendanceFor
 //
 // Project-agnostic (like golden-path TM-341 / broadcast-admin TM-366): runs under BOTH the desktop
 // `chromium` and the phone `mobile-chromium` Playwright projects (see playwright.config.mjs testMatch),
-// so web + mobile-web coverage come from ONE spec. Every nav interaction goes through openNav()/
-// clickNav(). `screenshot: "on"` is global; we ALSO take an explicit named shot per major step so the
-// run yields a step-by-step visual trail to attach to the events evidence ticket (TM-402).
+// so web + mobile-web coverage come from ONE spec. Every nav interaction goes through clickNav() — a
+// bottom-tab-bar click, the single primary nav at every width since TM-1043 removed the top .app-nav.
+// `screenshot: "on"` is global; we ALSO take an explicit named shot per major step so the run yields a
+// step-by-step visual trail to attach to the events evidence ticket (TM-402).
 
 // Suppress the first-run product tour (TM-147) so its dimmed backdrop can't cover the controls under
 // test — the identical localStorage init-script every other spec uses.
@@ -50,62 +51,15 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** True when we're on the phone project rather than desktop. Detected off the BOTTOM TAB BAR
- *  (#app-tabbar), NOT the hamburger toggle — a visible tab bar means "phone viewport + signed in"
- *  (router un-hides it for a signed-in un-gated session; CSS reveals it only ≤528px). Copied from
- *  golden-path (TM-341) so the spec is project-agnostic across chromium + mobile-chromium.
- *
- *  Why not `#nav-toggle.isVisible()`? TM-908 made Home content-first: corner-bell.js now HIDES
- *  #nav-toggle on the corner-bell routes (#/home, #/profile), so the toggle is invisible there even on
- *  a phone — a false "desktop" reading. The tab bar stays visible on those routes, so it's the mobile
- *  signal that survives TM-908. */
-async function isMobileViewport(page) {
-  return page.locator("#app-tabbar").isVisible();
-}
-
-/** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop
- *  width. Copied from golden-path (TM-341) so the spec is project-agnostic across chromium +
- *  mobile-chromium.
- *
- *  TM-908 wrinkle: on a corner-bell route (#/home, #/profile) the hamburger is HIDDEN, so its utility
- *  links aren't reachable. When we're on mobile and the toggle isn't present, hop to #/notifications (a
- *  signed-in route that keeps the normal nav row) so the hamburger + its collapsed menu exist. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (!(await toggle.isVisible()) && (await isMobileViewport(page))) {
-    await page.evaluate(() => (window.location.hash = "#/notifications"));
-    await expect(page.locator("#notifications-view")).toBeVisible();
-  }
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-// Primary destinations that moved to the bottom tab bar on mobile (TM-434): on a phone the tab bar is
-// the primary nav (its Events/Profile links are hidden inside the hamburger), so navigate via the tab;
-// on desktop the tab bar is display:none and the top-nav link is used as before.
-const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
-
-/** Click a nav destination by its top-nav id. Mobile → bottom tab (TM-434) for a tab-bar destination
- *  (works from any route, incl. corner-bell Home where the hamburger is hidden), else the hamburger;
- *  desktop → the top-nav link directly. Works under both Playwright projects. */
-async function clickNav(page, selector) {
-  const onMobile = await isMobileViewport(page);
-  const tabSelector = NAV_TO_TAB[selector];
-  if (onMobile && tabSelector) {
-    const tab = page.locator(tabSelector);
-    await expect(tab).toBeVisible();
-    await tab.click();
-    return;
-  }
-  await openNav(page);
-  const item = page.locator(selector);
-  await expect(item).toBeVisible();
-  await item.click();
+/** Click a primary destination by its bottom-tab id. TM-1043 removed the top .app-nav (and its
+ *  hamburger) entirely, so the bottom tab bar (#app-tabbar) is now the ONLY nav at every width — a tab
+ *  click works from any route, incl. corner-bell Home where the old hamburger used to be hidden. Works
+ *  under both Playwright projects (the bar is display:none only when there's nothing to tab between,
+ *  which a signed-in un-gated session never is). */
+async function clickNav(page, tabSelector) {
+  const tab = page.locator(tabSelector);
+  await expect(tab).toBeVisible();
+  await tab.click();
 }
 
 /** Sign in a seeded, un-gated account via the email+password ("Try another way") flow — the same path
@@ -124,7 +78,7 @@ async function signIn(page, account) {
 
 /** Browse to #/events via the nav and open one event's detail by id — proving the list → detail nav. */
 async function browseToEvent(page, id) {
-  await clickNav(page, "#nav-events");
+  await clickNav(page, "#tab-events");
   await expect(page.locator("#events-view")).toBeVisible();
   // Content-first Events chrome (TM-909): the tab heads with the viewer's city (seeded "London"), and the
   // walking-skeleton brand block (wordmark/tagline/#status) is retired above it — the twin of Home (TM-908).
@@ -404,7 +358,7 @@ test("@events content-first tab is scoped to the viewer's city, with a browse-ot
 
   // Sign in as the seeded London goer and open the Events tab.
   await signIn(page, EVENT_GOER);
-  await clickNav(page, "#nav-events");
+  await clickNav(page, "#tab-events");
   await expect(page.locator("#events-view")).toBeVisible();
 
   // Content-first chrome: the heading is the viewer's city; the brand block is retired above it.

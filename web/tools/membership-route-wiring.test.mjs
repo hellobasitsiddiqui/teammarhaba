@@ -79,7 +79,7 @@ test("router.js auth-guards #/receipts — a signed-out deep link bounces to log
   );
 });
 
-test("router.js owns the receipts screen's show/hide + mount lifecycle + nav reveal (TM-624)", () => {
+test("router.js owns the receipts screen's show/hide + mount lifecycle (TM-624)", () => {
   // render() toggles the section (single screen — never stacked on home).
   assert.match(
     ROUTER_SRC,
@@ -97,10 +97,7 @@ test("router.js owns the receipts screen's show/hide + mount lifecycle + nav rev
     /if\s*\(!receiptsActive\)\s*\{\s*\n?\s*receiptsActive\s*=\s*true;\s*\n?\s*enterMembershipReceipts\(\);/,
     "guard() must mount the receipts screen once on entry into #/receipts",
   );
-  // The nav link is gated on signed-in AND the flag AND not gated — the states the self-reveal ignored.
-  assert.match(
-    ROUTER_SRC,
-    /navReceipts\.hidden\s*=\s*!\(signedIn\s*&&\s*membershipEnabled\(\)\)\s*\|\|\s*gated/,
-    "router.js must gate the #nav-receipts link on signed-in + flag + not-gated",
-  );
+  // NOTE (TM-1043): the old third half — router.js gating the #nav-receipts top-nav link — is gone
+  // WITH the top .app-nav (the link no longer exists); the module-side "must not touch #nav-receipts"
+  // guard above still pins that the self-reveal can't come back anywhere.
 });

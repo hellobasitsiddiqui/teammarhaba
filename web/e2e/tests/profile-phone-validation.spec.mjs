@@ -33,8 +33,8 @@ async function openProfile(page) {
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await expect(page.locator("#nav-profile")).toBeVisible();
-  await page.click("#nav-profile");
+  await expect(page.locator("#tab-profile")).toBeVisible();
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded; // populate has run — the form won't clobber what we type next
 }

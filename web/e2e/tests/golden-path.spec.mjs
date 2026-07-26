@@ -20,8 +20,8 @@ import { signOutViaProfile } from "../helpers/auth-state.mjs";
 //
 // Project-agnostic (TM-341 requirement): runs under BOTH the desktop `chromium` and the phone
 // `mobile-chromium` Playwright projects (see playwright.config.mjs). Every nav interaction goes
-// through openNav()/clickNav() helpers that open the hamburger first when it's collapsed (mobile
-// width) and no-op on desktop — so the same spec proves the happy path on desktop AND mobile web.
+// through the clickNav() helper — a bottom-tab-bar click, the single primary nav at every width since
+// TM-1043 removed the top .app-nav — so the same spec proves the happy path on desktop AND mobile web.
 //
 // Reuses the exact helpers/selectors of its siblings so it stays in sync:
 //   • the tour-suppression init-script (email-code / onboarding / terms / responsive specs),
@@ -82,69 +82,15 @@ async function signInFreshUser(page, email) {
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
-/** True when we're on the phone project rather than desktop. Detected off the BOTTOM TAB BAR
- *  (#app-tabbar), NOT the hamburger toggle. The router un-hides the tab bar for a signed-in, un-gated
- *  session and the CSS reveals it only ≤528px, so a visible tab bar means exactly "phone viewport +
- *  signed in" — the same condition under which the hamburger utility menu exists.
- *
- *  Why not `#nav-toggle.isVisible()` (the old heuristic)? TM-908 made Home content-first: corner-bell.js
- *  now HIDES #nav-toggle on the corner-bell routes (#/home, #/profile), so on those routes the toggle
- *  is invisible even on a phone — a false "desktop" reading that sent clickNav down the wrong branch.
- *  The tab bar stays visible on those routes, so it's the TM-908-proof mobile signal. */
-async function isMobileViewport(page) {
-  return page.locator("#app-tabbar").isVisible();
-}
-
-/** Open the account nav if it's currently collapsed behind the hamburger (phone width); a no-op at a
- *  desktop width where the links are always laid out. Project-agnostic: at a phone viewport the nav
- *  carries data-nav-open="false" until the toggle is clicked (TM-229 nav-toggle.js); on desktop the
- *  toggle is display:none, so we simply skip it.
- *
- *  TM-908 wrinkle: on a corner-bell route (#/home, #/profile) the hamburger is HIDDEN — the utility
- *  menu (Help / Admin / Notifications / Sign out) isn't reachable from those surfaces. When we're on
- *  mobile and the toggle isn't present, hop to #/notifications (a signed-in route that keeps the normal
- *  nav row) so the hamburger + its collapsed menu exist to open. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (!(await toggle.isVisible()) && (await isMobileViewport(page))) {
-    // Mobile, but the current route is corner-bell (toggle hidden). Move to a route that carries the
-    // hamburger so the utility links become reachable, then fall through to open it below.
-    await page.evaluate(() => (window.location.hash = "#/notifications"));
-    await expect(page.locator("#notifications-view")).toBeVisible();
-  }
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-// Primary destinations that moved to the bottom tab bar on mobile (TM-434): on a phone the tab bar is
-// the primary nav and its duplicate Events/Profile links are hidden inside the hamburger, so navigate
-// via the tab there; on desktop the tab bar is display:none and the top-nav link is used as before.
-const NAV_TO_TAB = { "#nav-events": "#tab-events", "#nav-profile": "#tab-profile" };
-
-/** Click a nav destination by its top-nav id. Project-agnostic:
- *  - Mobile (the bottom tab bar is visible): for a tab-bar destination, click the bottom tab (TM-434) —
- *    this works from ANY route, incl. the corner-bell Home/Profile where the hamburger is hidden;
- *    otherwise open the hamburger (openNav hops off a corner-bell route first if needed) and click.
- *  - Desktop (tab bar display:none): click the top-nav link directly.
+/** Click a primary destination by its bottom-tab id (#tab-home / #tab-events / #tab-chat / #tab-profile,
+ *  and #tab-admin which tabbar.js injects for admins once the ADMIN role resolves). TM-1043 removed the
+ *  top .app-nav and its collapsing hamburger entirely, so the bottom tab bar (#app-tabbar) is the SINGLE
+ *  nav at every width and a tab click works from ANY route — no viewport branch, no hamburger to open.
  *  Waits for the target to be visible so the click can't race the CSS reveal / router paint. */
-async function clickNav(page, selector) {
-  const onMobile = await isMobileViewport(page);
-  const tabSelector = NAV_TO_TAB[selector];
-  if (onMobile && tabSelector) {
-    const tab = page.locator(tabSelector);
-    await expect(tab).toBeVisible();
-    await tab.click();
-    return;
-  }
-  await openNav(page);
-  const item = page.locator(selector);
-  await expect(item).toBeVisible();
-  await item.click();
+async function clickNav(page, tabSelector) {
+  const tab = page.locator(tabSelector);
+  await expect(tab).toBeVisible();
+  await tab.click();
 }
 
 test("@golden the whole happy path: sign in → onboarding → terms → profile → avatar → home → help → sign out", async ({
@@ -230,7 +176,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   const meLoaded = page.waitForResponse(
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
-  await clickNav(page, "#nav-profile");
+  await clickNav(page, "#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 
@@ -309,14 +255,15 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await shot("home");
 
-  // Conditionally exercise the admin console — only shown for a ROLE_ADMIN (the router removes the
-  // link's `hidden` attribute). This journey's fresh user is a normal user, so this branch is
-  // skipped here; the seeded ADMIN's console has dedicated coverage in admin-walkthrough.spec.mjs.
-  const navAdmin = page.locator("#nav-admin");
+  // Conditionally exercise the admin console — only shown for a ROLE_ADMIN (tabbar.js injects the
+  // #tab-admin tab once the role resolves, un-hidden). This journey's fresh user is a normal user, so
+  // this branch is skipped here; the seeded ADMIN's console has dedicated coverage in
+  // admin-walkthrough.spec.mjs.
+  const navAdmin = page.locator("#tab-admin");
   const adminHidden = await navAdmin.getAttribute("hidden");
   if (adminHidden === null) {
-    await clickNav(page, "#nav-admin");
-    // TM-917: #nav-admin opens the #/admin HUB; the users console moved to #/admin/users, reached
+    await clickNav(page, "#tab-admin");
+    // TM-917: the Admin tab opens the #/admin HUB; the users console moved to #/admin/users, reached
     // via the hub's Users row (same routing as admin-walkthrough / broadcast-admin).
     await expect(page.locator("#admin-hub-view")).toBeVisible();
     await page.click('.admin-hub-row[href="#/admin/users"]');
@@ -329,7 +276,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   // is present its detail opens with the action area. Defensive so the journey stays deterministic
   // regardless of seeded data — the shared @events spec (events.spec.mjs) owns the full RSVP / waitlist
   // / claim coverage; here we just prove the events surface is reachable and renders for a fresh user.
-  await clickNav(page, "#nav-events");
+  await clickNav(page, "#tab-events");
   await expect(page.locator("#events-view")).toBeVisible();
   await expect(page.locator('[data-testid="events-list"], [data-testid="events-empty"]').first()).toBeVisible();
   await shot("events");
@@ -372,9 +319,10 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   // waits for the router's viewport-independent body[data-auth]="signed-out" signal (signing out on
   // the protected #/profile also bounces us to #/login, same as the admin-walkthrough used to see).
   await signOutViaProfile(page);
-  // The nav reflects it too: the sign-in link's `hidden` attribute is dropped (attribute, not CSS
-  // visibility — at a phone width the link lives inside the collapsed hamburger).
-  await expect(page.locator("#nav-signin")).not.toHaveAttribute("hidden", /.*/);
+  // Signed-out state is confirmed by the router's viewport-independent signal (TM-1043 removed the top
+  // nav / its sign-in link, so there's no nav affordance to assert on any more): body[data-auth] flips
+  // to "signed-out", the same flag signOutViaProfile waits for.
+  await expect(page.locator("body")).toHaveAttribute("data-auth", "signed-out");
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
   await shot("signed-out");

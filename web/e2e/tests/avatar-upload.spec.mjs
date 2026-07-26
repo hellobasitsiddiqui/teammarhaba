@@ -4,8 +4,9 @@ import { ADMIN } from "../fixtures.mjs";
 
 // Avatar upload round-trip (TM-166): sign in → open #/profile → pick an image for the avatar control →
 // the bytes upload to the Firebase Storage EMULATOR and the Firebase user's `photoURL` is set to the
-// returned download URL (the single source of truth) → the preview + nav avatar render that URL →
-// after a reload the photoURL is still there (read back off the persisted Firebase user).
+// returned download URL (the single source of truth) → the edit-form preview + the Profile hub identity
+// header (the persistent avatar surface, since TM-1043 removed the top-nav avatar chip) render that URL
+// → after a reload the photoURL is still there (read back off the persisted Firebase user).
 //
 // Hermetic: Auth + Storage both run against local emulators (see web/e2e/firebase.json + serve.mjs's
 // injected config). No real Firebase project is touched. We sign in as the seeded ADMIN purely
@@ -29,7 +30,7 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
   await signIn(page);
 
   // Open the self-service profile page; its avatar control is enabled (Storage emulator configured).
-  await page.click("#nav-profile");
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   const fileInput = page.locator("#profile-avatar-file");
   await expect(fileInput).toBeEnabled();
@@ -51,8 +52,11 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
   expect(previewSrc).toContain("/v0/b/");
   expect(previewSrc).toContain("avatars%2F"); // the per-uid object path, URL-encoded.
 
-  // The nav avatar reflects the same photoURL.
-  await expect(page.locator("#nav-avatar img")).toHaveAttribute("src", previewSrc);
+  // A second, persistent avatar surface reflects the same photoURL. TM-1043 removed the top-nav avatar
+  // chip (#nav-avatar / nav-avatar.js) with the .app-nav; the Profile hub identity header photo
+  // (.tm-pf-avatar-photo) is the surviving surface that subscribes to the same broadcast (TM-846) and
+  // renders the live photoURL — so it now carries this "another surface picked up the upload" check.
+  await expect(page.locator(".tm-pf-avatar-photo")).toHaveAttribute("src", previewSrc);
 
   // It's the user's photoURL now — assert directly on the live Firebase user.
   const photoURL = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
@@ -62,7 +66,7 @@ test("@avatar a user uploads an avatar; photoURL is set and shown, and survives 
   // photoURL (Firebase persists the user across reloads — browserLocalPersistence).
   await page.reload();
   await expectSignedIn(page);
-  await page.click("#nav-profile");
+  await page.click("#tab-profile");
   await expect(page.locator(".tm-profile-avatar .tm-avatar-img")).toBeVisible();
   const afterReload = await page.evaluate(() => window.tmAuth.currentUser()?.photoURL || null);
   expect(afterReload).toBe(photoURL);
@@ -74,7 +78,7 @@ test("@avatar re-uploading a second avatar keeps the image loading (TM-335 self-
   // the object it had just uploaded — so the SECOND avatar 404'd. This exercises two consecutive
   // uploads and asserts the final avatar's bytes are actually fetchable (not a dangling 404).
   await signIn(page);
-  await page.click("#nav-profile");
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
   const fileInput = page.locator("#profile-avatar-file");
   await expect(fileInput).toBeEnabled();
@@ -123,7 +127,7 @@ test("@avatar re-uploading a second avatar keeps the image loading (TM-335 self-
 
 test("@avatar a non-image file is rejected client-side before any upload", async ({ page }) => {
   await signIn(page);
-  await page.click("#nav-profile");
+  await page.click("#tab-profile");
   await expect(page.locator("#profile-form")).toBeVisible();
 
   // The avatar preview reflects the user's current photoURL. The first test in this file uploaded an

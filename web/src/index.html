@@ -94,94 +94,6 @@
         <p class="tagline">Find your people — complete your circle</p>
         <p id="status" class="status">loading…</p>
 
-        <!-- Account nav (TM-109): router.js reflects auth state — sign-in link vs sign-out.
-             Responsive (TM-229): on narrow screens the row collapses behind a hamburger toggle.
-             #nav-toggle is hidden on wide screens by CSS and only appears below the nav breakpoint;
-             nav-toggle.js wires the open/close behaviour. The toggle controls #nav-items (the
-             collapsible group); the items themselves keep their ids/visibility logic unchanged. -->
-        <nav class="app-nav" aria-label="Account">
-            <!-- No `hidden` attribute: CSS (the nav media query) decides when the hamburger shows,
-                 and the UA `[hidden]{display:none!important}` rule would otherwise beat that. The
-                 toggle is display:none on wide screens via CSS instead (see .app-nav-toggle). -->
-            <button id="nav-toggle" class="app-nav-toggle" type="button"
-                    aria-controls="nav-items" aria-expanded="false" aria-label="Menu">
-                <span class="app-nav-toggle-bars" aria-hidden="true"></span>
-            </button>
-            <div id="nav-items" class="app-nav-items">
-                <a id="nav-signin" href="#/login" hidden>Sign in</a>
-                <!-- Primary top-nav destinations (TM-1024): on DESKTOP this row IS the primary nav, and
-                     it must be EXACTLY the four bottom-tab-bar tabs (tabbar-core.js TABS) in the same
-                     locked order — Home · Events · Chat · Profile — plus Admin for admins. Keeping the
-                     two nav surfaces to the one tab list means the desktop top nav and the mobile bottom
-                     bar can never drift (a drift-guard unit test pins it: web/tools/top-nav-matches-tabs.test.mjs).
-                     Each link is revealed by router.js for a signed-in, onboarded (un-gated) user. On
-                     MOBILE these links stay hidden inside the hamburger — the bottom tab bar (tabbar.js)
-                     is the primary nav there, so they aren't duplicated. -->
-                <!-- Home (TM-1024): matches TABS[home] → #/home. -->
-                <a id="nav-home" href="#/home" hidden>Home</a>
-                <!-- Events (TM-396 / TABS[events]): shown by router.js for any signed-in, onboarded user. -->
-                <a id="nav-events" href="#/events" hidden>Events</a>
-                <!-- Chat (TM-1024 / TABS[chat]): the event group-chat surface (#/chat). Placeholder route
-                     today (TM-434 "coming soon" stub) until the real chat lands (TM-433); the link is the
-                     same either way. -->
-                <a id="nav-chat" href="#/chat" hidden>Chat</a>
-                <!-- Edit-profile link (TM-167 / TABS[profile]): shown by router.js for any signed-in user. -->
-                <a id="nav-profile" href="#/profile" hidden>Profile</a>
-                <!-- Membership link (TM-480 screen, wired live TM-606): the #/membership tier-management
-                     screen. Kept `hidden` and revealed by router.js only for a signed-in, onboarded user
-                     AND only when the membership feature flag is ON (config.flags.membership, shipped OFF),
-                     so it's inert until the flag flips (TM-478). TM-606 moved the reveal + routing from
-                     membership-tier.js's old self-managed listener into the app router. -->
-                <a id="nav-membership" href="#/membership" hidden>Membership</a>
-                <!-- My tickets / purchases link (TM-481 screen, wired live TM-624): the #/receipts
-                     order-history screen. Kept `hidden` and revealed by router.js only for a signed-in,
-                     onboarded user AND only when the membership feature flag is ON (config.flags.membership,
-                     shipped OFF), so it's inert until the flag flips. TM-624 moved the reveal + routing out
-                     of membership-receipts.js's old self-managed listener into the app router (the same
-                     TM-606 move done for the Membership link), so it now respects the signed-out/gated states. -->
-                <a id="nav-receipts" href="#/receipts" hidden>My tickets</a>
-                <!-- Admin link (TM-133): shown by router.js only for a signed-in ADMIN. Opens the
-                     #/admin hub (TM-917), the single nav entry to all five consoles — the per-console
-                     top-nav links (events/venues/interests/messages) were removed in TM-937 since the
-                     hub's rows now cover them. The console ROUTES themselves are unchanged. -->
-                <a id="nav-admin" href="#/admin" hidden>Admin</a>
-                <!-- Take-a-tour launcher REMOVED from the top nav (TM-1024): the desktop top nav is now
-                     exactly the four tabs (+ Admin), so the tour-replay button no longer lives here. The
-                     tour code itself is unchanged and degrades gracefully with the button gone (tours.js
-                     wireHelp() no-ops when #nav-help is absent; tour.js skips any step whose target has
-                     vanished). Re-homing the tour launcher is deferred to wave-help-1; being unlaunchable
-                     from the nav in the interim is accepted (the #/help page + its visual guide stay). -->
-                <!-- Avatar (TM-166): nav-avatar.js paints the signed-in user's Firebase photoURL here. -->
-                <span id="nav-avatar" class="tm-nav-avatar" hidden></span>
-                <!-- Sign out (TM-906): removed from the top nav entirely — the ONLY sign-out entry is
-                     now the Profile hub's "Sign out" menu row (profile.js), behind a styled confirm
-                     dialog. No overflow menu, no admin shortcut. The old top-nav sign-out button id is
-                     BANNED repo-wide (web/tools/tm906-signout-ban.test.mjs pins this); e2e specs
-                     read the signed-in state from body[data-auth] (router.js) instead. -->
-
-            </div>
-            <!-- Notification bell (TM-455): the top-right header bell + unread badge, shown by
-                 router.js for any signed-in, onboarded user (hidden signed-out and on the onboarding /
-                 terms gates). A DIRECT child of .app-nav (NOT inside #nav-items) so it stays in the
-                 top-right next to the hamburger when the nav collapses on narrow screens — above the
-                 bottom tab bar (TM-434). notification-bell.js (imported by router.js) reads the unread
-                 count from the feed API (TM-454), paints the capped '9+' badge, and on click marks
-                 everything seen + opens the notification panel (TM-456 fills that open-seam; this does
-                 NOT build the panel). Reuses the .tm-notif-bell / .tm-notif-badge look from the TM-374
-                 foreground-push bell. Starts `hidden`; the router reveals it. -->
-            <button id="nav-notif-bell" class="tm-notif-bell" type="button" hidden aria-label="Notifications">
-                <svg class="tm-notif-bell-glyph" viewBox="0 0 24 24" width="22" height="22" fill="none"
-                     stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
-                     aria-hidden="true" focusable="false">
-                    <!-- a little hand-drawn bell (inks with currentColor; picks up the wobble edge
-                         when the sketchy Paper toggle is on) -->
-                    <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
-                    <path d="M10 19a2 2 0 0 0 4 0" />
-                </svg>
-                <span class="tm-notif-badge" hidden aria-hidden="true"></span>
-            </button>
-        </nav>
-
         <!-- Auth views (TM-106 panels, routed by TM-109): #auth-signed-out = #/login,
              #auth-signed-in = #/home. router.js owns their visibility. -->
         <section class="auth" aria-label="Account">
@@ -688,10 +600,29 @@
         </footer>
     </main>
 
-    <!-- Bottom navigation bar (TM-434): the PRIMARY mobile navigation — Home · Events · Chat · Profile
-         in this LOCKED order (Home first, Profile last). Shown only on narrow / mobile + native
-         (WebView) viewports for a signed-in, onboarded user; DESKTOP keeps the top .app-nav via a CSS
-         breakpoint (mirrors .app-nav-toggle). router.js drives visibility + the active-tab state via
+    <!-- Notification bell (TM-455 / TM-1043): standalone, route-independent chrome pinned to the
+         top-right of the app clamp band on EVERY signed-in route (the top .app-nav is gone; the
+         bottom tab bar is the only nav). Placed OUTSIDE <main class="app"> like #app-tabbar so it is
+         fixed chrome, aligned to the same width: min(100%, var(--app-max)) band. Visibility stays
+         owned by updateNotificationBell() (router-driven, signed-in + un-gated). Starts `hidden`. -->
+    <div id="app-topbar" class="app-topbar">
+        <button id="nav-notif-bell" class="tm-notif-bell" type="button" hidden aria-label="Notifications">
+            <svg class="tm-notif-bell-glyph" viewBox="0 0 24 24" width="22" height="22" fill="none"
+                 stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true" focusable="false">
+                <!-- a little hand-drawn bell (inks with currentColor; picks up the wobble edge
+                     when the sketchy Paper toggle is on) -->
+                <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
+                <path d="M10 19a2 2 0 0 0 4 0" />
+            </svg>
+            <span class="tm-notif-badge" hidden aria-hidden="true"></span>
+        </button>
+    </div>
+
+    <!-- Bottom navigation bar (TM-434 / TM-1042 / TM-1043): the PRIMARY navigation — Home · Events ·
+         Chat · Profile in this LOCKED order (Home first, Profile last), plus Admin for admins. The
+         tab bar is the SINGLE primary nav at EVERY width (the old desktop top .app-nav was removed in
+         TM-1043). Shown for a signed-in, onboarded user; router.js drives visibility + the active-tab state via
          tabbar.js (which uses the unit-tested tabbar-core.js rules). Placed OUTSIDE <main class="app">
          so it's a top-level fixed element in the thumb zone, not constrained by the centred column;
          styles.css pins it with env(safe-area-inset-bottom) so it clears the iPhone home indicator /
@@ -806,11 +737,6 @@
          localStorage + content-hash) / DISMISS (session) / PERSISTENT dismissal. Public read, so a
          warning shows pre-login; inert with nothing active. -->
     <script type="module" src="/assets/alerts.js"></script>
-    <!-- Nav avatar (TM-166): paints the signed-in user's Firebase photoURL into #nav-avatar. -->
-    <script type="module" src="/assets/nav-avatar.js"></script>
-    <!-- Responsive nav toggle (TM-229): hamburger open/close for the collapsed nav on narrow
-         screens. Vanilla, dependency-free; inert on wide screens (the toggle is CSS-hidden there). -->
-    <script src="/assets/nav-toggle.js"></script>
     <!-- Onboarding product tour (TM-135): auto-runs the whole-site walkthrough on first login and
          each page's tour on first visit; replayable from the Help menu. -->
     <script type="module" src="/assets/tours.js"></script>

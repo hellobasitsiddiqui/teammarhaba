@@ -6,7 +6,7 @@ import { authHeadersFor, createEvent, apiRsvp, resetAttendanceFor } from "../eve
 // runs ONLY under the `mobile-chromium` Playwright project (Pixel 5 ≈ 393px wide; see
 // playwright.config.mjs), so every assertion here is about the real narrow-screen layout:
 //   • no horizontal PAGE scroll (the classic mobile break),
-//   • the account nav collapses behind a hamburger that opens/closes,
+//   • the bottom tab bar (the single nav at every width since TM-1043) shows its tabs and navigates,
 //   • the admin users table scrolls inside its wrapper, not the whole page,
 //   • primary controls stay usable (visible + in the viewport).
 //
@@ -54,17 +54,17 @@ async function signInAsAdmin(page) {
   // TM-170) from GET /api/v1/me in the BACKGROUND and re-guards. Until that resolves, an immediate
   // `location.hash = "#/admin"` races AHEAD of the gate resolution: the late /me flips needsTerms/
   // isOnboarded and the re-guard bounces the session to #/onboarding or #/terms, stranding the
-  // admin view hidden for the whole timeout. The desktop admin-walkthrough spec dodges this by
-  // waiting for #nav-admin to be VISIBLE before navigating — but at a phone viewport #nav-admin
-  // lives inside the collapsed hamburger nav, so toBeVisible() never holds.
+  // admin view hidden for the whole timeout. The admin affordance is the bottom #tab-admin tab
+  // (TM-1043 removed the old top .app-nav / #nav-admin), which tabbar.js injects only once the
+  // ADMIN role resolves — so we can't race it by mere visibility either.
   //
-  // The viewport-independent equivalent of that desktop signal is the #nav-admin link's `hidden`
+  // The viewport-independent equivalent of that role-ready signal is the #tab-admin tab's `hidden`
   // ATTRIBUTE (set by render() in router.js, not the CSS collapse): the router removes it only once
   // the session is signed-in AND the ADMIN role has resolved AND NEITHER first-run gate is up
   // (`!(signedIn && isAdmin) || gated`). So waiting for that attribute to clear proves /me has
   // resolved and the session is un-gated + role-resolved — exactly the "app-ready" point a real
   // (slower) phone user reaches before they can open the admin console. Covers BOTH gates at once.
-  await expect(page.locator("#nav-admin")).not.toHaveAttribute("hidden", /.*/);
+  await expect(page.locator("#tab-admin")).not.toHaveAttribute("hidden", /.*/);
 }
 
 /**
@@ -126,67 +126,12 @@ test.describe("@responsive login at a phone viewport", () => {
     await expectControlUsable(page, page.locator("#emailcode-send-btn"));
     await expectNoHorizontalPageScroll(page);
   });
-
-  test("the hamburger toggle is shown at a phone viewport", async ({ page }) => {
-    await page.goto("/#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    // The toggle is hidden by the `hidden` attribute only when router/JS hides it; at this width the
-    // CSS reveals it (display:inline-grid). It must be visible AND a real ≥44px tap target.
-    const toggle = page.locator("#nav-toggle");
-    await expect(toggle).toBeVisible();
-    const box = await toggle.boundingBox();
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
-  });
 });
 
-test.describe("@responsive the account nav collapses behind a hamburger", () => {
-  test("opens to reveal the utility menu and closes after navigating", async ({ page }) => {
-    await page.goto("/#/login");
-    await expect(page.locator("#auth-signed-out")).toBeVisible();
-    await signInAsAdmin(page);
-    // Land on a signed-in route that STILL carries the floating hamburger so the utility-menu
-    // open/close behaviour under test is reachable. NOTE (TM-908): Home (#/home) is now content-first
-    // — corner-bell.js hides #nav-toggle and pins the bell top-right there — so the hamburger no
-    // longer exists on Home. #/notifications is a signed-in utility screen that keeps the normal nav
-    // row, so the hamburger + its collapsed menu are present to exercise here.
-    await page.evaluate(() => (window.location.hash = "#/notifications"));
-    await expect(page.locator("#notifications-view")).toBeVisible();
-
-    const nav = page.locator(".app-nav");
-    const toggle = page.locator("#nav-toggle");
-    // Post-TM-434 the hamburger is the UTILITY menu on mobile — the primary destinations moved to the
-    // bottom tab bar. TM-1024 removed the Help link from the nav (the desktop nav is now exactly the four
-    // tabs), so this test now asserts against the Admin link — a utility entry that stays in the hamburger
-    // for the admin we signed in as (Admin is NOT one of the four primary tabs, so it isn't hidden by the
-    // tm-has-tabbar rule the primary links get).
-    const adminLink = page.locator("#nav-admin");
-
-    // Collapsed by default: the menu group is not displayed, so the Admin link isn't visible.
-    await expect(adminLink).toBeHidden();
-    await expect(nav).toHaveAttribute("data-nav-open", "false");
-
-    // Open the menu → utility items become visible + aria-expanded reflects state.
-    await toggle.click();
-    await expect(nav).toHaveAttribute("data-nav-open", "true");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expectControlUsable(page, adminLink);
-
-    // Exactly one primary nav on mobile (TM-434 / TM-1024): the four primary tab destinations
-    // (Home · Events · Chat · Profile) now live in the bottom tab bar and are NOT duplicated inside the
-    // hamburger, so they stay hidden even when the menu is open.
-    await expect(page.locator(".app-nav-items > #nav-home")).toBeHidden();
-    await expect(page.locator(".app-nav-items > #nav-events")).toBeHidden();
-    await expect(page.locator(".app-nav-items > #nav-chat")).toBeHidden();
-    await expect(page.locator(".app-nav-items > #nav-profile")).toBeHidden();
-
-    // Clicking a utility item navigates AND closes the menu (TM-229 nav-toggle.js behaviour).
-    await adminLink.click();
-    await expect(nav).toHaveAttribute("data-nav-open", "false");
-    // The Admin link opens the #/admin hub (TM-917), which mounts into #admin-hub-view.
-    await expect(page.locator("#admin-hub-view")).toBeVisible();
-  });
-});
+// TM-1043 removed the top .app-nav and its collapsing hamburger (#nav-toggle) entirely — the bottom tab
+// bar is now the SINGLE nav at every width — so the former "hamburger toggle is shown" and "account nav
+// collapses behind a hamburger" cases were deleted (they asserted on removed elements). Tab-bar
+// responsive coverage below (TM-434) is the current nav under test.
 
 test.describe("@responsive bottom tab bar (TM-434)", () => {
   test("shows the four locked-order tabs, reflects the active route, and navigates each", async ({

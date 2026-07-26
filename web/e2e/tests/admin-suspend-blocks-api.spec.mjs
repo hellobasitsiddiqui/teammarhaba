@@ -132,11 +132,11 @@ test("@admin suspending a user via the console blocks their API access (200 → 
 
   // 3. Authenticated: the admin nav appears (ROLE_ADMIN only).
   await expectSignedIn(page);
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
 
-  // 4. Open the admin layer, then the users console via the hub (TM-917: #nav-admin opens the #/admin
+  // 4. Open the admin layer, then the users console via the hub (TM-917: #tab-admin opens the #/admin
   //    hub; the users console moved to #/admin/users). TARGET is listed + Enabled (reset in beforeAll).
-  await page.click("#nav-admin");
+  await page.click("#tab-admin");
   await page.click('.admin-hub-row[href="#/admin/users"]');
   await expect(page.locator("#admin-view")).toBeVisible();
   const targetRow = page.locator("#admin-table tr", { hasText: TARGET.email });

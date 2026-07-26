@@ -6,11 +6,13 @@
 // review, and — per the admin-stats-loading.test.mjs precedent — the DOM modules involved can't be
 // imported under `node --test`, so both are pinned with source assertions:
 //
-// 1. golden-path.spec.mjs's conditional admin branch still clicked #nav-admin and asserted
-//    #admin-view directly. #nav-admin now opens the hub, so the branch would fail the moment it ran
-//    as an admin (it's normally skipped: the journey's fresh user is a normal user). The fixed
+// 1. golden-path.spec.mjs's conditional admin branch still clicked the admin nav entry and asserted
+//    #admin-view directly. The admin entry now opens the hub, so the branch would fail the moment it
+//    ran as an admin (it's normally skipped: the journey's fresh user is a normal user). The fixed
 //    branch must route via the hub's Users row — exactly like the sibling admin specs
-//    (admin-walkthrough / admin-suspend-blocks-api / broadcast-admin) already do.
+//    (admin-walkthrough / admin-suspend-blocks-api / broadcast-admin) already do. (TM-1043: the
+//    admin nav entry is the tab bar's #tab-admin — the old top-nav #nav-admin was deleted with the
+//    .app-nav.)
 //
 // 2. The broadcast deep-link pickers' ROUTE_LABELS (admin.js + admin-messages.js) still labelled
 //    "#/admin" as "Admin console" — but that route now opens the hub, not the users console, so an
@@ -27,20 +29,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ── 1. golden-path admin branch routes to the users console VIA the hub ─────────────────────────────
 
-test("golden-path admin branch clicks the hub's Users row between #nav-admin and the #admin-view assert", () => {
+test("golden-path admin branch clicks the hub's Users row between #tab-admin and the #admin-view assert", () => {
   const spec = readFileSync(join(HERE, "../e2e/tests/golden-path.spec.mjs"), "utf8");
 
-  // Slice the admin branch: from the #nav-admin click to the first #admin-view assertion after it.
-  const navClick = spec.indexOf('clickNav(page, "#nav-admin")');
-  assert.ok(navClick !== -1, "golden-path.spec.mjs must still exercise #nav-admin in its admin branch");
+  // Slice the admin branch: from the #tab-admin click to the first #admin-view assertion after it.
+  const navClick = spec.indexOf('clickNav(page, "#tab-admin")');
+  assert.ok(navClick !== -1, "golden-path.spec.mjs must still exercise #tab-admin in its admin branch");
   const adminView = spec.indexOf('"#admin-view"', navClick);
-  assert.ok(adminView !== -1, "the admin branch must still assert #admin-view after the #nav-admin click");
+  assert.ok(adminView !== -1, "the admin branch must still assert #admin-view after the #tab-admin click");
   const branch = spec.slice(navClick, adminView);
 
-  // The crux: post-hub, #nav-admin opens #admin-hub-view — the branch must confirm the hub showed…
+  // The crux: post-hub, the admin entry opens #admin-hub-view — the branch must confirm the hub showed…
   assert.ok(
     branch.includes("#admin-hub-view"),
-    "the admin branch must assert the hub (#admin-hub-view) is shown after clicking #nav-admin",
+    "the admin branch must assert the hub (#admin-hub-view) is shown after clicking #tab-admin",
   );
   // …and reach the users console through the hub's Users row, not expect #admin-view directly.
   assert.ok(

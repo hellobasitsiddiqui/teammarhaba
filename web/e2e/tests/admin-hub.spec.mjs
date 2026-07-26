@@ -60,8 +60,6 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
     // Exactly the locked four tabs — the Admin tab is never injected for a non-admin.
     await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(4);
     await expect(page.locator("#tab-admin")).toHaveCount(0);
-    // The top-nav admin link stays hidden too (same verified-role gate).
-    await expect(page.locator("#nav-admin")).toHaveAttribute("hidden", /.*/);
 
     // Deep-linking the admin routes bounces a non-admin home — the hub and the moved users console
     // are both hard-gated (client bounce mirrors the server gate; no admin view is shown).

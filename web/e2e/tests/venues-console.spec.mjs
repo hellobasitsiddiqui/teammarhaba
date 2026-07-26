@@ -12,7 +12,8 @@ import { authHeadersFor } from "../events-api.mjs";
 //      create → see it in the list → edit a field → deactivate → confirm it drops from the active list.
 //
 // Both reuse the harness's seeded ADMIN (global-setup.mjs, which grants the role=ADMIN custom claim so
-// #nav-admin appears and the /api/v1/admin/venues routes authorize). `screenshot: "on"` is set
+// the #tab-admin tab appears (tabbar.js injects it for the ADMIN role) and the /api/v1/admin/venues
+// routes authorize). `screenshot: "on"` is set
 // globally (playwright.config.mjs); each spec also takes explicit named shots for the evidence trail.
 
 // Suppress the first-run product tour so its dimmed overlay/backdrop can't cover the controls under
@@ -28,22 +29,9 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Open the account nav if it's collapsed behind the hamburger (phone width); a no-op at desktop. */
-async function openNav(page) {
-  const toggle = page.locator("#nav-toggle");
-  if (await toggle.isVisible()) {
-    const nav = page.locator(".app-nav");
-    if ((await nav.getAttribute("data-nav-open")) !== "true") {
-      await toggle.click();
-      await expect(nav).toHaveAttribute("data-nav-open", "true");
-    }
-  }
-}
-
-/** Open the #/admin hub. Post-TM-908, signed-in Home is content-first: the top nav (hamburger +
- *  #nav-admin) is gone on phone Home, and the admin affordance (bottom #tab-admin on phone /
- *  #nav-admin on desktop) renders async after the role resolves — racing it flakes. So deep-link
- *  straight to the hub, the same reload-onto-#/admin pattern nav-render-races.spec relies on. */
+/** Open the #/admin hub. The top nav is gone entirely (TM-1043); the admin affordance is the bottom
+ *  #tab-admin tab, which tabbar.js injects once the ADMIN role resolves — racing it flakes. So
+ *  deep-link straight to the hub, the same reload-onto-#/admin pattern nav-render-races.spec relies on. */
 async function openAdminHub(page) {
   await page.goto("/#/admin");
   await expect(page).toHaveURL(/#\/admin$/);
@@ -59,7 +47,7 @@ async function signInAsAdmin(page) {
   await page.fill("#password", ADMIN.password);
   await page.click("#signin-btn");
   // Signed in. Home is content-first post-TM-908 (no top nav on phone Home), so don't assert
-  // #nav-admin here — admin nav is reached width-aware in openAdminHub / openVenuesConsole.
+  // #tab-admin here — the admin tab is reached in openAdminHub / openVenuesConsole once the role resolves.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 

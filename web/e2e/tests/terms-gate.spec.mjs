@@ -72,7 +72,7 @@ test("@terms a brand-new user is terms-gated, accepts, and then enters the app",
   await expect(page.locator("#terms-link")).toBeVisible();
   await expect(page.locator("#privacy-link")).toBeVisible();
   // The in-app nav links are suppressed while gated, so the user can't side-step it.
-  await expect(page.locator("#nav-profile")).toBeHidden();
+  await expect(page.locator("#tab-profile")).toBeHidden();
 
   // Accept the current terms version → the gate lifts.
   const accepted = page.waitForResponse(
@@ -84,7 +84,7 @@ test("@terms a brand-new user is terms-gated, accepts, and then enters the app",
   // ENTERED: the app home view shows, the terms gate is gone, the nav links return.
   await expect(page.locator("#auth-signed-in")).toBeVisible();
   await expect(page.locator("#terms-view")).toBeHidden();
-  await expect(page.locator("#nav-profile")).toBeVisible();
+  await expect(page.locator("#tab-profile")).toBeVisible();
 
   // It persisted: terms_accepted_version + terms_accepted_at are on the row.
   const client = new pg.Client(dbConfig);
@@ -113,5 +113,5 @@ test("@terms a returning user who already accepted the current terms is NOT term
   await expectSignedIn(page);
   // Not gated: the terms view never shows; the app (admin nav) is reachable.
   await expect(page.locator("#terms-view")).toBeHidden();
-  await expect(page.locator("#nav-admin")).toBeVisible();
+  await expect(page.locator("#tab-admin")).toBeVisible();
 });

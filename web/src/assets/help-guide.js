@@ -72,8 +72,8 @@ export const SCREENS = [
       { label: "Help", box: { x: 50, y: 7, w: 9, h: 10 }, kind: "nav" },
       // TM-906: the top-nav Sign out button is gone (sign-out moved to the Profile hub, behind a
       // confirm), so the Profile region now anchors the tour's re-homed closing step (#nav-profile).
-      { label: "Profile", box: { x: 60, y: 7, w: 11, h: 10 }, kind: "nav", anchor: "#nav-profile" },
-      { label: "Admin", box: { x: 72, y: 7, w: 10, h: 10 }, kind: "nav", anchor: "#nav-admin" },
+      { label: "Profile", box: { x: 60, y: 7, w: 11, h: 10 }, kind: "nav", anchor: "#tab-profile" },
+      { label: "Admin", box: { x: 72, y: 7, w: 10, h: 10 }, kind: "nav", anchor: "#tab-admin" },
       { label: "Signed in as you@example.com", box: { x: 6, y: 34, w: 88, h: 30 }, kind: "card", anchor: "#me" },
     ],
     callouts: [

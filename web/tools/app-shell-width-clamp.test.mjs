@@ -86,3 +86,21 @@ test("the tab-bar reveal is unconditional — NOT gated behind the old ≤33rem 
     "the tab-bar reveal must not be wrapped in a @media (max-width: 33rem) block — it is unconditional now",
   );
 });
+
+// ── TM-1043 (ticket C): the top nav .app-nav is DELETED — the bottom tab bar is the only nav, and the
+//    notification bell is standalone route-independent chrome. Pin the deletion so it can't regrow. ──
+
+test("no top-nav element survives in index.html (TM-1043 deleted .app-nav + the hamburger)", () => {
+  const HTML = readFileSync(join(HERE, "..", "src", "index.html"), "utf8");
+  assert.ok(!/class=["']app-nav["']/.test(HTML), 'the <nav class="app-nav"> top nav must be gone (TM-1043)');
+  assert.ok(!/id=["']nav-toggle["']/.test(HTML), "the #nav-toggle hamburger must be gone (TM-1043)");
+});
+
+test("no live .app-nav CSS selector survives (TM-1043 — historical comments are fine)", () => {
+  // Strip /* … */ comments; the deletion left accurate historical comments that name .app-nav.
+  const stripped = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(
+    !/\.app-nav\b/.test(stripped),
+    "no live .app-nav / .app-nav-toggle / .app-nav--corner-bell selector may remain in styles.css (TM-1043)",
+  );
+});
