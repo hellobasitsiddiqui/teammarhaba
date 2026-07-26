@@ -198,9 +198,22 @@ const MEMBERSHIP = "#/membership";
 const RECEIPTS = "#/receipts";
 const PROTECTED = new Set([HOME, ADMIN, ADMIN_USERS, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS (the moved users console must stay auth-gated like the old #/admin — a signed-out deep-link is remembered + bounced to login, not flashed then home-bounced)
 
-/** True for the events list (`#/events`) or any event detail (`#/events/{id}`). */
+/** True for the events list (`#/events`), the list with a query (`#/events?similarTo=…`, TM-827-C),
+ *  or any event detail (`#/events/{id}`). */
 function isEventsRoute(hash) {
-  return hash === EVENTS || hash.startsWith(`${EVENTS}/`);
+  return hash === EVENTS || hash.startsWith(`${EVENTS}?`) || hash.startsWith(`${EVENTS}/`);
+}
+
+/**
+ * The `similarTo` event id from the list route's query (`#/events?similarTo=<id>`, TM-827-C), or null.
+ * Only the LIST route carries it — a detail (`#/events/{id}`) never does. `URLSearchParams` decodes and
+ * is lenient (a malformed escape never throws), so this stays within the TM-721 no-throw discipline.
+ */
+function eventsSimilarTo(hash) {
+  if (!hash.startsWith(`${EVENTS}?`)) return null; // list-with-query only (detail form has no ?similarTo)
+  const raw = new URLSearchParams(hash.slice(hash.indexOf("?") + 1)).get("similarTo");
+  const val = (raw || "").trim();
+  return val || null;
 }
 /**
  * TM-721: decodeURIComponent THROWS a URIError on a malformed percent-escape (e.g. a hand-typed or
@@ -1015,7 +1028,7 @@ function guard() {
   if (isEventsRoute(route)) {
     if (route !== eventsRouteEntered) {
       eventsRouteEntered = route;
-      enterEvents(eventDetailId(route));
+      enterEvents(eventDetailId(route), { similarTo: eventsSimilarTo(route) });
     }
   } else {
     eventsRouteEntered = null;

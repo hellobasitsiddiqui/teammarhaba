@@ -433,3 +433,44 @@ test("@events content-first tab is scoped to the viewer's city, with a browse-ot
   await expect(sharjahCard).toBeVisible();
   await shot("sharjah-switched");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// TEST 4 — disabled/full RSVP → "See similar events" CTA (TM-827-C): the CTA routes to a pre-filtered
+// same-city list, and a malformed similarTo degrades to a normal view (no router crash).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+test("@events a full event offers a 'See similar events' CTA → the pre-filtered similar list", async ({ page }, testInfo) => {
+  const shot = stepShot(page, testInfo, "similar");
+  const stamp = Date.now();
+
+  // A FULL London event (cap 1, filled by the API-only filler) = the source; + a similar London candidate.
+  const adminHeaders = await authHeadersFor(ADMIN);
+  const fullEvent = await createEvent(adminHeaders, { heading: `e2e full source ${stamp}`, capacity: 1 });
+  const fillerHeaders = await resetAttendanceFor(EVENT_FILLER);
+  const fill = await apiRsvp(fillerHeaders, fullEvent.id);
+  expect(fill.state).toBe("GOING"); // the one spot is taken → full
+  const candidate = await createEvent(adminHeaders, { heading: `e2e similar candidate ${stamp}`, capacity: 10 });
+
+  await resetAttendanceFor(EVENT_GOER); // clean slate so no stale GOING interferes
+  await signIn(page, EVENT_GOER); // London account (global-setup seeds city=London)
+
+  // Open the full event's detail; it only offers the waitlist, so the way-out CTA appears.
+  await page.evaluate((id) => (window.location.hash = `#/events/${id}`), fullEvent.id);
+  await expect(page.locator('[data-testid="event-detail"]')).toBeVisible();
+  const cta = page.locator('[data-testid="event-similar-cta"]');
+  await expect(cta).toBeVisible();
+  await expect(cta).toHaveText("See similar events");
+  await shot("full-with-cta");
+
+  // Tapping it routes to #/events?similarTo=<id> and renders the similar set.
+  await cta.click();
+  await expect(page).toHaveURL(new RegExp(`#/events\\?similarTo=${fullEvent.id}(&|$)`));
+  await expect(page.locator('[data-testid="events-similar-list"]')).toBeVisible();
+  // The candidate is shown; the (full) source event is NOT.
+  await expect(page.locator(`[data-testid="event-card"][data-event-id="${candidate.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-testid="event-card"][data-event-id="${fullEvent.id}"]`)).toHaveCount(0);
+  await shot("similar-list");
+
+  // A malformed similarTo degrades to a normal events view — the router must not crash (TM-721).
+  await page.evaluate(() => (window.location.hash = "#/events?similarTo=%E0%A4%A"));
+  await expect(page.locator("#events-view")).toBeVisible();
+});

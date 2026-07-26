@@ -594,6 +594,23 @@ function closedReason(bw) {
     : "Booking closed — this event starts in under an hour.";
 }
 
+/** The "See similar events" secondary CTA copy (TM-827-C). One constant so the view + tests agree. */
+export const SIMILAR_EVENTS_LABEL = "See similar events";
+
+/**
+ * The "See similar events" affordance (TM-827-C) rsvpControlModel attaches to a NONE joiner who can't
+ * simply RSVP-and-go — a full event (waitlist only), an age gate, or a closed booking window. It routes
+ * to the Events tab pre-filtered to similar events (`#/events?similarTo=<id>`). Additive: it never
+ * changes which actions are enabled, the honest reason copy, or the 409 gate — it's a way OUT of a
+ * dead-ended action, rendered as a secondary link beneath the (possibly disabled) primary.
+ * @returns {?{show:boolean, label:string, href:string}} null when the event has no usable id.
+ */
+function similarEventsCta(detail) {
+  const id = detail?.id;
+  if (id == null || id === "") return null;
+  return { show: true, label: SIMILAR_EVENTS_LABEL, href: `#/events?similarTo=${encodeURIComponent(id)}` };
+}
+
 /**
  * THE control model for the detail's action area — the single place that decides the primary (and
  * optional secondary) button, whether it's disabled, and the honest copy for why. It composes, in
@@ -653,12 +670,14 @@ export function rsvpControlModel({ detail, me, cards = [], nowMs = Date.now(), c
   const joinLabel = landsGoing ? "RSVP — I'm going" : "Join the waiting list";
   const base = { key: "join", kind: joinKind, label: joinLabel };
 
-  // 4a) time gates apply to everyone.
+  // 4a) time gates apply to everyone. Booking-closed → offer a way out (TM-827-C).
   if (bw.started || bw.closed) {
     model.primary = { ...base, disabled: true, reason: closedReason(bw) };
+    model.similar = similarEventsCta(detail);
     return model;
   }
   // 4b) age gate (TM-415): unset age is fixable and links to the profile; outside-band is a hard no.
+  // Either age gate → offer similar (in-band) events too (TM-827-C).
   const age = ageEligibility(detail, me, { tolerance });
   if (age.status === "unset") {
     model.primary = {
@@ -667,10 +686,12 @@ export function rsvpControlModel({ detail, me, cards = [], nowMs = Date.now(), c
       reason: "Add your age to your profile to RSVP",
       link: { href: "#/profile", label: "Add your age" },
     };
+    model.similar = similarEventsCta(detail);
     return model;
   }
   if (age.status === "outside") {
     model.primary = { ...base, disabled: true, reason: `This event is for ${band || "a different age group"}.` };
+    model.similar = similarEventsCta(detail);
     return model;
   }
   // 4c) one-active-event gate (TM-413) — only blocks a would-be GOING RSVP; a second WAITLIST is fine.
@@ -703,6 +724,11 @@ export function rsvpControlModel({ detail, me, cards = [], nowMs = Date.now(), c
   };
   if (landsGoing) model.remindNote = "We'll remind you the day before.";
   else if (!model.remindNote) model.remindNote = "This event is full — you'll join the waiting list.";
+  // A full event only offers the waitlist (not a straight RSVP-and-go), so surface similar events the
+  // member could attend instead (TM-827-C). NOT on an enabled RSVP that lands GOING — they can just go.
+  // Kept AFTER the remindNote else-if above so it stays bound to `if (landsGoing)` (a stray `if` between
+  // them would rebind the else and drop the "you'll join the waiting list" note on full events).
+  if (!landsGoing) model.similar = similarEventsCta(detail);
   return model;
 }
 
@@ -943,6 +969,55 @@ export function cityScopedListModel(cards, selectedCity) {
   const others = eventCities(list).filter((c) => c.key !== key);
   const city = hasCity ? String(selectedCity).trim() : null;
   return { city, heading: city || EVENTS_NEUTRAL_HEADING, hasCity, scoped, others };
+}
+
+/**
+ * A relevance score for biasing "similar events" toward the viewer's interests (TM-773/TM-775). The
+ * event model carries NO interest/category/tag field today (see the eventFilters note), so there is
+ * nothing on a card to match against `me.interests` — the score is therefore 0 for every card and the
+ * ranking below collapses to soonest-first. This is the documented HOOK: once events carry interest
+ * labels/categories (a future ticket), score by overlap here and the ranking picks it up for free. Kept
+ * pure + defensive so it never throws on odd shapes.
+ * @param {Object} card  an EventCard (no interest field yet)
+ * @param {{interests?: Array<{label?:string, category?:string}>}} me
+ * @returns {number}
+ */
+function interestScore(card, me) {
+  const interests = Array.isArray(me?.interests) ? me.interests : [];
+  if (!interests.length) return 0;
+  // No interest-bearing field on the card exists yet, so there is nothing to overlap → 0.
+  // (When cards gain `category`/`tags`, count matches against interests' category/label here.)
+  return 0;
+}
+
+/**
+ * The "similar events" set for the disabled-RSVP → similar CTA (TM-827-C): from the full listing, the
+ * events a member could attend INSTEAD of `source` — SAME city, upcoming (not finished), NOT full, and
+ * excluding the source itself. Ranked by {@link interestScore} (currently inert — no event interest
+ * field), then soonest-first as the stable tiebreak. Pure + client-side over the listing the browse
+ * endpoint already returns (no backend "similar" query — TM-1040 tracks a server-side option).
+ * @param {Array} cards          the full listing (EventCard[])
+ * @param {Object} source        the source EventDetail/EventCard (for its city + id)
+ * @param {Object} me            the viewer's /me (for the interest bias)
+ * @param {number} [nowMs=Date.now()]
+ * @returns {Array} the similar cards, best-first
+ */
+export function similarEvents(cards, source, me, nowMs = Date.now()) {
+  const list = Array.isArray(cards) ? cards : [];
+  const sourceKey = cardCityKey(source);
+  if (sourceKey === "") return []; // no city on the source → nothing to scope "similar" to
+  const sourceId = source?.id;
+  const candidates = list.filter(
+    (c) =>
+      c &&
+      String(c.id) !== String(sourceId) &&
+      cardCityKey(c) === sourceKey &&
+      !isFinished(c, nowMs) &&
+      !isFull(c),
+  );
+  return candidates.sort(
+    (a, b) => interestScore(b, me) - interestScore(a, me) || (toMs(a?.startAt) || Infinity) - (toMs(b?.startAt) || Infinity),
+  );
 }
 
 /**
