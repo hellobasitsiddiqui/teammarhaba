@@ -46,7 +46,12 @@ import { enterAdminMessageCompose } from "./admin-messages.js";
 // exact-match #/admin/messages predicate) is the pure admin-message-route.js. Additive to this router.
 import { enterAdminSentHistory } from "./admin-sent-history.js";
 import { isAdminMessageComposeRoute, ADMIN_MESSAGES_ROUTE } from "./admin-message-route.js";
-import { enterProfile } from "./profile.js";
+import { enterProfile, editFormIsDirty } from "./profile.js";
+// TM-1027: the unsaved-changes guard for the profile edit form. The pure "should this nav be
+// intercepted?" decision (leaving the edit form while dirty) + the confirm-dialog copy live in
+// profile-guard-core.js so they're unit-testable; this router owns the restore-hash intercept that
+// enforces it on in-app hash navigation (which also covers the bottom tab bar — it navigates by hash).
+import { navGuardDecision, isLeavingProfileEdit, UNSAVED_GUARD_DIALOG } from "./profile-guard-core.js";
 import { enterEvents } from "./events.js";
 import { enterHome } from "./home.js";
 import { enterChat } from "./chat.js";
@@ -100,7 +105,7 @@ import { enterMembershipSubscribe } from "./membership-subscribe.js";
 // default. `membershipEnabled` is imported once from membership-tier.js (the single flag source).
 import { enterMembershipReceipts } from "./membership-receipts.js";
 import { getMe } from "./api.js";
-import { toast } from "./ui.js";
+import { toast, confirmDialog } from "./ui.js";
 import { settleOrFallback } from "./async-util.js";
 import { updateTabbar } from "./tabbar.js";
 import { updateFooter } from "./footer.js";
@@ -403,6 +408,21 @@ let eventsRouteEntered = null;
 // Where to send a signed-out user who tried to reach a protected view, so we can return them
 // after sign-in. Shared with api.js's 401 redirect (same key).
 const INTENDED_KEY = "tm.intendedRoute";
+
+// ---- TM-1027: unsaved-changes guard (restore-hash intercept) --------------------------------------
+// The hashchange listener fires AFTER the URL hash has already changed, so there is no native
+// before-navigate hook. The idiom for cancelling an in-app nav is therefore to RESTORE the previous
+// hash. We track the last COMMITTED hash (the one guard() actually rendered) so that, on a hashchange
+// that leaves the dirty profile edit form, we can (1) snap the URL back to where the user was, (2) ask
+// "Discard changes?", and (3) only then either re-issue the navigation (Discard) or stay put (Keep
+// editing). This covers the bottom tab bar too — it navigates by hash — plus any in-app #/ link.
+let lastCommittedHash = typeof window !== "undefined" ? window.location.hash : "";
+// True only while WE are programmatically restoring the hash after a cancelled/prompted nav, so the
+// hashchange that restore triggers is ignored by the intercept (it isn't a real user navigation).
+let restoringHash = false;
+// The hash a Discard confirmation approved: the one hashchange we let through the intercept without
+// re-prompting (the form is being abandoned on purpose). Cleared as soon as it's honoured.
+let discardApprovedHash = null;
 
 // TM-721: sessionStorage can THROW on mere access — a locked-down WebView, a private/incognito context,
 // or a browser with cookies/site-data blocked raises SecurityError on getItem/setItem, not just on the
@@ -754,6 +774,9 @@ function guard() {
     return;
   }
   render();
+  // TM-1027: we've passed every auth/admin bounce and are actually rendering `route` — this is the
+  // "committed" hash the unsaved-changes intercept restores TO if the next navigation is cancelled.
+  lastCommittedHash = window.location.hash;
   // Admin hub (TM-917): mount the #/admin second-level nav on entry, reset on leaving so re-entry
   // rebuilds if needed. The hub is static, so enterAdminHub() is itself idempotent.
   if (route === ADMIN && isAdmin) {
@@ -1156,7 +1179,64 @@ async function resolveRoleThenGuard() {
   guard();
 }
 
-window.addEventListener("hashchange", guard);
+/**
+ * TM-1027: the hashchange entry point, wrapping guard() with the unsaved-changes intercept.
+ *
+ * On a real user navigation that LEAVES the dirty profile edit form, we don't want to have already
+ * torn it down — but the hash has already changed by the time this fires. So we RESTORE the previous
+ * hash (snapping the URL back to the form), then ask "Discard changes?":
+ *   • Keep editing → we're already back on the form; do nothing (guard re-ran on the restore).
+ *   • Discard → re-issue the navigation, flagged as approved so this same intercept lets it through
+ *     without re-prompting; the profile view tears down on leaving and re-mounts fresh on any return.
+ *
+ * Everything else (a clean form, not leaving the profile, the programmatic restore itself, or an
+ * already-approved discard) falls straight through to guard() unchanged.
+ */
+function onHashChange() {
+  const from = lastCommittedHash;
+  const to = window.location.hash;
+
+  // The hashchange our own restore triggered — swallow it (guard already ran for `from`).
+  if (restoringHash) {
+    restoringHash = false;
+    return;
+  }
+  // A navigation the user already approved via Discard — let it through once, then forget it.
+  if (discardApprovedHash !== null && to === discardApprovedHash) {
+    discardApprovedHash = null;
+    guard();
+    return;
+  }
+
+  // Decide PURELY (unit-tested): only a nav that leaves the edit form while it's dirty is intercepted.
+  // editFormIsDirty() is safe to call in any view state (false when the form isn't mounted / is clean).
+  const decision = navGuardDecision({
+    dirty: isLeavingProfileEdit(from, to) && editFormIsDirty(),
+    isLeavingProfile: isLeavingProfileEdit(from, to),
+  });
+  if (decision !== "prompt") {
+    guard();
+    return;
+  }
+
+  // Intercept: snap the URL back to the edit form (this fires a hashchange we swallow above), then ask.
+  restoringHash = true;
+  window.location.hash = from;
+  confirmDialog(UNSAVED_GUARD_DIALOG).then((discard) => {
+    if (!discard) return; // Keep editing — we're already restored to the form.
+    // Discard confirmed: re-issue the navigation, pre-approved so we don't prompt a second time.
+    discardApprovedHash = to;
+    if (window.location.hash === to) {
+      // Edge case: the hash is somehow already the target — re-guard directly (no hashchange to ride).
+      discardApprovedHash = null;
+      guard();
+    } else {
+      window.location.hash = to;
+    }
+  });
+}
+
+window.addEventListener("hashchange", onHashChange);
 // Auth changes re-resolve the role then re-run the guard so views/nav follow immediately.
 onAuthChanged(resolveRoleThenGuard);
 // Ensure there's always a route in the URL bar, then guard once on load.

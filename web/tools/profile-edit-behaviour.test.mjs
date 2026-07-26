@@ -198,6 +198,11 @@ function loadProfileModule(deps) {
     // (flag ON = exactly the old behaviour); a test can flip it OFF via setVerifiedPhoneRequired.
     "  verifiedPhoneRequired,\n" +
     "  nextDayInterestsNudge,\n" +
+    // TM-1027: the unsaved-changes guard's pure dirty rule + native-unload prompt text
+    // (profile-guard-core.js). Import-safe pure symbols, injected REAL below so editFormIsDirty +
+    // the beforeunload arming resolve to the shipped behaviour under eval (the deps-kit rule from the
+    // blackboard: EVERY new profile.js import must be added here or the eval'd copy throws when hit).
+    "  isProfileDirty, BEFOREUNLOAD_PROMPT,\n" +
     // TM-879: the collapsible-sections pure model the buildShell renderer maps over.
     "  profileSectionsStateKey, resolveSectionState, toggleSectionState,\n" +
     "  COUNTRIES, flagOf,\n" +
@@ -249,6 +254,10 @@ const interestsCore = await import(interestsCoreUrl);
 // and the upload-success test proves the shipped announce → subscribers → repaint chain end-to-end.
 const avatarEventsUrl = new URL("../src/assets/avatar-events.js", import.meta.url);
 const avatarEvents = await import(avatarEventsUrl);
+// TM-1027: the unsaved-changes guard's pure core — import-safe (no DOM/CDN), injected REAL so
+// editFormIsDirty computes the shipped dirty rule under eval.
+const guardCoreUrl = new URL("../src/assets/profile-guard-core.js", import.meta.url);
+const guardCore = await import(guardCoreUrl);
 
 let getMeImpl = async () => ({});
 let updateMeImpl = async () => ({});
@@ -370,6 +379,10 @@ const deps = {
   // so the renderer's hidden/message wiring runs through the shipped logic. The max it targets is
   // injected by paintHub from state.interestConfig.max (TM-778's shared config), not a separate fetch.
   nextDayInterestsNudge: core.nextDayInterestsNudge,
+  // TM-1027: the REAL unsaved-changes dirty rule + native-unload prompt text, so editFormIsDirty +
+  // the beforeunload arming resolve to the shipped behaviour under eval.
+  isProfileDirty: guardCore.isProfileDirty,
+  BEFOREUNLOAD_PROMPT: guardCore.BEFOREUNLOAD_PROMPT,
   // TM-879: the REAL collapsible-sections pure model, so buildShell renders the shipped section
   // catalogue + resolves persisted state through the exact shipped logic under Node.
   profileSectionsStateKey: core.profileSectionsStateKey,
@@ -1692,5 +1705,76 @@ test("TM-879: the identity header is pinned and Sign out is NOT inside any colla
     } finally {
       currentUserImpl = () => null;
     }
+  });
+});
+
+// ═══ TM-1027 — the unsaved-changes dirty signal (editFormIsDirty), driven through the shipped source ══
+//
+// These prove the REAL editFormIsDirty() behaviour end-to-end (not a source-grep): a loaded, UNTOUCHED
+// form is clean (no false-positive prompt — the AC), a typed edit makes it dirty, and a successful save
+// clears it (save re-fills the form from /me → collectPatch no longer changes anything).
+
+test("TM-1027: an untouched populated form is NOT dirty (no false prompt on existing profiles)", async () => {
+  await withFakeDocumentAsync(async () => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    // A real existing profile: several populated fields. collectPatch would RE-SEND the non-blank text
+    // fields, so "patch non-empty" alone would wrongly read dirty — the diff-against-stored is what
+    // keeps this clean.
+    getMeImpl = async () => ({ firstName: "Ada", lastName: "Lovelace", city: "London", age: 36, notificationPref: "BOTH" });
+    getMembershipImpl = async () => ({});
+    await profile.load();
+
+    assert.equal(profile.editFormIsDirty(), false, "a freshly-loaded, untouched profile must navigate freely");
+  });
+});
+
+test("TM-1027: typing a change into a loaded field makes the form dirty", async () => {
+  await withFakeDocumentAsync(async () => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMeImpl = async () => ({ firstName: "Ada", city: "London", notificationPref: "EMAIL" });
+    getMembershipImpl = async () => ({});
+    await profile.load();
+    assert.equal(profile.editFormIsDirty(), false, "precondition: clean after load");
+
+    // The user edits their first name — now leaving would lose that edit.
+    shell.fields.get("firstName").input.value = "Adelaide";
+    assert.equal(profile.editFormIsDirty(), true, "a real field change reads as dirty");
+  });
+});
+
+test("TM-1027: a successful save CLEARS the dirty flag (form re-filled from the server response)", async () => {
+  await withFakeDocumentAsync(async () => {
+    TOASTS = [];
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMeImpl = async () => ({ firstName: "Ada", city: "London", notificationPref: "EMAIL" });
+    getMembershipImpl = async () => ({});
+    await profile.load();
+
+    // Edit → dirty.
+    shell.fields.get("city").input.value = "Karachi";
+    assert.equal(profile.editFormIsDirty(), true, "precondition: dirty after the edit");
+
+    // Save: the server echoes back the updated profile, which fillForm re-applies to the inputs.
+    updateMeImpl = async (patch) => ({ firstName: "Ada", city: "London", notificationPref: "EMAIL", ...patch });
+    await profile.save({ preventDefault() {} });
+
+    assert.ok(TOASTS.some((t) => /profile saved/i.test(t.msg)), "precondition: the save succeeded");
+    assert.equal(profile.editFormIsDirty(), false, "after a successful save the form is clean again");
+  });
+});
+
+test("TM-1027: editFormIsDirty is SAFE before the form loads / when no shell is mounted", async () => {
+  await withFakeDocumentAsync(async () => {
+    // No shell set here → the router may query dirty in any view state; it must never throw and must
+    // report clean (nothing to lose). Using a distinct throwaway shell-less state.
+    profile.__setShell(null);
+    assert.doesNotThrow(() => profile.editFormIsDirty());
+    assert.equal(profile.editFormIsDirty(), false, "no mounted edit form ⇒ clean");
   });
 });
