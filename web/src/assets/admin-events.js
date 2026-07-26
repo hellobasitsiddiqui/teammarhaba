@@ -55,9 +55,14 @@ import {
   formatEventWhen,
   isPastEvent,
   partitionEventsByPast,
+  EVENT_FORMAT_INPERSON,
+  EVENT_FORMAT_ONLINE,
+  formatFromEvent,
+  mapUrlPreviewState,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
+import { CITY_OPTIONS, cityChoiceError } from "./profile-core.js";
 import { adminVenueNewHash } from "./admin-venues-route.js";
 import { clampPage } from "./admin-paging-core.js";
 import { statsCards } from "./admin-stats-core.js";
@@ -782,7 +787,7 @@ const FORM_FIELDS = [
   { key: "heading", id: "event-heading", label: "Heading", type: "text", maxLength: HEADING_MAX, required: true },
   { key: "description", id: "event-description", label: "Description", type: "textarea", maxLength: DESCRIPTION_MAX, required: true },
   { key: "locationText", id: "event-location", label: "Location", type: "text", maxLength: LOCATION_MAX, required: true, hint: 'The venue line — use "Online" for online-only events.' },
-  { key: "city", id: "event-city", label: "City (optional)", type: "text", maxLength: CITY_MAX, hint: "The public pre-reveal hint + per-city reveal default (TM-408)." },
+  { key: "city", id: "event-city", label: "City (optional)", type: "select", options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])], hint: "The public pre-reveal hint + per-city reveal default (TM-408)." },
   { key: "mapUrl", id: "event-map-url", label: "Map URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
   { key: "onlineUrl", id: "event-online-url", label: "Online URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
   { key: "timezone", id: "event-timezone", label: "Time zone", type: "timezone", required: true, hint: "The event's local IANA zone; all times below are entered in it." },
@@ -814,6 +819,14 @@ function buildField(field, fields) {
     input = el("textarea", { id: field.id, class: "tm-input tm-textarea", rows: "4", maxLength: field.maxLength, "aria-describedby": describedBy });
   } else if (field.type === "timezone") {
     input = el("select", { id: field.id, class: "tm-input", "aria-describedby": describedBy });
+  } else if (field.type === "select") {
+    // A plain <select> of [value, label] pairs (ported from admin-venues.js:493). The City field uses
+    // this (TM-1063), sourcing CITY_OPTIONS from profile-core.js so there's ONE city list app-wide.
+    input = el(
+      "select",
+      { id: field.id, class: "tm-input", "aria-describedby": describedBy },
+      (field.options || []).map(([value, label]) => el("option", { value, text: label })),
+    );
   } else {
     input = el("input", {
       id: field.id,
@@ -884,6 +897,26 @@ function fillTimeZoneOptions(select, selected) {
   if (chosen && !zones.includes(chosen)) zones = [chosen, ...zones];
   clear(select).append(...zones.map((z) => el("option", { value: z, text: z, selected: z === chosen })));
   select.value = chosen;
+}
+
+/**
+ * Select a saved city in the TM-1063 City dropdown. A value on CITY_OPTIONS (or "") selects directly;
+ * a saved OFF-LIST city (e.g. "Dubai" set before the list existed, or a venue's off-list city) gets its
+ * own extra option injected so it stays VISIBLE and SELECTABLE — an existing event is preserved, never
+ * silently overwritten on save (the profile.js fillCitySelect idiom). `data-offlist` stops re-fills from
+ * stacking duplicate options for the same value.
+ *
+ * @param {HTMLSelectElement} select the city <select>.
+ * @param {*} value the saved city value.
+ */
+function fillCitySelect(select, value) {
+  if (!select) return;
+  const saved = value == null ? "" : String(value).trim();
+  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+    select.append(el("option", { value: saved, text: saved }));
+    select.setAttribute("data-offlist", saved);
+  }
+  select.value = saved;
 }
 
 /** The Coffee & X suggestion chips (TM-382): tap to prefill the heading, still fully editable after. */
@@ -1081,6 +1114,127 @@ function buildVenuePicker(event, onSelect) {
 }
 
 /**
+ * The In person / Online format selector (TM-1063) — a CLIENT-ONLY radio group (a real
+ * `role=radiogroup` so it's keyboard + screen-reader navigable) that drives which location fields the
+ * form shows. It persists NOTHING: the format is inferred from the event on edit and only shapes the
+ * client view + the payload ("Online" locationText / onlineUrl). `onChange(format)` fires on a pick.
+ *
+ * @param {"inperson"|"online"} initial the format to select on open.
+ * @param {(format: "inperson"|"online") => void} onChange
+ * @returns {{node: HTMLElement, setActive: (format: string) => void}}
+ */
+function buildFormatSelector(initial, onChange) {
+  const CHOICES = [
+    [EVENT_FORMAT_INPERSON, "In person"],
+    [EVENT_FORMAT_ONLINE, "Online"],
+  ];
+  const radios = new Map();
+  const options = CHOICES.map(([value, label]) => {
+    const input = el("input", {
+      class: "tm-format-radio",
+      type: "radio",
+      name: "event-format",
+      id: `event-format-${value}`,
+      value,
+      checked: value === initial,
+      onChange: () => onChange(value),
+    });
+    radios.set(value, input);
+    return el("label", { class: "tm-format-option", for: `event-format-${value}` }, [input, el("span", { text: label })]);
+  });
+
+  const node = el("div", { class: "tm-form-field", dataset: { field: "format" } }, [
+    el("span", { class: "tm-field-label", id: "event-format-label", text: "Format" }),
+    el("div", { class: "tm-format-choices", role: "radiogroup", "aria-labelledby": "event-format-label" }, options),
+    el("p", { class: "tm-muted tm-field-hint", text: "In person shows the location + venue; Online asks only for a joining link." }),
+  ]);
+
+  return {
+    node,
+    setActive: (format) => {
+      for (const [value, input] of radios) input.checked = value === format;
+    },
+  };
+}
+
+/**
+ * The Map URL live preview (TM-1063). A debounced GET /api/v1/link-preview?url=… renders a small card
+ * for a reachable URL (reusing the pure normalisePreview view-model via {@link mapUrlPreviewState}), a
+ * neutral "no rich preview" note when the URL is reachable but carries no OpenGraph data (e.g. a Google
+ * Maps consent page — NOT broken), or a "link looks broken" note ONLY when the endpoint reports the URL
+ * unreachable (a non-2xx). It NEVER gates Save — it's advisory. A newer keystroke supersedes an
+ * in-flight request via a monotonically-increasing token, so a slow response can't clobber a newer one.
+ *
+ * @returns {{node: HTMLElement, schedule: (url: string) => void}}
+ */
+function buildMapUrlPreview() {
+  const node = el("div", { class: "tm-map-preview", dataset: { field: "mapUrlPreview" }, "aria-live": "polite" });
+  let timer = null;
+  let token = 0;
+
+  const render = (state, preview) => {
+    clear(node);
+    if (state === "none") return;
+    if (state === "broken") {
+      node.append(el("p", { class: "tm-muted tm-map-preview-broken", text: "This link looks broken — we couldn't reach it. You can still save it." }));
+      return;
+    }
+    if (state === "empty") {
+      node.append(el("p", { class: "tm-muted tm-map-preview-empty", text: "Link looks reachable (no rich preview available)." }));
+      return;
+    }
+    // state === "preview": a small card. Fields are rendered as text / an image src (never HTML).
+    const children = [];
+    if (preview.imageUrl) {
+      children.push(el("img", {
+        class: "tm-map-preview-img",
+        src: preview.imageUrl,
+        alt: "",
+        loading: "lazy",
+        referrerpolicy: "no-referrer",
+        crossorigin: "anonymous",
+        onError: (e) => { e.target.style.display = "none"; },
+      }));
+    }
+    const body = [el("div", { class: "tm-map-preview-title", text: preview.title })];
+    if (preview.description) body.push(el("div", { class: "tm-map-preview-desc", text: preview.description }));
+    children.push(el("div", { class: "tm-map-preview-body" }, body));
+    node.append(el("div", { class: "tm-map-preview-card" }, children));
+  };
+
+  const fetchPreview = async (url) => {
+    const mine = ++token;
+    try {
+      const response = await apiFetch(`/api/v1/link-preview?url=${encodeURIComponent(url)}`, {
+        headers: { Accept: "application/json" },
+      });
+      // ok === false → the endpoint rejected the URL as unfetchable (broken). A 2xx body may be empty.
+      const raw = response.ok ? await response.json().catch(() => null) : null;
+      if (mine !== token) return; // a newer keystroke superseded this request
+      const { state, preview } = mapUrlPreviewState(url, response.ok, raw);
+      render(state, preview);
+    } catch {
+      if (mine !== token) return;
+      // A transport-level throw (rare — apiFetch returns non-2xx rather than throwing) = unreachable.
+      render("broken", null);
+    }
+  };
+
+  const schedule = (rawValue) => {
+    const url = String(rawValue ?? "").trim();
+    if (timer) clearTimeout(timer);
+    if (url === "") {
+      token++; // cancel any in-flight render
+      render("none", null);
+      return;
+    }
+    timer = setTimeout(() => fetchPreview(url), 450);
+  };
+
+  return { node, schedule };
+}
+
+/**
  * Build the create/edit event form as a detached DOM subtree (no shell) — the SAME fields, validation,
  * Coffee & X chips, image control and read-back the modal used; only the surrounding shell changed
  * from a modal() to a full page (TM-426). `mode` is "create" (event=null) or "edit" (event = the
@@ -1116,6 +1270,16 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
   let venuePicker = null;
 
+  // Format selector (TM-1063) — CLIENT-ONLY view state, no backend field. In person → show the physical
+  // cluster (Location + Venue + City + Map URL) and hide Online URL; Online → show Online URL only. The
+  // chosen format is inferred on edit (formatFromEvent) and fed into the draft so validateEventDraft /
+  // buildEventPayload apply the format-conditional rules. `mapUrl`/`onlineUrl` share the "links" row, so
+  // we toggle the individual field WRAPPERS (not the row) to hide one while showing the other.
+  let currentFormat = event ? formatFromEvent(event) : EVENT_FORMAT_INPERSON;
+  // Physical-only nodes hidden in Online mode; the venue picker node is spliced in later, so it's toggled
+  // via a mutable ref set once it exists.
+  const formatToggle = buildFormatSelector(currentFormat, (next) => setFormat(next));
+
   const setFieldError = (key, message) => {
     const f = fields.get(key);
     if (!f) return;
@@ -1136,6 +1300,8 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     // The venue reference (TM-519) isn't a FORM_FIELDS input; read it off the picker (blank on create
     // until built, "" = one-off location).
     draft.venueId = venuePicker ? venuePicker.getValue() : "";
+    // The CLIENT-ONLY format (TM-1063) drives the conditional validation + payload shaping.
+    draft.format = currentFormat;
     return draft;
   };
 
@@ -1157,10 +1323,51 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     return errors;
   };
 
+  // Show/hide the location cluster for the current format (TM-1063). In person → physical trio (Location,
+  // Venue, City, Map URL) visible, Online URL hidden; Online → only Online URL visible. Values are NOT
+  // cleared on toggle — hiding a populated field keeps its value so a toggle round-trip restores it
+  // (AC: "toggle back restores values, no loss"). Errors on a now-hidden field are cleared so a stale
+  // "Location required" can't block Save after switching to Online.
+  const physicalKeys = ["locationText", "mapUrl", "city"];
+  let mapPreviewRef = null; // set once buildMapUrlPreview runs (below); toggled with the physical cluster
+  // The Online URL field's <label>: its text is state-dependent (TM-1063). The field is optional in
+  // In-person mode (hidden) but REQUIRED in Online mode — so the label must not read "(optional)" then.
+  const onlineUrlLabel = byKey.get("onlineUrl").querySelector(".tm-field-label");
+  const applyFormatView = () => {
+    const online = currentFormat === EVENT_FORMAT_ONLINE;
+    for (const key of physicalKeys) {
+      byKey.get(key).hidden = online;
+      if (online) setFieldError(key, ""); // drop a stale required-error on a hidden physical field
+    }
+    if (venuePicker && venuePicker.node) venuePicker.node.hidden = online;
+    // The Map URL preview slot rides with the Map URL field — hide + clear it in Online mode so a stale
+    // preview card can't linger after switching away from In person.
+    if (mapPreviewRef) {
+      mapPreviewRef.node.hidden = online;
+      // Cancel the preview when hidden; re-seed it from the retained value when In person is restored
+      // (round-trip must not lose the Map URL or its preview).
+      mapPreviewRef.schedule(online ? "" : (fields.get("mapUrl").input.value || ""));
+    }
+    byKey.get("onlineUrl").hidden = !online;
+    if (!online) setFieldError("onlineUrl", ""); // drop a stale online-url error when hidden
+    // Reflect the field's REAL state in its label: required (the joining link) in Online mode, optional
+    // otherwise — so the label never lies (TM-1063 follow-up). No "(optional)" while it's required.
+    if (onlineUrlLabel) onlineUrlLabel.textContent = online ? "Online URL (required)" : "Online URL (optional)";
+  };
+  const setFormat = (next) => {
+    const normalised = next === EVENT_FORMAT_ONLINE ? EVENT_FORMAT_ONLINE : EVENT_FORMAT_INPERSON;
+    if (normalised === currentFormat) return;
+    currentFormat = normalised;
+    formatToggle.setActive(currentFormat);
+    applyFormatView();
+    revalidate(); // re-run the format-conditional gate (no single changedKey — repaint showing errors)
+  };
+
   for (const f of FORM_FIELDS) {
     const input = fields.get(f.key).input;
     input.addEventListener("input", () => revalidate(f.key));
-    if (f.type === "timezone") input.addEventListener("change", () => revalidate(f.key));
+    // <select>s (timezone, city) fire "change", not "input", in some engines — listen for both.
+    if (f.type === "timezone" || f.type === "select") input.addEventListener("change", () => revalidate(f.key));
   }
 
   // Prefill: timezone options first (needs the selected zone), then the rest of the values.
@@ -1168,9 +1375,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   fillTimeZoneOptions(fields.get("timezone").input, model.timezone);
   for (const f of FORM_FIELDS) {
     if (f.type === "timezone") continue;
+    if (f.key === "city") continue; // the city <select> needs the off-list allowance (below)
     const v = model[f.key];
     if (v != null && v !== "") fields.get(f.key).input.value = v;
   }
+  // City (TM-1063): a dropdown of CITY_OPTIONS. A saved OFF-LIST city (e.g. "Dubai" set before the list
+  // existed, or a venue's off-list city) stays selectable via an injected option so an existing event is
+  // never silently overwritten on save — the profile.js fillCitySelect / cityChoiceError idiom.
+  fillCitySelect(fields.get("city").input, model.city);
 
   // The venue picker (TM-519): sits under the Location line. Picking a venue prefills the required
   // Location line + City from it when they're still blank (so the event always has a display location
@@ -1181,7 +1393,9 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
       const loc = fields.get("locationText").input;
       if (loc.value.trim() === "") loc.value = chosen.addressLine || chosen.name || "";
       const cityInput = fields.get("city").input;
-      if (cityInput && cityInput.value.trim() === "" && chosen.city) cityInput.value = chosen.city;
+      // City is now a <select> (TM-1063); a venue's city may be off-list, so inject it as a selectable
+      // option before choosing it (fillCitySelect handles both on-list and off-list values).
+      if (cityInput && cityInput.value.trim() === "" && chosen.city) fillCitySelect(cityInput, chosen.city);
     }
     revalidate("locationText");
   });
@@ -1189,6 +1403,31 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const locIdx = layout.indexOf(locationNode);
   if (locIdx >= 0) layout.splice(locIdx + 1, 0, venuePicker.node);
   else layout.push(venuePicker.node);
+
+  // Format selector (TM-1063): sits ABOVE the location cluster. Spliced in just before the Location
+  // field so it reads "choose In person/Online, then the fields that apply".
+  const formatIdx = layout.indexOf(locationNode);
+  if (formatIdx >= 0) layout.splice(formatIdx, 0, formatToggle.node);
+  else layout.unshift(formatToggle.node);
+
+  // Map URL live preview (TM-1063): a debounced GET /api/v1/link-preview under the Map URL field. A
+  // reachable URL renders a small preview card (or a neutral "no rich preview" note when it carries no
+  // OG data — e.g. a Maps consent page); an UNREACHABLE URL shows a "link looks broken" note. It NEVER
+  // gates Save. Mounted right after the Map URL field wrapper.
+  const mapPreview = buildMapUrlPreview();
+  mapPreviewRef = mapPreview;
+  const mapNode = byKey.get("mapUrl");
+  // mapUrl shares the "links" row holder with onlineUrl; append the preview slot inside that row after
+  // the map field so it tracks the field's show/hide.
+  if (mapNode && mapNode.parentNode) mapNode.parentNode.insertBefore(mapPreview.node, mapNode.nextSibling);
+  else layout.push(mapPreview.node);
+  const mapInput = fields.get("mapUrl").input;
+  mapInput.addEventListener("input", () => mapPreview.schedule(mapInput.value));
+
+  // Apply the initial format view now that every toggleable node (incl. the venue picker + map preview)
+  // exists — hides the Online URL for a new In-person event, or the physical trio for an Online one, and
+  // seeds the Map URL preview from a prefilled value on an In-person edit-open (via applyFormatView).
+  applyFormatView();
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.

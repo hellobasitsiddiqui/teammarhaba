@@ -107,7 +107,7 @@ test("@events @event-image an uploaded event image renders on the detail page (T
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "An event whose uploaded image must actually render.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.fill("#event-city", "London");
+  await page.locator("#event-city").selectOption("London"); // City is now a dropdown (TM-1063)
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));

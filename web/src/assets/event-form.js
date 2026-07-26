@@ -28,6 +28,8 @@
 //     and form read (the TM-408 effective reveal window; the going/waitlist counts read defensively so
 //     they light up the moment the admin projection carries them; capacity vs "Unlimited").
 
+import { normalisePreview } from "./chat-linkpreview-core.js";
+
 // --- field caps (mirror Create/UpdateEventRequest, TM-392) ------------------------------------
 
 /** Heading cap — mirrors CreateEventRequest.heading @Size(max = 120). */
@@ -193,6 +195,74 @@ export function utcIsoToZoned(iso, timeZone) {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
+// --- format (In person / Online) — CLIENT-ONLY, no backend field (TM-1063) --------------------
+
+/**
+ * The two event formats the form offers (TM-1063). This is a CLIENT-ONLY view-state distinction — the
+ * backend has NO `format` field. An event IS "online" purely by virtue of what it carries: an
+ * `onlineUrl` and/or a `locationText` of literally "Online". So we never persist the format; we infer
+ * it on edit ({@link formatFromEvent}) and, on save, an Online event auto-fills `locationText="Online"`
+ * so the server's `@NotBlank` on the (physical) location line is still satisfied ({@link buildEventPayload}).
+ */
+export const EVENT_FORMAT_INPERSON = "inperson";
+export const EVENT_FORMAT_ONLINE = "online";
+
+/** The wire value written into `locationText` for an Online event so the server `@NotBlank` is met. */
+export const ONLINE_LOCATION_TEXT = "Online";
+
+/**
+ * Infer an event's format for the edit prefill (TM-1063), CLIENT-SIDE only — the backend carries no
+ * format flag. An event is "online" when it has a non-blank `onlineUrl` OR its `locationText` is exactly
+ * "Online" (case-insensitive), the two signals the create form leaves behind for an online event.
+ * Everything else (a physical location line, no online URL) is "in person" — the default for a brand-new
+ * event with no signals either way.
+ *
+ * @param {object} event an EventResponse (or a draft-shaped object), or nullish on create.
+ * @returns {"inperson"|"online"}
+ */
+export function formatFromEvent(event = {}) {
+  const e = event && typeof event === "object" ? event : {};
+  const online =
+    cleanText(e.onlineUrl) !== "" ||
+    cleanText(e.locationText).toLowerCase() === ONLINE_LOCATION_TEXT.toLowerCase();
+  return online ? EVENT_FORMAT_ONLINE : EVENT_FORMAT_INPERSON;
+}
+
+/** True when `format` is the Online format (tolerant of nullish → false = in person). */
+function isOnlineFormat(format) {
+  return cleanText(format).toLowerCase() === EVENT_FORMAT_ONLINE;
+}
+
+// --- Map URL preview state (TM-1063) ----------------------------------------------------------
+
+/**
+ * Classify the outcome of a `GET /api/v1/link-preview?url=…` call for the Map URL preview (TM-1063),
+ * PURE so the debounced DOM caller in admin-events.js is a thin wrapper. The distinction the ticket
+ * turns on: **"broken" means HTTP-unreachable ONLY, not "no OG data"**. Maps consent / interstitial
+ * pages are perfectly valid links that carry no OpenGraph metadata, so a reachable-but-title-less
+ * response must NOT be flagged broken — only a URL our own endpoint could not fetch is.
+ *
+ * The signal comes straight from the backend's contract (LinkPreviewService): a malformed / disallowed
+ * / internal-address URL yields a NON-2xx (a 400 the endpoint raised — the URL isn't a fetchable
+ * http(s) link), while a genuinely reachable URL (rich OG, empty OG, or even a swallowed transport
+ * failure) yields a 200. So:
+ *   • `ok === false`             → "broken"   (the endpoint rejected the URL as unfetchable)
+ *   • 2xx + a title              → "preview"  (draw the card)
+ *   • 2xx + no title             → "empty"    (reachable, no rich preview — NOT broken)
+ *   • blank URL / nothing to show → "none"    (draw nothing)
+ *
+ * @param {string} url the Map URL the admin typed (blank → "none").
+ * @param {boolean} ok whether the endpoint responded 2xx (false = non-2xx / network error).
+ * @param {?object} raw the endpoint JSON body (or null when the call failed / wasn't 2xx).
+ * @returns {{state: "none"|"broken"|"empty"|"preview", preview: ?object}}
+ */
+export function mapUrlPreviewState(url, ok, raw) {
+  if (cleanText(url) === "") return { state: "none", preview: null };
+  if (!ok) return { state: "broken", preview: null };
+  const preview = normalisePreview(raw, url);
+  return preview.hasContent ? { state: "preview", preview } : { state: "empty", preview };
+}
+
 // --- validation (mirrors the API's Bean Validation + cross-field rules) ------------------------
 
 /**
@@ -222,7 +292,16 @@ export function validateEventDraft(draft = {}, { requireForCreate = true } = {})
   // Required text (mirrors @NotBlank).
   req("heading", "Heading");
   req("description", "Description");
-  req("locationText", "Location");
+  // Format-conditional (TM-1063) — CLIENT-ONLY view state. Online → the Online URL is the required
+  // field and `locationText` is auto-filled "Online" on the wire (so it's NOT demanded here); In person
+  // → today's rules (Location required, Online URL optional). The server never sees a `format` field —
+  // it only ever sees a satisfied `locationText` (physical text, or "Online").
+  const online = isOnlineFormat(draft.format);
+  if (online) {
+    req("onlineUrl", "Online URL");
+  } else {
+    req("locationText", "Location");
+  }
   // Length caps (mirror @Size) — checked whether or not the field is required.
   if (!errors.heading) maxLen("heading", HEADING_MAX);
   if (!errors.description) maxLen("description", DESCRIPTION_MAX);
@@ -325,16 +404,32 @@ export function buildEventPayload(draft = {}) {
 
   putText("heading");
   putText("description");
-  putText("locationText");
-  putText("mapUrl");
-  putText("onlineUrl");
-  putText("city");
+  // Format-conditional wire shaping (TM-1063), CLIENT-ONLY. For an Online event the physical trio
+  // (mapUrl / city / venueId) is not part of the form, and `locationText` is auto-filled "Online" so
+  // the server's @NotBlank on the location line is satisfied without a physical address. For In person
+  // it's the existing behaviour verbatim. NOTE (TM-734): switching In person→Online on EDIT cannot
+  // CLEAR a stale server-side mapUrl over PATCH — buildEventPayload omits blanks and the server reads
+  // absent as "leave unchanged" — so a preexisting map URL persists on the wire; the submit handler
+  // surfaces the existing TM-734 "can't be cleared here yet" warning rather than pretending it cleared.
+  const online = isOnlineFormat(draft.format);
+  if (online) {
+    const loc = cleanText(draft.locationText);
+    body.locationText = loc === "" ? ONLINE_LOCATION_TEXT : loc;
+    putText("onlineUrl");
+    // mapUrl / city / venueId deliberately NOT written for an Online event.
+  } else {
+    putText("locationText");
+    putText("mapUrl");
+    putText("onlineUrl");
+    putText("city");
+  }
   // Opening message (TM-710): optional group-chat opening message; blank = omitted (no change on PATCH,
   // absent on create). Auto-posted once as an announcement when the event's chat first opens.
   putText("openingMessage");
   // Venue reference (TM-519): the id of a saved venue picked from the library, or omitted for a
   // one-off free-text location. Sent as an integer id; the server validates it exists + is active.
-  putInt("venueId");
+  // Skipped for an Online event (TM-1063) — no physical venue applies.
+  if (!online) putInt("venueId");
   if (tz !== "") body.timezone = tz;
   putInstant("startAt");
   putInstant("endAt");
@@ -424,6 +519,9 @@ export function toFormModel(event = {}) {
     ageMin: event.ageMin == null ? "" : String(event.ageMin),
     ageMax: event.ageMax == null ? "" : String(event.ageMax),
     imagePath: str(event.imagePath),
+    // CLIENT-ONLY format (TM-1063), inferred from the event's own signals (onlineUrl / "Online"
+    // locationText) — the backend carries no format field. Seeds the form's In person/Online selector.
+    format: formatFromEvent(event),
   };
 }
 
