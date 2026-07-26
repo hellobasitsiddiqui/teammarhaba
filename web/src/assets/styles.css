@@ -220,7 +220,13 @@ body {
     min-height: 100vh;
     min-height: 100dvh;
     display: grid;
-    place-items: center;
+    /* TM-1075: TOP-align, keep horizontal centring. `place-items: center` (both axes) vertically
+       centred the `.app` column, so short content floated mid-viewport and the column background
+       shrank to content height. `start center` pins content to the TOP while keeping the column
+       horizontally centred; the column itself then fills top→bottom via `.app { min-height: 100dvh;
+       align-self: stretch }` below (1 item still spans full height; 20 items span to the last row).
+       TM-295 (100dvh) and TM-665 (minmax cap) are unchanged. */
+    place-items: start center;
     /* TM-665: pin the single column to the viewport with minmax(0, 1fr) instead of the implicit `auto`
        track. An `auto` track grows to the max-content of ANY child wider than the screen (e.g. the
        680px admin .tm-table) and then place-items:center centres that over-wide box — shifting all
@@ -235,6 +241,16 @@ body {
 
 .app {
     text-align: center;
+    /* TM-1075: the column fills the viewport top→bottom regardless of content height, so its
+       background (--surface on wide viewports, --page-bg on phones) always spans the full height and
+       never shrinks to a short screen's content. `align-self: stretch` overrides the grid item's
+       default `start` cross-nothing so the item stretches down the row track; `min-height: 100dvh`
+       (100vh fallback first, per TM-295) guarantees it reaches the bottom even when the grid row is
+       only as tall as its content. Pairs with body's `place-items: start center` (TM-1075) which
+       top-aligns the content inside this now-full-height column. */
+    min-height: 100vh;
+    min-height: 100dvh;
+    align-self: stretch;
     /* Base padding plus the device safe-area insets (TM-295). With viewport-fit=cover the WebView
        draws under the status bar / nav bar / notch; adding env(safe-area-inset-*) keeps the centred
        content clear of them. env() is 0 on every non-notched surface (desktop, normal mobile web),
@@ -1100,7 +1116,16 @@ h3,
 
 /* Console shell */
 .admin-console {
-    width: min(72rem, 96vw);
+    /* TM-1074: FILL the (widened) `.app` content box rather than set an own `min(72rem, 96vw)` width.
+       `.app` is padded (2rem each side on desktop, 0.85rem on phones, + safe-area), so an own 72rem
+       width was WIDER than `.app`'s padded content box (72rem − 2×padding) and overflowed `.app` to the
+       right — `html/body{overflow-x:hidden}` clipped the leak (so `document.scrollWidth` didn't grow and
+       it read as "content flush/cut off at the right edge"). Filling to 100% makes `.app`'s padding the
+       symmetric gutter on BOTH sides. The desktop wide column comes from `.app`'s widened --app-max
+       (`.app:has(> .admin-console…)`, min-width:30rem); on phones `.app` is full-width so this is 100%
+       of the phone content box — unchanged from the pre-fix 96vw there. */
+    width: 100%;
+    max-width: 100%;
     margin: 1.5rem auto 0;
     text-align: left;
 }
@@ -3113,6 +3138,34 @@ html {
     width: min(100%, var(--app-max));
     margin-inline: auto;
     overflow-wrap: break-word;
+}
+
+/* TM-1074: the admin surface is a WIDE column. All 6 admin views are `<section class="admin-console">`
+   direct children of `main.app`, each rendered by unhiding it (the router toggles [hidden]). The admin
+   surface wants ~72rem (~1152px) but the shell above clamps `.app` to the phone band (--app-max ≤480px)
+   — so the wide admin content overflowed the centred column to the RIGHT (TM-1074 screenshot). Fix has
+   TWO parts: (1) when `.app` is showing a visible admin console, re-point `--app-max` to the admin width
+   so `.app` (which reads `min(100%, var(--app-max))`) GROWS to ~72rem; (2) `.admin-console` FILLS that
+   widened `.app` content box (`width/max-width: 100%`, see its own rule above) instead of setting its own
+   72rem — an own 72rem is wider than `.app`'s PADDED content box (72rem − 2×padding) and would still
+   overflow `.app` to the right by the padding amount (clipped by `overflow-x:hidden`, so `scrollWidth`
+   never grows and it reads as "content flush/cut off at the right edge"). Filling to 100% makes `.app`'s
+   padding the symmetric gutter on BOTH sides; the column stays centred (`.app { margin-inline: auto }`),
+   so the admin surface is a coherent wide column centred in the viewport with no horizontal overflow.
+   Non-admin routes never match this `:has`, so they stay on the phone clamp — Home/Events/Chat/Profile
+   unchanged. `:has()` is already relied on across this shell (e.g. `.app:has(#auth-signed-out…)`, the
+   sticky-header and users-console rules), so it is an accepted mechanism here.
+
+   DESKTOP-ONLY (min-width: 30rem): below the phone-polish breakpoint the admin surface stays FULL-WIDTH
+   like every other route — `.app` keeps the clamp band (`min(100%, 420px)` → 100% on a ≤480px phone) and
+   `.admin-console` fills it (100%). Widening --app-max on a phone would instead SHRINK `.app` to 96vw and
+   the phone `.app` padding (0.85rem each side) would then squeeze the console → a few px of right-overflow
+   (the exact phone regression this gate avoids). So the widen only applies once there is real horizontal
+   room, above the phone band. */
+@media (min-width: 30rem) {
+    .app:has(> .admin-console:not([hidden])) {
+        --app-max: min(72rem, 96vw);
+    }
 }
 
 /* TM-1041: Revolut-style neutral canvas. On viewports wider than the column the page background reads

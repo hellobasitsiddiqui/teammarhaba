@@ -236,3 +236,89 @@ test("the wide-viewport canvas stays at least as deep as the shade column (TM-10
     "--app-canvas must be no lighter than the --surface column shade so the column edge reads at wide viewports (TM-1073)",
   );
 });
+
+// ── TM-1075: content is TOP-aligned and the .app column FILLS the viewport height. The old
+//    `body { place-items: center }` vertically centred the column (short content floated mid-screen,
+//    column background shrank to content). Pin: body top-aligns (start), .app fills 100dvh height. ──
+
+test("body top-aligns the column (place-items: start center), never center (TM-1075)", () => {
+  // Scope to the base `body { … }` rule block.
+  const block = NO_COMMENTS.match(/(?:^|\n)body\s*\{[\s\S]*?\n\}/);
+  assert.ok(block, "the base body { … } rule must exist");
+  assert.match(
+    block[0],
+    /place-items:\s*start\s+center\b/,
+    "body must use `place-items: start center` — TOP-aligned content, horizontal centring kept (TM-1075)",
+  );
+  assert.ok(
+    !/place-items:\s*center\s*;/.test(block[0]),
+    "body must NOT use the old `place-items: center` (that vertically centred the short column) (TM-1075)",
+  );
+  // TM-665 horizontal-centring cap must be untouched.
+  assert.match(
+    block[0],
+    /grid-template-columns:\s*minmax\(\s*0\s*,\s*1fr\s*\)/,
+    "the TM-665 minmax(0, 1fr) column cap must survive the top-align change",
+  );
+});
+
+test(".app fills the viewport height so its background spans top→bottom (TM-1075)", () => {
+  // Scope to the base `.app { … }` width-agnostic rule (the one carrying padding + the safe-area
+  // insets, i.e. the block that also has `text-align: center`).
+  const block = NO_COMMENTS.match(/(?:^|\n)\.app\s*\{[\s\S]*?text-align:\s*center[\s\S]*?\n\}/);
+  assert.ok(block, "the base .app { text-align: center; … } rule must exist");
+  assert.match(
+    block[0],
+    /min-height:\s*100dvh/,
+    ".app must set min-height: 100dvh so the column fills the dynamic viewport height (TM-1075/TM-295)",
+  );
+  assert.match(
+    block[0],
+    /min-height:\s*100vh/,
+    ".app must keep a 100vh fallback before 100dvh for viewports without dvh support (TM-295)",
+  );
+  assert.match(
+    block[0],
+    /align-self:\s*stretch/,
+    ".app must set align-self: stretch so the grid item stretches down the row track (TM-1075)",
+  );
+});
+
+// ── TM-1074: the admin surface is a WIDE column. `.admin-console` wants min(72rem, 96vw) but the shell
+//    clamps `.app` to the ≤480px phone band, so the wider child overflowed right. Fix: when `.app` holds
+//    a visible admin console, `--app-max` re-points to the admin width so `.app` grows to fit it. ──
+
+test("the admin surface widens the shell clamp via .app:has(> .admin-console:not([hidden])) (TM-1074)", () => {
+  assert.match(
+    NO_COMMENTS,
+    /\.app:has\(\s*>\s*\.admin-console:not\(\[hidden\]\)\s*\)\s*\{[^}]*--app-max:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
+    ".app:has(> .admin-console:not([hidden])) must re-point --app-max to min(72rem, 96vw) so the admin " +
+      "column fits inside the shell (no right overflow) — gated on a VISIBLE admin console only (TM-1074)",
+  );
+  // .admin-console FILLS the widened .app content box (width/max-width: 100%) rather than setting its
+  // own 72rem width — an own 72rem is WIDER than .app's padded content box and overflows right (clipped
+  // by overflow-x:hidden). Filling to 100% makes .app's padding the symmetric gutter, no leak.
+  const adminBlock = NO_COMMENTS.match(/\.admin-console\s*\{[\s\S]*?\n\}/);
+  assert.ok(adminBlock, ".admin-console rule must exist");
+  assert.match(
+    adminBlock[0],
+    /width:\s*100%/,
+    ".admin-console must fill the widened .app content box (width: 100%), not set its own 72rem (which overflows .app's padded content box) (TM-1074)",
+  );
+  assert.match(
+    adminBlock[0],
+    /max-width:\s*100%/,
+    ".admin-console must cap at max-width: 100% so it can never exceed the .app content box (TM-1074)",
+  );
+  assert.ok(
+    !/width:\s*min\(\s*72rem\s*,\s*96vw\s*\)/.test(adminBlock[0]),
+    ".admin-console must NOT set its own min(72rem, 96vw) width — that overflowed .app's padded content box (TM-1074)",
+  );
+  // The base clamp token is UNCHANGED — non-admin routes stay on the phone band (the :has scopes the
+  // widen to the .app subtree only; #app-tabbar + non-admin routes read the untouched :root token).
+  assert.match(
+    NO_COMMENTS,
+    /--app-max:\s*clamp\(\s*420px\s*,\s*40vw\s*,\s*480px\s*\)/,
+    "the :root --app-max phone band must stay clamp(420px, 40vw, 480px) — only the admin subtree overrides it (TM-1074)",
+  );
+});
