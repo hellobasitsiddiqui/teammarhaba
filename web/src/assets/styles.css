@@ -4865,20 +4865,6 @@ body.tm-tabbar-kbd-open .app-tabbar {
     display: none;
 }
 
-/* Hide the DUPLICATE top-nav tab links ONLY where the top nav collapses to the hamburger (≤ 33rem),
-   exactly as before. On DESKTOP the top nav (TM-1024's four tabs) is still the nav and MUST stay
-   visible: TM-1043 removes .app-nav outright, and the e2e specs still navigate via #nav-* at the
-   desktop viewport until TM-1044 migrates them — hiding them here would 404 ~20 nav-driven specs. So
-   B accepts a brief B→C interim where desktop shows both navs; TM-1043 ends it. */
-@media (max-width: 33rem) {
-    body.tm-has-tabbar .app-nav-items > #nav-home,
-    body.tm-has-tabbar .app-nav-items > #nav-events,
-    body.tm-has-tabbar .app-nav-items > #nav-chat,
-    body.tm-has-tabbar .app-nav-items > #nav-profile {
-        display: none;
-    }
-}
-
 /* Hand-drawn edge when the sketchy toggle is on (TM-529) — the same #wobble-soft skin the nav / cards
    use; dropped under reduced-motion since it's purely decorative, and absent in clean Paper. The label
    keeps the body face: the design-token contract (TM-510) owns the hand-lettered faces via
