@@ -140,3 +140,22 @@ test("no routed VIEW re-introduces a page-width cap wider than the 480px column 
     `routed views must inherit the ≤480px clamp band, not set a wider page cap: ${offenders.join(" ; ")}`,
   );
 });
+
+// ── TM-1072: the notification bell is fixed chrome; its companion screen headers must be STICKY so on
+//    scroll the bell stays anchored to its header instead of floating over list rows (the Chat-list bug). ──
+
+test("bell-anchoring headers are sticky + the Chat header clears the bell (TM-1072)", () => {
+  // The sticky rule that keeps the fixed bell with its header while content scrolls beneath.
+  const sticky = NO_COMMENTS.match(/\.tm-chat-head\s*,[\s\S]*?\{[\s\S]*?\}/);
+  assert.ok(
+    sticky && /position:\s*sticky/.test(sticky[0]),
+    ".tm-chat-head (+ #auth-signed-in .tm-home-head / #profile-view .tm-pf-topbar) must be position: sticky " +
+      "so the fixed bell stays anchored to its header on scroll, not floating over list rows (TM-1072)",
+  );
+  // The Chat header reserves the same 44px bell-clearance Home/Profile already had.
+  assert.match(
+    NO_COMMENTS,
+    /\.tm-chat-head\s*\{\s*padding-right:\s*calc\(\s*44px/,
+    "the Chat header (.tm-chat-head) must reserve the 44px bell clearance (TM-1072)",
+  );
+});

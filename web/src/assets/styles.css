@@ -4056,10 +4056,29 @@ html {
 }
 
 /* Headings keep clear of the overlaid bell (replaces the route-scoped
- * .app:has(.app-nav--corner-bell) reservations — now unconditional at every width). */
+ * .app:has(.app-nav--corner-bell) reservations — now unconditional at every width).
+ * TM-1072: the Chat list header (.tm-chat-head) needs the same clearance so its title doesn't run under
+ * the bell. */
 #profile-view .tm-pf-topbar,
-#auth-signed-in .tm-home-head {
+#auth-signed-in .tm-home-head,
+.tm-chat-head {
     padding-right: calc(44px + var(--space-2));
+}
+
+/* TM-1072: the notification bell is FIXED chrome (#app-topbar), but its companion screen headers were
+ * in-flow — so on a scrolling screen (the Chat list especially) the header scrolled away and the fixed
+ * bell was left floating over the list rows (it read as a bell stuck on the first message — awkward, not
+ * industry-standard). Make each anchoring header STICKY: it stays pinned beside the bell while content
+ * scrolls BENEATH it (an opaque page-bg background hides the passing content). z-index sits above content
+ * but below the fixed bell (900) + toasts (1000). Sticky is a SCROLL-only effect — at load the header is
+ * in its normal place, so the content-first geometry (TM-910, profile-shell.spec) is unchanged. */
+.tm-chat-head,
+#auth-signed-in .tm-home-head,
+#profile-view .tm-pf-topbar {
+    position: sticky;
+    top: env(safe-area-inset-top);
+    z-index: 5;
+    background: var(--page-bg);
 }
 
 /* Heading-first (TM-908/TM-910 ACs, now route-independent): with no nav row in flow, collapse the
