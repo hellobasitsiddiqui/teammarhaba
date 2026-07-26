@@ -2798,6 +2798,26 @@ h3,
     border-color: var(--accent);
 }
 
+/* A disabled preset chip (TM-1064) — e.g. an "Ends +2h" chip before a Start is set. Muted + not
+   interactive, but still visible so the admin sees the option exists once Start is filled. */
+.tm-chip:disabled,
+.tm-chip[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--muted, var(--accent));
+    border-color: var(--border, var(--accent-line));
+}
+.tm-chip:disabled:hover,
+.tm-chip[aria-disabled="true"]:hover {
+    border-color: var(--border, var(--accent-line));
+}
+
+/* The scheduling preset-chip row (TM-1064) sits directly under its datetime / reveal field. A little
+   top gap separates it from the input; it inherits `.tm-chips` wrap so it stays tidy at 390px. */
+.tm-chips-slot {
+    margin-top: 0.35rem;
+}
+
 /* The create/edit form — a single comfortable column of fields. Lives on its own full-page admin
    route now (TM-426), not a modal. */
 .tm-event-form {

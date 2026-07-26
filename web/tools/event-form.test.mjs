@@ -46,6 +46,13 @@ import {
   ONLINE_LOCATION_TEXT,
   formatFromEvent,
   mapUrlPreviewState,
+  startNow,
+  startChips,
+  endChips,
+  visibleFromChips,
+  visibleUntilChips,
+  revealHourChips,
+  shiftZonedLocal,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -661,4 +668,138 @@ test("mapUrlPreviewState: reachable but NO OG data → 'empty', NEVER 'broken' (
   const { state, preview } = mapUrlPreviewState("https://maps.example/consent", true, { url: "https://maps.example/consent", title: null });
   assert.equal(state, "empty");
   assert.equal(preview.hasContent, false);
+});
+
+// --- scheduling preset chips (TM-1064) --------------------------------------------------------
+//
+// These assert the PURE chip-value helpers. Every datetime chip must produce a value that, once seeded
+// into the field, passes validateEventDraft — computed IN THE SELECTED EVENT TIMEZONE (a non-browser
+// zone) and across a DST boundary. Each value round-trips losslessly (zonedToUtcIso ∘ helper) so it is a
+// real, orderable wall clock the server will accept.
+
+// A fixed non-browser zone with a stable offset (UTC+5, no DST) for the deterministic cases.
+const KHI = "Asia/Karachi";
+
+test("startNow rounds UP to the next 15 min, in the event zone (non-browser zone) (TM-1064)", () => {
+  // 2026-07-10T12:07:00Z. In Karachi (UTC+5) that's 17:07 local → rounds up to 17:15.
+  assert.equal(startNow(KHI, "2026-07-10T12:07:00.000Z"), "2026-07-10T17:15");
+  // Already on a boundary: 12:00Z = 17:00 local → unchanged (ceil is a no-op, not +15).
+  assert.equal(startNow(KHI, "2026-07-10T12:00:00.000Z"), "2026-07-10T17:00");
+  // Exactly one second past a boundary still rounds up to the next quarter.
+  assert.equal(startNow(KHI, "2026-07-10T12:00:01.000Z"), "2026-07-10T17:15");
+  // Rounding crosses the hour: 17:52 local → 18:00.
+  assert.equal(startNow(KHI, "2026-07-10T12:52:00.000Z"), "2026-07-10T18:00");
+});
+
+test("startChips: Now / In 2h / In 4h are quarter-aligned and strictly increasing, in-zone (TM-1064)", () => {
+  const chips = startChips(KHI, "2026-07-10T12:07:00.000Z");
+  assert.deepEqual(chips.map((c) => c.label), ["Now", "In 2h", "In 4h"]);
+  assert.equal(chips[0].value, "2026-07-10T17:15");
+  assert.equal(chips[1].value, "2026-07-10T19:15");
+  assert.equal(chips[2].value, "2026-07-10T21:15");
+  // Each value round-trips through zonedToUtcIso (it's a real, orderable wall clock).
+  for (const c of chips) assert.equal(utcIsoToZoned(zonedToUtcIso(c.value, KHI), KHI), c.value);
+});
+
+test("startChips 'Now' seeds a draft that validateEventDraft accepts (TM-1064)", () => {
+  const chips = startChips("Europe/London", "2026-07-10T12:07:00.000Z");
+  const start = chips[0].value;
+  const draft = validDraft({ timezone: "Europe/London", startAt: start, endAt: "", visibilityStart: "2026-07-01T09:00", visibilityEnd: start });
+  const { errors } = validateEventDraft(draft);
+  assert.equal(errors.startAt, undefined);
+});
+
+test("endChips: +1h/+2h/+4h off the current start, DST-correct across spring-forward (TM-1064)", () => {
+  // London spring-forward is 2026-03-29: 01:00 local jumps to 02:00 (02:00–02:59 does NOT exist).
+  // A 00:30 start + 1h must land on 02:30 (a REAL hour later), not the non-existent 01:30.
+  const chips = endChips("2026-03-29T00:30", "Europe/London");
+  assert.deepEqual(chips.map((c) => c.label), ["+1h", "+2h", "+4h"]);
+  assert.equal(chips[0].value, "2026-03-29T02:30"); // +1 real hour skips the DST gap
+  assert.equal(chips[1].value, "2026-03-29T03:30");
+  assert.equal(chips[2].value, "2026-03-29T05:30");
+  // Non-DST zone sanity (Karachi): plain +Nh.
+  const khi = endChips("2026-07-10T17:15", KHI);
+  assert.equal(khi[0].value, "2026-07-10T18:15");
+});
+
+test("endChips with a BLANK start yields all-'' values (a harmless no-op) (TM-1064)", () => {
+  const chips = endChips("", "Europe/London");
+  assert.deepEqual(chips.map((c) => c.value), ["", "", ""]);
+  // Garbage in is also just "" (never throws, never a stray date).
+  assert.deepEqual(endChips("not-a-date", KHI).map((c) => c.value), ["", "", ""]);
+});
+
+test("endChips '+2h' seeds an end that passes validateEventDraft (after > start) (TM-1064)", () => {
+  const start = "2026-07-10T18:00";
+  const end = endChips(start, "Europe/London")[1].value; // +2h → 20:00
+  assert.equal(end, "2026-07-10T20:00");
+  const { errors } = validateEventDraft(validDraft({ timezone: "Europe/London", startAt: start, endAt: end }));
+  assert.equal(errors.endAt, undefined);
+});
+
+test("visibleFromChips: Today/Tomorrow at 09:00 local; N-before tracks the start (TM-1064)", () => {
+  const start = "2026-07-10T18:00";
+  const chips = visibleFromChips(start, KHI, "2026-07-01T12:00:00.000Z"); // 17:00 Karachi on Jul 1
+  assert.deepEqual(chips.map((c) => c.label), ["Today", "Tomorrow", "1 day before", "1 week before"]);
+  assert.equal(chips[0].value, "2026-07-01T09:00"); // Today (in-zone date) at 09:00
+  assert.equal(chips[1].value, "2026-07-02T09:00"); // Tomorrow
+  assert.equal(chips[2].value, "2026-07-09T18:00"); // 1 day before start, same time of day
+  assert.equal(chips[3].value, "2026-07-03T18:00"); // 1 week before start
+});
+
+test("visibleFromChips 'Today' uses the EVENT zone's date, not the browser's (late-night edge) (TM-1064)", () => {
+  // 2026-07-10T23:30Z is still 2026-07-10 in UTC but already 2026-07-11 04:30 in Karachi (UTC+5).
+  // "Today" must be the KARACHI date (the event zone), i.e. the 11th.
+  assert.equal(visibleFromChips("", KHI, "2026-07-10T23:30:00.000Z")[0].value, "2026-07-11T09:00");
+});
+
+test("visibleFromChips: start-relative chips are '' when start is blank (TM-1064)", () => {
+  const chips = visibleFromChips("", KHI, "2026-07-01T12:00:00.000Z");
+  assert.equal(chips[2].value, ""); // 1 day before
+  assert.equal(chips[3].value, ""); // 1 week before
+  // Today/Tomorrow don't depend on start, so they're still populated.
+  assert.notEqual(chips[0].value, "");
+});
+
+test("visibleFromChips '1 week before' keeps the wall clock across a DST change (TM-1064)", () => {
+  // Start Apr 5 2026 10:00 London (BST); 1 week before is Mar 29 — the spring-forward day. Keeping the
+  // TIME OF DAY (10:00), not a real-ms shift, is what "a week before" means to an admin.
+  const chips = visibleFromChips("2026-04-05T10:00", "Europe/London", "2026-03-01T00:00:00.000Z");
+  assert.equal(chips[3].value, "2026-03-29T10:00");
+});
+
+test("visibleUntilChips: single '1h before start', tracks the current start (TM-1064)", () => {
+  const chips = visibleUntilChips("2026-07-10T18:00", "Europe/London");
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].label, "1h before start");
+  assert.equal(chips[0].value, "2026-07-10T17:00");
+  // Blank start → '' (no-op).
+  assert.equal(visibleUntilChips("", "Europe/London")[0].value, "");
+  // A seeded visibility-end 1h before start passes validation (visStart < visEnd, before start).
+  const { errors } = validateEventDraft(
+    validDraft({ timezone: "Europe/London", startAt: "2026-07-10T18:00", visibilityStart: "2026-07-01T09:00", visibilityEnd: chips[0].value }),
+  );
+  assert.equal(errors.visibilityEnd, undefined);
+});
+
+test("revealHourChips: 1h / 24h, both within the API bounds (TM-1064)", () => {
+  const chips = revealHourChips();
+  assert.deepEqual(chips, [
+    { label: "1h", value: "1" },
+    { label: "24h", value: "24" },
+  ]);
+  for (const c of chips) {
+    const { errors } = validateEventDraft(validDraft({ locationRevealHours: c.value }));
+    assert.equal(errors.locationRevealHours, undefined);
+    assert.ok(Number(c.value) >= REVEAL_HOURS_MIN && Number(c.value) <= REVEAL_HOURS_MAX);
+  }
+});
+
+test("shiftZonedLocal is real-ms and null-safe (TM-1064)", () => {
+  // A fall-back edge (London 2026-10-25 02:00 → 01:00; 01:00–01:59 occurs TWICE). Adding a real hour to
+  // 00:30 lands on the FIRST 01:30, then another real hour reaches the SECOND 01:30 wall clock again is
+  // ambiguous — assert the +2h real-ms result is a valid, parseable wall clock (never throws / blank).
+  assert.equal(shiftZonedLocal("2026-07-10T10:00", 90 * 60 * 1000, KHI), "2026-07-10T11:30");
+  assert.equal(shiftZonedLocal("", 3600000, KHI), "");
+  assert.equal(shiftZonedLocal("2026-07-10T10:00", 3600000, "Not/AZone"), "");
 });
