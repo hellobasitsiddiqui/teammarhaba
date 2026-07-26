@@ -29,6 +29,9 @@ import {
   directionsUrl,
   directionsModel,
   DIRECTIONS_LABEL,
+  mapSlotModel,
+  MAP_SLOT,
+  MAPS_PLATFORM,
   ageBand,
   ageBandLabel,
   ageEligibility,
@@ -862,4 +865,54 @@ test("cityScopedListModel: junk card input degrades to an empty, no-throw model"
   assert.equal(m.heading, "London");
   assert.deepEqual(m.scoped, []);
   assert.deepEqual(m.others, []);
+});
+
+// ── event-detail map slot (TM-827-A: reveal-aware paper-map placeholder) ───────────────────────────
+
+test("mapSlotModel: PRE-REVEAL → placeholder with the reveal-countdown caption (no directions link)", () => {
+  const detail = { locationRevealed: false, locationRevealsAt: "2026-07-07T12:00:00Z", city: "London" };
+  const slot = mapSlotModel(detail, MAPS_PLATFORM.WEB, NOON_UTC);
+  assert.equal(slot.kind, MAP_SLOT.PLACEHOLDER);
+  assert.ok(slot.caption.startsWith("Exact location revealed"), `caption was ${JSON.stringify(slot.caption)}`);
+  assert.equal(slot.directions, undefined, "no directions link pre-reveal");
+});
+
+test("mapSlotModel: pre-reveal caption never leaks the venue (city-level max, TM-408)", () => {
+  const detail = {
+    locationRevealed: false,
+    locationRevealsAt: "2026-07-07T12:00:00Z",
+    city: "London",
+    // These are withheld by the server pre-reveal; even if present the model must not surface them.
+    locationText: "Secret Venue, 1 Hidden Lane",
+    mapUrl: "https://maps.example/secret",
+  };
+  const slot = mapSlotModel(detail, MAPS_PLATFORM.WEB, NOON_UTC);
+  assert.equal(slot.kind, MAP_SLOT.PLACEHOLDER);
+  assert.ok(!/Hidden Lane|Secret Venue|maps\.example/.test(slot.caption), "caption must not contain venue/mapUrl");
+});
+
+test("mapSlotModel: POST-REVEAL with a venue → the platform-correct directions link (unchanged)", () => {
+  const detail = { locationRevealed: true, locationText: "Marhaba Hall, 1 Test St", city: "London" };
+  const slot = mapSlotModel(detail, MAPS_PLATFORM.WEB, NOON_UTC);
+  assert.equal(slot.kind, MAP_SLOT.DIRECTIONS);
+  assert.equal(slot.directions.show, true);
+  assert.equal(slot.directions.label, DIRECTIONS_LABEL);
+  assert.ok(slot.directions.href, "a directions href is present");
+  // The model carries directionsModel verbatim (TM-487 unchanged).
+  assert.deepEqual(slot.directions, directionsModel(detail, MAPS_PLATFORM.WEB, NOON_UTC));
+});
+
+test("mapSlotModel: REVEALED but nowhere to point (online-only, no venue) → NONE", () => {
+  const online = { locationRevealed: true, onlineUrl: "https://meet.example/room" }; // no locationText/city/mapUrl
+  const slot = mapSlotModel(online, MAPS_PLATFORM.WEB, NOON_UTC);
+  assert.equal(slot.kind, MAP_SLOT.NONE, "the map slot renders nothing; the join link lives elsewhere");
+  assert.equal(slot.caption, undefined);
+  assert.equal(slot.directions, undefined);
+});
+
+test("mapSlotModel: a curated mapUrl post-reveal still yields a directions link", () => {
+  const detail = { locationRevealed: true, mapUrl: "https://maps.google/?q=venue" };
+  const slot = mapSlotModel(detail, MAPS_PLATFORM.WEB, NOON_UTC);
+  assert.equal(slot.kind, MAP_SLOT.DIRECTIONS);
+  assert.equal(slot.directions.show, true);
 });

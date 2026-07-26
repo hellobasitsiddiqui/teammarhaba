@@ -63,6 +63,46 @@ function icon(name, size = 18) {
   );
 }
 
+/**
+ * The pre-reveal map placeholder illustration (TM-827-A): a GENERIC, hand-drawn "paper map" — wobbly
+ * roads, a park blob, a water curve and a centred location pin — inked with `currentColor` in the Paper
+ * design-kit style. It is purely decorative (`aria-hidden`, the caption carries the meaning) and shows
+ * NOTHING geographic: no real streets, no coordinates, no venue text — so it can never leak the withheld
+ * location (TM-408). Static inline SVG: zero network requests, no maps provider, no API key.
+ */
+function paperMapDoodle() {
+  return svgEl(
+    "svg",
+    {
+      class: "tm-event-map-doodle",
+      viewBox: "0 0 240 120",
+      width: "100%",
+      height: "120",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": 2,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "aria-hidden": "true",
+      focusable: "false",
+      preserveAspectRatio: "xMidYMid meet",
+    },
+    [
+      // roads (wobbly, generic — no real geometry)
+      svgEl("path", { d: "M8 34c40 6 70-8 106-4s78 16 118 6", opacity: "0.55" }),
+      svgEl("path", { d: "M20 96c30-10 52 4 82-2s62-18 112-8", opacity: "0.55" }),
+      svgEl("path", { d: "M74 12c-6 34 4 62 2 98", opacity: "0.45" }),
+      svgEl("path", { d: "M168 16c8 30-4 60 0 92", opacity: "0.45" }),
+      // a park blob + a water curve, faint
+      svgEl("path", { d: "M28 52c14-8 30-4 30 10s-20 20-32 12-8-16 2-22z", opacity: "0.3" }),
+      svgEl("path", { d: "M196 60c-10 6-10 22 2 30", opacity: "0.35" }),
+      // centred location pin (the only "solid" mark)
+      svgEl("path", { d: "M120 40a14 14 0 0 0-14 14c0 10 14 24 14 24s14-14 14-24a14 14 0 0 0-14-14z" }),
+      svgEl("circle", { cx: 120, cy: 54, r: 5, fill: "currentColor", stroke: "none" }),
+    ],
+  );
+}
+
 // Viewer formatting context: the browser's timezone + locale, so instants render in the viewer's
 // local time (the AC) and in their number/date format. Both fail soft to sensible defaults.
 const VIEWER_TZ = core.viewerTimeZone() || undefined;
@@ -588,8 +628,9 @@ function locationSection(detail, now) {
  * the non-interactive "revealed later" placeholder; revealed-but-nowhere-to-go renders nothing.
  */
 function mapSection(detail, now) {
-  const model = core.directionsModel(detail, platformFor(), now);
-  if (model.show) {
+  const slot = core.mapSlotModel(detail, platformFor(), now);
+  if (slot.kind === core.MAP_SLOT.DIRECTIONS) {
+    const model = slot.directions;
     return el(
       "a",
       {
@@ -606,10 +647,18 @@ function mapSection(detail, now) {
       [icon("pin"), el("span", { class: "tm-event-map-label", text: `${model.label} — Directions` })],
     );
   }
-  if (core.locationView(detail, now).revealed === false) {
-    return el("div", { class: "tm-event-map" }, "Map opens once the venue is revealed");
+  if (slot.kind === core.MAP_SLOT.PLACEHOLDER) {
+    // Pre-reveal (TM-827-A): a generic paper-map illustration + the reveal-countdown caption. The
+    // illustration is decorative (aria-hidden) and geography-free; the caption is the accessible content.
+    return el("div", { class: "tm-event-map tm-event-map-placeholder", "data-testid": "event-map-placeholder" }, [
+      paperMapDoodle(),
+      el("p", {
+        class: "tm-muted tm-event-map-caption",
+        text: slot.caption || "Map opens once the venue is revealed",
+      }),
+    ]);
   }
-  return null;
+  return null; // revealed but nowhere to point (online-only) — the map slot stays empty.
 }
 
 // ------------------------------------------------------------------ add to calendar (TM-398)

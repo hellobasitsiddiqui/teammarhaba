@@ -81,3 +81,17 @@ test("no aria-label overrides the visible text away from 'Open in Maps' (regress
     assert.ok(true, "no aria-label — accessible name comes from the descriptive visible text");
   }
 });
+
+test("the pre-reveal paper-map placeholder is decorative (aria-hidden SVG, no Label-in-Name), TM-827-A", () => {
+  // The illustration is a `svgEl("svg", { class: "tm-event-map-doodle", ... "aria-hidden": "true" })`;
+  // the accessible content is the caption <p> text, not the artwork. Assert the doodle carries
+  // aria-hidden so a screen reader announces only the caption, and that the placeholder builder does not
+  // slap an aria-label on the map container (which could re-introduce a Label-in-Name mismatch).
+  const doodle = SRC.match(/svgEl\(\s*"svg",\s*\{\s*class:\s*"tm-event-map-doodle",([\s\S]*?)\},/);
+  assert.ok(doodle, "could not locate the paper-map doodle svgEl() builder");
+  assert.match(doodle[1], /"aria-hidden":\s*"true"/, "the decorative paper-map SVG must be aria-hidden");
+  // The placeholder container renders the doodle + a caption <p>; it must not carry its own aria-label.
+  const placeholder = SRC.match(/class:\s*"tm-event-map tm-event-map-placeholder",([\s\S]*?)\},/);
+  assert.ok(placeholder, "could not locate the map placeholder container");
+  assert.ok(!/aria-label/.test(placeholder[1]), "the placeholder container must not add an aria-label");
+});
