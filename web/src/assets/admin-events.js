@@ -63,6 +63,13 @@ import {
   visibleFromChips,
   visibleUntilChips,
   revealHourChips,
+  AGE_DEFAULT_MIN,
+  AGE_DEFAULT_MAX,
+  AGE_BAND_CUSTOM,
+  AGE_BAND_PRESETS,
+  OPENING_MESSAGE_TEMPLATES,
+  ageBandToMinMax,
+  minMaxToAgeBand,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
@@ -793,8 +800,12 @@ const FORM_FIELDS = [
   { key: "visibilityEnd", id: "event-visibility-end", label: "Visible until", type: "datetime-local", required: true, row: "visibility" },
   { key: "capacity", id: "event-capacity", label: "Capacity (optional)", type: "number", min: 1, row: "limits", hint: "Blank = unlimited." },
   { key: "locationRevealHours", id: "event-reveal-hours", label: "Location reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
-  { key: "ageMin", id: "event-age-min", label: "Min age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
-  { key: "ageMax", id: "event-age-max", label: "Max age (optional)", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "age" },
+  // Age band (TM-1065): the two number inputs are no longer laid out two-up. They stay in FORM_FIELDS
+  // (so readDraft / validateEventDraft / server-error routing still key off them) but are RE-HOMED inside
+  // the age-band control (buildAgeBandControl), revealed only when the "Custom" band chip is chosen. The
+  // "customage" row groups them two-up INSIDE that control's reveal region.
+  { key: "ageMin", id: "event-age-min", label: "Min age", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "customage" },
+  { key: "ageMax", id: "event-age-max", label: "Max age", type: "number", min: AGE_MIN_BOUND, max: AGE_MAX_BOUND, row: "customage" },
   { key: "openingMessage", id: "event-opening-message", label: "Chat opening message (optional)", type: "textarea", maxLength: OPENING_MESSAGE_MAX, hint: "Auto-posted once as an announcement when the event's group chat first opens. Blank = none (TM-710)." },
 ];
 
@@ -977,9 +988,9 @@ function buildImageControl(event) {
     id: "event-image-hint",
     class: "tm-muted tm-field-hint",
     text: !configured
-      ? "Event image uploads aren't available in this environment yet."
+      ? "Main image uploads aren't available in this environment yet."
       : hasExisting
-        ? `An image is already set. Choose a file to replace it. ${sizeHint}`
+        ? `A main image is already set. Choose a file to replace it. ${sizeHint}`
         : sizeHint,
   });
 
@@ -1037,7 +1048,7 @@ function buildImageControl(event) {
   const node = el("section", { class: "tm-event-image", "aria-label": "Event image" }, [
     frame,
     el("div", { class: "tm-event-image-meta" }, [
-      el("label", { class: "tm-field-label", for: "event-image-file", text: "Image" }),
+      el("label", { class: "tm-field-label", for: "event-image-file", text: "Main image" }),
       file,
       progress,
       hint,
@@ -1238,6 +1249,111 @@ function buildMapUrlPreview() {
 }
 
 /**
+ * The age-band control (TM-1065) — one control that replaces the old two raw "Min age / Max age" number
+ * inputs. It offers the preset chips (18-30 / 21-35 / 30+ / All ages) plus a **Custom** chip that reveals
+ * the two number inputs for any other band. Built on the shared {@link buildPresetChips} primitive.
+ *
+ * The two number inputs are the SAME `#event-age-min` / `#event-age-max` inputs FORM_FIELDS built (passed
+ * in via `customRow`), so `readDraft` / `validateEventDraft` / server-error routing are untouched: a
+ * preset chip just SEEDS those inputs (via {@link ageBandToMinMax}) and hides them; Custom reveals them.
+ * On open it reverse-maps the current `{min,max}` draft to a preset ({@link minMaxToAgeBand}), falling back
+ * to Custom for a non-preset band (e.g. a saved 25-40, or the 18-99 create default) so the exact numbers
+ * stay visible + editable.
+ *
+ * A server `ageMin`/`ageMax` validation error is routed here (via `revealForError`) so it renders on the
+ * band's own error node and forces Custom open — it can never hide behind a collapsed reveal.
+ *
+ * @param {{minInput: HTMLInputElement, maxInput: HTMLInputElement, customRow: HTMLElement}} parts the
+ *   FORM_FIELDS-built min/max inputs and the two-up `.tm-field-row` wrapper holding their field blocks.
+ * @param {string} initialMin the min value already seeded into the input (draft/prefill).
+ * @param {string} initialMax the max value already seeded into the input.
+ * @param {() => void} onChange called after a chip pick seeds the inputs (the caller revalidates).
+ * @returns {{node: HTMLElement, revealForError: (message: string) => void, clearError: () => void}}
+ */
+function buildAgeBandControl({ minInput, maxInput, customRow }, initialMin, initialMax, onChange) {
+  // The chip set = the presets + a trailing Custom chip. Each chip's data-chip is its label so a chip is
+  // targetable by copy (e.g. `.tm-chip[data-chip="Custom"]` in the e2e).
+  const chipDefs = [...AGE_BAND_PRESETS.map((b) => b.label), AGE_BAND_CUSTOM];
+  let active = minMaxToAgeBand(initialMin, initialMax); // the preset (or Custom) the current band maps to
+
+  const error = el("p", { id: "event-age-band-error", class: "tm-field-error", role: "alert", hidden: true });
+  const chipsHolder = el("div", { class: "tm-chips-slot" });
+  // The reveal region wraps the two number inputs; shown only for Custom.
+  const reveal = el("div", { class: "tm-age-custom", hidden: true }, [customRow]);
+
+  const paintActive = () => {
+    // Reflect the active band on the chips (aria-pressed + a class hook) and toggle the Custom reveal.
+    for (const btn of chipsHolder.querySelectorAll(".tm-chip")) {
+      const on = btn.dataset.chip === active;
+      btn.classList.toggle("tm-chip-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    reveal.hidden = active !== AGE_BAND_CUSTOM;
+  };
+
+  const pick = (label) => {
+    active = label;
+    if (label === AGE_BAND_CUSTOM) {
+      // Custom keeps whatever numbers are already in the inputs (don't wipe an admin's typed band).
+      paintActive();
+      // Focus the min input so a keyboard user lands on it once the reveal opens.
+      minInput.focus();
+    } else {
+      const { min, max } = ageBandToMinMax(label);
+      minInput.value = min;
+      maxInput.value = max;
+      paintActive();
+    }
+    error.hidden = true;
+    error.textContent = "";
+    onChange();
+  };
+
+  const chips = buildPresetChips(chipDefs, (value) => pick(value), { ariaLabel: "Age band" });
+  chipsHolder.append(chips);
+  paintActive();
+
+  // Typing in the custom inputs can change which band the numbers represent — keep the active chip in
+  // sync (e.g. typing 18/30 by hand lights the "18-30" preset chip) WITHOUT collapsing the reveal.
+  const syncFromInputs = () => {
+    const mapped = minMaxToAgeBand(minInput.value, maxInput.value);
+    // Stay on Custom while the admin is editing custom numbers even if they momentarily match a preset,
+    // so the reveal doesn't slam shut mid-edit — only reflect the chip highlight.
+    for (const btn of chipsHolder.querySelectorAll(".tm-chip")) {
+      const on = active === AGE_BAND_CUSTOM ? btn.dataset.chip === AGE_BAND_CUSTOM : btn.dataset.chip === mapped;
+      btn.classList.toggle("tm-chip-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+  minInput.addEventListener("input", syncFromInputs);
+  maxInput.addEventListener("input", syncFromInputs);
+
+  const node = el("div", { class: "tm-form-field tm-age-band", dataset: { field: "ageBand" } }, [
+    el("span", { class: "tm-field-label", id: "event-age-band-label", text: "Age band (optional)" }),
+    chipsHolder,
+    el("p", { class: "tm-muted tm-field-hint", text: "Who can attend. Tap a band, or Custom to set exact ages. All ages = no limit." }),
+    reveal,
+    error,
+  ]);
+
+  return {
+    node,
+    // A server ageMin/ageMax error → force Custom open + render on the band's own error node so it's
+    // never hidden behind a collapsed reveal (AC: a server ageMin error renders on the band control).
+    revealForError: (message) => {
+      active = AGE_BAND_CUSTOM;
+      paintActive();
+      error.textContent = message || "";
+      error.hidden = !message;
+    },
+    clearError: () => {
+      error.textContent = "";
+      error.hidden = true;
+    },
+  };
+}
+
+/**
  * Build the create/edit event form as a detached DOM subtree (no shell) — the SAME fields, validation,
  * Coffee & X chips, image control and read-back the modal used; only the surrounding shell changed
  * from a modal() to a full page (TM-426). `mode` is "create" (event=null) or "edit" (event = the
@@ -1269,9 +1385,19 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     }
   }
 
+  // Age band (TM-1065): pull the two-up custom-age row OUT of the top-level layout — it's re-homed inside
+  // the age-band control's Custom reveal (built below). We keep a reference to splice the band control
+  // into the layout at the same position the row occupied.
+  const customAgeRow = rowGroups.get("customage") || null;
+  const ageRowIndex = customAgeRow ? layout.indexOf(customAgeRow) : -1;
+  if (ageRowIndex >= 0) layout.splice(ageRowIndex, 1);
+
   const image = buildImageControl(event);
   // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
   let venuePicker = null;
+  // The age-band control (TM-1065) is built after the model prefill; setFieldError routes ageMin/ageMax
+  // errors onto its own error node (via this mutable ref) so they stay visible on the band control.
+  let ageBand = null;
 
   // Format selector (TM-1063) — CLIENT-ONLY view state, no backend field. In person → show the physical
   // cluster (Location + Venue + City + Map URL) and hide Online URL; Online → show Online URL only. The
@@ -1294,6 +1420,13 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     } else {
       f.input.removeAttribute("aria-invalid");
       f.input.classList.remove("tm-field-invalid");
+    }
+    // Age band (TM-1065): the two age inputs live inside the band control's Custom reveal, so mirror their
+    // error onto the band's own error node — and force the reveal open — so a server (or live) ageMin/
+    // ageMax error can never hide behind a collapsed reveal. Clearing it clears the band error too.
+    if ((key === "ageMin" || key === "ageMax") && ageBand) {
+      if (message) ageBand.revealForError(message);
+      else ageBand.clearError();
     }
   };
 
@@ -1387,6 +1520,15 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // never silently overwritten on save — the profile.js fillCitySelect / cityChoiceError idiom.
   fillCitySelect(fields.get("city").input, model.city);
 
+  // Age band (TM-1065): on CREATE the default band is 18-99 (attendees are 18-99, TM-884) — seed the two
+  // age inputs so the whole adult range is pre-filled and untouched. 18-99 is a non-preset band, so the
+  // control opens on Custom showing 18/99 (see buildAgeBandControl → minMaxToAgeBand). On EDIT the prefill
+  // already seeded ageMin/ageMax from the event (loop above), so leave them.
+  if (mode === "create") {
+    fields.get("ageMin").input.value = String(AGE_DEFAULT_MIN);
+    fields.get("ageMax").input.value = String(AGE_DEFAULT_MAX);
+  }
+
   // The venue picker (TM-519): sits under the Location line. Picking a venue prefills the required
   // Location line + City from it when they're still blank (so the event always has a display location
   // AND references the venue), then re-validates. Built here — after revalidate/prefill — so its
@@ -1406,6 +1548,21 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const locIdx = layout.indexOf(locationNode);
   if (locIdx >= 0) layout.splice(locIdx + 1, 0, venuePicker.node);
   else layout.push(venuePicker.node);
+
+  // Age band (TM-1065): build the control now that the inputs carry their prefill/create-default values, so
+  // it reverse-maps them to the right chip (a preset, or Custom for a non-preset band). It hosts the two-up
+  // custom-age row (pulled from the layout earlier) inside its Custom reveal. Splice its node in where the
+  // old age row sat — just after the capacity/reveal "limits" row (or at the end as a fallback).
+  ageBand = buildAgeBandControl(
+    { minInput: fields.get("ageMin").input, maxInput: fields.get("ageMax").input, customRow: customAgeRow || el("div") },
+    fields.get("ageMin").input.value,
+    fields.get("ageMax").input.value,
+    () => { revalidate("ageMin"); revalidate("ageMax"); },
+  );
+  const limitsRow = rowGroups.get("limits") || null;
+  const limitsIdx = limitsRow ? layout.indexOf(limitsRow) : -1;
+  if (limitsIdx >= 0) layout.splice(limitsIdx + 1, 0, ageBand.node);
+  else layout.push(ageBand.node);
 
   // Format selector (TM-1063): sits ABOVE the location cluster. Spliced in just before the Location
   // field so it reads "choose In person/Online, then the fields that apply".
@@ -1472,6 +1629,33 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // chips are constant, but rebuilding every row is cheap and keeps a single code path).
   tzInput.addEventListener("change", refreshScheduleChips);
   startInput.addEventListener("input", refreshScheduleChips);
+
+  // Opening-message sample templates (TM-1065): 2-3 GENERIC tap-to-prefill starters ABOVE the textarea.
+  // Tapping one SEEDS the textarea (free text after — the TM-382 seeding contract) then re-validates; the
+  // OPENING_MESSAGE_MAX cap is unchanged. Category-specific templates are deferred to TM-219. The chips
+  // are labelled "Template 1/2/3" (their full text is long) with the real text in a title tooltip.
+  const openingInput = fields.get("openingMessage").input;
+  const templateDefs = OPENING_MESSAGE_TEMPLATES.map((text, i) => ({ label: `Template ${i + 1}`, value: text }));
+  const templateChips = buildPresetChips(
+    templateDefs,
+    (value) => {
+      openingInput.value = value;
+      openingInput.focus();
+      revalidate("openingMessage");
+    },
+    { ariaLabel: "Opening-message templates" },
+  );
+  // A full-text title on each chip so hovering/long-pressing reveals what it will insert.
+  [...templateChips.querySelectorAll(".tm-chip")].forEach((btn, i) => {
+    btn.setAttribute("title", OPENING_MESSAGE_TEMPLATES[i]);
+  });
+  // Mount ABOVE the textarea: insert the chips right after the field's <label>, before the textarea.
+  const openingWrapper = byKey.get("openingMessage");
+  if (openingWrapper) {
+    const label = openingWrapper.querySelector(".tm-field-label");
+    if (label && label.nextSibling) openingWrapper.insertBefore(templateChips, label.nextSibling);
+    else openingWrapper.insertBefore(templateChips, openingWrapper.firstChild);
+  }
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.

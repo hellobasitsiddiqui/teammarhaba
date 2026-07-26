@@ -2818,6 +2818,28 @@ h3,
     margin-top: 0.35rem;
 }
 
+/* The SELECTED chip in a single-select chip group (TM-1065 age band): solid accent fill so the active
+   band reads at a glance. Only the age-band + template groups use aria-pressed; the seed-only chips
+   (heading / schedule) don't set it, so this never lights them up. */
+.tm-chip.tm-chip-active,
+.tm-chip[aria-pressed="true"] {
+    color: var(--on-accent, #fff);
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Age-band control (TM-1065): the chip group + the Custom reveal holding the two number inputs. The
+   reveal sits below the chips with a small gap; hidden entirely unless Custom is chosen. */
+.tm-age-band .tm-chips {
+    margin-top: 0.35rem;
+}
+.tm-age-custom {
+    margin-top: 0.6rem;
+}
+.tm-age-custom[hidden] {
+    display: none;
+}
+
 /* The create/edit form — a single comfortable column of fields. Lives on its own full-page admin
    route now (TM-426), not a modal. */
 .tm-event-form {

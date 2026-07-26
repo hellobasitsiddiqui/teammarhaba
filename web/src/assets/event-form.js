@@ -59,6 +59,89 @@ export const AGE_MIN_BOUND = 13;
 export const AGE_MAX_BOUND = 120;
 
 /**
+ * The create default age band (TM-1065): 18–99 — attendees are 18–99 (TM-884), so a brand-new event
+ * opens pre-filled to the whole adult range rather than blank. These are the numbers seeded into the
+ * two custom age inputs on create (which, being 18/99, map back to the "18-99" — a non-preset band, so
+ * the control opens on Custom on create). Kept inside [AGE_MIN_BOUND, AGE_MAX_BOUND] so they validate.
+ */
+export const AGE_DEFAULT_MIN = 18;
+export const AGE_DEFAULT_MAX = 99;
+
+/** The Custom sentinel {@link minMaxToAgeBand} returns for any band that isn't one of the presets. */
+export const AGE_BAND_CUSTOM = "Custom";
+
+/**
+ * The age-band preset chips (TM-1065) — the single configurable source of the tap-to-set age bands the
+ * create/edit form offers, in display order. Each is `{ label, min, max }` where `min`/`max` are numbers
+ * or null (null = "no bound on that side"). The 13–17 preset is deliberately dropped: attendees are
+ * 18–99 (TM-884). A `Custom` chip (not in this list) reveals the two number inputs for any other band.
+ *
+ * The mapping is bidirectional and must stay 1:1 so {@link minMaxToAgeBand} can reverse-map a saved band
+ * back to its preset (and fall back to Custom otherwise). Add/adjust a band by editing THIS list.
+ */
+export const AGE_BAND_PRESETS = Object.freeze([
+  Object.freeze({ label: "18-30", min: 18, max: 30 }),
+  Object.freeze({ label: "21-35", min: 21, max: 35 }),
+  Object.freeze({ label: "30+", min: 30, max: null }),
+  Object.freeze({ label: "All ages", min: null, max: null }),
+]);
+
+/**
+ * Generic opening-message sample templates (TM-1065) — the 2–3 tap-to-prefill starters shown above the
+ * chat opening-message textarea. They only SEED the textarea (the free-text seeding contract, like the
+ * TM-382 heading chips): the admin edits freely after a tap and `OPENING_MESSAGE_MAX` still caps it.
+ * Deliberately GENERIC (no category-specific copy — that's deferred to TM-219). Add a starter here.
+ */
+export const OPENING_MESSAGE_TEMPLATES = Object.freeze([
+  "Welcome! So glad you're joining us. Introduce yourself when you get a moment 👋",
+  "Hi everyone — this is our group chat for the event. Any questions, ask away here.",
+  "Looking forward to meeting you all! I'll share any last-minute details in this chat.",
+]);
+
+/**
+ * Map an age-band preset LABEL to its `{ min, max }` as form-field STRINGS (or "" for a null bound), so
+ * the caller can drop them straight into the two number inputs (TM-1065). An unknown label (including the
+ * Custom sentinel) returns `{ min: "", max: "" }` — Custom carries no fixed numbers, the admin types them.
+ * Pure — no DOM. The inverse is {@link minMaxToAgeBand}.
+ *
+ * @param {string} preset a label from {@link AGE_BAND_PRESETS} (or anything else → blank band).
+ * @returns {{min: string, max: string}}
+ */
+export function ageBandToMinMax(preset) {
+  const match = AGE_BAND_PRESETS.find((b) => b.label === cleanText(preset));
+  if (!match) return { min: "", max: "" };
+  return {
+    min: match.min == null ? "" : String(match.min),
+    max: match.max == null ? "" : String(match.max),
+  };
+}
+
+/**
+ * Reverse-map a saved `{min, max}` band to the preset LABEL that matches it, or {@link AGE_BAND_CUSTOM}
+ * ("Custom") when NO preset matches (TM-1065) — e.g. a saved 25–40, or the 18–99 create default, opens on
+ * Custom showing its numbers. Accepts numbers, numeric strings, or null/""/undefined for an absent bound
+ * (both absent = the "All ages" preset). A non-integer / out-of-parse value on either side falls back to
+ * Custom (it's a real, if unusual, band the admin should still see verbatim). Pure — no DOM.
+ *
+ * @param {number|string|null|undefined} min
+ * @param {number|string|null|undefined} max
+ * @returns {string} a preset label from {@link AGE_BAND_PRESETS}, or "Custom".
+ */
+export function minMaxToAgeBand(min, max) {
+  const norm = (v) => {
+    if (v == null || cleanText(String(v)) === "") return null;
+    // parseIntOrNull only reads strings; accept a raw number too (presets carry numeric min/max).
+    const n = parseIntOrNull(String(v));
+    return typeof n === "number" ? n : NaN; // NaN = present-but-unparseable → never matches a preset
+  };
+  const lo = norm(min);
+  const hi = norm(max);
+  if (Number.isNaN(lo) || Number.isNaN(hi)) return AGE_BAND_CUSTOM;
+  const match = AGE_BAND_PRESETS.find((b) => b.min === lo && b.max === hi);
+  return match ? match.label : AGE_BAND_CUSTOM;
+}
+
+/**
  * The "Coffee & X" suggestion chips (TM-382) — the single configurable list the create/edit form
  * offers as tap-to-prefill heading suggestions. Editable after a tap (they only seed the field), and
  * the heading is free text, so this is a convenience, never a fixed taxonomy. Add a theme by editing
