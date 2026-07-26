@@ -52,7 +52,9 @@ test("@profile a DIRTY profile prompts before leaving; Keep editing stays, the e
   await page.fill("#profile-firstName", "GuardTest");
 
   // Try to leave via the bottom Home tab → the restore-hash intercept snaps back and prompts.
-  await page.click("#tab-home");
+  // dispatchEvent (not click()): the guard's confirmDialog inerts the background incl. the tab bar
+  // (TM-947), so a normal click() would retry actionability on the now-inert tab and hang.
+  await page.locator("#tab-home").dispatchEvent("click");
   await expect(page.locator(DIALOG)).toBeVisible();
   await expect(page.locator(DIALOG)).toContainText("Discard changes?");
   await expect(page.locator(DISCARD)).toContainText("Discard changes");
@@ -71,7 +73,8 @@ test("@profile a DIRTY profile: Discard proceeds with the navigation and drops t
 
   await page.fill("#profile-firstName", "ThrowawayEdit");
 
-  await page.click("#tab-home");
+  // dispatchEvent (not click()) — the guard's confirmDialog inerts the tab bar (TM-947); see the note above.
+  await page.locator("#tab-home").dispatchEvent("click");
   await expect(page.locator(DIALOG)).toBeVisible();
 
   // Discard changes → the dialog closes, the navigation completes to Home, the edit is abandoned.
