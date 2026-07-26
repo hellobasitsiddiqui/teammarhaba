@@ -2288,18 +2288,15 @@ function buildShell(view) {
   // Sign out is a real action; Notifications / Privacy scroll to the relevant on-page control (no
   // fabricated routes). Public profile → the additive #/profile/public preview. (TM-1028: the old
   // "My events" row was removed — it just re-opened #/events, a plain duplicate of the Events tab.)
-  const menuCard = pfCard(
-    null,
-    [
-      el("nav", { class: "tm-pf-menu", "aria-label": "Profile menu" }, [
-        menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
-        menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
-        menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
-        menuRow("Sign out", { onClick: doSignOut, muted: true, id: "profile-signout-row" }),
-      ]),
-    ],
-    "tm-pf-menu-card",
-  );
+  // TM-1083: each action is its OWN button-card (matching the collapsible section headers above),
+  // not rows in one divided list — so the nav is rendered directly (no wrapping pfCard) and each
+  // .tm-pf-menu-row carries the card look via CSS.
+  const menuCard = el("nav", { class: "tm-pf-menu", "aria-label": "Profile menu" }, [
+    menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
+    menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
+    menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
+    menuRow("Sign out", { onClick: doSignOut, muted: true, id: "profile-signout-row" }),
+  ]);
 
   // The screen mounts with `tm-pf-loading` so the identity + strength area renders as a skeleton
   // (CSS shimmer, no concrete text) until the first /me paint. paintHub() removes the class when real
