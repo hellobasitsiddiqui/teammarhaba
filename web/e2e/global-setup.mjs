@@ -108,13 +108,18 @@ async function provisionInBackend({ email, password, phone }) {
   // form (where a real user picks their TM-877 city), so without this they'd have no city and the Events
   // tab would render the no-city empty state instead of the seeded London events — breaking the browse
   // journey. "London" is a valid TM-877 list city and matches the seed, mirroring a real London user.
+  //
+  // TM-955: gender is now ALSO required on record before the onboarding-complete transition (mirroring
+  // the TM-880 phone rule), so seed it in the same PATCH. Any value satisfies the gate; "PREFER_NOT_TO_SAY"
+  // is a deliberate, neutral choice for a fixture account. Without it the POST /me/onboarding-complete
+  // below would 400 exactly as it does for a phone-less account.
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, city: "London" }),
+    body: JSON.stringify({ phone, city: "London", gender: "PREFER_NOT_TO_SAY" }),
   });
   if (!phoneRes.ok) {
-    throw new Error(`seed phone/city failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
+    throw new Error(`seed phone/city/gender failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
   }
 
   // Un-gate the seeded account (TM-250): mark first-run onboarding complete so the gate is bypassed.

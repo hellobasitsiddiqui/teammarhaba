@@ -121,6 +121,9 @@ function loadProfileModule() {
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
+    // TM-955: the FIELDS gender <select> maps over GENDER_OPTIONS at module load; fillForm reads
+    // GENDER_VALUES — both must be present in the destructure or the eval copy throws at load.
+    "  GENDER_OPTIONS, GENDER_VALUES,\n" +
     "  splitE164, composeE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
     "  nextDayInterestsNudge,\n" +
     "  COUNTRIES, flagOf,\n" +
@@ -190,6 +193,11 @@ function loadProfileModule() {
     NOTIFICATION_PREFS: ["EMAIL", "PUSH", "BOTH"],
     CITY_OPTIONS: ["London"],
     cityChoiceError: () => "",
+    // TM-955: shaped stand-ins — the FIELDS gender <select> iterates GENDER_OPTIONS ([value,label]
+    // pairs) at module load, and fillForm calls GENDER_VALUES.has(); the picker paths under test never
+    // touch gender, so minimal real-shaped values are enough.
+    GENDER_OPTIONS: [["FEMALE", "Female"], ["MALE", "Male"], ["PREFER_NOT_TO_SAY", "Prefer not to say"]],
+    GENDER_VALUES: new Set(["FEMALE", "MALE", "PREFER_NOT_TO_SAY"]),
     splitE164: () => ({ iso2: "GB", national: "" }),
     composeE164: () => "",
     defaultCountryFor: () => "GB",

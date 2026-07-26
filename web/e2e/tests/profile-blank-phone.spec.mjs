@@ -118,6 +118,7 @@ test("@profile a phone-less user is held at the completion gate until a valid ph
     // TM-898: location is the allowed-cities <select> now — a list city, picked not typed.
     await page.selectOption("#onboarding-location", "London");
     await page.fill("#onboarding-age", "30");
+    await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
     await page.click("#onboarding-form button[type=submit]");
     await expect(page.locator("#onboarding-phone-error")).toContainText("required", { timeout: 2_000 });
     await expect(page.locator("#onboarding-name-error")).toBeHidden({ timeout: 1_000 });

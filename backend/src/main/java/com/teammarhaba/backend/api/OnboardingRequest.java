@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.api;
 
+import com.teammarhaba.backend.user.Gender;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -40,6 +41,13 @@ import jakarta.validation.constraints.Size;
  *       total, separators only between digits — but with <em>no</em> empty-string alternative,
  *       because here the phone cannot be omitted or cleared. This is what makes the completion gate
  *       unbypassable via the API: onboarding cannot be marked complete without a valid phone.
+ *   <li>{@code gender} — required (TM-955: the user must pick one bucket — including "prefer not to
+ *       say" — to complete onboarding, exactly as phone is mandatory). {@code @NotNull} on the
+ *       {@link Gender} enum, so a missing value is a {@code 400} and an unknown value is rejected by
+ *       Jackson at deserialization time (uniform {@code 400}). This makes the completion gate
+ *       unbypassable without a gender, the same way phone is: onboarding cannot be marked complete
+ *       via this endpoint without one. The stored column is nullable (legacy rows = {@code null} =
+ *       unknown), but every NEW gate submission carries a chosen value.
  * </ul>
  *
  * @param name     the public display name; required, 1–255 chars, name-like (TM-771/TM-898)
@@ -47,6 +55,7 @@ import jakarta.validation.constraints.Size;
  *                 allowed-list constrained in the service (TM-877/TM-898)
  * @param age      age in years; required, 18–99
  * @param phone    E.164 phone number; required (e.g. {@code +447700900123})
+ * @param gender   self-reported gender bucket; required (TM-955): FEMALE / MALE / PREFER_NOT_TO_SAY
  */
 public record OnboardingRequest(
         @NotNull
@@ -63,4 +72,5 @@ public record OnboardingRequest(
                 @Pattern(
                         regexp = "^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
                         message = "must be a valid phone number")
-                String phone) {}
+                String phone,
+        @NotNull Gender gender) {}

@@ -122,7 +122,8 @@ async function createCompletedAccount({ verifyPhone = false } = {}) {
   const phoneRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    // TM-955: gender is also required on record before onboarding-complete (mirrors the TM-880 phone rule).
+    body: JSON.stringify({ phone, gender: "PREFER_NOT_TO_SAY" }),
   });
   if (!phoneRes.ok) throw new Error(`seed phone failed for ${email}: ${phoneRes.status} ${await phoneRes.text()}`);
 
@@ -280,6 +281,7 @@ test("@profile a COMPLETED account with an UNVERIFIED stored phone is HARD-re-ga
     await page.fill("#onboarding-name", "Retro Verify");
     await page.selectOption("#onboarding-location", "London");
     await page.fill("#onboarding-age", "34");
+    await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
     await expect(page.locator("#onboarding-name")).toHaveValue("Retro Verify");
     await expect(page.locator("#onboarding-phone")).toHaveValue(national); // prefill still holds
   }).toPass({ timeout: 15_000 });

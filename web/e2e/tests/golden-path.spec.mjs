@@ -129,6 +129,7 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   await page.fill("#onboarding-name", "Golden Tester");
   await page.selectOption("#onboarding-location", location); // TM-898: the gate city is picked, not typed
   await page.fill("#onboarding-age", "29");
+  await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
   // TM-880: phone is mandatory at the gate — national number; the GB-default picker composes +44….
   // TM-930: the number must be OTP-verified + LINKED to a Firebase account, and Firebase enforces
   // strict 1:1 number↔account. golden-path runs on BOTH the chromium and mobile-chromium projects in

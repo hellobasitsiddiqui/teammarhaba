@@ -401,6 +401,37 @@ export function phonePartsError(iso2, national) {
 export const CITY_OPTIONS = Object.freeze(["London", "Milton Keynes", "Sharjah", "Karachi"]);
 
 /**
+ * The gender buckets (TM-955), shared by the profile edit form (profile.js) AND the onboarding gate
+ * (onboarding.js) so the two surfaces can never disagree on the allowed set. Each entry is
+ * `[value, label]`: `value` is the enum NAME the backend accepts ({@code Gender}), `label` the human
+ * copy. A closed set — mirrors the backend enum exactly; adding a bucket is a one-line edit here plus
+ * the backend enum + migration. Private field: it is on the caller's own profile only, never the
+ * public profile.
+ */
+export const GENDER_OPTIONS = Object.freeze([
+  ["FEMALE", "Female"],
+  ["MALE", "Male"],
+  ["PREFER_NOT_TO_SAY", "Prefer not to say"],
+]);
+
+/** The set of valid gender enum values (TM-955) — the fillForm / validation membership check. */
+export const GENDER_VALUES = new Set(GENDER_OPTIONS.map(([value]) => value));
+
+/**
+ * Validate a REQUIRED gender choice for the onboarding gate (TM-955). Returns an error message, or ""
+ * when acceptable. Unlike the optional profile-edit field (blank = leave unchanged), the gate demands
+ * a choice: blank/absent fails, and the value must be one of the {@link GENDER_VALUES} buckets. Pure
+ * so both the gate's client-side check and its unit tests share one rule (mirrors cityChoiceError /
+ * the required-field pattern). "Prefer not to say" is a valid CHOICE — it satisfies the requirement.
+ */
+export function genderChoiceError(value) {
+  const v = (value ?? "").trim();
+  if (v === "") return "Please choose an option.";
+  if (!GENDER_VALUES.has(v)) return "Please choose an option.";
+  return "";
+}
+
+/**
  * Validate a city dropdown choice (TM-877). Returns an error message, or "" when acceptable.
  *
  * Blank is allowed (blank = leave unchanged, the TM-188 semantics). A value from CITY_OPTIONS is

@@ -18,6 +18,7 @@ import com.google.firebase.auth.UserMetadata;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.user.Gender;
 import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserAdminService;
@@ -542,12 +543,13 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         var who = caller("uid-onboard", "ada@example.com");
 
         // Age supplied first (TM-162), so completing onboarding self-attests it (TM-163). A phone
-        // must also be on record before the transition is allowed (TM-880). TM-934: a number unique
-        // to this test — the V48 unique index bans reusing one literal across methods (shared DB).
+        // must also be on record before the transition is allowed (TM-880), and — since TM-955 — a
+        // gender too. TM-934: a number unique to this test — the V48 unique index bans reusing one
+        // literal across methods (shared DB).
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"age\":36,\"phone\":\"+447700901201\"}"))
+                        .content("{\"age\":36,\"phone\":\"+447700901201\",\"gender\":\"FEMALE\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -566,11 +568,12 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteLeavesAgeUnverifiedWhenNoAgeOnRecord() throws Exception {
         var who = caller("uid-onboard-noage", "eve@example.com");
 
-        // Phone on record (the TM-880 precondition) but no age: the flag flips, the age stays unverified.
+        // Phone + gender on record (the TM-880/TM-955 preconditions) but no age: the flag flips, the
+        // age stays unverified.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900124\"}"))
+                        .content("{\"phone\":\"+447700900124\",\"gender\":\"PREFER_NOT_TO_SAY\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -615,11 +618,11 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         // behaviour is byte-for-byte the pre-TM-931 baseline. We drive both paths without ever hitting
         // GET /me (which DOES read Firebase state for its own reasons), then assert zero interaction.
         var whoComplete = caller("uid-flagoff-complete", "flagoff1@example.com");
-        // Seed a valid stored phone via PATCH (no Firebase call), then complete onboarding.
+        // Seed a valid stored phone + gender via PATCH (no Firebase call), then complete onboarding.
         mockMvc.perform(patch("/api/v1/me")
                         .with(whoComplete)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900321\"}"))
+                        .content("{\"phone\":\"+447700900321\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(whoComplete))
                 .andExpect(status().isOk())
@@ -630,7 +633,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-flagoff-gate", "flagoff2@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Flag Off\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900654\"}"))
+                                + "\"phone\":\"+447700900654\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.onboardingCompleted").value(true))
                 .andExpect(jsonPath("$.phone").value("+447700900654")); // client value kept (not overwritten)
@@ -646,11 +649,11 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         // repeat call must stay 200 and keep the flag true (no error, no flip back to false).
         var who = caller("uid-onboard-twice", "rumi@example.com");
 
-        // A phone on record first — the TM-880 precondition for the transition.
+        // A phone + gender on record first — the TM-880/TM-955 preconditions for the transition.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"phone\":\"+447700900125\"}"))
+                        .content("{\"phone\":\"+447700900125\",\"gender\":\"FEMALE\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -677,7 +680,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Ibn Battuta\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+212612345678\"}"))
+                                + "\"phone\":\"+212612345678\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Ibn Battuta"))
                 .andExpect(jsonPath("$.city").value("London"))
@@ -701,7 +704,144 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(saved.getCity()).isEqualTo("London");
         assertThat(saved.getAge()).isEqualTo(30);
         assertThat(saved.getPhone()).isEqualTo("+212612345678");
+        assertThat(saved.getGender()).isEqualTo(Gender.MALE);
         assertThat(saved.isOnboardingCompleted()).isTrue();
+    }
+
+    @Test
+    void onboardingGatePersistsGenderAndReturnsItOnMe() throws Exception {
+        // TM-955: gender is a required gate field. The atomic gate persists the chosen bucket, echoes
+        // it back on the response, and a fresh GET /me reads it back — for each of the three buckets.
+        int i = 0;
+        for (Gender g : Gender.values()) {
+            var who = caller("uid-gate-gender-" + g, "gender" + (i++) + "@example.com");
+            mockMvc.perform(post("/api/v1/me/onboarding")
+                            .with(who)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Gee Person\",\"location\":\"London\",\"age\":30,"
+                                    + "\"phone\":\"+44770090150" + i + "\",\"gender\":\"" + g.name() + "\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.gender").value(g.name()));
+
+            mockMvc.perform(get("/api/v1/me").with(who))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.gender").value(g.name()));
+            assertThat(users.findByFirebaseUid("uid-gate-gender-" + g).orElseThrow().getGender())
+                    .isEqualTo(g);
+        }
+    }
+
+    @Test
+    void onboardingGateRejectsMissingGenderWith400() throws Exception {
+        // TM-955 fail-before/pass-after: gender is a REQUIRED gate field (mirroring phone TM-880) —
+        // an otherwise-valid body with no gender now 400s, and nothing half-applies (the account
+        // stays not-onboarding-complete). On clean main (no gender field) this body would 200.
+        var who = caller("uid-gate-nogender", "nogender@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"No Gender\",\"location\":\"London\",\"age\":25,"
+                                + "\"phone\":\"+447700901510\"}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-gate-nogender")
+                .ifPresent(u -> assertThat(u.isOnboardingCompleted()).isFalse());
+    }
+
+    @Test
+    void onboardingGateRejectsUnknownGenderValueWith400() throws Exception {
+        // TM-955: Gender is a closed enum — an unknown bucket is rejected by Jackson at
+        // deserialization time (uniform 400), so it can never reach persistence.
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(caller("uid-gate-badgender", "badgender@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Bad Gender\",\"location\":\"London\",\"age\":25,"
+                                + "\"phone\":\"+447700901511\",\"gender\":\"OTHER\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void patchUpdatesGenderAndRoundTrips() throws Exception {
+        // TM-955: gender is editable after onboarding via PATCH /me. A new value is stored, echoed, and
+        // read back; a second PATCH to a different bucket changes it. Partial-PATCH: omitting gender
+        // leaves the stored value untouched.
+        var who = caller("uid-gender-edit", "genderedit@example.com");
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"FEMALE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gender").value("FEMALE"));
+
+        // A PATCH that omits gender leaves it untouched (partial semantics).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Edith\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gender").value("FEMALE"));
+
+        // Changing it to another bucket sticks and round-trips on a fresh GET.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"PREFER_NOT_TO_SAY\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gender").value("PREFER_NOT_TO_SAY"));
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gender").value("PREFER_NOT_TO_SAY"));
+    }
+
+    @Test
+    void patchRejectsUnknownGenderValueWith400() throws Exception {
+        // TM-955: the closed Gender enum rejects an unknown value at the PATCH boundary too.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bad-gender-patch", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"NONBINARY_TYPO\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void freshAccountHasNullGender() throws Exception {
+        // TM-955: gender is nullable — a just-provisioned account (never onboarded) reports no gender.
+        mockMvc.perform(get("/api/v1/me").with(caller("uid-gender-null", "gnull@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gender").doesNotExist());
+    }
+
+    @Test
+    void onboardingCompleteRejectedWithoutGenderOnRecordWith400() throws Exception {
+        // TM-955 fail-before/pass-after: the onboarding-complete transition must be unreachable without
+        // a gender on record, mirroring the TM-880 phone rule. A phone is present (so the phone check
+        // passes) but no gender → 400, and nothing half-applies. On clean main (no gender rule) this
+        // would 200.
+        var who = caller("uid-complete-nogender", "completenogender@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"phone\":\"+447700901512\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isBadRequest());
+
+        // Nothing half-applied: the account is still not onboarding-complete.
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(false));
+
+        // With a gender now on record the same transition succeeds (the rule is gender-specific).
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"MALE\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true));
     }
 
     @Test
@@ -715,7 +855,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Priya Sharma\",\"location\":\"London\",\"age\":28,"
-                                + "\"phone\":\"+447700900001\"}"))
+                                + "\"phone\":\"+447700900001\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Priya Sharma"))
                 .andExpect(jsonPath("$.firstName").value("Priya"))
@@ -741,7 +881,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Sting\",\"location\":\"Karachi\",\"age\":45,"
-                                + "\"phone\":\"+447700900002\"}"))
+                                + "\"phone\":\"+447700900002\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Sting"))
                 .andExpect(jsonPath("$.lastName").doesNotExist());
@@ -754,7 +894,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-gate-multiword", "mary@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Mary Jane Watson\",\"location\":\"Sharjah\",\"age\":31,"
-                                + "\"phone\":\"+447700900003\"}"))
+                                + "\"phone\":\"+447700900003\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Mary"))
                 .andExpect(jsonPath("$.lastName").value("Jane Watson"));
@@ -776,7 +916,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Amelia Williams\",\"location\":\"London\",\"age\":26,"
-                                + "\"phone\":\"+447700900004\"}"))
+                                + "\"phone\":\"+447700900004\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Amelia Williams"))
                 .andExpect(jsonPath("$.firstName").value("Amelia Rose"))
@@ -790,7 +930,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"  Mansa Musa  \",\"location\":\"  London  \",\"age\":40,"
-                                + "\"phone\":\"+22370000000\"}"))
+                                + "\"phone\":\"+22370000000\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Mansa Musa"))
                 .andExpect(jsonPath("$.city").value("London"));
@@ -808,7 +948,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"676767\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700900005\"}"))
+                                + "\"phone\":\"+447700900005\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
 
         // Nothing seeded: the row (if the request even provisioned one) carries no name parts.
@@ -828,7 +968,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-gate-numloc", "numloc@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Anon User\",\"location\":\"676767\",\"age\":30,"
-                                + "\"phone\":\"+447700900006\"}"))
+                                + "\"phone\":\"+447700900006\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -841,7 +981,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Anon User\",\"location\":\"Bristol\",\"age\":30,"
-                                + "\"phone\":\"+447700900007\"}"))
+                                + "\"phone\":\"+447700900007\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
 
         // Nothing half-applied: the account (if provisioned) is still un-onboarded with no city.
@@ -867,7 +1007,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Expat User\",\"location\":\"Dubai\",\"age\":30,"
-                                + "\"phone\":\"+447700900008\"}"))
+                                + "\"phone\":\"+447700900008\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.city").value("Dubai"))
                 .andExpect(jsonPath("$.onboardingCompleted").value(true));
@@ -877,7 +1017,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Expat User\",\"location\":\"Manchester\",\"age\":30,"
-                                + "\"phone\":\"+447700900008\"}"))
+                                + "\"phone\":\"+447700900008\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -886,7 +1026,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noname", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"location\":\"London\",\"age\":25,\"phone\":\"+201234567890\"}"))
+                        .content("{\"location\":\"London\",\"age\":25,\"phone\":\"+201234567890\","
+                                + "\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -895,7 +1036,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-blankloc", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"   \",\"age\":25,\"phone\":\"+201234567890\"}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"   \",\"age\":25,\"phone\":\"+201234567890\","
+                                + "\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -904,7 +1046,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(caller("uid-gate-noage", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"phone\":\"+201234567890\"}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"phone\":\"+201234567890\","
+                                + "\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -916,7 +1059,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                             .with(caller("uid-gate-badage", "x@example.com"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":" + age
-                                    + ",\"phone\":\"+201234567890\"}"))
+                                    + ",\"phone\":\"+201234567890\",\"gender\":\"MALE\"}"))
                     .andExpect(status().isBadRequest());
         }
     }
@@ -929,7 +1072,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":25}"))
+                        .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":25,\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
 
         users.findByFirebaseUid("uid-gate-nophone")
@@ -945,7 +1088,7 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                         .with(caller("uid-gate-barephone", "x@example.com"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Anon\",\"location\":\"London\",\"age\":25,"
-                                + "\"phone\":\"07700 900123\"}"))
+                                + "\"phone\":\"07700 900123\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -957,7 +1100,8 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Half\",\"location\":\"London\",\"age\":200,\"phone\":\"+447700900123\"}"))
+                        .content("{\"name\":\"Half\",\"location\":\"London\",\"age\":200,\"phone\":\"+447700900123\","
+                                + "\"gender\":\"MALE\"}"))
                 .andExpect(status().isBadRequest());
 
         // The account may not exist yet (request rejected before provision) — if it does, it's clean.

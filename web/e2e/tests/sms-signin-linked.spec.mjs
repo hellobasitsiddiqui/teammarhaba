@@ -68,7 +68,7 @@ async function provisionOnboardedAccount(auth, { email, password, phone }) {
   const patch = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone }),
+    body: JSON.stringify({ phone, gender: "PREFER_NOT_TO_SAY" }),
   });
   if (!patch.ok) throw new Error(`PATCH /me phone failed for ${email}: ${patch.status} ${await patch.text()}`);
 

@@ -21,6 +21,7 @@ public record ProfileUpdate(
         String lastName,
         String city,
         Integer age,
+        Gender gender,
         String phone,
         NotificationPref notificationPref,
         String timezone,

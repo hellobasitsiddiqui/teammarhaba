@@ -390,6 +390,17 @@ public class UserService {
             changes.add(change("age", user.getAge(), update.age()));
             user.setAge(update.age());
         }
+        // Gender (TM-955): a closed enum, editable here after onboarding. Partial-update like the rest —
+        // a null leaves the stored value unchanged; only an actual change is written + audited (mirroring
+        // the notificationPref enum handling above). There is no "clear to null" via this path: the edit
+        // form only ever sends one of the three buckets, and the boundary rejects an unknown value.
+        if (update.gender() != null && user.getGender() != update.gender()) {
+            changes.add(change(
+                    "gender",
+                    user.getGender() == null ? null : user.getGender().name(),
+                    update.gender().name()));
+            user.setGender(update.gender());
+        }
         if (update.phone() != null && phoneChanged(user.getPhone(), update.phone())) {
             changes.add(change("phone", user.getPhone(), update.phone()));
             user.setPhone(update.phone());
@@ -585,6 +596,11 @@ public class UserService {
      * E.164 phone is already on record, so the onboarding-complete state can't be reached without
      * one via this endpoint either — the API can't bypass the completion gate. (The atomic gate
      * {@link #completeProfileOnboarding} collects the phone in the same request instead.)
+     *
+     * <p>Gender is mandatory too (TM-955): the transition is likewise refused with a {@code 400}
+     * unless a gender is already on record, mirroring the phone rule exactly — so the completion gate
+     * is unbypassable without a gender via this endpoint as well. (The atomic gate collects gender in
+     * the same request.)
      */
     @Transactional
     public User completeOnboarding(VerifiedUser caller) {
@@ -595,6 +611,7 @@ public class UserService {
         // account is refused with the distinct verified-phone message rather than the TM-880 one.
         enforceVerifiedPhoneIfRequired(caller, user);
         requirePhoneOnRecord(user);
+        requireGenderOnRecord(user); // TM-955: mirror the phone rule — no onboarding-complete without a gender
         boolean wasComplete = user.isOnboardingCompleted();
         boolean ageWasVerified = user.isAgeVerified();
 
@@ -645,7 +662,7 @@ public class UserService {
      */
     @Transactional
     public User completeProfileOnboarding(
-            VerifiedUser caller, String name, String location, Integer age, String phone) {
+            VerifiedUser caller, String name, String location, Integer age, String phone, Gender gender) {
         User user = provision(caller);
 
         String fullName = requireText(name, "name");
@@ -681,6 +698,11 @@ public class UserService {
         }
         user.setCity(city);
         user.setAge(age); // range already enforced (18–99) by bean validation at the boundary
+        // TM-955: gender is a REQUIRED gate field — @NotNull on OnboardingRequest already rejected a
+        // missing/unknown value at the boundary (uniform 400), so by construction it is a valid bucket
+        // here. Always (re)written from the request (like the other gate fields), so a re-submit
+        // overwrites with the latest choice.
+        user.setGender(gender);
         user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
         // TM-931: when enforcement is on, the Firebase-verified phone wins over the client-supplied
         // one just set above — read it and mirror it onto users.phone (refusing if it can't be
@@ -701,8 +723,8 @@ public class UserService {
                 Map.of(
                         "fields",
                         seedNames
-                                ? "displayName,firstName,lastName,city,age,phone"
-                                : "displayName,city,age,phone",
+                                ? "displayName,firstName,lastName,city,age,gender,phone"
+                                : "displayName,city,age,gender,phone",
                         "via",
                         "onboarding"));
         if (!wasComplete) {
@@ -742,6 +764,19 @@ public class UserService {
         String phone = user.getPhone();
         if (phone == null || !E164_PHONE.matcher(phone).matches()) {
             throw new BadRequestException("A phone number is required to complete onboarding");
+        }
+    }
+
+    /**
+     * TM-955: refuse the onboarding-complete transition unless a gender is on record — the exact
+     * mirror of {@link #requirePhoneOnRecord}. A {@code null} gender is the legacy/never-chose state;
+     * a completed account must have made a choice (one of the three buckets, "prefer not to say"
+     * included), so this endpoint can't reach onboarding-complete without one either. The atomic gate
+     * {@link #completeProfileOnboarding} collects it in the same request instead.
+     */
+    private static void requireGenderOnRecord(User user) {
+        if (user.getGender() == null) {
+            throw new BadRequestException("A gender is required to complete onboarding");
         }
     }
 

@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.api;
 
+import com.teammarhaba.backend.user.Gender;
 import com.teammarhaba.backend.user.NotificationPref;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -40,6 +41,12 @@ import java.util.List;
  *       and is rejected — it would be country-ambiguous and break the picker's round-trip split.
  *       We still do not attempt to verify a real, dialable number. An empty string is also
  *       accepted (clear/leave blank), consistent with the optional {@code @Size} text fields.
+ *   <li>{@code gender} — the {@link Gender} enum (TM-955), editable here after onboarding; an unknown
+ *       value is rejected by Jackson at deserialization time (uniform {@code 400}). Optional like
+ *       every field here: {@code null}/omitted leaves the stored gender unchanged (partial PATCH).
+ *       There is no empty-string "clear" — gender is a closed enum, not free text; a user changes it
+ *       between the three buckets (including {@code PREFER_NOT_TO_SAY}) but the edit form never sends
+ *       a "no gender" value.</li>
  *   <li>{@code notificationPref} — the {@link NotificationPref} enum; an unknown value is rejected
  *       by Jackson at deserialization time (uniform {@code 400}).
  *   <li>{@code timezone} (IANA id) and {@code locale} (BCP-47 tag) — best-effort validated in
@@ -53,6 +60,8 @@ import java.util.List;
  * @param city             city name (name-like TM-771; allowed-list constrained TM-877 — see above)
  * @param age              age in years, 18–99 for new values (TM-884; band enforced in the service
  *                         behind the unchanged-guard, TM-900 — grandfathered values re-send fine)
+ * @param gender           self-reported gender (TM-955): FEMALE / MALE / PREFER_NOT_TO_SAY; optional
+ *                         partial-PATCH ({@code null}/omitted leaves it unchanged)
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
  *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -84,6 +93,9 @@ public record UpdateMeRequest(
         // No @Min/@Max here (TM-900): the 18–99 band is enforced in UserService.updateProfile BEHIND
         // the Objects.equals unchanged-guard, so an unchanged grandfathered age re-sends as a no-op.
         Integer age,
+        // TM-955: the self-reported gender bucket. A closed Gender enum, so Jackson rejects an unknown
+        // value with a uniform 400 at deserialization; null/omitted leaves it unchanged (partial PATCH).
+        Gender gender,
         // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
         // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).

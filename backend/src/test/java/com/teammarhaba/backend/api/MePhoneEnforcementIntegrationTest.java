@@ -101,8 +101,10 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
+                        // TM-955: include a valid gender so bean validation passes and the request reaches
+                        // the verified-phone service check (the behaviour this test asserts).
                         .content("{\"name\":\"Bee Bee\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700901302\"}")) // TM-934: unique per test (V48 index)
+                                + "\"phone\":\"+447700901302\",\"gender\":\"MALE\"}")) // TM-934: unique per test (V48 index)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));
@@ -118,11 +120,12 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
     void onboardingCompleteSucceedsAndMirrorsVerifiedPhoneOverClientValue() throws Exception {
         var who = caller("uid-enf-complete-ok", "c@example.com");
         stubVerifiedPhone("uid-enf-complete-ok", "+447700900999");
-        // Client stored a DIFFERENT phone; the verified one must overwrite it.
+        // Client stored a DIFFERENT phone; the verified one must overwrite it. Gender on record too
+        // (TM-955) so the onboarding-complete transition below can pass its gender precondition.
         mockMvc.perform(patch("/api/v1/me")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"age\":36,\"phone\":\"+441111111111\"}"))
+                        .content("{\"age\":36,\"phone\":\"+441111111111\",\"gender\":\"MALE\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/me/onboarding-complete").with(who))
@@ -143,7 +146,7 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Dee Dee\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+441111111111\"}")) // different client value
+                                + "\"phone\":\"+441111111111\",\"gender\":\"FEMALE\"}")) // different client value
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.onboardingCompleted").value(true))
                 .andExpect(jsonPath("$.phone").value("+447700900888"));
@@ -185,8 +188,10 @@ class MePhoneEnforcementIntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(post("/api/v1/me/onboarding")
                         .with(who)
                         .contentType(MediaType.APPLICATION_JSON)
+                        // TM-955: valid gender so bean validation passes and the fail-closed verified-phone
+                        // service check (the behaviour under test) is what produces the 400.
                         .content("{\"name\":\"Eff Eff\",\"location\":\"London\",\"age\":30,"
-                                + "\"phone\":\"+447700901304\"}")) // TM-934: unique per test (V48 index)
+                                + "\"phone\":\"+447700901304\",\"gender\":\"MALE\"}")) // TM-934: unique per test (V48 index)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(
                         "Phone number must be verified before completing onboarding"));

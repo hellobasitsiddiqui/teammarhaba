@@ -86,7 +86,7 @@ async function seed(account) {
   const patchRes = await fetch(`${API_BASE_URL}/api/v1/me`, {
     method: "PATCH",
     headers: { ...authed, "Content-Type": "application/json" },
-    body: JSON.stringify({ firstName: "Ada", lastName: "Admin", city: "London", age: 30, phone: "+447700900123" }),
+    body: JSON.stringify({ firstName: "Ada", lastName: "Admin", city: "London", age: 30, phone: "+447700900123", gender: "PREFER_NOT_TO_SAY" }),
   });
   if (!patchRes.ok) throw new Error(`seed profile failed: ${patchRes.status} ${await patchRes.text()}`);
 

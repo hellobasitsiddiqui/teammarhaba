@@ -71,6 +71,18 @@ public class User {
     @Column(name = "age")
     private Integer age;
 
+    /**
+     * Self-reported gender (TM-955). Nullable — {@code null} = unknown, the state of every legacy /
+     * pre-existing row and any account provisioned just-in-time that never passed through the
+     * onboarding gate. Stored as the enum {@code name()} via {@code EnumType.STRING}, exactly like
+     * {@code role}/{@code notification_pref}; the {@code V50__users_gender} migration owns the
+     * (nullable) {@code VARCHAR(32)} column. Required at the onboarding gate going forward
+     * (mirroring the mandatory phone of TM-880) but existing rows are never backfilled.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gender")
+    private Gender gender;
+
     @Column(name = "phone")
     private String phone;
 
@@ -220,6 +232,15 @@ public class User {
 
     public void setAge(Integer age) {
         this.age = age;
+    }
+
+    /** Self-reported gender (TM-955); {@code null} = unknown (legacy / never-onboarded accounts). */
+    public Gender getGender() {
+        return gender;
+    }
+
+    public void setGender(Gender gender) {
+        this.gender = gender;
     }
 
     public String getPhone() {

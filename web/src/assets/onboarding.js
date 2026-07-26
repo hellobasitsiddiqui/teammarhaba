@@ -50,6 +50,10 @@ import {
   CITY_OPTIONS,
   cityChoiceError,
   nameFormatError,
+  // TM-955: the shared gender buckets + the required-choice validator, so the gate and the profile
+  // edit form (both import profile-core) can never disagree on the allowed set or the rule.
+  GENDER_OPTIONS,
+  genderChoiceError,
 } from "./profile-core.js";
 import { COUNTRIES, flagOf } from "./countries.js";
 // TM-930: the gate phone becomes a Firebase phone VERIFY-AND-LINK step. The user proves ownership of
@@ -117,6 +121,21 @@ const FIELDS = [
     max: 99,
     autocomplete: "off",
     hint: "Between 18 and 99.",
+  },
+  {
+    // TM-955: gender is a REQUIRED gate field (mirroring the mandatory phone TM-880) — a user must
+    // pick one of the closed buckets, INCLUDING "prefer not to say", to complete onboarding. The
+    // backend OnboardingRequest enforces @NotNull, so client-valid input can't 400 server-side. Same
+    // select machinery as location; the leading blank option is the "not chosen yet" placeholder that
+    // fails required validation until the user picks (there is no saved off-list value to inject, so
+    // it's simpler than the city dropdown). The buckets are the shared GENDER_OPTIONS (one source of
+    // truth with the profile edit form).
+    field: "gender",
+    meKey: "gender",
+    label: "Gender",
+    type: "select",
+    options: [["", "Choose an option…"], ...GENDER_OPTIONS],
+    hint: "This is private — it's never shown on your public profile.",
   },
   {
     // TM-880: phone is MANDATORY (email stays optional — it's the Firebase identity, not a form
@@ -486,6 +505,13 @@ async function adoptVerifiedPhone() {
 /** Validate one field's raw value against its rules. Returns an error message, or "" if valid. */
 function validateField(field, raw) {
   const value = (raw ?? "").trim();
+  if (field.field === "gender") {
+    // TM-955: gender is REQUIRED — the shared genderChoiceError rejects the blank placeholder and any
+    // non-bucket value with the friendly "Please choose an option." (a "prefer not to say" CHOICE is
+    // valid). Handled before the generic required-check so it owns its own copy, mirroring the backend
+    // @NotNull that would otherwise 400 a missing/unknown value.
+    return genderChoiceError(value);
+  }
   // ALL fields are REQUIRED here (unlike the partial edit-profile form, where blank = "leave alone").
   if (value === "") return `${field.label} is required.`;
   if (field.field === "phone") {
@@ -663,14 +689,16 @@ function prefillPhone(entry, profile) {
   }
 }
 
-/** Build the request body: trimmed name/location, age coerced to a number, phone composed to E.164. */
+/** Build the request body: trimmed name/location, age coerced to a number, phone composed to E.164,
+ *  and the required gender bucket (TM-955). */
 function collectBody() {
   const get = (k) => (shell.fields.get(k).input.value ?? "").trim();
   // TM-880: storage is E.164, composed from the picker + national input — same as the edit form's
   // collectPatch. validateAll has already blocked a blank/unconfirmed pair before this runs.
   const phoneEntry = shell.fields.get("phone");
   const phone = composeE164(phoneEntry.country ? phoneEntry.country.value : "", get("phone"));
-  return { name: get("name"), location: get("location"), age: Number(get("age")), phone };
+  // TM-955: gender is the chosen enum NAME (validateAll already rejected a blank/unknown value).
+  return { name: get("name"), location: get("location"), age: Number(get("age")), phone, gender: get("gender") };
 }
 
 async function load() {

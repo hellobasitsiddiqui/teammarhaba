@@ -93,6 +93,7 @@ test("@onboarding a brand-new user is gated, completes the profile, and then ent
   await page.fill("#onboarding-name", "Fresh User");
   await page.selectOption("#onboarding-location", location);
   await page.fill("#onboarding-age", "27");
+  await page.selectOption("#onboarding-gender", "PREFER_NOT_TO_SAY"); // TM-955: required gate field
   await page.fill("#onboarding-phone", gateNational);
   // TM-930: the phone must be OTP-VERIFIED (Firebase phone verify + link) before the gate submits —
   // send the code, peek it from the Auth emulator, auto-submit the six boxes → "Verified ✓".

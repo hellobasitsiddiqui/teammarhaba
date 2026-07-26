@@ -2,6 +2,7 @@ package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.AccountState;
 import com.teammarhaba.backend.event.ReliabilityStatus;
+import com.teammarhaba.backend.user.Gender;
 import com.teammarhaba.backend.user.NotificationPref;
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +20,10 @@ import java.util.List;
  * @param lastName             family name (may be {@code null})
  * @param city                 free-text city (may be {@code null})
  * @param age                  age in years (may be {@code null})
+ * @param gender               self-reported gender (TM-955): FEMALE / MALE / PREFER_NOT_TO_SAY, or
+ *                             {@code null} = unknown (legacy / never-onboarded accounts). PRIVATE — it
+ *                             is on the caller's OWN {@code /me} only and is never rendered on the
+ *                             public profile ({@code #/profile/public})
  * @param phone                phone number (may be {@code null})
  * @param notificationPref     delivery preference — new accounts default to {@code BOTH} (email + push, TM-427)
  * @param timezone             IANA timezone id (may be {@code null})
@@ -79,6 +84,7 @@ public record MeResponse(
         String lastName,
         String city,
         Integer age,
+        Gender gender,
         String phone,
         NotificationPref notificationPref,
         String timezone,

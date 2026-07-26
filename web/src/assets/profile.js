@@ -58,6 +58,10 @@ import {
   // already-saved off-list city, so an existing "Dubai" profile is never invalidated).
   CITY_OPTIONS,
   cityChoiceError,
+  // TM-955: the shared gender buckets (mirror the backend Gender enum) + the membership set used by
+  // fillForm to select the stored value (or blank for a legacy null-gender account).
+  GENDER_OPTIONS,
+  GENDER_VALUES,
   splitE164,
   composeE164,
   canonicalE164,
@@ -147,6 +151,19 @@ const FIELDS = [
     max: 99,
     autocomplete: "off",
     hint: "Between 18 and 99.",
+  },
+  {
+    // TM-955: gender is a closed enum (FEMALE / MALE / PREFER_NOT_TO_SAY), required at onboarding but
+    // editable here — the SAME select machinery as city/notificationPref. The leading blank option
+    // keeps "not set" honest for a LEGACY/null-gender account (never onboarded through the gate): it
+    // shows blank rather than being silently defaulted to the first bucket, and collectPatch's
+    // blank-omission then means "no change" (a null gender is never overwritten just by opening the
+    // form). Values are the enum NAMEs the backend accepts; labels are the human copy. PRIVATE — this
+    // field exists only on the caller's own edit form, never on the public profile (#/profile/public).
+    key: "gender",
+    label: "Gender",
+    type: "select",
+    options: [["", "Not set…"], ...GENDER_OPTIONS],
   },
   {
     key: "phone",
@@ -697,6 +714,11 @@ function fillForm(profile) {
     const input = entry.input;
     if (field.key === "city") {
       fillCitySelect(input, value);
+    } else if (field.key === "gender") {
+      // TM-955: select the stored bucket, or the leading blank ("not set") for a null-gender legacy
+      // account. An unknown/absent value falls back to blank rather than silently selecting the first
+      // option — so collectPatch omits it (no change) until the user makes a real choice.
+      input.value = GENDER_VALUES.has(value) ? value : "";
     } else if (field.type === "select") {
       input.value = NOTIFICATION_PREFS.has(value) ? value : "EMAIL";
     } else {

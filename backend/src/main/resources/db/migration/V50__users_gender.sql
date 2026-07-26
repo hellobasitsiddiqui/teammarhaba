@@ -1,0 +1,14 @@
+-- V50__users_gender — add the self-reported user gender column (TM-955)
+--
+-- TM-955 adds a user gender field, full-stack. This migration lands the DB half: a single NULLABLE
+-- VARCHAR(32) column on users, mirroring the nullable free-profile columns (city, V5). Stored as the
+-- enum NAME via Hibernate EnumType.STRING (com.teammarhaba.backend.user.Gender = FEMALE / MALE /
+-- PREFER_NOT_TO_SAY), so VARCHAR(32) comfortably fits the longest value ("PREFER_NOT_TO_SAY", 17
+-- chars) with headroom for any future bucket.
+--
+-- NULLABLE is load-bearing: NULL = unknown, the state of every legacy / pre-existing row (created
+-- before this field existed) AND any account provisioned just-in-time that never passed through the
+-- onboarding gate. Onboarding requires a choice going forward (OnboardingRequest.@NotNull, mirroring
+-- the mandatory phone of TM-880), but existing rows are left untouched — never backfilled to a guessed
+-- value. "PREFER_NOT_TO_SAY" is a DELIBERATE user choice and is distinct from NULL (never chose).
+ALTER TABLE users ADD COLUMN gender VARCHAR(32);
