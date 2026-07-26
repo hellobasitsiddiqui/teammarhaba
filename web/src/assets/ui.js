@@ -77,10 +77,15 @@ export function stackableTable(head, body) {
   return table;
 }
 
+// The toast host id. Held in a constant because it is referenced in two places that MUST agree: the
+// lazy host builder below, and the modal-layer inert sweep (TM-947), which permanently exempts this
+// node so toasts sit ON the modal layer rather than being inerted behind it (item 1b).
+const TOAST_HOST_ID = "tm-toasts";
+
 function toastHost() {
-  let host = document.getElementById("tm-toasts");
+  let host = document.getElementById(TOAST_HOST_ID);
   if (!host) {
-    host = el("div", { id: "tm-toasts", class: "tm-toasts", role: "status", "aria-live": "polite" });
+    host = el("div", { id: TOAST_HOST_ID, class: "tm-toasts", role: "status", "aria-live": "polite" });
     document.body.append(host);
   }
   return host;
@@ -133,15 +138,146 @@ export function toast(message, { type = "info", action = null, timeout = 5000, o
   return dismiss;
 }
 
+// ── Shared modal layer (TM-947) ─────────────────────────────────────────────────────────────────
+//
+// confirmDialog() and modal() are both aria-modal dialogs and must behave identically: background
+// inerted, Tab trapped inside, focus restored to the opener on close. Before TM-947 only confirmDialog
+// had any of that; modal() had none (the parity gap). Rather than copy the logic, both now go through
+// ONE helper — openModalLayer — so the contract lives in a single place (the AC mandates shared, not
+// copied).
+//
+// The helper also fixes three sharp edges the original single-shot sweep had:
+//   • Item 1a — a toast fired WHILE a dialog is open was never inerted (the sweep ran once at open, so
+//     a later sibling stayed tabbable behind the backdrop). A MutationObserver now inerts siblings as
+//     they mount.
+//   • Item 1b — a pre-existing #tm-toasts host GOT inerted, so persistent toasts went click-dead under
+//     the dialog. The sweep + observer now permanently exempt the toast host, so toasts join the modal
+//     layer (they render above the backdrop and stay interactive).
+//   • Item 2 — stacking. Only the TOPMOST layer is active: Escape and the Tab trap act on the frontmost
+//     dialog only, so two stacked dialogs don't double-close or fight over focus.
+
+// The stack of currently-open modal layers, oldest → newest. The last entry is the topmost (active) one.
+const modalLayerStack = [];
+
+/** Focusable descendants of a dialog, in DOM order — the Tab ring the trap cycles through. */
+function focusableWithin(dialog) {
+  const sel = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), " +
+    "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+  return dialog.querySelectorAll ? Array.from(dialog.querySelectorAll(sel)) : [];
+}
+
+/**
+ * Open a modal layer: append the backdrop, inert the background (now + as it grows), trap Tab inside
+ * the dialog, and make Escape close it — but only while this layer is the topmost one.
+ *
+ * @param {{backdrop: HTMLElement, dialog: HTMLElement, onEscape: Function, initialFocus?: HTMLElement}} cfg
+ * @returns {() => void} teardown — un-inert the background, stop observing, restore focus to the opener,
+ *   and pop this layer off the stack. Idempotent.
+ */
+function openModalLayer({ backdrop, dialog, onEscape, initialFocus }) {
+  // Remember who had focus so we can hand it back on close (unless a destructive action removed it).
+  const opener = document.activeElement;
+  // Only the nodes WE inerted, so a node that was ALREADY inert/aria-hidden isn't un-hidden on close.
+  const inerted = [];
+
+  // Inert one background sibling (untabbable + click-dead + hidden from AT), tracking it for restore.
+  // Never touches the toast host (item 1b) or a node we already inerted / that was pre-inert.
+  const inertSibling = (node) => {
+    if (node === backdrop) return;
+    if (node.id === TOAST_HOST_ID) return; // toasts sit ON the modal layer, never behind it
+    if (node.inert || (node.getAttribute && node.getAttribute("aria-hidden") === "true")) return;
+    node.inert = true;
+    if (node.setAttribute) node.setAttribute("aria-hidden", "true");
+    inerted.push(node);
+  };
+
+  const isTopmost = () => modalLayerStack[modalLayerStack.length - 1] === layer;
+
+  const onKey = (e) => {
+    if (!isTopmost()) return; // item 2: only the frontmost dialog reacts to keys
+    if (e.key === "Escape") {
+      onEscape();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    // Focus trap: cycle within the dialog's focusable ring; pull focus back in if it left the dialog.
+    const ring = focusableWithin(dialog);
+    if (ring.length === 0) {
+      e.preventDefault();
+      if (typeof dialog.focus === "function") dialog.focus();
+      return;
+    }
+    const active = document.activeElement;
+    const inside = dialog.contains(active);
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (e.shiftKey) {
+      if (!inside || active === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (!inside || active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
+  // Watch for siblings mounted AFTER open (e.g. a toast fired mid-dialog) and inert them too (item 1a).
+  // Guarded so a non-DOM/legacy environment without MutationObserver just skips the live sweep.
+  let observer = null;
+  if (typeof MutationObserver !== "undefined") {
+    observer = new MutationObserver((records) => {
+      for (const rec of records) {
+        for (const node of rec.addedNodes || []) {
+          if (node.nodeType === 1) inertSibling(node);
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true });
+  }
+
+  const layer = { onKey };
+
+  let torn = false;
+  const teardown = () => {
+    if (torn) return; // idempotent: Escape + button + backdrop-click can all race onto close
+    torn = true;
+    if (observer) observer.disconnect();
+    for (const node of inerted) {
+      node.inert = false;
+      if (node.removeAttribute) node.removeAttribute("aria-hidden");
+    }
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+    const i = modalLayerStack.indexOf(layer);
+    if (i !== -1) modalLayerStack.splice(i, 1);
+    // Hand focus back to the opener (if it's still in the document — a confirmed destructive action
+    // may have removed it, e.g. sign-out tearing down the Profile hub).
+    if (opener && typeof opener.focus === "function" && document.contains(opener)) opener.focus();
+  };
+
+  document.body.append(backdrop);
+  // Make aria-modal true in fact, not just in name: everything behind the backdrop is inert
+  // (unfocusable + untabbable + click-dead) and aria-hidden for screen readers. A dialog stacked over
+  // another naturally inerts the lower backdrop here too, so topmost-wins for clicks as well as keys.
+  for (const node of Array.from(document.body.children)) inertSibling(node);
+  modalLayerStack.push(layer);
+  document.addEventListener("keydown", onKey);
+  if (initialFocus && typeof initialFocus.focus === "function") initialFocus.focus();
+
+  return teardown;
+}
+
 /**
  * A styled, accessible confirm dialog (never the native `confirm()`). Resolves `true` on confirm,
  * `false` on cancel / Escape / backdrop click.
  *
- * Honours the `aria-modal="true"` contract for real (TM-906 review): while the dialog is open the
- * rest of the page is `inert` + `aria-hidden` (background controls can't be tabbed to, clicked via
- * keyboard, or reached by a screen reader), Tab/Shift+Tab cycle WITHIN the dialog, and on close
- * focus returns to the element that opened it. Without this, a keyboard user could Tab out from
- * under the backdrop and activate background controls while the (destructive) confirm was up.
+ * Honours the `aria-modal="true"` contract for real (TM-906 review), via the shared modal layer
+ * (TM-947): while the dialog is open the rest of the page is `inert` + `aria-hidden` (background
+ * controls can't be tabbed to, clicked via keyboard, or reached by a screen reader), Tab/Shift+Tab
+ * cycle WITHIN the dialog, and on close focus returns to the element that opened it. Without this, a
+ * keyboard user could Tab out from under the backdrop and activate background controls while the
+ * (destructive) confirm was up.
  *
  * The two buttons carry stable DOM ids (#tm-dialog-confirm / #tm-dialog-cancel) — the automation
  * hooks the Maestro mobile flows use, since both the trigger row and the confirm button can share
@@ -157,40 +293,8 @@ export function confirmDialog({
   danger = false,
 } = {}) {
   return new Promise((resolve) => {
-    const opener = document.activeElement;
-    // Background siblings we inerted (only ones WE set, so a pre-hidden node isn't un-hidden on close).
-    const inerted = [];
-    const onKey = (e) => {
-      if (e.key === "Escape") {
-        close(false);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      // Focus trap: the dialog's tab ring is exactly [cancelBtn, confirmBtn] (DOM order). Wrap at
-      // the ends, and pull focus back in if it somehow left the dialog (e.g. was on <body>).
-      const ring = [cancelBtn, confirmBtn];
-      const active = document.activeElement;
-      const inside = dialog.contains(active);
-      if (e.shiftKey) {
-        if (!inside || active === ring[0]) {
-          e.preventDefault();
-          ring[ring.length - 1].focus();
-        }
-      } else if (!inside || active === ring[ring.length - 1]) {
-        e.preventDefault();
-        ring[0].focus();
-      }
-    };
     const close = (result) => {
-      for (const node of inerted) {
-        node.inert = false;
-        node.removeAttribute("aria-hidden");
-      }
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      // Hand focus back to the opener (if it's still in the document — a confirmed destructive
-      // action may have removed it, e.g. sign-out tearing down the Profile hub).
-      if (opener && typeof opener.focus === "function" && document.contains(opener)) opener.focus();
+      teardown();
       resolve(result);
     };
     const cancelBtn = el(
@@ -223,34 +327,33 @@ export function confirmDialog({
       },
       [dialog],
     );
-    document.body.append(backdrop);
-    // Make aria-modal true in fact, not just in name: everything behind the backdrop is inert
-    // (unfocusable + untabbable + click-dead) and aria-hidden for screen readers.
-    for (const node of document.body.children) {
-      if (node === backdrop) continue;
-      if (node.inert || node.getAttribute("aria-hidden") === "true") continue;
-      node.inert = true;
-      node.setAttribute("aria-hidden", "true");
-      inerted.push(node);
-    }
-    document.addEventListener("keydown", onKey);
-    confirmBtn.focus();
+    const teardown = openModalLayer({
+      backdrop,
+      dialog,
+      onEscape: () => close(false),
+      initialFocus: confirmBtn,
+    });
   });
 }
 
-/** A general modal holding arbitrary content. Returns `{ close }`. */
+/**
+ * A general modal holding arbitrary content. Returns `{ close }`.
+ *
+ * Has the same aria-modal semantics as confirmDialog — background inert, Tab trapped inside, focus
+ * restored to the opener on close — because both share `openModalLayer` (TM-947, closing the parity
+ * gap where modal() previously had none of these).
+ */
 export function modal(title, content) {
-  const onKey = (e) => {
-    if (e.key === "Escape") close();
-  };
-  const close = () => {
-    backdrop.remove();
-    document.removeEventListener("keydown", onKey);
-  };
+  const close = () => teardown();
+  const closeBtn = el(
+    "button",
+    { class: "tm-toast-close", type: "button", "aria-label": "Close", onClick: close },
+    "×",
+  );
   const dialog = el("div", { class: "tm-dialog tm-modal", role: "dialog", "aria-modal": "true", "aria-label": title }, [
     el("div", { class: "tm-modal-head" }, [
       el("h2", { class: "tm-dialog-title", text: title }),
-      el("button", { class: "tm-toast-close", type: "button", "aria-label": "Close", onClick: close }, "×"),
+      closeBtn,
     ]),
     el("div", { class: "tm-modal-body" }, content),
   ]);
@@ -264,8 +367,14 @@ export function modal(title, content) {
     },
     [dialog],
   );
-  document.body.append(backdrop);
-  document.addEventListener("keydown", onKey);
+  const teardown = openModalLayer({
+    backdrop,
+    dialog,
+    onEscape: () => close(),
+    // Seat focus inside the dialog on open (the close button is always present). This is what gives
+    // modal() a working trap: focusableWithin() then keeps Tab inside.
+    initialFocus: closeBtn,
+  });
   return { close };
 }
 
