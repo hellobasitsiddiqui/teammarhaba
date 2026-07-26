@@ -4718,6 +4718,11 @@ button.tm-notif-item:hover {
 
 .tm-event-cal-icon { width: 20px; height: 20px; flex: 0 0 auto; color: var(--accent); }
 
+/* "More options" event-form disclosure (TM-1066) — reuses the TM-398 .tm-event-calendar-toggle look;
+   the body just needs breathing room below the summary so the moved timezone field isn't cramped. */
+.tm-event-more-options { margin-top: 0.5rem; }
+.tm-event-more-options-body { margin-top: 0.6rem; }
+
 .tm-event-calendar-menu {
     display: flex;
     flex-wrap: wrap;

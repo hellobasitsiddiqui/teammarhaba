@@ -120,6 +120,9 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.fill("#event-description", "Bring a laptop and a mug — we pair on the app.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
   await page.locator("#event-city").selectOption("London"); // City is now a dropdown (TM-1063)
+  // TM-1066: the timezone selector moved under a collapsed "More options" <details>; open it first so
+  // the select is interactable (an override — the derived venue-timezone case doesn't need this).
+  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));

@@ -40,6 +40,7 @@ import {
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
   isValidTimeZone,
+  deriveVenueTimezone,
   validateEventDraft,
   buildEventPayload,
   clearedOptionalFields,
@@ -793,7 +794,7 @@ const FORM_FIELDS = [
   { key: "city", id: "event-city", label: "City (optional)", type: "select", options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])], hint: "The public pre-reveal hint + per-city reveal default (TM-408)." },
   { key: "mapUrl", id: "event-map-url", label: "Map URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
   { key: "onlineUrl", id: "event-online-url", label: "Online URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
-  { key: "timezone", id: "event-timezone", label: "Time zone", type: "timezone", required: true, hint: "The event's local IANA zone; all times below are entered in it." },
+  { key: "timezone", id: "event-timezone", label: "Time zone", type: "timezone", required: true, hint: "Derived from the venue — change it under More options." },
   { key: "startAt", id: "event-start", label: "Starts", type: "datetime-local", required: true, row: "when" },
   { key: "endAt", id: "event-end", label: "Ends (optional)", type: "datetime-local", row: "when" },
   { key: "visibilityStart", id: "event-visibility-start", label: "Visible from", type: "datetime-local", required: true, row: "visibility" },
@@ -867,6 +868,11 @@ function buildField(field, fields) {
                 if (guess && isValidTimeZone(guess)) {
                   ensureZoneOption(input, guess);
                   input.value = guess;
+                  // Fire "input" so the form-level revalidate + the TM-1066 manual-edit flag react to
+                  // "Use mine" exactly as they do to a hand-pick (an explicit choice is a manual edit,
+                  // so a later venue re-pick won't clobber it). Programmatic value sets don't fire on
+                  // their own, so dispatch it.
+                  input.dispatchEvent(new Event("input", { bubbles: true }));
                 }
               },
             },
@@ -1082,7 +1088,10 @@ async function fetchActiveVenues() {
  * picked venue id flows into the event payload as `venueId`.
  *
  * @param {?object} event the EventResponse being edited (for the prefill), or null on create.
- * @param {(venue: ?object) => void} onSelect called with the chosen venue (or null) after a change.
+ * @param {(venue: ?object, ctx: {initial: boolean}) => void} onSelect called with the chosen venue (or
+ *   null) after a change. `ctx.initial` is true only for the one-shot echo of the current selection right
+ *   after the async venue list loads (not a user pick) — so a consumer can skip clobbering established
+ *   prefilled values (TM-1066 timezone derive).
  * @returns {{node: HTMLElement, getValue: () => string}}
  */
 function buildVenuePicker(event, onSelect) {
@@ -1109,14 +1118,17 @@ function buildVenuePicker(event, onSelect) {
   };
   populate([]);
 
-  // Async-load the active venues, then re-populate (keeping any current selection).
+  // Async-load the active venues, then re-populate (keeping any current selection). This initial echo of
+  // the current selection is flagged `initial:true` so a consumer can tell it apart from a real user pick
+  // (TM-1066: the timezone derive must NOT clobber a saved/prefilled event timezone on edit-open — that
+  // auto-fire is not a user choosing a venue).
   fetchActiveVenues().then((list) => {
     populate(list);
-    onSelect?.(venues.find((v) => String(v.id) === select.value) || null);
+    onSelect?.(venues.find((v) => String(v.id) === select.value) || null, { initial: true });
   });
 
   select.addEventListener("change", () => {
-    onSelect?.(venues.find((v) => String(v.id) === select.value) || null);
+    onSelect?.(venues.find((v) => String(v.id) === select.value) || null, { initial: false });
   });
 
   const node = el("div", { class: "tm-form-field", dataset: { field: "venueId" } }, [
@@ -1395,6 +1407,16 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const image = buildImageControl(event);
   // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
   let venuePicker = null;
+  // The "More options" <details> the timezone field lives under (TM-1066); a mutable ref so the submit
+  // error-paint can force it OPEN when the (required) timezone is in error — a hidden required error is
+  // otherwise invisible. Set once the disclosure is built (below).
+  let moreOptions = null;
+  // TM-1066 derive-precedence: has the admin hand-edited the timezone since open? The event's zone is
+  // DERIVED from the picked venue (deriveVenueTimezone) UNLESS this flips true — after that a manual
+  // value is never clobbered by a later venue re-pick. Set only from a REAL user edit of the tz select
+  // (a native change/input, or the "Use mine" button which dispatches "input"); the venue-derive sets
+  // the value programmatically WITHOUT dispatching, so it never trips this.
+  let tzUserEdited = false;
   // The age-band control (TM-1065) is built after the model prefill; setFieldError routes ageMin/ageMax
   // errors onto its own error node (via this mutable ref) so they stay visible on the band control.
   let ageBand = null;
@@ -1428,6 +1450,10 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
       if (message) ageBand.revealForError(message);
       else ageBand.clearError();
     }
+    // Timezone (TM-1066) now lives under the "More options" <details>; a server OR live error on it force-
+    // opens the disclosure so it's never hidden behind a collapsed section. Clearing it leaves the
+    // disclosure as-is (don't slam it shut mid-edit). paintAllErrors additionally focuses on submit.
+    if (key === "timezone" && message && moreOptions) moreOptions.open = true;
   };
 
   const readDraft = () => {
@@ -1456,6 +1482,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   const paintAllErrors = () => {
     const { errors } = validateEventDraft(readDraft(), { requireForCreate: mode === "create" });
     for (const f of FORM_FIELDS) setFieldError(f.key, errors[f.key] || "");
+    // TM-1066: the (required) timezone now lives under the "More options" <details>. If it's in error on
+    // submit, force the disclosure OPEN and focus the field — a hidden required error is otherwise
+    // invisible, so the admin can't see or reach what's blocking Save.
+    if (errors.timezone && moreOptions) {
+      moreOptions.open = true;
+      const tzInput = fields.get("timezone").input;
+      if (tzInput) tzInput.focus();
+    }
     return errors;
   };
 
@@ -1505,6 +1539,15 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     // <select>s (timezone, city) fire "change", not "input", in some engines — listen for both.
     if (f.type === "timezone" || f.type === "select") input.addEventListener("change", () => revalidate(f.key));
   }
+  // TM-1066: any REAL user edit of the timezone (native change/input, or "Use mine" which dispatches
+  // "input") pins it — a later venue re-pick then leaves the admin's value alone (deriveVenueTimezone).
+  // The venue-derive sets the value programmatically without dispatching, so it never trips this.
+  {
+    const tzEdit = fields.get("timezone").input;
+    const markEdited = () => { tzUserEdited = true; };
+    tzEdit.addEventListener("input", markEdited);
+    tzEdit.addEventListener("change", markEdited);
+  }
 
   // Prefill: timezone options first (needs the selected zone), then the rest of the values.
   const model = event ? toFormModel(event) : { timezone: guessTimeZone() };
@@ -1533,7 +1576,7 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // Location line + City from it when they're still blank (so the event always has a display location
   // AND references the venue), then re-validates. Built here — after revalidate/prefill — so its
   // onSelect can safely call them; spliced into the layout right after the location field.
-  venuePicker = buildVenuePicker(event, (chosen) => {
+  venuePicker = buildVenuePicker(event, (chosen, { initial } = {}) => {
     if (chosen) {
       const loc = fields.get("locationText").input;
       if (loc.value.trim() === "") loc.value = chosen.addressLine || chosen.name || "";
@@ -1541,6 +1584,22 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
       // City is now a <select> (TM-1063); a venue's city may be off-list, so inject it as a selectable
       // option before choosing it (fillCitySelect handles both on-list and off-list values).
       if (cityInput && cityInput.value.trim() === "" && chosen.city) fillCitySelect(cityInput, chosen.city);
+      // TM-1066: DERIVE the event's timezone from the venue. deriveVenueTimezone applies the locked
+      // precedence — overwrite unless the admin has hand-edited the field (tzUserEdited), and never blank
+      // it for a venue that carries no/invalid zone. Read defensively (`chosen?.timezone`). SKIP on the
+      // `initial` auto-echo (edit-open re-selecting the event's own venue) so a SAVED event timezone is
+      // never silently overwritten by its venue's — the edit prefill must behave exactly as before.
+      if (!initial) {
+        const derived = deriveVenueTimezone(chosen, tzUserEdited);
+        if (derived) {
+          const tzInput = fields.get("timezone").input;
+          ensureZoneOption(tzInput, derived);
+          // Set the value programmatically (NO dispatch) so the manual-edit flag doesn't trip — this is a
+          // derive, not a hand-edit. revalidate("timezone") below repaints its error state.
+          tzInput.value = derived;
+          revalidate("timezone");
+        }
+      }
     }
     revalidate("locationText");
   });
@@ -1656,6 +1715,27 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     if (label && label.nextSibling) openingWrapper.insertBefore(templateChips, label.nextSibling);
     else openingWrapper.insertBefore(templateChips, openingWrapper.firstChild);
   }
+
+  // "More options" (TM-1066): the timezone field is DERIVED from the picked venue, so its raw selector
+  // moves out of the main body into a native <details> disclosure near the form bottom — reachable for
+  // the override case but out of the way otherwise. The field is UNCHANGED (still required + validated +
+  // prefilled + "Use mine"); only its home in the layout moves. Reuse the TM-398 `.tm-event-calendar`
+  // disclosure styling (styles.css) so the toggle reads consistently with the events UI. The submit
+  // error-paint force-opens this (via `moreOptions`) so a hidden required-timezone error is never
+  // invisible. Only the timezone lives here; capacity/reveal/age stay in the main body.
+  const timezoneNode = byKey.get("timezone");
+  const tzIdx = layout.indexOf(timezoneNode);
+  if (tzIdx >= 0) layout.splice(tzIdx, 1);
+  moreOptions = el(
+    "details",
+    { class: "tm-event-calendar tm-event-more-options", id: "event-more-options" },
+    [
+      el("summary", { class: "tm-event-calendar-toggle", id: "event-more-options-toggle" }, "More options"),
+      el("div", { class: "tm-event-more-options-body" }, [timezoneNode]),
+    ],
+  );
+  // Render it near the bottom of the main fields (after the last body field, before the image + actions).
+  layout.push(moreOptions);
 
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.

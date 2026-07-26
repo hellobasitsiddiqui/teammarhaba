@@ -192,6 +192,28 @@ export function guessTimeZone() {
 }
 
 /**
+ * Derive-precedence rule (TM-1066) for the venue-pick → event-timezone hook. The event's time zone is
+ * DERIVED from the picked venue's `timezone`, EXCEPT once the admin has manually edited the field —
+ * a manual value is then never clobbered by a later re-pick. Pure so the precedence is unit-testable
+ * without the DOM (admin-events.js can't be imported in Node — a transitive Firebase `https:` import).
+ *
+ * Returns the zone the field SHOULD hold after a pick, or `null` for "leave the current value alone":
+ *   - venue carries no (or a blank/invalid) `timezone` → null (a venue without a zone never blanks it),
+ *   - the admin has manually edited the timezone (`userEdited`) → null (their choice wins),
+ *   - otherwise → the venue's zone (overwrite; read defensively via `venue?.timezone`).
+ *
+ * @param {?object} venue the chosen venue (or null for the one-off / blank option).
+ * @param {boolean} userEdited whether the admin has hand-edited the timezone since the form opened.
+ * @returns {?string} the IANA zone to set, or null to leave the current value unchanged.
+ */
+export function deriveVenueTimezone(venue, userEdited) {
+  if (userEdited) return null;
+  const tz = cleanText(venue?.timezone);
+  if (tz === "" || !isValidTimeZone(tz)) return null;
+  return tz;
+}
+
+/**
  * How many milliseconds `timeZone` is ahead of UTC at the instant `date` — computed by formatting the
  * instant AS the zone's wall clock and reading it back as if it were UTC. The gap is the offset. This
  * is what makes the wall-clock ⇄ UTC conversions DST-correct without a tz database on the client.

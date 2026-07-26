@@ -61,6 +61,7 @@ import {
   OPENING_MESSAGE_TEMPLATES,
   ageBandToMinMax,
   minMaxToAgeBand,
+  deriveVenueTimezone,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -97,6 +98,40 @@ test("guessTimeZone returns a usable IANA id (or blank), never throws", () => {
   const tz = guessTimeZone();
   assert.equal(typeof tz, "string");
   if (tz) assert.equal(isValidTimeZone(tz), true);
+});
+
+// --- venue-derived timezone precedence (TM-1066) ---------------------------------------------
+// The event's timezone is DERIVED from the picked venue (admin-events.js venue onSelect), EXCEPT once
+// the admin has hand-edited the field. deriveVenueTimezone is the pure precedence rule; the DOM shell
+// (which can't be imported in Node — a transitive Firebase https: import) is a thin layer over it.
+
+test("deriveVenueTimezone: a venue WITH a zone sets it when the admin hasn't edited (TM-1066)", () => {
+  // The core derive path: venue carries a valid IANA zone, no manual edit → return it to overwrite with.
+  assert.equal(deriveVenueTimezone({ timezone: "Europe/London" }, false), "Europe/London");
+  assert.equal(deriveVenueTimezone({ timezone: "America/New_York" }, false), "America/New_York");
+});
+
+test("deriveVenueTimezone: a MANUAL edit is not clobbered by a later re-pick (TM-1066 locked precedence)", () => {
+  // The locked rule: once the admin edits the timezone, a subsequent venue pick must leave it alone —
+  // deriveVenueTimezone returns null (= "keep the current value") regardless of the venue's zone.
+  assert.equal(deriveVenueTimezone({ timezone: "Europe/London" }, true), null);
+  assert.equal(deriveVenueTimezone({ timezone: "America/New_York" }, true), null);
+});
+
+test("deriveVenueTimezone: a venue WITHOUT a zone leaves the current value alone (no crash/blank) (TM-1066)", () => {
+  // AC: picking a venue that carries no timezone must not blank the field. null = leave-alone.
+  assert.equal(deriveVenueTimezone({ timezone: "" }, false), null);
+  assert.equal(deriveVenueTimezone({ timezone: "   " }, false), null);
+  assert.equal(deriveVenueTimezone({ timezone: null }, false), null);
+  assert.equal(deriveVenueTimezone({}, false), null);
+  // Read defensively — a null/undefined venue (the one-off / blank option) never crashes.
+  assert.equal(deriveVenueTimezone(null, false), null);
+  assert.equal(deriveVenueTimezone(undefined, false), null);
+});
+
+test("deriveVenueTimezone: a venue's INVALID zone is ignored, not applied (TM-1066)", () => {
+  // A junk zone would fail isValidTimeZone / ensureZoneOption downstream — never set it.
+  assert.equal(deriveVenueTimezone({ timezone: "Not/AZone" }, false), null);
 });
 
 // --- UTC ⇄ zoned wall-clock (DST-correct) -----------------------------------------------------
