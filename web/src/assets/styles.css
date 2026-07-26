@@ -4932,6 +4932,9 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
 /* The sub-line under the CTA — the wireframe's centred "Then £5 per event …" note (here the tested
    reminder / honest disabled reason). */
 .tm-event-reason, .tm-event-remind { margin: 0; font-size: 0.9rem; text-align: center; }
+/* The "See similar events" way-out CTA (TM-827-C) — a secondary link beneath the (possibly disabled)
+   primary, centred like the reason/reminder note. Reuses the .tm-btn look. */
+.tm-event-similar-cta { align-self: center; margin-top: 0.15rem; }
 
 .tm-event-reason-link { color: var(--accent); font-weight: 600; }
 

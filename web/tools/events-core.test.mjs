@@ -39,6 +39,8 @@ import {
   wouldLandGoing,
   activeGoingConflict,
   rsvpControlModel,
+  similarEvents,
+  SIMILAR_EVENTS_LABEL,
   leaveConfirmModel,
   commandErrorMessage,
   isFull,
@@ -915,4 +917,95 @@ test("mapSlotModel: a curated mapUrl post-reveal still yields a directions link"
   const slot = mapSlotModel(detail, MAPS_PLATFORM.WEB, NOON_UTC);
   assert.equal(slot.kind, MAP_SLOT.DIRECTIONS);
   assert.equal(slot.directions.show, true);
+});
+
+// ── disabled-RSVP → "See similar events" CTA (TM-827-C) ────────────────────────────────────────────
+
+const CTA_HREF = "#/events?similarTo=1"; // OPEN_DETAIL.id === 1
+
+test("control.similar: SHOWS on a full event (fresh joiner → waitlist), remindNote PRESERVED", () => {
+  const full = { ...OPEN_DETAIL, capacity: 3, goingCount: 3 };
+  const m = rsvpControlModel({ detail: full, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(m.primary.disabled, false, "the waitlist primary is still ENABLED (additive CTA)");
+  assert.deepEqual(m.similar, { show: true, label: SIMILAR_EVENTS_LABEL, href: CTA_HREF });
+  assert.equal(SIMILAR_EVENTS_LABEL, "See similar events");
+  // Additive contract: the pre-existing "you'll join the waiting list" note must NOT be dropped by the
+  // similar-CTA insertion (regression: a stray `if` rebinding the remindNote else-if — caught in review).
+  assert.equal(m.remindNote, "This event is full — you'll join the waiting list.");
+});
+
+test("control.similar: SHOWS on booking-closed / started (disabled primary unchanged)", () => {
+  const soon = rsvpControlModel({ detail: { ...OPEN_DETAIL, startAt: "2026-07-05T12:30:00Z" }, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(soon.primary.disabled, true);
+  assert.match(soon.primary.reason, /Booking closed/, "reason copy is byte-identical (additive)");
+  assert.equal(soon.similar.href, CTA_HREF);
+  const started = rsvpControlModel({ detail: { ...OPEN_DETAIL, startAt: "2026-07-05T11:00:00Z" }, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(started.similar?.show, true);
+});
+
+test("control.similar: SHOWS on both age gates (unset + outside band)", () => {
+  const banded = { ...OPEN_DETAIL, ageMin: 25, ageMax: 30 };
+  const unset = rsvpControlModel({ detail: banded, me: {}, nowMs: NOON_UTC });
+  assert.equal(unset.primary.disabled, true);
+  assert.deepEqual(unset.primary.link, { href: "#/profile", label: "Add your age" }, "add-age link unchanged");
+  assert.equal(unset.similar.href, CTA_HREF);
+  const outside = rsvpControlModel({ detail: banded, me: { age: 40 }, nowMs: NOON_UTC });
+  assert.equal(outside.similar?.show, true);
+});
+
+test("control.similar: does NOT show on an enabled RSVP that lands GOING", () => {
+  const m = rsvpControlModel({ detail: OPEN_DETAIL, me: { age: 27 }, nowMs: NOON_UTC });
+  assert.equal(m.primary.disabled, false);
+  assert.equal(m.similar, undefined, "an enabled RSVP can just go — no way-out CTA");
+});
+
+test("control.similar: does NOT show on the one-active-event conflict (excluded by decision)", () => {
+  const cards = [{ id: 2, myState: "GOING", heading: "Rooftop BBQ", startAt: "2026-07-06T18:00:00Z" }];
+  const m = rsvpControlModel({ detail: OPEN_DETAIL, me: { age: 27 }, cards, nowMs: NOON_UTC });
+  assert.equal(m.primary.disabled, true);
+  assert.match(m.primary.reason, /You're going to Rooftop BBQ/);
+  assert.equal(m.similar, undefined, "conflict is explicitly NOT a similar-CTA trigger");
+});
+
+test("control.similar: does NOT show on GOING / WAITLISTED leave states or an ended event", () => {
+  assert.equal(rsvpControlModel({ detail: { ...OPEN_DETAIL, myState: "GOING" }, me: { age: 27 }, nowMs: NOON_UTC }).similar, undefined);
+  assert.equal(rsvpControlModel({ detail: { ...OPEN_DETAIL, myState: "WAITLISTED" }, me: { age: 27 }, nowMs: NOON_UTC }).similar, undefined);
+  const ended = { ...OPEN_DETAIL, startAt: "2026-07-04T18:00:00Z", endAt: "2026-07-04T20:00:00Z" };
+  assert.equal(rsvpControlModel({ detail: ended, me: { age: 27 }, nowMs: NOON_UTC }).similar, undefined);
+});
+
+test("similarEvents: same-city + upcoming + not-full, source excluded, soonest-first", () => {
+  const source = { id: 1, city: "London" };
+  const cards = [
+    { id: 1, city: "London", startAt: "2026-07-10T18:00:00Z", capacity: 10, goingCount: 1 }, // the source → excluded
+    { id: 2, city: "London", startAt: "2026-07-08T18:00:00Z", capacity: 10, goingCount: 1 }, // ✓ (soonest)
+    { id: 3, city: "London", startAt: "2026-07-09T18:00:00Z", capacity: 10, goingCount: 1 }, // ✓
+    { id: 4, city: "Sharjah", startAt: "2026-07-07T18:00:00Z", capacity: 10, goingCount: 1 }, // ✗ other city
+    { id: 5, city: "London", startAt: "2026-07-08T18:00:00Z", capacity: 3, goingCount: 3 }, // ✗ full
+    { id: 6, city: "London", startAt: "2026-07-01T18:00:00Z", endAt: "2026-07-01T20:00:00Z", capacity: 10, goingCount: 1 }, // ✗ finished (ended before NOON_UTC)
+  ];
+  const out = similarEvents(cards, source, { age: 27 }, NOON_UTC);
+  assert.deepEqual(out.map((c) => c.id), [2, 3], "only same-city upcoming not-full, source out, soonest-first");
+});
+
+test("similarEvents: city match is case/whitespace-insensitive (mirrors the city scope)", () => {
+  const source = { id: 1, city: " London " };
+  const cards = [{ id: 2, city: "LONDON", startAt: "2026-07-08T18:00:00Z", capacity: 10, goingCount: 0 }];
+  assert.deepEqual(similarEvents(cards, source, {}, NOON_UTC).map((c) => c.id), [2]);
+});
+
+test("similarEvents: a source with no city, or junk input, yields an empty list (no throw)", () => {
+  assert.deepEqual(similarEvents([{ id: 2, city: "London", startAt: "2026-07-08T18:00:00Z" }], { id: 1 }, {}, NOON_UTC), []);
+  assert.deepEqual(similarEvents(null, { id: 1, city: "London" }, {}, NOON_UTC), []);
+  assert.deepEqual(similarEvents([{ id: 2, city: "London" }], null, {}, NOON_UTC), []);
+});
+
+test("similarEvents: interest bias is currently inert (no event interest field) → soonest-first holds", () => {
+  const source = { id: 1, city: "London" };
+  const cards = [
+    { id: 2, city: "London", startAt: "2026-07-09T18:00:00Z", capacity: 10, goingCount: 0 },
+    { id: 3, city: "London", startAt: "2026-07-08T18:00:00Z", capacity: 10, goingCount: 0 },
+  ];
+  const me = { interests: [{ label: "Hiking", category: "Outdoors" }] };
+  assert.deepEqual(similarEvents(cards, source, me, NOON_UTC).map((c) => c.id), [3, 2], "still soonest-first (bias is a no-op hook)");
 });

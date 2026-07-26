@@ -163,11 +163,11 @@ async function loadMe() {
  * for the `#/events` list. Re-invoked on every entry so list↔detail↔another-detail navigation always
  * shows fresh counts/state.
  */
-export function enterEvents(eventId) {
+export function enterEvents(eventId, { similarTo } = {}) {
   const view = $("events-view");
   if (!view) return;
   if (eventId != null && eventId !== "") renderDetail(view, String(eventId));
-  else renderList(view);
+  else renderList(view, { similarTo });
 }
 
 // ------------------------------------------------------------------ shared chrome
@@ -196,7 +196,7 @@ function errorBlock(view, title, message, onRetry) {
 
 // ------------------------------------------------------------------ browse list (#/events)
 
-async function renderList(view) {
+async function renderList(view, { similarTo } = {}) {
   const mine = ++renderToken;
   loadingBlock(view, core.EVENTS_NEUTRAL_HEADING);
   // Fetch the listing and /me together (TM-909). /me is BEST-EFFORT — it only supplies the scope city
@@ -204,6 +204,7 @@ async function renderList(view) {
   // so it never rejects and the catch below only fires on a listing-load failure.
   let data;
   let me = null;
+  let source = null;
   try {
     // Fetch the full catalogue page (size = the backend MAX_SIZE, 100), NOT the default 20: the city
     // scope is filtered CLIENT-SIDE (TM-909, no backend city param for MVP), so a small default page
@@ -211,10 +212,18 @@ async function renderList(view) {
     // the viewer's city — and the tab would wrongly show its empty state. Fetching the whole visible-now
     // set makes the client filter correct for the current small catalogue. (A backend `city` param is
     // the scale-correct fix — TM-1040 follow-up.)
-    [data, me] = await Promise.all([listEvents({ size: EVENTS_LIST_PAGE_SIZE }), loadMe()]);
+    const fetches = [listEvents({ size: EVENTS_LIST_PAGE_SIZE }), loadMe()];
+    // Similar-events mode (TM-827-C): also fetch the SOURCE event for its city — it may lie beyond the
+    // listing page. Best-effort (its own catch) so a malformed/unknown `similarTo` degrades to the plain
+    // list (AC3), never a crash; the listing/me failure still drives the error block below.
+    if (similarTo) fetches.push(getEvent(similarTo).catch(() => null));
+    const [listData, meData, sourceData] = await Promise.all(fetches);
+    data = listData;
+    me = meData;
+    source = sourceData ?? null;
   } catch (err) {
     if (mine !== renderToken) return;
-    errorBlock(view, core.EVENTS_NEUTRAL_HEADING, "Couldn't load events. Please try again.", () => renderList(view));
+    errorBlock(view, core.EVENTS_NEUTRAL_HEADING, "Couldn't load events. Please try again.", () => renderList(view, { similarTo }));
     console.warn("[events] list load failed:", err?.message ?? err);
     return;
   }
@@ -224,7 +233,44 @@ async function renderList(view) {
   // Reset the scope to the viewer's own city on every fresh entry (a switcher pick only lasts within a
   // paint session); null/blank city → the no-city empty/browse path.
   state.city = (me?.city || "").trim() || null;
+  // Similar mode paints its own filtered view; a resolved source is required (else fall through to the
+  // plain city-scoped list — the honest degrade for an unknown/malformed similarTo).
+  if (similarTo && source) {
+    paintSimilar(view, source, me);
+    return;
+  }
   paintList(view);
+}
+
+/**
+ * Paint the "similar events" view (TM-827-C) reached from a disabled-RSVP → "See similar events" CTA at
+ * `#/events?similarTo=<id>`: the events a member could attend instead of the source — same city, upcoming,
+ * not full, source excluded (events-core `similarEvents`). A clear heading + "← All events" back link make
+ * it obviously a filtered view and easy to escape to the plain list.
+ */
+function paintSimilar(view, source, me) {
+  const now = Date.now();
+  const similar = core.similarEvents(state.cards, source, me, now);
+  const city = (source?.city || "").trim();
+  const heading = city ? `Similar events in ${city}` : "Similar events";
+
+  clear(view).append(headerBar(heading, { back: { href: "#/events", label: "← All events" } }));
+
+  if (!similar.length) {
+    view.append(
+      el("div", { class: "tm-empty", "data-testid": "events-similar-empty" }, [
+        doodle("calendar", { class: "tm-doodle-empty", title: "No similar events" }),
+        el("p", { class: "tm-empty-title", text: "No similar events right now" }),
+        el("p", { class: "tm-muted", text: `Nothing else in ${city || "your area"} just yet — browse all events.` }),
+        el("a", { class: "tm-btn", href: "#/events" }, "Browse all events"),
+      ]),
+    );
+    return;
+  }
+
+  const list = el("div", { class: "tm-event-list", "data-testid": "events-similar-list" });
+  for (const c of similar) list.append(eventCard(c, { live: core.isHappeningNow(c, now) }));
+  view.append(list);
 }
 
 /**
@@ -817,6 +863,20 @@ function actionSection(view, detail, now, me) {
     wrap.append(reason);
   } else if (model.remindNote) {
     wrap.append(el("p", { class: "tm-event-remind tm-muted", "data-testid": "event-remind-note", text: model.remindNote }));
+  }
+
+  // TM-827-C: a way OUT of a dead-ended RSVP — a "See similar events" link beneath the (possibly
+  // disabled) primary. A real <a> (it navigates to the pre-filtered list, it isn't a command, so a
+  // disabled primary can't fire it); its visible text IS its accessible name — no aria-label, so no
+  // WCAG 2.5.3 Label-in-Name issue (TM-568).
+  if (model.similar?.show) {
+    wrap.append(
+      el(
+        "a",
+        { class: "tm-btn tm-btn-sm tm-event-similar-cta", href: model.similar.href, "data-testid": "event-similar-cta" },
+        model.similar.label,
+      ),
+    );
   }
 
   return wrap;

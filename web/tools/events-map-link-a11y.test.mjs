@@ -95,3 +95,13 @@ test("the pre-reveal paper-map placeholder is decorative (aria-hidden SVG, no La
   assert.ok(placeholder, "could not locate the map placeholder container");
   assert.ok(!/aria-label/.test(placeholder[1]), "the placeholder container must not add an aria-label");
 });
+
+test("the 'See similar events' CTA is a real link whose accessible name is its visible text (TM-827-C / TM-568)", () => {
+  // The CTA is `el("a", { class: "...tm-event-similar-cta", href, "data-testid": "event-similar-cta" }, label)`
+  // — a real <a> (navigates, so a disabled primary can't fire it) with NO aria-label, so the visible
+  // "See similar events" text IS the accessible name (no WCAG 2.5.3 Label-in-Name mismatch).
+  const m = SRC.match(/el\(\s*"a",\s*\{\s*class:\s*"tm-btn tm-btn-sm tm-event-similar-cta",([\s\S]*?)\},/);
+  assert.ok(m, "could not locate the similar-events CTA anchor builder");
+  assert.match(m[1], /"data-testid":\s*"event-similar-cta"/, "matched the wrong anchor");
+  assert.ok(!/aria-label/.test(m[1]), "the similar-events CTA must not add an aria-label (visible text is the name)");
+});
