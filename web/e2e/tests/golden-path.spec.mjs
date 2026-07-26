@@ -259,9 +259,12 @@ test("@golden the whole happy path: sign in → onboarding → terms → profile
   // #tab-admin tab once the role resolves, un-hidden). This journey's fresh user is a normal user, so
   // this branch is skipped here; the seeded ADMIN's console has dedicated coverage in
   // admin-walkthrough.spec.mjs.
-  const navAdmin = page.locator("#tab-admin");
-  const adminHidden = await navAdmin.getAttribute("hidden");
-  if (adminHidden === null) {
+  // #tab-admin is INJECTED by tabbar.js only once the ADMIN role resolves (not a static, always-present
+  // element like the old top-nav #nav-admin) — so this journey's fresh NON-admin user never gets the tab.
+  // Check PRESENCE via count() (immediate) rather than getAttribute (which would auto-wait 60s for a tab
+  // that never appears). TM-1043: the old `#nav-admin` [hidden]-attribute probe is gone with the top nav.
+  const isAdmin = (await page.locator("#tab-admin").count()) > 0;
+  if (isAdmin) {
     await clickNav(page, "#tab-admin");
     // TM-917: the Admin tab opens the #/admin HUB; the users console moved to #/admin/users, reached
     // via the hub's Users row (same routing as admin-walkthrough / broadcast-admin).
