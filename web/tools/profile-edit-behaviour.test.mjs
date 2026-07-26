@@ -198,9 +198,12 @@ function loadProfileModule(deps) {
     // (flag ON = exactly the old behaviour); a test can flip it OFF via setVerifiedPhoneRequired.
     "  verifiedPhoneRequired,\n" +
     "  nextDayInterestsNudge,\n" +
+    // TM-879: the collapsible-sections pure model the buildShell renderer maps over.
+    "  profileSectionsStateKey, resolveSectionState, toggleSectionState,\n" +
     "  COUNTRIES, flagOf,\n" +
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
-    "  profileMembershipRow, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
+    // TM-879: buildShell (now exercised by the section smoke tests) also names profileManageAffordance.
+    "  profileMembershipRow, profileManageAffordance, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
 
   // A test seam appended to the eval copy only: reach the module-private shell/state + internals.
@@ -209,7 +212,11 @@ function loadProfileModule(deps) {
     // TM-1005: the phone verify controller (sendBtn/otpWrap/statusEl handles) so the affordance tests
     // can assert visibility + label without re-walking the built wrapper tree.
     "export function __phoneVerify(){ return phoneVerify; }\n" +
-    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField, buildAvatar };\n";
+    // TM-879: reach the collapsible-section renderer + its live controls so a smoke test can assert the
+    // built section structure (aria-expanded / panel hidden per the groomed defaults) + the toggle wiring.
+    "export function __sectionControls(){ return sectionControls; }\n" +
+    "export function __sectionState(){ return sectionState; }\n" +
+    "export { validateField, collectPatch, save, load, paintHub, renderStatus, setFieldError, FIELDS, fillForm, buildField, buildAvatar, buildShell, toggleSection };\n";
 
   const stripped = withoutImports.replace(/gstatic\.com|from ["']\.\//, "");
   assert.doesNotMatch(preamble + stripped, /^import[\s\S]*?from/m, "all top-level imports must be replaced before eval");
@@ -363,6 +370,11 @@ const deps = {
   // so the renderer's hidden/message wiring runs through the shipped logic. The max it targets is
   // injected by paintHub from state.interestConfig.max (TM-778's shared config), not a separate fetch.
   nextDayInterestsNudge: core.nextDayInterestsNudge,
+  // TM-879: the REAL collapsible-sections pure model, so buildShell renders the shipped section
+  // catalogue + resolves persisted state through the exact shipped logic under Node.
+  profileSectionsStateKey: core.profileSectionsStateKey,
+  resolveSectionState: core.resolveSectionState,
+  toggleSectionState: core.toggleSectionState,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
   // TM-778 interests-core: the REAL pure functions the card maps over, so paintInterests/openInterestPicker
@@ -375,6 +387,9 @@ const deps = {
   selectionError: interestsCore.selectionError,
   // membership-tier.js is import-safe (no CDN); use the real pure mapping.
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
+  // TM-879: the REAL "Manage" affordance decision (link vs coming-soon badge) so buildShell's
+  // membership section renders the shipped affordance under Node.
+  profileManageAffordance: (await import(membershipTierUrl)).profileManageAffordance,
   membershipEnabled: () => false,
   MEMBERSHIP_ROUTE: "#/membership",
 };
@@ -1572,6 +1587,110 @@ test("TM-1018(b): a cross-account collision HARD-BLOCKS — recovery affordance 
       startPhoneVerifyImpl = async () => "fake-verification-id";
       confirmPhoneLinkImpl = async () => ({});
       updateMeImpl = async () => ({});
+    }
+  });
+});
+
+// ── TM-879: collapsible profile sections — buildShell DOM smoke (the renderer over the pure model) ──
+// buildShell is the DOM half of TM-879. These prove it builds the seven sections with the groomed
+// default open/collapsed state wired onto real disclosure controls (button aria-expanded + panel
+// hidden), that toggling flips both, that each section collapses INDEPENDENTLY (not single-open), and
+// that the identity header + Sign out are NOT inside any collapsible panel (Sign out stays reachable).
+
+test("TM-879: buildShell renders the 7 sections with the groomed default open/collapsed states", () => {
+  withFakeDocument(() => {
+    currentUserImpl = () => ({ uid: "smoke-uid" });
+    try {
+      const view = wireClassList(fakeEl("div"));
+      profile.buildShell(view);
+      const controls = profile.__sectionControls();
+
+      // All seven collapsible sections were built (identity header is pinned, NOT one of them).
+      assert.deepEqual(
+        [...controls.keys()].sort(),
+        ["appearance", "diagnostics", "edit", "interests", "membership", "security", "strength"].sort(),
+      );
+
+      // The groomed defaults, reflected on the REAL disclosure controls: aria-expanded on the header
+      // button and the panel's `hidden` attribute agree with the section's default open state.
+      const expectOpen = (id, open) => {
+        const { button, panel } = controls.get(id);
+        assert.equal(button.getAttribute("aria-expanded"), open ? "true" : "false", `${id} aria-expanded`);
+        assert.equal(panel.hidden, !open, `${id} panel hidden`);
+        assert.equal(panel.getAttribute("role"), "region", `${id} panel is a labelled region`);
+        assert.equal(panel.getAttribute("aria-labelledby"), `profile-section-${id}-btn`, `${id} region labelled by its header`);
+        assert.equal(button.getAttribute("aria-controls"), `profile-section-${id}-panel`, `${id} button controls its panel`);
+      };
+      expectOpen("strength", true);
+      expectOpen("interests", true);
+      expectOpen("membership", false);
+      expectOpen("edit", false);
+      expectOpen("security", false);
+      expectOpen("appearance", false);
+      expectOpen("diagnostics", false);
+    } finally {
+      currentUserImpl = () => null;
+    }
+  });
+});
+
+test("TM-879: toggling a collapsed section opens BOTH aria-expanded and the panel (independently)", () => {
+  withFakeDocument(() => {
+    currentUserImpl = () => ({ uid: "smoke-uid" });
+    try {
+      profile.buildShell(wireClassList(fakeEl("div")));
+      const controls = profile.__sectionControls();
+      const editBtn = controls.get("edit").button;
+      const editPanel = controls.get("edit").panel;
+
+      // Edit starts collapsed; the header's onClick (→ toggleSection) opens it. el() wires the handler
+      // as the `onClick` prop, so drive it directly (the fake el has no live event dispatch).
+      assert.equal(editBtn.getAttribute("aria-expanded"), "false");
+      editBtn.onClick();
+      assert.equal(editBtn.getAttribute("aria-expanded"), "true", "clicking the header expands the section");
+      assert.equal(editPanel.hidden, false, "the panel un-hides on expand");
+      assert.ok(editPanel.classList.contains("tm-pf-open"), "the panel carries the open modifier");
+
+      // Opening Edit did NOT collapse the default-open sections — multi-open, not a single-open accordion.
+      assert.equal(controls.get("strength").button.getAttribute("aria-expanded"), "true");
+      assert.equal(controls.get("interests").button.getAttribute("aria-expanded"), "true");
+
+      // Toggling again collapses it back (and re-hides the panel).
+      editBtn.onClick();
+      assert.equal(editBtn.getAttribute("aria-expanded"), "false");
+      assert.equal(editPanel.hidden, true);
+    } finally {
+      currentUserImpl = () => null;
+    }
+  });
+});
+
+test("TM-879: the identity header is pinned and Sign out is NOT inside any collapsible panel", () => {
+  withFakeDocument(() => {
+    currentUserImpl = () => ({ uid: "smoke-uid" });
+    try {
+      profile.buildShell(wireClassList(fakeEl("div")));
+      const controls = profile.__sectionControls();
+
+      // Recursively collect every node inside every collapsible PANEL.
+      const inPanels = new Set();
+      const collect = (node) => {
+        if (!node || typeof node !== "object") return;
+        inPanels.add(node);
+        for (const c of node._children || []) collect(c);
+      };
+      for (const { panel } of controls.values()) collect(panel);
+
+      // No panel contains the pinned identity header (.tm-pf-id) or the sign-out row (#profile-signout-row):
+      // both live OUTSIDE the collapsible region so Sign out (TM-906) can never be hidden by a collapse.
+      const hasClass = (n, cls) => n?._classes?.has?.(cls);
+      const hasId = (n, id) => n?._attrs?.id === id || n?.getAttribute?.("id") === id;
+      for (const node of inPanels) {
+        assert.ok(!hasClass(node, "tm-pf-id"), "the pinned identity header must not be inside a collapsible panel");
+        assert.ok(!hasId(node, "profile-signout-row"), "Sign out must not be inside a collapsible panel");
+      }
+    } finally {
+      currentUserImpl = () => null;
     }
   });
 });

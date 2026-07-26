@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 
@@ -31,6 +31,8 @@ async function openProfile(page) {
   );
   await expect(page.locator("#tab-profile")).toBeVisible();
   await page.click("#tab-profile");
+  // TM-879: the Edit-profile section now defaults COLLAPSED — expand it before touching the form.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded; // populate has run — the form won't clobber what we type next
 }

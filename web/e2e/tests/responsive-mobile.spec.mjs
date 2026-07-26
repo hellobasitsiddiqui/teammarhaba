@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN, TARGET, API_BASE_URL } from "../fixtures.mjs";
 import { authHeadersFor, createEvent, apiRsvp, resetAttendanceFor } from "../events-api.mjs";
+import { expandProfileSection } from "../helpers/auth-state.mjs";
 
 // Responsive mobile-web polish (TM-229) — proves the app is usable at a phone viewport. This spec
 // runs ONLY under the `mobile-chromium` Playwright project (Pixel 5 ≈ 393px wide; see
@@ -317,6 +318,8 @@ test.describe("@responsive edit-profile at a phone viewport", () => {
       (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
     );
     await page.evaluate(() => (window.location.hash = "#/profile"));
+    // TM-879: the Edit-profile section defaults COLLAPSED — expand it to measure the form + its card.
+    await expandProfileSection(page, "edit");
     await expect(page.locator("#profile-form")).toBeVisible();
     await meLoaded;
 
@@ -335,6 +338,8 @@ test.describe("@responsive edit-profile at a phone viewport", () => {
       (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
     );
     await page.evaluate(() => (window.location.hash = "#/profile"));
+    // TM-879: the Edit-profile section defaults COLLAPSED — expand it to measure the form + its card.
+    await expandProfileSection(page, "edit");
     await expect(page.locator("#profile-form")).toBeVisible();
     await meLoaded;
 

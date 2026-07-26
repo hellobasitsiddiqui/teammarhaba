@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import { ADMIN, TARGET } from "../fixtures.mjs";
 
 // Paper appearance guard (TM-216 origin; rewritten for the single Paper theme in TM-529). The
@@ -96,6 +96,8 @@ test.describe("@theme authenticated pages render under Paper", () => {
       (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
     );
     await page.evaluate(() => (window.location.hash = "#/profile"));
+    // TM-879: Save changes is inside the default-COLLAPSED Edit-profile section — expand it.
+    await expandProfileSection(page, "edit");
     await expect(page.locator("#profile-form")).toBeVisible();
     await meLoaded;
     await expectControlUsable(page, page.getByRole("button", { name: "Save changes" }));
@@ -136,7 +138,9 @@ test.describe("@theme the accent swatch + wavy/sketchy toggle persist per user",
     // Open profile. The appearance controls build synchronously from the applied <html> state (set by
     // appearance-sync from GET /me on auth-resolve, during signInAsAdmin) — no GET re-fires on this nav.
     await page.evaluate(() => (window.location.hash = "#/profile"));
-    await expect(page.locator("#profile-form")).toBeVisible();
+    // TM-879: the accent swatch + wavy/sketchy toggle live in the default-COLLAPSED Appearance section.
+    await expandProfileSection(page, "appearance");
+    await expect(page.locator("#appearance-settings")).toBeVisible();
 
     const appearance = page.locator("#appearance-settings");
     await expectControlUsable(page, appearance);
@@ -172,6 +176,8 @@ test.describe("@theme the accent swatch + wavy/sketchy toggle persist per user",
 
     // Restore the defaults so the shared emulator account doesn't leak state into other specs/retries.
     await page.evaluate(() => (window.location.hash = "#/profile"));
+    // TM-879: a fresh nav re-mounts collapsed — re-open the Appearance section for the restore step.
+    await expandProfileSection(page, "appearance");
     await expect(appearance).toBeVisible();
     await expect(sketchy).not.toBeChecked(); // reflects the persisted "off" applied above
     patched = page.waitForResponse((r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH");

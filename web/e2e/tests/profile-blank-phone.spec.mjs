@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import pg from "pg";
 import { ADMIN, API_BASE_URL, dbConfig, lettersOnlyStamp, uniqueGateGbNumber } from "../fixtures.mjs";
 import { completeInterestsStep, verifyGatePhone } from "../helpers/onboarding.mjs";
@@ -46,6 +46,8 @@ test("@profile saving with a blank phone input PRESERVES the stored phone (TM-88
     (r) => r.url().includes("/api/v1/me") && r.request().method() === "GET",
   );
   await page.click("#tab-profile");
+  // TM-879: the edit form lives in the default-COLLAPSED Edit-profile section — open it first.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 

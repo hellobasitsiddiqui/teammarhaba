@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import admin from "firebase-admin";
 import pg from "pg";
-import { expectSignedIn } from "../helpers/auth-state.mjs";
+import { expectSignedIn, expandProfileSection } from "../helpers/auth-state.mjs";
 import { API_BASE_URL, AUTH_EMULATOR_HOST, PROJECT_ID, dbConfig, lettersOnlyStamp } from "../fixtures.mjs";
 
 // TM-907 — the name lock, end to end through the REAL SPA + backend. A user who has real-world event
@@ -126,6 +126,8 @@ async function openProfileForm(page) {
   );
   await expect(page.locator("#tab-profile")).toBeVisible();
   await page.click("#tab-profile");
+  // TM-879: the Edit-profile section defaults COLLAPSED — expand it before touching the name fields.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
   await meLoaded;
 }
@@ -177,6 +179,8 @@ test("@profile a name-locked user sees read-only name fields with an explanation
   await page.reload();
   await expectSignedIn(page);
   await meAfterLock;
+  // TM-879: a full reload re-mounts with the default collapse state — re-expand the Edit section.
+  await expandProfileSection(page, "edit");
   await expect(page.locator("#profile-form")).toBeVisible();
 
   // Pass-after: the SET name fields are read-only (real readOnly property + aria-readonly for a11y),
