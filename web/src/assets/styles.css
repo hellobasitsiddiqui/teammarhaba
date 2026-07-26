@@ -220,7 +220,13 @@ body {
     min-height: 100vh;
     min-height: 100dvh;
     display: grid;
-    place-items: center;
+    /* TM-1075: TOP-align, keep horizontal centring. `place-items: center` (both axes) vertically
+       centred the `.app` column, so short content floated mid-viewport and the column background
+       shrank to content height. `start center` pins content to the TOP while keeping the column
+       horizontally centred; the column itself then fills top→bottom via `.app { min-height: 100dvh;
+       align-self: stretch }` below (1 item still spans full height; 20 items span to the last row).
+       TM-295 (100dvh) and TM-665 (minmax cap) are unchanged. */
+    place-items: start center;
     /* TM-665: pin the single column to the viewport with minmax(0, 1fr) instead of the implicit `auto`
        track. An `auto` track grows to the max-content of ANY child wider than the screen (e.g. the
        680px admin .tm-table) and then place-items:center centres that over-wide box — shifting all
@@ -235,6 +241,16 @@ body {
 
 .app {
     text-align: center;
+    /* TM-1075: the column fills the viewport top→bottom regardless of content height, so its
+       background (--surface on wide viewports, --page-bg on phones) always spans the full height and
+       never shrinks to a short screen's content. `align-self: stretch` overrides the grid item's
+       default `start` cross-nothing so the item stretches down the row track; `min-height: 100dvh`
+       (100vh fallback first, per TM-295) guarantees it reaches the bottom even when the grid row is
+       only as tall as its content. Pairs with body's `place-items: start center` (TM-1075) which
+       top-aligns the content inside this now-full-height column. */
+    min-height: 100vh;
+    min-height: 100dvh;
+    align-self: stretch;
     /* Base padding plus the device safe-area insets (TM-295). With viewport-fit=cover the WebView
        draws under the status bar / nav bar / notch; adding env(safe-area-inset-*) keeps the centred
        content clear of them. env() is 0 on every non-notched surface (desktop, normal mobile web),
@@ -3113,6 +3129,30 @@ html {
     width: min(100%, var(--app-max));
     margin-inline: auto;
     overflow-wrap: break-word;
+}
+
+/* TM-1074: the admin surface is a WIDE column. All 6 admin views are `<section class="admin-console">`
+   direct children of `main.app`, each rendered by unhiding it (the router toggles [hidden]). The
+   console content wants `min(72rem, 96vw)` (~1152px) but the shell above clamps `.app` to the phone
+   band (--app-max ≤480px) — so the wider `.admin-console` child overflowed the centred column to the
+   RIGHT (TM-1074 screenshot). Fix: when `.app` is showing a visible admin console, re-point `--app-max`
+   to the admin width so `.app` (which reads `min(100%, var(--app-max))`) grows to fit it. `.admin-console`
+   itself keeps `width: min(72rem, 96vw)` and both stay centred (`.app { margin-inline: auto }`), so the
+   admin surface is a coherent wide column centred in the viewport with no horizontal overflow. Non-admin
+   routes never match this `:has`, so they stay on the phone clamp — Home/Events/Chat/Profile unchanged.
+   `:has()` is already relied on across this shell (e.g. `.app:has(#auth-signed-out…)`, the sticky-header
+   and users-console rules), so it is an accepted mechanism here.
+
+   DESKTOP-ONLY (min-width: 30rem): below the phone-polish breakpoint the admin surface stays FULL-WIDTH
+   like every other route — `.app` keeps the clamp band (`min(100%, 420px)` → 100% on a ≤480px phone) and
+   `.admin-console` (min(72rem, 96vw) → 96vw) sits inside it. Widening --app-max on a phone would instead
+   SHRINK `.app` to 96vw and then the phone `.app` padding (0.85rem each side) would squeeze the 96vw
+   console → a few px of right-overflow (the exact phone regression this gate avoids). So the widen only
+   applies once there is real horizontal room, above the phone band. */
+@media (min-width: 30rem) {
+    .app:has(> .admin-console:not([hidden])) {
+        --app-max: min(72rem, 96vw);
+    }
 }
 
 /* TM-1041: Revolut-style neutral canvas. On viewports wider than the column the page background reads
