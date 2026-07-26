@@ -213,14 +213,32 @@ public class UserService {
      * Provision the caller (as {@link #provision}) and stamp {@code last_active_at = now()} (TM-164).
      * This backs {@code GET /api/v1/me}: every authenticated read advances our own "last active"
      * marker — the one piece of account state we own (Firebase reports last <em>login</em>, not last
-     * activity against our API). A cheap single-column dirty update flushed on commit; the Firebase-
-     * owned state block is read separately and never persisted.
+     * activity against our API). The Firebase-owned state block is read separately and never persisted.
+     *
+     * <p><strong>The touch is a NON-versioned UPDATE, not a dirty-check (TM-1031).</strong> It used to
+     * be {@code user.markActive(now)} + Hibernate dirty-check flush on commit — which bumps the
+     * {@code @Version} column. Because EVERY authenticated read runs this (including the signed-in
+     * page's own background {@code GET /me} polling), that version bump raced a concurrent
+     * {@code PATCH /me}: both wrote a new {@code @Version} on the same row, the loser's now-stale
+     * version threw {@code ObjectOptimisticLockingFailureException}, which the
+     * {@code GlobalExceptionHandler} maps to a spurious {@code 409} on a perfectly valid profile save
+     * — the {@code profile-regate} e2e flake, and a real product bug (a liveness stamp must never
+     * invalidate a concurrent, independent write). So the stamp is now
+     * {@link UserRepository#touchLastActiveAt}, a targeted single-column native UPDATE that leaves
+     * {@code version} untouched — nothing for a concurrent PATCH to lose against.
      */
     @Transactional
     public User provisionAndTouch(VerifiedUser caller) {
         User user = provision(caller);
-        user.markActive(Instant.now()); // dirty-checking flushes on commit
-        return user;
+        // Authoritative write: a non-versioned single-column UPDATE that does NOT bump @Version (see
+        // the method's javadoc). flushAutomatically/clearAutomatically evict the persistence context,
+        // so the `user` reference above is now detached and can't be dirty-flushed with a version bump
+        // on commit — that dirty-flush is exactly the 409 race this replaces.
+        users.touchLastActiveAt(user.getId(), Instant.now());
+        // Re-read a fresh, clean managed entity: it carries the just-written last_active_at and the
+        // row's CURRENT version, so this request's /me response echoes the new stamp and there is no
+        // stale dirty state to flush at commit. The row is guaranteed to exist — we just updated it.
+        return users.findById(user.getId()).orElseThrow();
     }
 
     /**
