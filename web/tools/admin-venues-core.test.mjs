@@ -60,6 +60,7 @@ const validDraft = (over = {}) => ({
   accessibility: "",
   parking: "",
   indoorOutdoor: "",
+  timezone: "",
   ...over,
 });
 
@@ -97,6 +98,17 @@ test("validateVenueDraft rejects an unknown indoor/outdoor value", () => {
   assert.deepEqual(validateVenueDraft(validDraft({ indoorOutdoor: "MIXED" })).errors, {});
 });
 
+test("validateVenueDraft accepts a valid IANA timezone, rejects a bad one, allows blank (TM-1067)", () => {
+  // Blank is allowed (optional — no default to inherit).
+  assert.deepEqual(validateVenueDraft(validDraft({ timezone: "" })).errors, {});
+  // A real IANA zone passes (mirrors the server @AssertTrue).
+  assert.deepEqual(validateVenueDraft(validDraft({ timezone: "Europe/London" })).errors, {});
+  // A bogus zone is a field-scoped error, blocking save before the doomed request is sent.
+  const bad = validateVenueDraft(validDraft({ timezone: "Mars/Phobos" }));
+  assert.ok(bad.errors.timezone, "an invalid IANA id must be flagged");
+  assert.equal(bad.canSave, false);
+});
+
 // --- payload building -------------------------------------------------------------------------
 
 test("buildVenuePayload includes present fields and omits blank optionals", () => {
@@ -131,6 +143,7 @@ test("toVenueFormModel ∘ buildVenuePayload round-trips a VenueResponse", () =>
     accessibility: "Step-free",
     parking: null,
     indoorOutdoor: "MIXED",
+    timezone: "Europe/London",
     photoPath: "venue-images/7",
     active: true,
   };
@@ -139,12 +152,14 @@ test("toVenueFormModel ∘ buildVenuePayload round-trips a VenueResponse", () =>
   assert.equal(model.mapUrl, ""); // null → ""
   assert.equal(model.capacity, "60");
   assert.equal(model.latitude, "51.5");
+  assert.equal(model.timezone, "Europe/London"); // TM-1067: surfaced for the edit prefill
   const body = buildVenuePayload(model);
   assert.equal(body.name, venue.name);
   assert.equal(body.capacity, 60);
   assert.equal(body.latitude, 51.5);
   assert.equal(body.longitude, -0.12);
   assert.equal(body.indoorOutdoor, "MIXED");
+  assert.equal(body.timezone, "Europe/London"); // round-trips onto the request body
 });
 
 // --- clearedOptionalVenueFields: the silent-no-op guard on edit (TM-734) ----------------------

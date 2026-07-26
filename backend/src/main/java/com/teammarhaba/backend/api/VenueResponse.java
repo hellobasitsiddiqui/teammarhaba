@@ -27,6 +27,7 @@ import java.time.Instant;
  * @param parking       parking notes ({@code null} = none)
  * @param indoorOutdoor {@code INDOOR | OUTDOOR | MIXED} ({@code null} = unspecified)
  * @param photoPath     storage path of the venue photo ({@code null} = no photo)
+ * @param timezone      IANA timezone id ({@code null} = none); the event-create form (TM-1066) default
  * @param active        whether the venue is offered in the event-create picker (deactivate sets false)
  * @param createdBy     {@code users.id} of the creating admin
  * @param createdAt     DB-authoritative creation instant
@@ -46,6 +47,7 @@ public record VenueResponse(
         String parking,
         IndoorOutdoor indoorOutdoor,
         String photoPath,
+        String timezone,
         boolean active,
         Long createdBy,
         Instant createdAt,
@@ -67,6 +69,7 @@ public record VenueResponse(
                 venue.getParking(),
                 venue.getIndoorOutdoor(),
                 venue.getPhotoPath(),
+                venue.getTimezone(),
                 venue.isActive(),
                 venue.getCreatedBy(),
                 venue.getCreatedAt(),

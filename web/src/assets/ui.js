@@ -303,3 +303,50 @@ export function relativeTime(value) {
   }
   return { text: "just now", title };
 }
+
+// --- Timezone <select> helpers (TM-1067) ------------------------------------------------------------
+//
+// Lifted here from admin-events.js so BOTH admin consoles (events + venues) populate a timezone picker
+// through ONE copy — the events form inherits its default from a venue's timezone, so the two must stay
+// identical. Self-contained by design: it uses only Intl + ui.js's own el()/clear(), so it doesn't drag
+// ui.js onto the event-form.js/Firebase import chain.
+
+// Fallback timezone shortlist if Intl.supportedValuesOf isn't available (older engines). The real list
+// is the full IANA set; this just keeps the picker usable everywhere.
+const FALLBACK_TIME_ZONES = [
+  "UTC", "Europe/London", "Europe/Paris", "Europe/Istanbul", "America/New_York", "America/Los_Angeles",
+  "America/Sao_Paulo", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
+/** The browser/runtime's best-guess IANA zone (for a new record's default), or "" if unknowable. */
+export function guessTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Make sure `zone` is a selectable option in a timezone <select> (defensive for a non-listed id). */
+export function ensureZoneOption(select, zone) {
+  if (!zone) return;
+  if (![...select.options].some((o) => o.value === zone)) {
+    select.append(el("option", { value: zone, text: zone }));
+  }
+}
+
+/** Populate a timezone <select> with the full IANA set (or the fallback), preselecting `selected`. */
+export function fillTimeZoneOptions(select, selected) {
+  let zones;
+  try {
+    zones = Intl.supportedValuesOf("timeZone");
+  } catch {
+    zones = null;
+  }
+  if (!Array.isArray(zones) || !zones.length) zones = FALLBACK_TIME_ZONES.slice();
+  const chosen = (selected || guessTimeZone() || "UTC").trim();
+  if (chosen && !zones.includes(chosen)) zones = [chosen, ...zones];
+  clear(select).append(...zones.map((z) => el("option", { value: z, text: z, selected: z === chosen })));
+  select.value = chosen;
+}

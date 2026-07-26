@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.ZoneId;
 
 /**
  * Body for {@code POST /api/v1/admin/venues} (TM-519). Field caps mirror the {@code venues} columns
@@ -34,6 +35,8 @@ import jakarta.validation.constraints.Size;
  * @param parking       optional parking notes (≤ 1000)
  * @param indoorOutdoor optional {@code INDOOR | OUTDOOR | MIXED}; omitted = unspecified
  * @param photoPath     optional storage path of the venue photo ({@code venue-images/…})
+ * @param timezone      optional IANA timezone id (≤ 64), e.g. {@code Europe/London}; the event-create
+ *                      form (TM-1066) inherits it as a default. Must be a real IANA zone when present.
  */
 public record CreateVenueRequest(
         @NotBlank @Size(max = 160) String name,
@@ -51,13 +54,21 @@ public record CreateVenueRequest(
                 @Pattern(
                         regexp = "venue-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like venue-images/{venueId}")
-                String photoPath) {
+                String photoPath,
+        @Size(max = 64) String timezone) {
 
     /** A geo pin needs both edges — half a coordinate can't place a point on a map. */
     @JsonIgnore
     @AssertTrue(message = "latitude and longitude must be provided together")
     public boolean isCoordinatePairComplete() {
         return (latitude == null) == (longitude == null);
+    }
+
+    /** The timezone, when given, must be a real IANA zone id (mirrors {@code CreateEventRequest}). */
+    @JsonIgnore
+    @AssertTrue(message = "timezone must be a valid IANA timezone id (e.g. Europe/London)")
+    public boolean isTimezoneValid() {
+        return timezone == null || timezone.isBlank() || ZoneId.getAvailableZoneIds().contains(timezone);
     }
 
     /** Map onto the domain-side command object ({@code event} package stays free of api DTOs). */
@@ -74,6 +85,7 @@ public record CreateVenueRequest(
                 accessibility,
                 parking,
                 indoorOutdoor,
-                photoPath);
+                photoPath,
+                timezone);
     }
 }

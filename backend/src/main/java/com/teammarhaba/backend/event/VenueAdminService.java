@@ -95,6 +95,7 @@ public class VenueAdminService {
         venue.setParking(draft.parking());
         venue.setIndoorOutdoor(draft.indoorOutdoor());
         venue.setPhotoPath(draft.photoPath());
+        venue.setTimezone(draft.timezone());
 
         Venue saved = venues.saveAndFlush(venue);
         // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the 201
@@ -135,6 +136,7 @@ public class VenueAdminService {
         applyIfChanged(
                 patch.indoorOutdoor(), venue.getIndoorOutdoor(), venue::setIndoorOutdoor, "indoorOutdoor", changed);
         applyIfChanged(patch.photoPath(), venue.getPhotoPath(), venue::setPhotoPath, "photoPath", changed);
+        applyIfChanged(patch.timezone(), venue.getTimezone(), venue::setTimezone, "timezone", changed);
 
         if (changed.isEmpty()) {
             return venue; // nothing actually changed: no touch, no audit

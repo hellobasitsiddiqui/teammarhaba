@@ -20,7 +20,8 @@ public record VenuePatch(
         String accessibility,
         String parking,
         IndoorOutdoor indoorOutdoor,
-        String photoPath) {
+        String photoPath,
+        String timezone) {
 
     /** {@code true} if the patch carries no fields at all (a guaranteed no-op). */
     public boolean isEmpty() {
@@ -35,6 +36,7 @@ public record VenuePatch(
                 && accessibility == null
                 && parking == null
                 && indoorOutdoor == null
-                && photoPath == null;
+                && photoPath == null
+                && timezone == null;
     }
 }

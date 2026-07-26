@@ -1016,6 +1016,11 @@
             "minLength" : 0,
             "pattern" : "venue-images/[A-Za-z0-9._-]+",
             "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
           }
         },
         "required" : [ "addressLine", "name" ],
@@ -2702,6 +2707,11 @@
             "minLength" : 0,
             "pattern" : "venue-images/[A-Za-z0-9._-]+",
             "type" : "string"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -2838,6 +2848,9 @@
             "type" : "string"
           },
           "photoPath" : {
+            "type" : "string"
+          },
+          "timezone" : {
             "type" : "string"
           },
           "updatedAt" : {

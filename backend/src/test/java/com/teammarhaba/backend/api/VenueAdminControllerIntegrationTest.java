@@ -332,6 +332,95 @@ class VenueAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.errors[?(@.field == 'capacity')]").exists());
     }
 
+    // --- Timezone (TM-1067) ---
+    // A venue carries an optional IANA timezone so the event-create form (TM-1066) can inherit it as a
+    // default. The column is nullable (V49), validated to a real IANA zone when present (the same
+    // @AssertTrue idiom as events.timezone), and surfaced on VenueResponse. Fail-before/pass-after: on
+    // the pre-change tree the `timezone` field does not exist on the DTOs/entity/column, so a body
+    // carrying it round-trips to no persisted value and VenueResponse has no `timezone` — every
+    // assertion below fails; after the change they pass.
+
+    @Test
+    void createAndEditAcceptAValidIanaTimezoneAndExposeItOnResponse() throws Exception {
+        // Create with a valid zone → 201, VenueResponse exposes it, and it really lands on the row.
+        String body = mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-tz"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace(
+                                "\"indoorOutdoor\": \"INDOOR\"",
+                                "\"indoorOutdoor\": \"INDOOR\", \"timezone\": \"Europe/London\"")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.timezone").value("Europe/London"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(body).<Number>read("$.id").longValue();
+        assertThat(venues.findById(id).orElseThrow().getTimezone()).isEqualTo("Europe/London");
+
+        // Edit to a different valid zone → 200, persisted, echoed on the response.
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-tz"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Asia/Karachi\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.timezone").value("Asia/Karachi"));
+        assertThat(venues.findById(id).orElseThrow().getTimezone()).isEqualTo("Asia/Karachi");
+        assertThat(auditActionsFor(id)).contains(AuditAction.VENUE_UPDATED);
+    }
+
+    @Test
+    void createAllowsBlankOrAbsentTimezone() throws Exception {
+        // The timezone is optional — a venue with no zone simply offers no default to inherit. The
+        // canonical VALID_BODY carries no `timezone` at all, so a plain create must still succeed and
+        // its VenueResponse.timezone must be null (present in the projection, just empty).
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-tz-blank"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.timezone").doesNotExist());
+
+        // An explicitly blank string is likewise allowed (isTimezoneValid() short-circuits on blank).
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-tz-blank"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace(
+                                "\"indoorOutdoor\": \"INDOOR\"", "\"indoorOutdoor\": \"INDOOR\", \"timezone\": \"\"")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void createAndEditRejectAnInvalidTimezone() throws Exception {
+        // A bad zone id would break the default the event form inherits — it must be a field-scoped
+        // 400 at the validation boundary (CreateVenueRequest/UpdateVenueRequest @AssertTrue), never
+        // persisted. Assert on both the create and the patch path.
+        // The @AssertTrue accessor surfaces as the RFC-7807 field `timezoneValid` (the derived property
+        // name of the boolean method) — the same shape as CreateEventRequest.isTimezoneValid and the
+        // coordinate-pair rule; the message names the timezone explicitly for the client.
+        mockMvc.perform(post("/api/v1/admin/venues")
+                        .with(admin("venues-admin-tz-bad"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY.replace(
+                                "\"indoorOutdoor\": \"INDOOR\"",
+                                "\"indoorOutdoor\": \"INDOOR\", \"timezone\": \"Mars/Phobos\"")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'timezoneValid')]").exists());
+
+        Venue seeded = seedVenue("TZ patch reject", true);
+        long id = seeded.getId();
+        mockMvc.perform(patch("/api/v1/admin/venues/{id}", id)
+                        .with(admin("venues-admin-tz-bad"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timezone\":\"Not/AZone\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[?(@.field == 'timezoneValid')]").exists());
+
+        // The doomed patch never landed — the row still has no timezone.
+        assertThat(venues.findById(id).orElseThrow().getTimezone()).isNull();
+    }
+
     // --- Edit (PATCH) ---
 
     @Test

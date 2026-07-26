@@ -8,8 +8,12 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.Version;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.time.ZoneId;
 import org.hibernate.annotations.SQLRestriction;
 
 /**
@@ -97,6 +101,15 @@ public class Venue {
     /** Optional Firebase Storage path of the venue photo ({@code venue-images/…}); {@code null} = none. */
     @Column(name = "photo_path")
     private String photoPath;
+
+    /**
+     * Optional IANA timezone id (e.g. {@code "Europe/London"}); {@code null} = none. The event-create
+     * form (TM-1066) inherits this as a default so an admin doesn't retype the zone for events at this
+     * place. Validated to a real IANA zone when present (same idiom as {@code events.timezone}).
+     */
+    @Size(max = 64)
+    @Column(name = "timezone")
+    private String timezone;
 
     /** Whether the venue is offered in the event-create picker; deactivate flips it to {@code false}. */
     @Column(name = "active", nullable = false)
@@ -236,6 +249,25 @@ public class Venue {
 
     public void setPhotoPath(String photoPath) {
         this.photoPath = photoPath;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public void setTimezone(String timezone) {
+        this.timezone = timezone;
+    }
+
+    /**
+     * The timezone, when set, must be a real IANA zone id — a bad id would break the default the
+     * event-create form (TM-1066) inherits. Blank/{@code null} = no timezone (allowed). Mirrors the
+     * {@code @AssertTrue} IANA check on {@code CreateEventRequest.timezone}.
+     */
+    @Transient
+    @AssertTrue(message = "timezone must be a valid IANA timezone id (e.g. Europe/London)")
+    public boolean isTimezoneValid() {
+        return timezone == null || timezone.isBlank() || ZoneId.getAvailableZoneIds().contains(timezone);
     }
 
     /** {@code true} while the venue is offered in the event-create picker (not deactivated). */

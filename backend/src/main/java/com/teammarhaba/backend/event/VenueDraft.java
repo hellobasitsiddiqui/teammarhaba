@@ -19,4 +19,5 @@ public record VenueDraft(
         String accessibility,
         String parking,
         IndoorOutdoor indoorOutdoor,
-        String photoPath) {}
+        String photoPath,
+        String timezone) {}

@@ -9,6 +9,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.ZoneId;
 
 /**
  * Body for {@code PATCH /api/v1/admin/venues/{id}} (TM-519). Partial update in the house PATCH
@@ -38,12 +39,20 @@ public record UpdateVenueRequest(
                 @Pattern(
                         regexp = "venue-images/[A-Za-z0-9._-]+",
                         message = "must be a storage object path like venue-images/{venueId}")
-                String photoPath) {
+                String photoPath,
+        @Size(max = 64) String timezone) {
 
     @JsonIgnore
     @AssertTrue(message = "name must not be blank")
     public boolean isNameUsable() {
         return name == null || !name.isBlank();
+    }
+
+    /** The timezone, when given, must be a real IANA zone id (mirrors {@code CreateVenueRequest}). */
+    @JsonIgnore
+    @AssertTrue(message = "timezone must be a valid IANA timezone id (e.g. Europe/London)")
+    public boolean isTimezoneValid() {
+        return timezone == null || timezone.isBlank() || ZoneId.getAvailableZoneIds().contains(timezone);
     }
 
     @JsonIgnore
@@ -66,6 +75,7 @@ public record UpdateVenueRequest(
                 accessibility,
                 parking,
                 indoorOutdoor,
-                photoPath);
+                photoPath,
+                timezone);
     }
 }
