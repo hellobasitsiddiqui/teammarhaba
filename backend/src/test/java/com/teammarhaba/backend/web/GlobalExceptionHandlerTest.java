@@ -80,6 +80,13 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.device.DeviceTokenService deviceTokenService;
 
+    // DeviceController's sign-out-everywhere (TM-924) also needs a SessionRevocationService — a
+    // @WebMvcTest slice loads the controller but no @Service beans, so supply it or the web slice
+    // can't construct DeviceController and the whole context fails to load (its constructor now takes
+    // both DeviceTokenService and SessionRevocationService).
+    @MockitoBean
+    private com.teammarhaba.backend.auth.SessionRevocationService sessionRevocationService;
+
     // PushAdminController (TM-363) needs a BroadcastService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.notify.BroadcastService broadcastService;
