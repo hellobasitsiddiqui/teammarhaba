@@ -139,19 +139,21 @@ test("@profile-shell the identity header is the FIRST visible content — corner
   expect(geo.bellGearOverlap).toBe(false);
 });
 
-test("@profile-shell the brand block is restored when leaving the profile (scoping, not deletion)", async ({ page }) => {
+test("@profile-shell the brand block is scoped off (hidden), not deleted from the DOM, on self-headed tabs", async ({ page }) => {
   await signIn(page);
   await page.click("#tab-profile");
   await expect(page.locator("#profile-view")).toBeVisible();
   await expect(page.locator("main.app > h1")).toBeHidden();
 
-  // Leaving Profile restores the brand block on a still-branded tab. Home (TM-908) and Events (TM-909)
-  // are now content-first / self-headed too, so Chat is the only remaining tab that keeps the brand
-  // block — verify the restoration there, proving the block was SCOPED off Profile, not deleted.
+  // Every main tab is now content-first / self-headed — Home (TM-908), Events (TM-909), Chat (TM-1030),
+  // Profile — so no tab shows the brand block. Prove it's SCOPED (hidden), not DELETED: after leaving
+  // Profile to Chat, the wordmark + tagline nodes still EXIST in the DOM (count 1), just hidden.
   await page.click("#tab-chat");
   await expect(page.locator("#chat-view")).toBeVisible();
-  await expect(page.locator("main.app > h1")).toBeVisible();
-  await expect(page.locator("main.app > .tagline")).toBeVisible();
+  await expect(page.locator("main.app > h1")).toHaveCount(1);
+  await expect(page.locator("main.app > h1")).toBeHidden();
+  await expect(page.locator("main.app > .tagline")).toHaveCount(1);
+  await expect(page.locator("main.app > .tagline")).toBeHidden();
 });
 
 test("@profile-shell the phone re-gate (#/onboarding) shows its own header only — no brand leak, tab bar deliberately hidden (TM-885 finding)", async ({ page }) => {
