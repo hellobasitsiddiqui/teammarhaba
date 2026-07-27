@@ -158,6 +158,10 @@ for (const width of [1440, 1920]) {
       // For the events console, wait until rows have rendered so the wide `.tm-table` is actually laid
       // out (a populated console is the real overflow risk — the ~680px table must also fit).
       if (route === "#/admin/events") {
+        // TM-1096: the list defaults to the "Happening now" lifecycle chip, and the seeded events start
+        // +7 days ("Visible"), so the default view is EMPTY and the wide `.tm-table` never renders. Click
+        // "All" to show every bucket, so the populated console (the real overflow risk) is actually laid out.
+        await page.locator("#admin-events-lifecycle-all").click().catch(() => {});
         await page.locator(".admin-console:not([hidden]) .tm-table").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
       }
 

@@ -151,6 +151,9 @@ test("@events @event-image an uploaded event image renders on the detail page (T
   // Saving navigated back to the list (TM-426).
   await expect(page).toHaveURL(/#\/admin\/events$/);
   await expect(page.locator("#admin-events-view")).toBeVisible();
+  // TM-1096: the list defaults to the "Happening now" lifecycle chip; this event starts in the future
+  // ("Visible"), so it's filtered out of the default view. Click "All" so the created row shows in the shot.
+  await page.locator("#admin-events-lifecycle-all").click();
   await shot("created");
 
   // ── STEP 5: open the event's PUBLIC detail page — the hero must render the uploaded image. This is
