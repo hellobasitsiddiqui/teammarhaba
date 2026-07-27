@@ -169,6 +169,10 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   // ── STEP 5: saving navigated back to the list (TM-426); it lands there with its derived status. ───
   await expect(page).toHaveURL(/#\/admin\/events$/);
   await expect(page.locator("#admin-events-view")).toBeVisible();
+  // TM-1096: the list defaults to the "Happening now" lifecycle chip, so a future-start ("Visible")
+  // event is filtered OUT of the default view. Click "All" (the All/Clear affordance) to show every
+  // bucket so the created row is present for the assertions in steps 5-8.
+  await page.locator("#admin-events-lifecycle-all").click();
   const row = page.locator(`tr[data-event-id="${created.id}"]`);
   await expect(row).toBeVisible();
   await expect(row).toContainText(HEADING);
