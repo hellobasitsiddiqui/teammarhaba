@@ -144,20 +144,45 @@ test("no routed VIEW re-introduces a page-width cap wider than the 480px column 
 // ── TM-1072: the notification bell is fixed chrome; its companion screen headers must be STICKY so on
 //    scroll the bell stays anchored to its header instead of floating over list rows (the Chat-list bug). ──
 
-test("bell-anchoring headers are sticky + the Chat header clears the bell (TM-1072)", () => {
-  // The sticky rule that keeps the fixed bell with its header while content scrolls beneath.
-  const sticky = NO_COMMENTS.match(/\.tm-chat-head\s*,[\s\S]*?\{[\s\S]*?\}/);
-  assert.ok(
-    sticky && /position:\s*sticky/.test(sticky[0]),
-    ".tm-chat-head (+ #auth-signed-in .tm-home-head / #profile-view .tm-pf-topbar) must be position: sticky " +
-      "so the fixed bell stays anchored to its header on scroll, not floating over list rows (TM-1072)",
-  );
-  // The Chat header reserves the same 44px bell-clearance Home/Profile already had.
-  assert.match(
-    NO_COMMENTS,
-    /\.tm-chat-head\s*\{\s*padding-right:\s*calc\(\s*44px/,
-    "the Chat header (.tm-chat-head) must reserve the 44px bell clearance (TM-1072)",
-  );
+test("bell-anchoring headers are sticky + reserve the 44px clearance — Chat, Home, Profile, Events, Admin (TM-1072/TM-1090)", () => {
+  // TM-1090 widened both allowlists to Events + Admin, so assert MEMBERSHIP of the selector list that
+  // precedes each declaration rather than an exact ordering (which the list growth would break).
+  const ANCHORS = [
+    ".tm-chat-head",
+    "#auth-signed-in .tm-home-head",
+    "#profile-view .tm-pf-topbar",
+    "#events-view .tm-event-head",
+    ".admin-console .tm-admin-head",
+  ];
+  // The 44px bell-clearance rule: capture the selector list immediately before `padding-right: calc(44px …)`.
+  const clearance = NO_COMMENTS.match(/([^{}]*)\{\s*padding-right:\s*calc\(\s*44px[^}]*\}/);
+  assert.ok(clearance, "a `padding-right: calc(44px …)` bell-clearance rule must exist");
+  for (const sel of ANCHORS) {
+    assert.ok(clearance[1].includes(sel), `bell-clearance selector list must include ${sel} (TM-1072/TM-1090)`);
+  }
+  // The sticky rule that keeps the fixed bell anchored to its header while content scrolls beneath.
+  const sticky = NO_COMMENTS.match(/([^{}]*)\{\s*position:\s*sticky;[^}]*\}/);
+  assert.ok(sticky, "a `position: sticky` bell-anchoring header rule must exist");
+  for (const sel of ANCHORS) {
+    assert.ok(sticky[1].includes(sel), `sticky bell-anchoring selector list must include ${sel} (TM-1072/TM-1090)`);
+  }
+});
+
+// ── TM-1090: the bell is pinned to the TRUE VIEWPORT top-right corner, not the centred clamp band —
+//    so it is identical top-right on every route at every width. The band-centring machinery must be GONE. ──
+
+test("the corner bell is viewport-anchored, not clamp-band-centred (TM-1090)", () => {
+  // Isolate the `.app-topbar` rule body (the standalone bell chrome, not `.app-topbar > .tm-notif-bell`).
+  const rule = NO_COMMENTS.match(/\.app-topbar\s*\{([^}]*)\}/);
+  assert.ok(rule, ".app-topbar rule must exist");
+  const body = rule[1];
+  assert.match(body, /position:\s*fixed/, ".app-topbar must be position: fixed");
+  assert.match(body, /top:\s*0/, ".app-topbar must pin top: 0");
+  assert.match(body, /right:\s*0/, ".app-topbar must pin right: 0 (the true viewport corner)");
+  // The band-centring that made the bell drift must NOT come back.
+  assert.ok(!/var\(--app-max\)/.test(body), ".app-topbar must NOT read --app-max (that anchored it to the drifting band) (TM-1090)");
+  assert.ok(!/margin-inline/.test(body), ".app-topbar must NOT set margin-inline (no band centring) (TM-1090)");
+  assert.ok(!/\bwidth\s*:/.test(body), ".app-topbar must NOT set a width — it shrink-wraps the bell at the corner (TM-1090)");
 });
 
 // ── TM-1073: soft shade page background, white content cards. The page ground (--page-bg on the phone

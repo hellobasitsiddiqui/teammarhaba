@@ -4204,25 +4204,23 @@ html {
     cursor: pointer;
 }
 
-/* --- Standalone corner bell (TM-1043) ----------------------------------------------------------
- * The top .app-nav is gone; the bell is route-independent fixed chrome pinned top-right of the SAME
- * clamp band as the .app column / #app-tabbar (width: min(100%, var(--app-max)), centred — NOT the
- * raw viewport corner on desktop), with safe-area insets. The band itself is click-transparent;
- * only the bell takes pointer events. Visibility stays on the button's `hidden` attribute, owned by
- * updateNotificationBell() (signed-in + un-gated), so signed-out/gated screens show nothing. */
+/* --- Standalone corner bell (TM-1043; re-anchored to the viewport corner in TM-1090) -------------
+ * The bell is route-independent fixed chrome pinned to the TRUE VIEWPORT top-right corner at EVERY
+ * width — its offsets are two constants + safe-area env() ONLY: no --app-max, no media query, no
+ * centring. The old clamp-band anchoring (width: min(100%, var(--app-max)); margin-inline: auto) made
+ * the bell DRIFT: on Admin the widened --app-max stranded it mid-column, and on any viewport wider
+ * than the band it sat inset from the real corner. This box is a SIBLING of <main class="app"> (below),
+ * so no column/route style can reach it. Do NOT reintroduce --app-max / width / margin-inline here.
+ * The box is click-transparent; only the bell takes pointer events. Visibility stays on the button's
+ * `hidden` attribute, owned by updateNotificationBell(), so signed-out/gated screens show nothing. */
 .app-topbar {
     position: fixed;
     top: 0;
-    left: 0;
-    right: 0;
+    right: 0; /* pinned to the true viewport top-right; the box shrink-wraps the bell (no width/left/centring) */
     z-index: 900; /* same layer as the tab bar: under toasts (1000) + modals (1100) */
-    width: min(100%, var(--app-max));
-    margin-inline: auto;
-    display: flex;
-    justify-content: flex-end;
     /* ~1.1rem = the established corner-bell top position (TM-910). A tighter 0.5rem sat the bell ~10px
        higher, which pushed the profile identity header past the "content-first" geometry invariant
-       (profile-shell.spec.mjs: identityTop <= bellBottom + bellHeight). */
+       (profile-shell.spec.mjs: identityTop <= bellBottom + bellHeight). MUST stay 1.1rem. */
     padding-top: calc(1.1rem + env(safe-area-inset-top));
     padding-right: calc(0.85rem + env(safe-area-inset-right));
     pointer-events: none;
@@ -4235,10 +4233,15 @@ html {
 /* Headings keep clear of the overlaid bell (replaces the route-scoped
  * .app:has(.app-nav--corner-bell) reservations — now unconditional at every width).
  * TM-1072: the Chat list header (.tm-chat-head) needs the same clearance so its title doesn't run under
- * the bell. */
+ * the bell. TM-1090: Events (#events-view .tm-event-head) and every Admin console (.admin-console
+ * .tm-admin-head) were MISSING from this list, so their right-aligned header content ran under the
+ * bell. Scoped selectors deliberately EXCLUDE onboarding/terms' reuse of .tm-admin-head (bell is
+ * hidden on those gated screens). */
 #profile-view .tm-pf-topbar,
 #auth-signed-in .tm-home-head,
-.tm-chat-head {
+.tm-chat-head,
+#events-view .tm-event-head,
+.admin-console .tm-admin-head {
     padding-right: calc(44px + var(--space-2));
 }
 
@@ -4251,11 +4254,27 @@ html {
  * in its normal place, so the content-first geometry (TM-910, profile-shell.spec) is unchanged. */
 .tm-chat-head,
 #auth-signed-in .tm-home-head,
-#profile-view .tm-pf-topbar {
+#profile-view .tm-pf-topbar,
+#events-view .tm-event-head,
+.admin-console .tm-admin-head {
     position: sticky;
     top: env(safe-area-inset-top);
     z-index: 5;
     background: var(--page-bg);
+}
+
+/* TM-1090: at >=28rem the centred .app column paints --surface (not --page-bg), so a stuck header must
+ * paint --surface too or it reads as a wrong-colour bar over the column. (Today --page-bg == --surface
+ * post-TM-1073, so this is a no-op safety belt that keeps the sticky bar matching the column if the two
+ * ever diverge.) Same allowlist as the sticky rule above. */
+@media (min-width: 28rem) {
+    .tm-chat-head,
+    #auth-signed-in .tm-home-head,
+    #profile-view .tm-pf-topbar,
+    #events-view .tm-event-head,
+    .admin-console .tm-admin-head {
+        background: var(--surface);
+    }
 }
 
 /* Heading-first (TM-908/TM-910 ACs, now route-independent): with no nav row in flow, collapse the
