@@ -38,6 +38,12 @@ export const CONFIRM_DIALOG = ".tm-dialog";
 export const CONFIRM_BUTTON = ".tm-dialog .tm-btn-danger";
 export const CANCEL_BUTTON = ".tm-dialog .tm-dialog-actions .tm-btn:not(.tm-btn-danger)";
 
+/** TM-1097: tapping the "Sign out" row now opens a CHOOSER (ui.js modal) — "Sign out on this device"
+ *  vs "Sign out everywhere" — instead of going straight to a confirm dialog. These target its buttons. */
+export const SIGNOUT_CHOOSER = ".tm-signout-chooser";
+export const SIGNOUT_THIS_DEVICE = "#signout-this-device";
+export const SIGNOUT_EVERYWHERE = "#signout-everywhere";
+
 /** Wait until the router has rendered a signed-IN state (any route, any viewport, gated or not). */
 export async function expectSignedIn(page, opts = undefined) {
   await expect(page.locator(SIGNED_IN)).toBeAttached(opts);
@@ -84,7 +90,9 @@ export async function signOutViaProfile(page) {
   const row = page.locator(SIGNOUT_ROW);
   await expect(row).toBeVisible();
   await row.click();
-  await expect(page.locator(CONFIRM_DIALOG)).toBeVisible();
-  await page.locator(CONFIRM_BUTTON).click();
+  // TM-1097: the row opens a chooser; the this-device option is the deliberate confirmation (no second
+  // dialog) and reproduces the pre-TM-1097 "sign out this session" behaviour the specs rely on.
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeVisible();
+  await page.locator(SIGNOUT_THIS_DEVICE).click();
   await expectSignedOut(page);
 }

@@ -1,23 +1,22 @@
 import { test, expect } from "@playwright/test";
 import { EVENT_GOER } from "../fixtures.mjs";
-import { CONFIRM_DIALOG, CONFIRM_BUTTON, CANCEL_BUTTON } from "../helpers/auth-state.mjs";
+import { CANCEL_BUTTON, SIGNOUT_CHOOSER, SIGNOUT_THIS_DEVICE, SIGNOUT_EVERYWHERE } from "../helpers/auth-state.mjs";
 
-// TM-906 confirm-gate regression — proves sign-out is GATED behind the styled confirm dialog:
+// TM-906 + TM-1097 sign-out-gate regression — proves sign-out is GATED behind a deliberate choice and
+// never fires on an accidental tap:
 //
-//   1. clicking the Profile hub's "Sign out" row does NOT sign out by itself — the confirm dialog
-//      opens and the session stays live;
-//   2. CANCEL is a genuine no-op — dialog gone, session intact, still on the Profile hub;
-//   3. CONFIRM really signs out — Firebase signOut → onAuthChanged(null) (which is what fires the
-//      TM-720 onSignedOut reset chain, covered in depth by signout-state-leak.spec.mjs).
+//   1. clicking the Profile hub's "Sign out" row does NOT sign out by itself — it opens the TM-1097
+//      CHOOSER ("Sign out on this device" vs "Sign out everywhere") and the session stays live;
+//   2. the chooser CANCEL is a genuine no-op — chooser gone, session intact, still on the Profile hub;
+//   3. the chooser traps focus + inerts the background (aria-modal for real);
+//   4. "Sign out on this device" really signs out (Firebase signOut → onAuthChanged(null), which fires
+//      the TM-720 onSignedOut reset chain — covered in depth by signout-state-leak.spec.mjs);
+//   5. "Sign out everywhere" (TM-1097 surfaced it on the button, not just Security) opens its own
+//      destructive confirm with the everywhere copy — the entry point the Security section already has.
 //
-// FAIL-BEFORE / PASS-AFTER: on the pre-TM-906 tree the hub row called signOut() directly — no
-// dialog, session gone on the first click — so test 1 fails RED there (dialog never appears; the
-// signed-out login panel shows instead). On the TM-906 tree all three pass. The row is located by
-// its visible label inside the hub menu (not the new #profile-signout-row id) precisely so the spec
-// RESOLVES the row on both trees and the red run fails on the missing BEHAVIOUR, not a missing id.
-//
-// Signed-in/-out signals are tree-agnostic for the same reason: the login panel's visibility
-// (#auth-signed-out), which predates TM-906, rather than the new body[data-auth] attribute.
+// FAIL-BEFORE / PASS-AFTER: on the pre-TM-1097 tree the row opened a plain confirm dialog (no
+// `.tm-signout-chooser`), so test 1 fails RED there (the chooser never appears). On the TM-1097 tree
+// all pass. The row is located by its stable id (#profile-signout-row).
 
 // Suppress the first-run product tour (TM-147) so its backdrop can't overlay the controls under
 // test — the identical localStorage init-script every other auth spec uses.
@@ -45,71 +44,68 @@ async function openProfileSignedIn(page) {
   await page.evaluate(() => {
     window.location.hash = "#/profile";
   });
-  const row = page.locator(".tm-pf-menu-row", { hasText: "Sign out" });
+  const row = page.locator("#profile-signout-row");
   await expect(row).toBeVisible();
   return row;
 }
 
-test("@auth TM-906: clicking Sign out opens the confirm dialog and does NOT sign out by itself", async ({ page }) => {
+test("@auth TM-1097: clicking Sign out opens the CHOOSER and does NOT sign out by itself", async ({ page }) => {
   const row = await openProfileSignedIn(page);
   await row.click();
 
-  // THE CRUX: the styled confirm dialog (ui.js confirmDialog — never native confirm()) is up, with
-  // the agreed copy and a destructive-styled confirm button...
-  const dialog = page.locator(CONFIRM_DIALOG);
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("Sign out?");
-  await expect(dialog).toContainText("You'll need your code to sign back in.");
-  await expect(page.locator(CONFIRM_BUTTON)).toHaveText("Sign out");
+  // THE CRUX: the styled chooser (ui.js modal — never native confirm()) is up, offering BOTH paths...
+  const chooser = page.locator(SIGNOUT_CHOOSER);
+  await expect(chooser).toBeVisible();
+  await expect(page.locator(SIGNOUT_THIS_DEVICE)).toHaveText("Sign out on this device");
+  await expect(page.locator(SIGNOUT_EVERYWHERE)).toHaveText("Sign out everywhere");
 
   // ...and the click alone did NOT end the session: the signed-out login panel has not returned.
-  // (Pre-TM-906 the row signed out immediately — no dialog, panel back — so this test failed RED.)
+  // (Pre-TM-1097 the row opened a plain confirm dialog with no chooser — so this test fails RED there.)
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
-test("@auth TM-906: cancelling the confirm keeps the session intact", async ({ page }) => {
+test("@auth TM-1097: cancelling the chooser keeps the session intact", async ({ page }) => {
   const row = await openProfileSignedIn(page);
   await row.click();
-  await expect(page.locator(CONFIRM_DIALOG)).toBeVisible();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeVisible();
 
-  await page.locator(CANCEL_BUTTON).click();
-  await expect(page.locator(CONFIRM_DIALOG)).toBeHidden();
+  await page.locator("#signout-cancel").click();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeHidden();
 
-  // Session intact: still on the Profile hub with its menu (the guard would bounce a signed-out
-  // user off this protected route), and the signed-out login panel never returned.
-  await expect(page.locator(".tm-pf-menu-row", { hasText: "Sign out" })).toBeVisible();
+  // Session intact: still on the Profile hub with its menu, and the signed-out login panel never
+  // returned. Belt-and-braces: re-navigating to the protected profile still renders it (no re-login).
+  await expect(page.locator("#profile-signout-row")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
-  // Belt-and-braces: a fresh navigation to the protected profile still renders it (no re-login).
   await page.evaluate(() => {
     window.location.hash = "#/home";
   });
   await page.evaluate(() => {
     window.location.hash = "#/profile";
   });
-  await expect(page.locator(".tm-pf-menu-row", { hasText: "Sign out" })).toBeVisible();
+  await expect(page.locator("#profile-signout-row")).toBeVisible();
 });
 
-test("@auth TM-906: the confirm dialog traps focus and inerts the background (aria-modal for real)", async ({ page }) => {
+test("@auth TM-1097: the chooser traps focus and inerts the background (aria-modal for real)", async ({ page }) => {
   const row = await openProfileSignedIn(page);
   await row.click();
-  await expect(page.locator(CONFIRM_DIALOG)).toBeVisible();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeVisible();
 
-  // Initial focus lands on the (destructive) confirm button.
-  await expect(page.locator(CONFIRM_BUTTON)).toBeFocused();
+  // Focus is seated INSIDE the modal on open (modal() seats it on the close control).
+  expect(
+    await page.evaluate(() => !!(document.activeElement && document.activeElement.closest(".tm-modal"))),
+  ).toBe(true);
 
-  // THE CRUX (review finding): Tab must CYCLE within the dialog — before the trap, one Tab moved
-  // focus to <body> and the next onto page content behind the backdrop, where Enter could activate
-  // a background control while the destructive confirm was still up.
+  // THE CRUX: Tab must CYCLE within the modal — focus must never escape onto page content behind the
+  // backdrop, where Enter could activate a background control while the chooser is up.
   for (let i = 0; i < 4; i += 1) {
     await page.keyboard.press(i % 2 === 0 ? "Tab" : "Shift+Tab");
     const insideDialog = await page.evaluate(
-      () => !!(document.activeElement && document.activeElement.closest(".tm-dialog")),
+      () => !!(document.activeElement && document.activeElement.closest(".tm-modal")),
     );
-    expect(insideDialog, `focus escaped the dialog on key press ${i + 1}`).toBe(true);
+    expect(insideDialog, `focus escaped the chooser on key press ${i + 1}`).toBe(true);
   }
 
-  // The page behind the backdrop is inert + aria-hidden while the dialog is open, so background
-  // controls are unreachable by keyboard AND correctly absent for screen readers (aria-modal).
+  // The page behind the backdrop is inert + aria-hidden while the chooser is open (aria-modal).
   expect(
     await page.evaluate(() => {
       const main = document.querySelector("main.app");
@@ -117,9 +113,9 @@ test("@auth TM-906: the confirm dialog traps focus and inerts the background (ar
     }),
   ).toBe(true);
 
-  // Escape closes the dialog, restores the background, and hands focus back to the opening row.
+  // Escape closes the chooser, restores the background, and hands focus back to the opening row.
   await page.keyboard.press("Escape");
-  await expect(page.locator(CONFIRM_DIALOG)).toBeHidden();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeHidden();
   expect(
     await page.evaluate(() => {
       const main = document.querySelector("main.app");
@@ -127,19 +123,38 @@ test("@auth TM-906: the confirm dialog traps focus and inerts the background (ar
     }),
   ).toBe(true);
   await expect(page.locator("#profile-signout-row")).toBeFocused();
-  // And the cancel path stayed a genuine no-op: session intact.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 });
 
-test("@auth TM-906: confirming really signs out", async ({ page }) => {
+test("@auth TM-1097: 'Sign out on this device' really signs out", async ({ page }) => {
   const row = await openProfileSignedIn(page);
   await row.click();
-  await expect(page.locator(CONFIRM_DIALOG)).toBeVisible();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeVisible();
 
-  await page.locator(CONFIRM_BUTTON).click();
+  await page.locator(SIGNOUT_THIS_DEVICE).click();
 
   // Signed out for real: #/profile is protected, so the guard bounces to #/login and the signed-out
-  // panel renders. (Firebase signOut → onAuthChanged(null) is the same event that fires the TM-720
-  // onSignedOut reset chain — its depth is covered by signout-state-leak.spec.mjs.)
+  // panel renders. (Firebase signOut → onAuthChanged(null) fires the TM-720 onSignedOut reset chain.)
   await expect(page.locator("#auth-signed-out")).toBeVisible();
+});
+
+test("@auth TM-1097: 'Sign out everywhere' opens the destructive confirm with the everywhere copy", async ({ page }) => {
+  const row = await openProfileSignedIn(page);
+  await row.click();
+  await expect(page.locator(SIGNOUT_CHOOSER)).toBeVisible();
+
+  await page.locator(SIGNOUT_EVERYWHERE).click();
+
+  // The chooser hands off to the destructive confirm (a plain confirmDialog, NOT the modal chooser),
+  // with the agreed everywhere copy + a destructive-styled confirm button — the same gate the Security
+  // section uses. Cancelling here is a no-op (no refresh-token revoke happens), session intact.
+  const confirm = page.locator(".tm-dialog:not(.tm-modal)");
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText("Sign out everywhere?");
+  await expect(confirm).toContainText("This signs you out on every device, including this one.");
+  await expect(page.locator(".tm-dialog:not(.tm-modal) .tm-btn-danger")).toHaveText("Sign out everywhere");
+
+  await page.locator(CANCEL_BUTTON).click();
+  await expect(confirm).toBeHidden();
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
 });

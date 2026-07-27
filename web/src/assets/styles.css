@@ -3904,6 +3904,24 @@ html {
     margin-top: 0.5rem;
 }
 
+/* TM-1097 sign-out CHOOSER — the modal body offered when the hub "Sign out" row is tapped: a short
+   explainer then a vertical stack of full-width action buttons (this device / everywhere / cancel),
+   the action-sheet idiom. Buttons keep their .tm-btn / -primary / -danger tokens; we only stack them. */
+.tm-signout-chooser {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.tm-signout-chooser .tm-muted {
+    margin: 0 0 0.2rem;
+}
+
+.tm-signout-choice {
+    width: 100%;
+    justify-content: center;
+}
+
 .tm-switch-hint {
     margin: 0.4rem 0 0;
     font-size: 0.9rem;

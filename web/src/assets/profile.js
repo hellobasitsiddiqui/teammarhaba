@@ -22,6 +22,7 @@ import {
   getMembership,
   getInterestCatalogue,
   getInterestConfig,
+  signOutEverywhere,
   ApiError,
 } from "./api.js";
 import { currentUser, signOut, startPhoneVerify, confirmPhoneLink } from "./auth.js";
@@ -2163,23 +2164,85 @@ function focusOnPage(id) {
   if (typeof node.focus === "function") node.focus({ preventScroll: true });
 }
 
-/** Sign the user out — the hub menu's "Sign out" row is the ONLY sign-out entry in the app (TM-906;
- *  the old top-nav control is gone). Always confirm first via the styled ui.js confirmDialog (never
- *  native confirm()): cancel/Escape/backdrop = no-op, session intact; confirm calls auth signOut(),
- *  which fires onAuthChanged(null) → the TM-720 onSignedOut reset chain, untouched and unreordered. */
-async function doSignOut() {
-  const confirmed = await confirmDialog({
-    title: "Sign out?",
-    message: "You'll need your code to sign back in.",
-    confirmLabel: "Sign out",
-    danger: true,
-  });
-  if (!confirmed) return;
+/** Sign out of THIS device only — the pre-TM-1097 behaviour. Firebase signOut() fires
+ *  onAuthChanged(null) → the TM-720 onSignedOut reset chain, untouched and unreordered. */
+async function signOutThisDevice() {
   try {
     await signOut();
   } catch (err) {
     toast(err?.message || "Couldn't sign out.", { type: "error" });
   }
+}
+
+/** Sign out of EVERY session (TM-924): a destructive confirm, then revoke ALL of the caller's Firebase
+ *  refresh tokens server-side (every session boots on its next request), then clear THIS tab so it
+ *  doesn't linger on a now-dead session. This mirrors, byte-for-byte, the Security section's
+ *  "Sign out everywhere" block (biometric-settings.js) so both entry points behave identically — a
+ *  server error is toasted and does NOT sign this tab out (the sessions weren't revoked). */
+async function signOutEverywhereFlow() {
+  const confirmed = await confirmDialog({
+    title: "Sign out everywhere?",
+    message: "This signs you out on every device, including this one. You'll need your code to sign back in.",
+    confirmLabel: "Sign out everywhere",
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await signOutEverywhere();
+  } catch {
+    toast("Couldn't sign out everywhere. Please try again.", { type: "error" });
+    return;
+  }
+  try {
+    await signOut();
+  } catch (err) {
+    toast(err?.message || "Signed out everywhere, but couldn't clear this tab — please reload.", { type: "error" });
+  }
+}
+
+/** Sign out — the hub menu's "Sign out" row is the ONLY sign-out entry in the app (TM-906; the old
+ *  top-nav control is gone). TM-1097: tapping it opens a styled CHOOSER (ui.js modal — never native
+ *  confirm()) offering "Sign out on this device" vs "Sign out everywhere", so the everywhere option is
+ *  no longer buried in the Security section. The chooser is itself the deliberate confirmation for the
+ *  this-device path (a chosen menu action, not an accidental tap); the destructive everywhere path
+ *  keeps its own extra confirm. Cancel / Escape / backdrop / × = no-op, session intact. */
+async function doSignOut() {
+  const thisDeviceBtn = el(
+    "button",
+    { class: "tm-btn tm-btn-primary tm-signout-choice", id: "signout-this-device", type: "button" },
+    "Sign out on this device",
+  );
+  const everywhereBtn = el(
+    "button",
+    { class: "tm-btn tm-btn-danger tm-signout-choice", id: "signout-everywhere", type: "button" },
+    "Sign out everywhere",
+  );
+  const cancelBtn = el(
+    "button",
+    { class: "tm-btn tm-signout-choice", id: "signout-cancel", type: "button" },
+    "Cancel",
+  );
+  const body = el("div", { class: "tm-signout-chooser" }, [
+    el("p", {
+      class: "tm-muted",
+      text: "Sign out on just this device, or on every device you're signed in on.",
+    }),
+    thisDeviceBtn,
+    everywhereBtn,
+    cancelBtn,
+  ]);
+  const { close } = modal("Sign out", body);
+  // Each option closes the chooser first (restoring focus to the row + clearing the inert background)
+  // and THEN runs its flow, so the sign-out reset chain / confirm dialog runs on a clean modal layer.
+  thisDeviceBtn.addEventListener("click", () => {
+    close();
+    signOutThisDevice();
+  });
+  everywhereBtn.addEventListener("click", () => {
+    close();
+    signOutEverywhereFlow();
+  });
+  cancelBtn.addEventListener("click", () => close());
 }
 
 // Build the Profile screen (view mode) — the paper-profile hub (identity + strength + interests +
