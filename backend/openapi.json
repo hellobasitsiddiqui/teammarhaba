@@ -1026,6 +1026,27 @@
         "required" : [ "addressLine", "name" ],
         "type" : "object"
       },
+      "DeviceListResponse" : {
+        "properties" : {
+          "created" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "lastSeen" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "platform" : {
+            "enum" : [ "ANDROID", "IOS", "WEB" ],
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "DeviceResponse" : {
         "properties" : {
           "platform" : {
@@ -3037,7 +3058,7 @@
     },
     "/api/v1/admin/events" : {
       "get" : {
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -3330,7 +3351,7 @@
     },
     "/api/v1/admin/interests" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "list_2",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -3747,7 +3768,7 @@
     },
     "/api/v1/admin/users" : {
       "get" : {
-        "operationId" : "list_7",
+        "operationId" : "list_8",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -3978,7 +3999,7 @@
     },
     "/api/v1/admin/venues" : {
       "get" : {
-        "operationId" : "list",
+        "operationId" : "list_1",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -4198,7 +4219,7 @@
     },
     "/api/v1/audit" : {
       "get" : {
-        "operationId" : "list_6",
+        "operationId" : "list_7",
         "parameters" : [ {
           "in" : "query",
           "name" : "actorUid",
@@ -4724,7 +4745,7 @@
     },
     "/api/v1/events" : {
       "get" : {
-        "operationId" : "list_5",
+        "operationId" : "list_6",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -5091,7 +5112,7 @@
     },
     "/api/v1/me/conversations" : {
       "get" : {
-        "operationId" : "list_4",
+        "operationId" : "list_5",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",
@@ -5143,6 +5164,25 @@
       }
     },
     "/api/v1/me/devices" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/DeviceListResponse"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "device-controller" ]
+      },
       "post" : {
         "operationId" : "register",
         "requestBody" : {
@@ -5165,6 +5205,17 @@
               }
             },
             "description" : "OK"
+          }
+        },
+        "tags" : [ "device-controller" ]
+      }
+    },
+    "/api/v1/me/devices/sign-out-everywhere" : {
+      "post" : {
+        "operationId" : "signOutEverywhere",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
           }
         },
         "tags" : [ "device-controller" ]
@@ -5279,7 +5330,7 @@
     },
     "/api/v1/me/notifications" : {
       "get" : {
-        "operationId" : "list_3",
+        "operationId" : "list_4",
         "parameters" : [ {
           "in" : "query",
           "name" : "page",

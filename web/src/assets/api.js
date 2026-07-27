@@ -594,6 +594,50 @@ export async function deregisterDevice(token) {
 }
 
 /**
+ * GET /api/v1/me/devices — the caller's own PUSH-registered devices (TM-924, the profile "Your
+ * devices" list). Each row is { id, platform, lastSeen, created }; the raw push token is deliberately
+ * NOT returned (it's a sender-usable credential and the list has no need for it). This is an honest
+ * projection of the device_tokens table, NOT a session registry — a browser that never granted push
+ * has no row and won't appear (the UI copy says so). A 401 will already have refreshed/redirected via
+ * {@link apiFetch}.
+ *
+ * @returns {Promise<Array<{id: number, platform: string, lastSeen: string, created: string}>>} the
+ *   caller's devices (possibly empty — a push-less account has none).
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getMyDevices() {
+  const response = await apiFetch("/api/v1/me/devices", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/me/devices failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * POST /api/v1/me/devices/sign-out-everywhere — "sign out everywhere" (TM-924): ask the backend to
+ * revoke ALL of the caller's Firebase refresh tokens, so every session (including this one) is booted
+ * on its next request via the filter's checkRevoked. There is no per-session granularity in Firebase,
+ * so this is all-or-nothing by design (per-device sign-out is deferred to TM-1077). The endpoint is
+ * best-effort and idempotent — it answers 204 even when the revoke degrades server-side — so the
+ * caller should follow this with a LOCAL auth signOut() to clear this tab immediately. A 401 will
+ * already have refreshed/redirected via {@link apiFetch}.
+ *
+ * @returns {Promise<void>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function signOutEverywhere() {
+  const response = await apiFetch("/api/v1/me/devices/sign-out-everywhere", {
+    method: "POST",
+    headers: { Accept: "application/problem+json" },
+  });
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/me/devices/sign-out-everywhere failed: ${response.status}`);
+  }
+}
+
+/**
  * GET /api/v1/me/notifications/badge — the caller's notification bell counts (TM-454): `unseen` (the
  * bell BADGE — what opening the bell clears) and `unread` (per-item, survives a mark-seen). The header
  * bell (TM-455) shows the `unseen` count, summed with chat-unread once that sibling lands. A 401 will
@@ -1515,6 +1559,8 @@ if (typeof window !== "undefined") {
     verifyEmailCode,
     registerDevice,
     deregisterDevice,
+    getMyDevices,
+    signOutEverywhere,
     getNotificationBadge,
     markNotificationsSeen,
     listNotifications,

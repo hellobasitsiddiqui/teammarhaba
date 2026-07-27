@@ -55,6 +55,16 @@ public enum AuditAction {
     DEVICE_TOKEN_DEREGISTERED,
 
     /**
+     * A user signed out of every session via {@code POST /api/v1/me/devices/sign-out-everywhere}
+     * (TM-924): their Firebase refresh tokens were revoked, so every already-issued ID token stops
+     * verifying on its next request (the {@code checkRevoked=true} filter enforces it). One row per
+     * request carrying the account's own Firebase uid as the target — the account revoking itself is
+     * the recovery-from-a-lost-device path. This reuses the same {@code revokeRefreshTokens} primitive
+     * as the admin demotion revoke; per-device sign-out is deferred to TM-1077.
+     */
+    SESSIONS_REVOKED_ALL,
+
+    /**
      * An admin sent a broadcast notification to real users (TM-359 / epic TM-358). One summary row
      * per send; the full header (title/body/recipient-count/outcome) lives in {@code
      * notification_broadcasts}.

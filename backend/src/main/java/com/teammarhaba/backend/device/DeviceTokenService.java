@@ -91,6 +91,23 @@ public class DeviceTokenService {
     }
 
     /**
+     * List the caller's own registered device tokens (TM-924, the "Your devices" read). Provisions the
+     * caller just-in-time (as {@link #register} does) so a brand-new account's first read still works,
+     * then returns only the rows owned by that account — identity comes from the verified principal,
+     * never the client, so a caller can only ever see their own devices.
+     *
+     * <p>This is an honest projection of {@code device_tokens}, <em>not</em> a session registry: it
+     * lists devices that registered a push token, so a signed-in browser that never granted push
+     * permission simply isn't here. The UI carries copy that says so; a true per-session view is
+     * deferred to TM-1077. Read-only, so a plain {@code @Transactional(readOnly = true)}.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<DeviceToken> list(VerifiedUser caller) {
+        Long callerUserId = users.provision(caller).getId();
+        return tokens.findByUserId(callerUserId);
+    }
+
+    /**
      * Deregister one of the caller's <em>own</em> device tokens on sign-out / invalidation (TM-283,
      * owner-scoped per TM-291). Deletes the token only when it belongs to the caller, so a user can
      * never remove another account's token and silence their pushes. Idempotent — deregistering an
