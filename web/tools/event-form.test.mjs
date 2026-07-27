@@ -42,6 +42,8 @@ import {
   isPastEvent,
   partitionEventsByPast,
   matchesStatusFilter,
+  LIFECYCLE_FILTERS,
+  matchesLifecycleFilter,
   EVENT_FORMAT_INPERSON,
   EVENT_FORMAT_ONLINE,
   ONLINE_LOCATION_TEXT,
@@ -468,8 +470,8 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
 
   // TM-727: an OPEN-ENDED event (no endAt) that has STARTED must NOT be "Finished" the instant it
   // begins — the server runs it for an assumed default duration and the member UI never client-side-
-  // finishes it. With the authoritative `past` flag it follows the server verdict; without it, the
-  // endAt-only fallback keeps it live (Visible) rather than mislabelling it Finished at start.
+  // finishes it. Post-TM-1096 a started, not-finished event reads "Happening" (live), not "Visible" —
+  // the endAt-only fallback keeps it live rather than mislabelling it Finished at start.
   const openEndedStarted = {
     ...base,
     endAt: null,
@@ -477,7 +479,7 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
     visibilityEnd: "2026-07-31T00:00:00.000Z", // still within its listing window
   };
   const justStarted = "2026-07-10T18:30:00Z"; // 30 min after start, no endAt
-  assert.equal(eventLifecycle(openEndedStarted, justStarted).label, "Visible", "open-ended not finished at start");
+  assert.equal(eventLifecycle(openEndedStarted, justStarted).label, "Happening", "open-ended, started → Happening (not Finished)");
   // The server's authoritative `past` flag still wins when it says the open-ended event has ended.
   assert.equal(
     eventLifecycle({ ...openEndedStarted, past: true }, justStarted).label,
@@ -597,6 +599,124 @@ test("matchesStatusFilter: Visible / Hidden / Cancelled buckets", () => {
   assert.equal(matchesStatusFilter(hidden, "Hidden", now), true);
   assert.equal(matchesStatusFilter(cancelled, "Cancelled", now), true);
   assert.equal(matchesStatusFilter(visible, "Unlisted", now), false);
+});
+
+// --- TM-1096: the "Happening" lifecycle branch (started, not finished) + its precedence edges -------
+
+test("eventLifecycle: a started, not-finished event reads Happening (TM-1096)", () => {
+  // Window is open and the event has STARTED but not ended → Happening, not Visible. `tone` is "ok".
+  const live = {
+    status: "PUBLISHED",
+    past: false,
+    startAt: "2026-07-10T18:00:00.000Z",
+    endAt: "2026-07-10T20:00:00.000Z",
+    visibilityStart: "2026-07-01T09:00:00.000Z",
+    visibilityEnd: "2026-07-31T00:00:00.000Z",
+  };
+  const midEvent = "2026-07-10T19:00:00Z"; // an hour in, before the end
+  assert.deepEqual(eventLifecycle(live, midEvent), { label: "Happening", tone: "ok" });
+
+  // A NOT-yet-started event in its window is still plain Visible (Happening must not swallow it).
+  const beforeStart = "2026-07-10T12:00:00Z";
+  assert.equal(eventLifecycle(live, beforeStart).label, "Visible", "not started yet → Visible");
+});
+
+test("eventLifecycle: Happening precedence — Cancelled/Finished win, Hidden/Unlisted don't (TM-1096)", () => {
+  const base = {
+    status: "PUBLISHED",
+    startAt: "2026-07-10T18:00:00.000Z",
+    endAt: "2026-07-10T20:00:00.000Z",
+    visibilityStart: "2026-07-01T09:00:00.000Z",
+    visibilityEnd: "2026-07-31T00:00:00.000Z",
+  };
+  const mid = "2026-07-10T19:00:00Z"; // started, not over
+
+  // Cancelled beats Happening even mid-event.
+  assert.equal(eventLifecycle({ ...base, status: "CANCELLED" }, mid).label, "Cancelled");
+  // Finished (server `past` flag) beats Happening.
+  assert.equal(eventLifecycle({ ...base, past: true }, mid).label, "Finished");
+
+  // Happening beats Hidden: a started event whose visibility window hasn't "opened" (visStart in the
+  // future) still reads Happening — being live takes precedence over the window position.
+  const startedButWindowNotOpen = { ...base, visibilityStart: "2026-07-20T00:00:00Z" };
+  assert.equal(eventLifecycle(startedButWindowNotOpen, mid).label, "Happening", "Happening beats Hidden");
+
+  // Happening beats Unlisted: a started event past its listing window is still live, not Unlisted.
+  const startedButWindowClosed = { ...base, visibilityEnd: "2026-07-05T00:00:00Z" };
+  assert.equal(eventLifecycle(startedButWindowClosed, mid).label, "Happening", "Happening beats Unlisted");
+});
+
+test("eventLifecycle: Happening edges at exactly startAt and exactly endAt (TM-1096)", () => {
+  const ev = {
+    status: "PUBLISHED",
+    startAt: "2026-07-10T18:00:00.000Z",
+    endAt: "2026-07-10T20:00:00.000Z",
+    visibilityStart: "2026-07-01T09:00:00.000Z",
+    visibilityEnd: "2026-07-31T00:00:00.000Z",
+  };
+  // At EXACTLY startAt (now === startAt) it's already Happening (`>=`), not still Visible.
+  assert.equal(eventLifecycle(ev, "2026-07-10T18:00:00.000Z").label, "Happening", "at startAt → Happening");
+  // One ms before startAt it's still Visible.
+  assert.equal(eventLifecycle(ev, "2026-07-10T17:59:59.999Z").label, "Visible", "just before start → Visible");
+  // At EXACTLY endAt the Finished branch (t >= endAt) has already claimed it — NOT Happening.
+  assert.equal(eventLifecycle(ev, "2026-07-10T20:00:00.000Z").label, "Finished", "at endAt → Finished");
+  // One ms before endAt it's still Happening.
+  assert.equal(eventLifecycle(ev, "2026-07-10T19:59:59.999Z").label, "Happening", "just before end → Happening");
+
+  // An OPEN-ENDED event (no endAt) that has started is Happening (not finished at start, TM-727), and
+  // stays Happening as long as the server's `past` flag hasn't flipped.
+  const openEnded = { ...ev, endAt: null };
+  assert.equal(eventLifecycle(openEnded, "2026-07-10T18:30:00Z").label, "Happening", "open-ended, started → Happening");
+});
+
+// --- TM-1096: the lifecycle filter chips (LIFECYCLE_FILTERS) + matchesLifecycleFilter --------------
+
+test("LIFECYCLE_FILTERS: the chip buckets + their lifecycle labels (TM-1096)", () => {
+  // One chip per lifecycle bucket, in reading order. The chip COPY differs from the lifecycle label for
+  // "Upcoming" (surfaces the "Hidden" lifecycle) — the admin thinks "upcoming", not "hidden".
+  assert.deepEqual(LIFECYCLE_FILTERS, [
+    ["Happening", "Happening now"],
+    ["Visible", "Visible"],
+    ["Hidden", "Upcoming"],
+    ["Unlisted", "Unlisted"],
+    ["Finished", "Finished"],
+    ["Cancelled", "Cancelled"],
+  ]);
+  // Every key is a real lifecycle label eventLifecycle can emit (no orphan chip that matches nothing).
+  const emitted = new Set(["Happening", "Visible", "Hidden", "Unlisted", "Finished", "Cancelled"]);
+  for (const [key] of LIFECYCLE_FILTERS) assert.ok(emitted.has(key), `${key} is a real lifecycle label`);
+});
+
+test("matchesLifecycleFilter: empty selection ⇒ show all (TM-1096)", () => {
+  const ev = { status: "PUBLISHED", past: false, startAt: "2026-08-01T00:00:00Z", visibilityStart: "2026-06-01T00:00:00Z", visibilityEnd: "2026-12-31T00:00:00Z" };
+  const now = Date.parse("2026-07-01T00:00:00Z");
+  assert.equal(matchesLifecycleFilter(ev, new Set(), now), true, "empty Set matches");
+  assert.equal(matchesLifecycleFilter(ev, [], now), true, "empty array matches");
+  assert.equal(matchesLifecycleFilter(ev, null, now), true, "null matches");
+  assert.equal(matchesLifecycleFilter(ev, undefined, now), true, "undefined matches");
+});
+
+test("matchesLifecycleFilter: single-bucket selection matches only that lifecycle (TM-1096)", () => {
+  // A started, not-finished event = Happening.
+  const happening = { status: "PUBLISHED", past: false, startAt: "2026-07-10T18:00:00Z", endAt: "2026-07-10T22:00:00Z", visibilityStart: "2026-07-01T00:00:00Z", visibilityEnd: "2026-07-31T00:00:00Z" };
+  const now = Date.parse("2026-07-10T20:00:00Z"); // mid-event
+  assert.equal(eventLifecycle(happening, now).label, "Happening");
+  assert.equal(matchesLifecycleFilter(happening, new Set(["Happening"]), now), true, "Happening chip matches");
+  assert.equal(matchesLifecycleFilter(happening, new Set(["Visible"]), now), false, "Visible chip does not");
+  assert.equal(matchesLifecycleFilter(happening, ["Happening"], now), true, "array form matches too");
+});
+
+test("matchesLifecycleFilter: MULTI-select is a union across buckets (TM-1096)", () => {
+  const now = Date.parse("2026-07-10T20:00:00Z");
+  const happening = { status: "PUBLISHED", past: false, startAt: "2026-07-10T18:00:00Z", endAt: "2026-07-10T22:00:00Z", visibilityStart: "2026-07-01T00:00:00Z", visibilityEnd: "2026-07-31T00:00:00Z" };
+  const cancelled = { status: "CANCELLED", startAt: "2026-07-15T00:00:00Z", visibilityStart: "2026-07-01T00:00:00Z", visibilityEnd: "2026-07-31T00:00:00Z" };
+  const visible = { status: "PUBLISHED", past: false, startAt: "2026-08-01T00:00:00Z", visibilityStart: "2026-07-01T00:00:00Z", visibilityEnd: "2026-08-31T00:00:00Z" };
+  const sel = new Set(["Happening", "Cancelled"]);
+  // Both selected buckets match…
+  assert.equal(matchesLifecycleFilter(happening, sel, now), true);
+  assert.equal(matchesLifecycleFilter(cancelled, sel, now), true);
+  // …and a bucket NOT in the set does not.
+  assert.equal(matchesLifecycleFilter(visible, sel, now), false, "Visible isn't selected → excluded");
 });
 
 // --- format (In person / Online) — CLIENT-ONLY, no backend field (TM-1063) -------------------

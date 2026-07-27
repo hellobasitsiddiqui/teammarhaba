@@ -172,6 +172,9 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   await expect(page.locator("#tm-toasts")).not.toContainText("didn't upload");
   // Saving navigates back to the list; the event lands there with its derived "Visible" status.
   await expect(page).toHaveURL(/#\/admin\/events$/);
+  // TM-1096: the list defaults to the "Happening now" lifecycle chip, and this event starts in the
+  // future ("Visible"), so it's filtered OUT of the default view. Click "All" to show every bucket.
+  await page.locator("#admin-events-lifecycle-all").click();
   const row = page.locator(`tr[data-event-id="${created.id}"]`);
   await expect(row).toBeVisible();
   await expect(row).toContainText(HEADING);

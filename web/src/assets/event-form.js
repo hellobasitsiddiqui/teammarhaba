@@ -932,9 +932,17 @@ export function toFormModel(event = {}) {
  *
  *   CANCELLED                          → Cancelled (off)
  *   finished (see below)               → Finished  (muted)
+ *   now ≥ startAt (started, not over)  → Happening (ok)     — the event is live right now (TM-1096)
  *   now < visibilityStart              → Hidden    (info)   — scheduled, not yet public
  *   now > visibilityEnd                → Unlisted  (muted)  — past its listing window, not yet started
  *   otherwise                          → Visible   (ok)     — publicly listed right now
+ *
+ * "Happening" (TM-1096) sits between Finished and Hidden: an event that has STARTED (now ≥ startAt) but
+ * is NOT finished is live, distinct from an upcoming-but-visible event. It's checked after Finished (so
+ * an over event never reads Happening) and before the window buckets (so a live event never reads
+ * Visible/Unlisted just because of where `now` sits relative to its listing window). The started test
+ * mirrors {@link isPastEvent}'s startAt handling: at exactly startAt it's already Happening; at exactly
+ * endAt the Finished branch has already claimed it.
  *
  * The "finished" verdict prefers the admin projection's authoritative {@code past} boolean (the
  * server's {@code EventPhasePolicy.isFinished}); only when it's absent (a legacy response) does it
@@ -960,6 +968,10 @@ export function eventLifecycle(event = {}, now = Date.now()) {
       ? event.past
       : event.endAt != null && Number.isFinite(new Date(event.endAt).getTime()) && t >= new Date(event.endAt).getTime();
   if (finished) return { label: "Finished", tone: "muted" };
+  // Happening (TM-1096): started (now ≥ startAt) and not finished ⇒ live right now. `>=` so exactly at
+  // startAt reads Happening; the Finished branch above already claimed anything at/after its end.
+  const startAt = new Date(event.startAt).getTime();
+  if (Number.isFinite(startAt) && t >= startAt) return { label: "Happening", tone: "ok" };
   if (Number.isFinite(visStart) && t < visStart) return { label: "Hidden", tone: "info" };
   if (Number.isFinite(visEnd) && t > visEnd) return { label: "Unlisted", tone: "muted" };
   return { label: "Visible", tone: "ok" };
@@ -1020,6 +1032,44 @@ export function partitionEventsByPast(events = [], now = Date.now()) {
 export function matchesStatusFilter(event, filter, now = Date.now()) {
   if (!filter || filter === "ALL") return true;
   return eventLifecycle(event, now).label === filter;
+}
+
+/**
+ * The admin list's lifecycle filter chips (TM-1096). Each chip is one lifecycle bucket the admin thinks
+ * in: its `key` is the {@link eventLifecycle} label it matches, and `label` is the chip's copy. The
+ * dropdown this replaced only offered a single label; chips are multi-select, so the console keeps a
+ * Set of selected keys instead of one string. "Upcoming" surfaces the "Hidden" lifecycle (an event
+ * scheduled but not yet inside its public window) under friendlier copy — the admin doesn't think of a
+ * not-yet-public event as "hidden", they think of it as upcoming.
+ *
+ * Order = the natural lifecycle reading order (live → upcoming → gone): Happening now · Visible ·
+ * Upcoming · Unlisted · Finished · Cancelled.
+ */
+export const LIFECYCLE_FILTERS = [
+  ["Happening", "Happening now"],
+  ["Visible", "Visible"],
+  ["Hidden", "Upcoming"],
+  ["Unlisted", "Unlisted"],
+  ["Finished", "Finished"],
+  ["Cancelled", "Cancelled"],
+];
+
+/**
+ * Whether an event matches the admin list's lifecycle-chip selection (TM-1096). `selected` is the Set
+ * (or array) of chosen lifecycle labels; an event matches when its derived {@link eventLifecycle} label
+ * is in the set. An EMPTY (or missing) selection matches EVERYTHING — clearing the chips shows all, and
+ * a no-chips-selected state is never an empty table. Pure, so the admin-events.js chip row is a thin
+ * wrapper over it and the filter core is unit-testable without the DOM.
+ *
+ * @param {object} event an EventResponse.
+ * @param {Set<string>|string[]|null|undefined} selected the chosen lifecycle labels (empty = all).
+ * @param {Date|number|string} [now]
+ * @returns {boolean}
+ */
+export function matchesLifecycleFilter(event, selected, now = Date.now()) {
+  const set = selected instanceof Set ? selected : new Set(Array.isArray(selected) ? selected : []);
+  if (set.size === 0) return true; // empty selection ⇒ show all
+  return set.has(eventLifecycle(event, now).label);
 }
 
 /** "Unlimited" when capacity is null/absent, otherwise the number as a string (blank = unlimited). */

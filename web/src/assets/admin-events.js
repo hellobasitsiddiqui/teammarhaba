@@ -47,7 +47,8 @@ import {
   toFormModel,
   eventLifecycle,
   capacityLabel,
-  matchesStatusFilter,
+  LIFECYCLE_FILTERS,
+  matchesLifecycleFilter,
   attendanceCounts,
   overCapacityState,
   overCapacityWarning,
@@ -89,18 +90,11 @@ const FETCH_SIZE = 100; // page size PER REQUEST of the full-inventory walk — 
 const MAX_FETCH_PAGES = 50; // runaway guard on the walk (× FETCH_SIZE = 5,000 events)
 const PAGE_SIZES = [10, 25, 50];
 
-// Client-side status buckets over the DERIVED lifecycle (event-form.js), so the admin can filter the
-// full inventory the way they think about it — not just the raw PUBLISHED|CANCELLED the API stores.
-const STATUS_FILTERS = [
-  ["ALL", "All statuses"],
-  ["Visible", "Visible now"],
-  ["Hidden", "Hidden (upcoming)"],
-  // TM-965: "Unlisted" — past its visibility window but not yet started. eventLifecycle emits this label,
-  // so without a matching filter option an unlisted event matched NO non-ALL filter and disappeared.
-  ["Unlisted", "Unlisted (window closed)"],
-  ["Finished", "Finished"],
-  ["Cancelled", "Cancelled"],
-];
+// The default lifecycle-chip selection (TM-1096): the console lands showing only what's LIVE — an
+// admin's most common "what do I need to look at right now" view. Empty selection ⇒ show all; the
+// available buckets live on LIFECYCLE_FILTERS (event-form.js). Cloned per mount so the shared default
+// array never mutates.
+const DEFAULT_LIFECYCLE_FILTER = ["Happening"];
 
 const COLUMNS = [
   { key: "heading", label: "Event", sortable: true },
@@ -119,7 +113,9 @@ const state = {
   loading: false,
   error: null,
   search: "",
-  statusFilter: "ALL",
+  // TM-1096: multi-select lifecycle filter (was a single-select status dropdown). A Set of the selected
+  // lifecycle labels; empty ⇒ show all. Defaults to { Happening } so the list lands on live events.
+  lifecycleFilter: new Set(DEFAULT_LIFECYCLE_FILTER),
   sortKey: "startAt",
   sortDir: "desc",
   page: 0,
@@ -206,8 +202,9 @@ export async function loadEvents() {
 function filteredEvents(now) {
   const q = state.search.trim().toLowerCase();
   return state.events.filter((e) => {
-    // TM-965: match against the DERIVED lifecycle label via the pure predicate — covers "Unlisted" too.
-    if (!matchesStatusFilter(e, state.statusFilter, now)) return false;
+    // TM-1096: match against the DERIVED lifecycle label via the pure multi-select predicate — an event
+    // shows if its lifecycle bucket is in the selected chip set (empty set ⇒ all).
+    if (!matchesLifecycleFilter(e, state.lifecycleFilter, now)) return false;
     if (q) {
       const haystack = [e.heading, e.locationText, e.city].filter(Boolean).join(" ").toLowerCase();
       if (!haystack.includes(q)) return false;
@@ -245,14 +242,20 @@ function statusPill(event, now) {
 
 function renderStats(now) {
   const total = Math.max(state.totalEvents, state.events.length);
-  const visible = state.events.filter((e) => eventLifecycle(e, now).label === "Visible").length;
+  // TM-1096: a live event now reads "Happening" once it has started (was all "Visible"), so the live
+  // stat counts BOTH live buckets — Happening (started, running) + Visible (listed, not yet started) —
+  // to stay the "publicly live right now" figure it was before the Happening split.
+  const live = state.events.filter((e) => {
+    const label = eventLifecycle(e, now).label;
+    return label === "Happening" || label === "Visible";
+  }).length;
   const cancelled = state.events.filter((e) => String(e.status).toUpperCase() === "CANCELLED").length;
   // TM-756: loadEvents() renders BEFORE the page walk resolves, so these counts derive from EMPTY
   // state — the mask (admin-stats-core.js) shows "—" per card while loading instead of a false
   // "Total 0", mirroring the table's state.loading gate below; loaded cards pass through untouched.
   const cards = statsCards([
     ["Total", total],
-    ["Visible now", visible],
+    ["Live now", live],
     ["Cancelled", cancelled],
   ], state.loading);
   clear(shell.stats).append(
@@ -2140,11 +2143,6 @@ function buildShell(view) {
     "aria-label": "Search events",
     onInput: (e) => { state.search = e.target.value; state.page = 0; renderTable(); },
   });
-  const statusSelect = el(
-    "select",
-    { id: "admin-events-status-filter", class: "tm-input", "aria-label": "Filter by status", onChange: (e) => { state.statusFilter = e.target.value; state.page = 0; render(); } },
-    STATUS_FILTERS.map(([value, label]) => el("option", { value, text: label })),
-  );
   const sizeSelect = el(
     "select",
     { class: "tm-input", "aria-label": "Rows per page", onChange: (e) => { state.pageSize = Number(e.target.value); state.page = 0; renderTable(); } },
@@ -2166,10 +2164,76 @@ function buildShell(view) {
       ]),
     ]),
     stats,
-    el("div", { class: "tm-toolbar" }, [search, statusSelect, sizeSelect]),
+    el("div", { class: "tm-toolbar" }, [search, sizeSelect]),
+    lifecycleChipRow(),
     table,
     pager,
   );
+}
+
+/**
+ * The lifecycle filter chips (TM-1096) — one `aria-pressed` toggle chip per lifecycle bucket
+ * (LIFECYCLE_FILTERS), replacing the old single-select status dropdown. Multi-select: toggling a chip
+ * adds/removes its lifecycle label from `state.lifecycleFilter` (a Set); an event shows if its lifecycle
+ * label is in the set (empty set ⇒ all, via matchesLifecycleFilter). An "All" / "Clear" affordance
+ * flips the whole set: All selects every bucket, Clear empties it (both then show everything, but the
+ * chips reflect which the admin asked for). Built on the existing `.tm-chip` CSS — `aria-pressed="true"`
+ * is what lights a chip up. Rebuilt in place on every toggle so the pressed state stays in sync.
+ */
+function lifecycleChipRow() {
+  const row = el("div", {
+    class: "tm-chips tm-events-filter-chips",
+    id: "admin-events-lifecycle-chips",
+    role: "group",
+    "aria-label": "Filter by lifecycle",
+  });
+  const rebuild = () => {
+    clear(row);
+    for (const [key, label] of LIFECYCLE_FILTERS) {
+      const on = state.lifecycleFilter.has(key);
+      row.append(
+        el(
+          "button",
+          {
+            type: "button",
+            class: "tm-chip",
+            "aria-pressed": on ? "true" : "false",
+            dataset: { lifecycle: key },
+            onClick: () => {
+              if (state.lifecycleFilter.has(key)) state.lifecycleFilter.delete(key);
+              else state.lifecycleFilter.add(key);
+              state.page = 0;
+              rebuild();
+              render();
+            },
+          },
+          label,
+        ),
+      );
+    }
+    // All / Clear: All selects every bucket; Clear empties the set. Both leave the list showing
+    // everything, but the pressed chips record the admin's intent (all-on vs none-on).
+    const allOn = LIFECYCLE_FILTERS.every(([key]) => state.lifecycleFilter.has(key));
+    row.append(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "tm-chip tm-chip-all",
+          id: "admin-events-lifecycle-all",
+          onClick: () => {
+            state.lifecycleFilter = allOn ? new Set() : new Set(LIFECYCLE_FILTERS.map(([key]) => key));
+            state.page = 0;
+            rebuild();
+            render();
+          },
+        },
+        allOn ? "Clear" : "All",
+      ),
+    );
+  };
+  rebuild();
+  return row;
 }
 
 /** Called by the router when the #/admin/events view becomes active. Builds the shell once, then loads. */
