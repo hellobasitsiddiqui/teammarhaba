@@ -1,10 +1,17 @@
-// Account-state badges (TM-168): render the verification flags from the `/me` state block — Email
-// verified, Age verified — each with a clear "not verified / off" variant, reusing the shared badge
+// Account-state badges (TM-168): render the verification flags from the `/me` state block — currently
+// Email verified only — each with a clear "not verified / off" variant, reusing the shared badge
 // primitive (`.tm-badge` + `.tm-badge-ok` / `.tm-badge-off`, from TM-133).
+//
+// NOTE (TM-1093): the "Age verified" badge was REMOVED. `ageVerified` only records a *self-attested*
+// age (the user typed a birthdate at onboarding — see MeResponse "self-attested", AgeEligibilityPolicy
+// "real verification is out of scope"); a green "Age verified" chip falsely implied real, checked
+// verification. We do not have real age verification yet — that's tracked by TM-875 (Real UK age
+// verification). The badge returns, keyed off a genuine `ageVerified` signal, when TM-875 ships. The
+// `ageVerified` flag is still read below (extractAccountFlags) so re-introduction is a one-line change.
 //
 // Where the flags live in the /me payload (see backend MeResponse / AccountState, TM-163/TM-164):
 //   - emailVerified → `accountState.emailVerified`  (live from Firebase; may be null = unknown)
-//   - ageVerified   → top-level `ageVerified`       (our DB, self-attested; always a boolean)
+//   - ageVerified   → top-level `ageVerified`       (our DB, self-attested; NOT rendered — TM-1093)
 //
 // The Firebase-sourced flags are best-effort: in credential-free dev/test (and on the admin list
 // projection, which doesn't carry them) they arrive as `null`/`undefined`. Per the product owner
@@ -36,18 +43,17 @@ function twoState(value) {
 
 // The badges, in display order. Each carries the labels for its on/off states and an accessible-label
 // prefix so a screen reader announces the full meaning (e.g. "Email: verified"), not just the terse
-// pill text. TM-911: the MFA badge was removed from this list — MFA moves to a dedicated security
-// section (TM-912) and no longer belongs in the profile identity header.
+// pill text.
+// TM-911: the MFA badge was removed from this list — MFA moves to a dedicated security section
+// (TM-912) and no longer belongs in the profile identity header.
+// TM-1093: the "Age verified" badge was removed — `ageVerified` is only a self-attested age, so a
+// green "Age verified" chip mis-claimed real verification we don't yet have (TM-875). Re-add an entry
+// keyed on a genuine verification signal here once TM-875 ships.
 const BADGES = [
   {
     key: "emailVerified",
     aria: "Email",
     labels: { on: "Email verified", off: "Email not verified" },
-  },
-  {
-    key: "ageVerified",
-    aria: "Age",
-    labels: { on: "Age verified", off: "Age not verified" },
   },
 ];
 
