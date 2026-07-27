@@ -91,9 +91,13 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
 
   test("USER: no admin affordance in the DOM and admin routes bounce", async ({ page }) => {
     await signIn(page, TARGET);
-    // Exactly the locked four tabs — the Admin tab is never injected for a non-admin.
-    await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(4);
+    // Five tabs for a non-admin: the locked four PLUS the Help tab (TM-1092). The Admin tab is never
+    // injected for a non-admin; Help is the non-admin's 5th slot, pointing at #/help.
+    await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(5);
     await expect(page.locator("#tab-admin")).toHaveCount(0);
+    const helpTab = page.locator("#tab-help");
+    await expect(helpTab).toHaveCount(1);
+    await expect(helpTab).toHaveAttribute("href", "#/help");
 
     // Deep-linking the admin routes bounces a non-admin home — the hub, the users console, and the two
     // lifted folds (TM-972) are all hard-gated (client bounce mirrors the server gate; no admin view is
@@ -106,5 +110,17 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
       await expect(page.locator("#admin-ops-view")).toBeHidden();
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/home");
     }
+  });
+
+  test("USER: the Help tab (5th) navigates to #/help and lights as active (TM-1092)", async ({ page }) => {
+    await signIn(page, TARGET);
+    const helpTab = page.locator("#tab-help");
+    await expect(helpTab).toBeVisible();
+    await helpTab.click();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/help");
+    await expect(page.locator("#help-view")).toBeVisible();
+    await expect(helpTab).toHaveAttribute("aria-current", "page");
+    // Only Help is active — the other tabs clear their active state.
+    await expect(page.locator("#tab-home")).not.toHaveAttribute("aria-current", "page");
   });
 });
