@@ -2139,14 +2139,22 @@ function ensureSectionVisibleFor(targetId) {
 /** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action.
  *  `id` (optional) stamps a stable DOM id on the row — the sign-out row carries one (TM-906) so the
  *  e2e suite can drive the ONLY sign-out entry without coupling to label text. */
-function menuRow(label, { to = null, onClick = null, muted = false, id = null, signout = false } = {}) {
+function menuRow(label, { to = null, onClick = null, muted = false, id = null, signout = false, sub = null } = {}) {
   // TM-1091: the sign-out row is a dark ACTION button — no chevron (a "›" implies navigation, but
   // signing out is a confirm-then-act). Every other row keeps its trailing chevron.
   const cls = `tm-pf-menu-row${muted ? " tm-pf-menu-muted" : ""}${signout ? " tm-pf-menu-signout" : ""}`;
   const props = id ? { class: cls, id } : { class: cls };
+  // TM-1099: an optional muted subtitle under the label (e.g. "Your public profile" → "See how people
+  // see your profile"). Stacks title + sub in a column so the trailing chevron still sits on the right.
+  const labelCell = sub
+    ? el("span", { class: "tm-pf-menu-labelcol" }, [
+        el("span", { class: "tm-pf-menu-title", text: label }),
+        el("span", { class: "tm-pf-menu-sub", text: sub }),
+      ])
+    : el("span", { text: label });
   const children = signout
     ? [el("span", { text: label })]
-    : [el("span", { text: label }), el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" })];
+    : [labelCell, el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" })];
   if (to) return el("a", { ...props, href: to }, children);
   return el("button", { ...props, type: "button", onClick }, children);
 }
@@ -2377,7 +2385,7 @@ function buildShell(view) {
   // .tm-pf-menu-row carries the card look via CSS.
   const menuCard = el("nav", { class: "tm-pf-menu", "aria-label": "Profile menu" }, [
     menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
-    menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
+    menuRow("Your public profile", { to: PROFILE_PUBLIC_ROUTE, sub: "See how people see your profile" }),
     menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
     menuRow("Sign out", { onClick: doSignOut, signout: true, id: "profile-signout-row" }),
   ]);
