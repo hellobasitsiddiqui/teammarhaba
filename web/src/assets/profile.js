@@ -2139,12 +2139,16 @@ function ensureSectionVisibleFor(targetId) {
 /** One paper-profile menu row: a label with a chevron. `to` = hash link; `onClick` = in-page action.
  *  `id` (optional) stamps a stable DOM id on the row — the sign-out row carries one (TM-906) so the
  *  e2e suite can drive the ONLY sign-out entry without coupling to label text. */
-function menuRow(label, { to = null, onClick = null, muted = false, id = null } = {}) {
-  const chev = el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" });
-  const cls = `tm-pf-menu-row${muted ? " tm-pf-menu-muted" : ""}`;
+function menuRow(label, { to = null, onClick = null, muted = false, id = null, signout = false } = {}) {
+  // TM-1091: the sign-out row is a dark ACTION button — no chevron (a "›" implies navigation, but
+  // signing out is a confirm-then-act). Every other row keeps its trailing chevron.
+  const cls = `tm-pf-menu-row${muted ? " tm-pf-menu-muted" : ""}${signout ? " tm-pf-menu-signout" : ""}`;
   const props = id ? { class: cls, id } : { class: cls };
-  if (to) return el("a", { ...props, href: to }, [el("span", { text: label }), chev]);
-  return el("button", { ...props, type: "button", onClick }, [el("span", { text: label }), chev]);
+  const children = signout
+    ? [el("span", { text: label })]
+    : [el("span", { text: label }), el("span", { class: "tm-pf-chev", "aria-hidden": "true", text: "›" })];
+  if (to) return el("a", { ...props, href: to }, children);
+  return el("button", { ...props, type: "button", onClick }, children);
 }
 
 /** Scroll a same-page element into view and focus it (Notifications / Privacy menu rows, the strength-gap
@@ -2375,7 +2379,7 @@ function buildShell(view) {
     menuRow("Notifications", { onClick: () => focusOnPage("profile-notificationPref") }),
     menuRow("Public profile", { to: PROFILE_PUBLIC_ROUTE }),
     menuRow("Privacy & my data", { onClick: () => focusOnPage("profile-settings") }),
-    menuRow("Sign out", { onClick: doSignOut, muted: true, id: "profile-signout-row" }),
+    menuRow("Sign out", { onClick: doSignOut, signout: true, id: "profile-signout-row" }),
   ]);
 
   // The screen mounts with `tm-pf-loading` so the identity + strength area renders as a skeleton
