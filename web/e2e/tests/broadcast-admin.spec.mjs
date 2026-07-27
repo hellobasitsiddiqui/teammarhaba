@@ -94,12 +94,13 @@ test("@admin @broadcast admin composes a broadcast, sends it, and the fan-out + 
   await expect(page.locator("#tab-admin")).toBeVisible();
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 
-  // ── STEP 2: open the admin layer, then the users console via the hub (TM-917: the Admin tab opens the
-  //    #/admin hub; the users console + its compose panel moved to #/admin/users). ─────────────────
+  // ── STEP 2: open the admin layer, then the Send-notification screen via the hub. TM-972 LIFTED the
+  //    push-broadcast compose + its recipient picker OUT of the users console into its own #/admin/
+  //    notifications fold — so the compose panel + recipient roster now live there, not in #/admin/users. ─
   await clickNav(page, "#tab-admin");
-  await page.click('.admin-hub-row[href="#/admin/users"]');
-  await expect(page.locator("#admin-view")).toBeVisible();
-  await expect(page.locator("#admin-table")).toBeVisible();
+  await page.click('.admin-hub-row[href="#/admin/notifications"]');
+  await expect(page.locator("#admin-notifications-view")).toBeVisible();
+  await expect(page.locator("#admin-notifications-roster")).toBeVisible();
   const compose = page.locator("#admin-broadcast");
   await expect(compose).toBeVisible();
   // A8 (TM-976): the PRISTINE, untouched compose panel must not shout — no "required" errors, no red

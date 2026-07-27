@@ -52,8 +52,12 @@ test("golden-path admin branch clicks the hub's Users row between #tab-admin and
 });
 
 // ── 2. Both deep-link pickers label #/admin as the hub it now is ────────────────────────────────────
+// TM-972: the push-broadcast deep-link picker (with its ROUTE_LABELS) moved OUT of the users console
+// (admin.js) into its own screen (admin-notifications.js) when "Send notification" was lifted to its own
+// hub fold. The in-app message compose picker (admin-messages.js) is unchanged. Both must still label
+// "#/admin" as the hub — a stale "Admin console" label would point an admin's deep-link at the wrong page.
 
-for (const file of ["admin.js", "admin-messages.js"]) {
+for (const file of ["admin-notifications.js", "admin-messages.js"]) {
   test(`${file}: ROUTE_LABELS maps "#/admin" to "Admin hub" (the route opens the hub, not the users console)`, () => {
     const source = readFileSync(join(HERE, "../src/assets", file), "utf8");
     assert.match(

@@ -25,12 +25,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** The three compose-panel error element ids the A8 pristine-panel guard asserts on. */
 const ERROR_IDS = ["admin-broadcast-title-error", "admin-broadcast-body-error", "admin-broadcast-recipients"];
 
-test("admin.js still renders all three broadcast error ids the A8 guard targets (assertions aren't stale)", () => {
-  const source = readFileSync(join(HERE, "../src/assets/admin.js"), "utf8");
+// TM-972: the broadcast compose (with these three error elements) moved OUT of the users console
+// (admin.js) into its own "Send notification" screen (admin-notifications.js) — so the source of these
+// ids is now admin-notifications.js. The e2e spec (broadcast-admin.spec.mjs) still asserts on them.
+test("admin-notifications.js still renders all three broadcast error ids the A8 guard targets (assertions aren't stale)", () => {
+  const source = readFileSync(join(HERE, "../src/assets/admin-notifications.js"), "utf8");
   for (const id of ERROR_IDS) {
     assert.ok(
       source.includes(`id: "${id}"`),
-      `admin.js must still create the "${id}" error element — the broadcast-admin A8 guard asserts on it`,
+      `admin-notifications.js must still create the "${id}" error element — the broadcast-admin A8 guard asserts on it`,
     );
   }
 });

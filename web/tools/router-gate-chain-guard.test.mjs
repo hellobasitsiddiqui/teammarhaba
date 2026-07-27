@@ -101,9 +101,11 @@ test("the onboarding and terms gates each early-return (redirect wins over every
 // --- EVERY admin route is gated via shouldBounceNonAdmin (no admin view is ungated) -----------------
 
 test("every admin route in guard() is protected by shouldBounceNonAdmin (roleResolved-aware)", () => {
-  // The ten ADMIN-only routes: hub (TM-917), users console (TM-917, moved to #/admin/users), events
+  // The twelve ADMIN-only routes: hub (TM-917), users console (TM-917, moved to #/admin/users), events
   // console, event form, venues console, venue form, interests console, interest form (TM-779),
-  // message compose, sent-history. Each must sit in an `if (<admin-route> && shouldBounceNonAdmin(...))`.
+  // message compose, sent-history, and the two TM-972 lift-and-shift folds — Send notification
+  // (#/admin/notifications) and Developer tools (#/admin/ops). Each must sit in an
+  // `if (<admin-route> && shouldBounceNonAdmin(...))`.
   const adminRouteConditions = [
     /route\s*===\s*ADMIN\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_USERS\s*&&\s*shouldBounceNonAdmin\(/, // TM-917: users console moved off #/admin
@@ -115,6 +117,8 @@ test("every admin route in guard() is protected by shouldBounceNonAdmin (roleRes
     /isAdminInterestFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/, // TM-779: interest form
     /isAdminMessageComposeRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_MESSAGES\s*&&\s*shouldBounceNonAdmin\(/,
+    /route\s*===\s*ADMIN_NOTIFICATIONS\s*&&\s*shouldBounceNonAdmin\(/, // TM-972: Send notification fold
+    /route\s*===\s*ADMIN_OPS\s*&&\s*shouldBounceNonAdmin\(/, // TM-972: Developer tools fold
   ];
   for (const cond of adminRouteConditions) {
     assert.match(ROUTER_SRC, cond, `admin route ${cond} must be guarded by shouldBounceNonAdmin`);
@@ -150,6 +154,23 @@ test("the moved users console (#/admin/users) is in the PROTECTED set (TM-917 au
     ROUTER_SRC,
     /const PROTECTED = new Set\(\[[^\]]*\bADMIN_USERS\b[^\]]*\]\)/,
     "ADMIN_USERS must be in the PROTECTED set so a signed-out #/admin/users deep-link is remembered + bounced to login",
+  );
+});
+
+test("the two TM-972 lifted folds (#/admin/notifications, #/admin/ops) are in the PROTECTED set (auth-gate regression)", () => {
+  // Same class of regression as ADMIN_USERS above (learned on TM-917): every admin route needs BOTH its
+  // shouldBounceNonAdmin gate AND a PROTECTED entry. A missing PROTECTED entry means a SIGNED-OUT
+  // deep-link to the route skips the auth gate — the intended route isn't remembered and the role-bounce
+  // later fires "Admins only." + go(HOME) instead of remember-then-#/login. Pin both new routes into the set.
+  assert.match(
+    ROUTER_SRC,
+    /const PROTECTED = new Set\(\[[^\]]*\bADMIN_NOTIFICATIONS\b[^\]]*\]\)/,
+    "ADMIN_NOTIFICATIONS must be in the PROTECTED set so a signed-out #/admin/notifications deep-link is remembered + bounced to login",
+  );
+  assert.match(
+    ROUTER_SRC,
+    /const PROTECTED = new Set\(\[[^\]]*\bADMIN_OPS\b[^\]]*\]\)/,
+    "ADMIN_OPS must be in the PROTECTED set so a signed-out #/admin/ops deep-link is remembered + bounced to login",
   );
 });
 

@@ -21,7 +21,10 @@ const read = (name) => readFileSync(join(assets, name), "utf8");
 // stacked-card CSS can label it. We require at least the number of labelled fields each COLUMNS array
 // carries (control cells — checkbox / Actions — are deliberately unlabelled, so we assert ">=", not "=").
 const CONSOLES = [
-  { file: "admin.js", minLabels: 6 }, // Email, Name, Role, Status, Push, ID
+  // TM-972: the users console is now MANAGEMENT-only — the Push column moved to the lifted
+  // Send-notification recipient roster (admin-notifications.js), so admin.js is down to 5 labelled cells.
+  { file: "admin.js", minLabels: 5 }, // Email, Name, Role, Status, ID
+  { file: "admin-notifications.js", minLabels: 3 }, // Recipient, Push, ID (the lifted recipient roster, TM-972)
   { file: "admin-events.js", minLabels: 5 }, // Event, Start, Status, Going / Waitlist, Capacity
   { file: "admin-venues.js", minLabels: 4 }, // Venue, City / area, Capacity, Status
   { file: "admin-interests.js", minLabels: 5 }, // Interest, Category, Weight, Featured, Status

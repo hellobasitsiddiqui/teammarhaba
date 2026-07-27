@@ -1203,8 +1203,12 @@ h3,
     border-bottom: var(--border-width) solid var(--border);
 }
 
-.admin-console .tm-admin-head h2 {
+.admin-console .tm-admin-head h2,
+/* TM-972: the lifted Send-notification screen is heading-first with its own <h1> in the same head row —
+   style it identically to the sibling consoles' <h2> so the chrome reads consistently. */
+.admin-console .tm-admin-head h1 {
     font-size: var(--fs-5);
+    margin: 0;
 }
 
 .tm-muted {
@@ -2571,7 +2575,9 @@ h3,
 /* Admin Operations panel (TM-183): grouped operational links (App endpoints / Diagnostics / Consoles)
    at the foot of the #/admin view. Token-only styling, mirroring the broadcast panel's surface card. */
 .tm-ops {
-    margin: 1.25rem 0 0;
+    /* TM-972: the ops panel used to be a nested card at the FOOT of the users console (hence the top
+       margin); it's now the whole Developer-tools screen, so it sits flush at the top. */
+    margin: 0;
     padding: var(--space-4);
     background: var(--surface-card);
     border: var(--border-width) solid var(--border);
@@ -2579,7 +2585,9 @@ h3,
     box-shadow: var(--shadow-sm);
 }
 
-.tm-ops-head h2 {
+/* TM-972: the ops screen is heading-first with its own <h1>; the group titles moved from <h3> to <h2>. */
+.tm-ops-head h2,
+.tm-ops-head h1 {
     margin: 0;
     font-size: 1.15rem;
 }
@@ -2683,6 +2691,13 @@ h3,
 
 .tm-broadcast-title {
     margin: 0;
+    font-size: 1.05rem;
+}
+
+/* TM-972: the "Recipients" sub-heading above the roster on the lifted Send-notification screen — a
+   section divider between the compose panel and the recipient picker. */
+.tm-broadcast-recipients-title {
+    margin: var(--space-5) 0 var(--space-3);
     font-size: 1.05rem;
 }
 

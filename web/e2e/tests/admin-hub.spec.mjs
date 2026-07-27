@@ -35,17 +35,51 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
     await adminTab.click();
     await expect(page.locator("#admin-hub-view")).toBeVisible();
     const rows = page.locator("#admin-hub-view .admin-hub-row");
-    await expect(rows).toHaveCount(5);
-    await expect(rows).toHaveText([/Users/, /Manage events/, /Venues/, /Interests/, /Send a message/]);
+    // TM-972: the hub is now SEVEN verb-led folds, flat + in order. "Send notification" (push broadcast)
+    // and "Developer tools" (the ops panel) were LIFTED out of the users console into their own folds.
+    await expect(rows).toHaveCount(7);
+    await expect(rows).toHaveText([
+      /Manage users/,
+      /Manage events/,
+      /Manage venues/,
+      /Manage interests/,
+      /Send a message/,
+      /Send notification/,
+      /Developer tools/,
+    ]);
     // On the hub, the Admin tab is the active one (activeTab maps #/admin* → "admin").
     await expect(adminTab).toHaveAttribute("aria-current", "page");
 
-    // The Users row opens the moved users console at #/admin/users; the Admin tab stays active.
-    await rows.filter({ hasText: "Users" }).click();
+    // The "Manage users" row opens the users console at #/admin/users; the Admin tab stays active.
+    await rows.filter({ hasText: "Manage users" }).click();
     await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/admin/users");
     await expect(page.locator("#admin-view")).toBeVisible();
     await expect(page.locator("#admin-hub-view")).toBeHidden();
     await expect(adminTab).toHaveAttribute("aria-current", "page");
+
+    // The lifted "Send notification" fold opens the notification screen at #/admin/notifications, which
+    // carries its OWN recipient picker (the broadcast compose + select-all roster). Admin tab stays active.
+    await adminTab.click();
+    await page.locator("#admin-hub-view .admin-hub-row").filter({ hasText: "Send notification" }).click();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/admin/notifications");
+    await expect(page.locator("#admin-notifications-view")).toBeVisible();
+    await expect(page.locator("#admin-broadcast")).toBeVisible(); // the compose panel
+    await expect(page.locator("#admin-select-all")).toBeVisible(); // the recipient select-all
+    await expect(adminTab).toHaveAttribute("aria-current", "page");
+
+    // The lifted "Developer tools" fold opens the ops screen at #/admin/ops (diagnostics/consoles panel).
+    await adminTab.click();
+    await page.locator("#admin-hub-view .admin-hub-row").filter({ hasText: "Developer tools" }).click();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/admin/ops");
+    await expect(page.locator("#admin-ops-view")).toBeVisible();
+    await expect(page.locator("#admin-ops")).toBeVisible();
+    await expect(adminTab).toHaveAttribute("aria-current", "page");
+
+    // The users console it left behind has NO broadcast compose and NO ops panel any more.
+    await page.evaluate(() => (window.location.hash = "#/admin/users"));
+    await expect(page.locator("#admin-view")).toBeVisible();
+    await expect(page.locator("#admin-view #admin-broadcast")).toHaveCount(0);
+    await expect(page.locator("#admin-view #admin-ops")).toHaveCount(0);
 
     // A deep console route still lights the Admin tab (prefix match), and tapping Admin returns to the hub.
     await page.evaluate(() => (window.location.hash = "#/admin/venues"));
@@ -61,12 +95,15 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
     await expect(page.locator("#app-tabbar .app-tab")).toHaveCount(4);
     await expect(page.locator("#tab-admin")).toHaveCount(0);
 
-    // Deep-linking the admin routes bounces a non-admin home — the hub and the moved users console
-    // are both hard-gated (client bounce mirrors the server gate; no admin view is shown).
-    for (const route of ["#/admin", "#/admin/users"]) {
+    // Deep-linking the admin routes bounces a non-admin home — the hub, the users console, and the two
+    // lifted folds (TM-972) are all hard-gated (client bounce mirrors the server gate; no admin view is
+    // shown). A missing bounce/PROTECTED entry on the lifted routes would be a real auth regression (TM-917).
+    for (const route of ["#/admin", "#/admin/users", "#/admin/notifications", "#/admin/ops"]) {
       await page.evaluate((r) => (window.location.hash = r), route);
       await expect(page.locator("#admin-hub-view")).toBeHidden();
       await expect(page.locator("#admin-view")).toBeHidden();
+      await expect(page.locator("#admin-notifications-view")).toBeHidden();
+      await expect(page.locator("#admin-ops-view")).toBeHidden();
       await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#/home");
     }
   });
