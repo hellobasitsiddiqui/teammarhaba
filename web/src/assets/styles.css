@@ -7129,7 +7129,10 @@ a.tm-pf-go:focus-visible {
     min-height: 44px;
     padding: var(--space-3) var(--space-4);
     font: inherit;
-    font-size: var(--fs-3);
+    /* TM-1091: match the section-header titles (.tm-pf-sec-title, fs-4/700) so the action buttons and
+       the section cards above them read as one consistent family. */
+    font-size: var(--fs-4);
+    font-weight: 700;
     text-align: left;
     color: var(--fg);
     text-decoration: none;
@@ -7152,6 +7155,20 @@ a.tm-pf-go:focus-visible {
 }
 .tm-pf-menu-muted {
     color: var(--muted);
+}
+/* TM-1091: Sign out is a dark filled ACTION button — centred label, no chevron — distinct from the
+   navigation rows above it (the industry-standard sign-out affordance). Dark = the Paper --ink. */
+.tm-pf-menu-signout {
+    justify-content: center;
+    background: var(--ink);
+    color: var(--surface-card);
+    border-color: var(--ink);
+    font-weight: 700;
+}
+.tm-pf-menu-signout:hover {
+    background: var(--ink);
+    color: var(--surface-card);
+    filter: brightness(1.25);
 }
 .tm-pf-chev {
     color: var(--muted);
