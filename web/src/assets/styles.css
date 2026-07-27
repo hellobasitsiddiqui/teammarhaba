@@ -5080,8 +5080,9 @@ a.tm-event-map:focus-visible { outline: 2px solid var(--accent); outline-offset:
     padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Five-column variant for the injected Admin tab (TM-915) — admins only. tabbar.js sets
-   `data-tabs="5"` on the nav when it appends #tab-admin; the base bar stays 4-up for everyone else.
+/* Five-column variant for the injected 5th tab — Admin for admins (TM-915), Help for non-admins
+   (TM-1092). tabbar.js sets `data-tabs="5"` whenever it appends #tab-admin OR #tab-help, so every
+   signed-in bar is 5-up (the base 4-col rule now only applies to the hidden signed-out/gated state).
    Higher specificity than the base `.app-tabbar` rule, so it wins with no !important. */
 .app-tabbar[data-tabs="5"] {
     grid-template-columns: repeat(5, 1fr);

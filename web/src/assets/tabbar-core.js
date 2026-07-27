@@ -39,34 +39,45 @@ export const TAB_IDS = Object.freeze(TABS.map((t) => t.id));
 export const ADMIN_TAB = Object.freeze({ id: "admin", route: "#/admin", prefix: "#/admin" });
 
 /**
- * The tabs to render for a session, in order: the locked four (TM-434), plus the Admin tab appended
- * for a verified admin (TM-915). A normal user gets EXACTLY the four — the admin entry is never even
- * composed in, so it can't leak into their DOM. The DOM half (tabbar.js) injects/removes the
- * `#tab-admin` link to match, and drives the 4-vs-5 column grid off this list's length.
+ * The Help tab (TM-1092) — the 5th tab for a NON-admin user, mirroring how `ADMIN_TAB` is the 5th for
+ * an admin. Help is a normal-user feature (the `#/help` guide); a permanent tab is its nav home now
+ * that the top-nav Help link is gone. Kept OUT of the locked `TABS` (like `ADMIN_TAB`) so the four core
+ * tabs stay frozen; `tabsFor()` composes it in per role and `activeTab()` matches its `#/help*` routes.
+ * Admins do NOT get Help — their 5th slot is Admin (Help is non-admin only).
+ */
+export const HELP_TAB = Object.freeze({ id: "help", route: "#/help", prefix: "#/help" });
+
+/**
+ * The tabs to render for a session, in order: the locked four (TM-434) plus a role-specific 5th — the
+ * Admin tab for a verified admin (TM-915), or the Help tab for a normal user (TM-1092). BOTH roles get
+ * exactly five. The admin entry is never composed in for a normal user (can't leak into their DOM), and
+ * Help is never composed in for an admin. The DOM half (tabbar.js) injects/removes the matching
+ * `#tab-admin` / `#tab-help` link, and drives the 5-column grid off this list's length.
  *
  * @param {{isAdmin?: boolean}} [state] the verified-role flag (defaults to non-admin / fail-safe)
  * @returns {ReadonlyArray<{id: string, route: string, prefix: string}>}
  */
 export function tabsFor({ isAdmin = false } = {}) {
-  return isAdmin ? [...TABS, ADMIN_TAB] : TABS;
+  return isAdmin ? [...TABS, ADMIN_TAB] : [...TABS, HELP_TAB];
 }
 
 /**
  * Which tab is "active" for a hash route, or `null` when the current route isn't one of the tabs
- * (e.g. `#/help`, `#/login`, `#/diagnostics` — no tab is highlighted there). Every `#/admin*` route
- * lights the Admin tab (TM-915) — a pure route→id map, independent of role: a non-admin has no
- * `#tab-admin` link in the DOM, so nothing lights for them even though this returns "admin".
+ * (e.g. `#/login`, `#/onboarding`, `#/diagnostics` — no tab is highlighted there). Every `#/admin*`
+ * route lights the Admin tab (TM-915) and `#/help*` lights the Help tab (TM-1092) — a pure route→id
+ * map, independent of role: a non-admin has no `#tab-admin` link in the DOM (and an admin has no
+ * `#tab-help`), so a returned id only visibly lights when that role actually has the link.
  *
  * A tab matches when the route equals its route exactly OR is a sub-path of it (`#/events/{id}` →
  * Events; `#/admin/venues/new` → Admin), so a detail deep-link still reflects the right tab.
  * Order matters only in that each prefix is distinct, so the first match is the only match.
  *
  * @param {string} hash the current `window.location.hash` (e.g. "#/events/42")
- * @returns {("home"|"events"|"chat"|"profile"|"admin"|null)}
+ * @returns {("home"|"events"|"chat"|"profile"|"admin"|"help"|null)}
  */
 export function activeTab(hash) {
   if (typeof hash !== "string" || !hash) return null;
-  for (const tab of [...TABS, ADMIN_TAB]) {
+  for (const tab of [...TABS, ADMIN_TAB, HELP_TAB]) {
     if (hash === tab.prefix || hash.startsWith(`${tab.prefix}/`)) return tab.id;
   }
   return null;

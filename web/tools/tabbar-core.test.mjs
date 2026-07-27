@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { TABS, TAB_IDS, ADMIN_TAB, tabsFor, activeTab, shouldShowTabbar } from "../src/assets/tabbar-core.js";
+import { TABS, TAB_IDS, ADMIN_TAB, HELP_TAB, tabsFor, activeTab, shouldShowTabbar } from "../src/assets/tabbar-core.js";
 
 test("the tab order is LOCKED to Home · Events · Chat · Profile (TM-434 clarification)", () => {
   assert.deepEqual(TAB_IDS, ["home", "events", "chat", "profile"]);
@@ -20,18 +20,30 @@ test("the tab order is LOCKED to Home · Events · Chat · Profile (TM-434 clari
   assert.equal(TABS.some((t) => t.id === "admin"), false, "Admin must not leak into the locked TABS");
 });
 
-test("tabsFor: a normal user gets exactly the locked four (no admin affordance)", () => {
-  assert.deepEqual(tabsFor({ isAdmin: false }).map((t) => t.id), ["home", "events", "chat", "profile"]);
-  // Fail-safe: missing/partial state is treated as non-admin (the flag defaults false).
-  assert.deepEqual(tabsFor().map((t) => t.id), ["home", "events", "chat", "profile"]);
-  assert.deepEqual(tabsFor({}).map((t) => t.id), ["home", "events", "chat", "profile"]);
+test("tabsFor: a normal user gets the four PLUS the Help tab as the 5th (TM-1092), never an admin affordance", () => {
+  assert.deepEqual(tabsFor({ isAdmin: false }).map((t) => t.id), ["home", "events", "chat", "profile", "help"]);
+  // Fail-safe: missing/partial state is treated as non-admin (the flag defaults false) — still Help, never Admin.
+  assert.deepEqual(tabsFor().map((t) => t.id), ["home", "events", "chat", "profile", "help"]);
+  assert.deepEqual(tabsFor({}).map((t) => t.id), ["home", "events", "chat", "profile", "help"]);
+  // The core four are unchanged in place; Help is purely additive at the end; Admin never leaks in.
+  assert.deepEqual(tabsFor({ isAdmin: false }).slice(0, 4), TABS);
+  assert.equal(tabsFor({ isAdmin: false }).some((t) => t.id === "admin"), false, "a non-admin must never get the Admin tab");
+  assert.deepEqual(HELP_TAB, { id: "help", route: "#/help", prefix: "#/help" });
 });
 
-test("tabsFor: an admin gets the four PLUS the Admin tab appended last (TM-915)", () => {
+test("tabsFor: an admin gets the four PLUS the Admin tab appended last — and NO Help tab (TM-915/TM-1092)", () => {
   assert.deepEqual(tabsFor({ isAdmin: true }).map((t) => t.id), ["home", "events", "chat", "profile", "admin"]);
   assert.deepEqual(ADMIN_TAB, { id: "admin", route: "#/admin", prefix: "#/admin" });
   // The user four are unchanged in place — the admin entry is purely additive at the end.
   assert.deepEqual(tabsFor({ isAdmin: true }).slice(0, 4), TABS);
+  assert.equal(tabsFor({ isAdmin: true }).some((t) => t.id === "help"), false, "an admin must not get the Help tab");
+});
+
+test("both roles get EXACTLY five tabs — Admin or Help as the 5th, never both (TM-1092)", () => {
+  assert.equal(tabsFor({ isAdmin: true }).length, 5);
+  assert.equal(tabsFor({ isAdmin: false }).length, 5);
+  assert.equal(tabsFor({ isAdmin: true }).at(-1).id, "admin");
+  assert.equal(tabsFor({ isAdmin: false }).at(-1).id, "help");
 });
 
 test("activeTab lights the matching tab for each exact route", () => {
@@ -60,12 +72,18 @@ test("activeTab lights the Admin tab for every #/admin* route (TM-915)", () => {
   // #tab-admin link in the DOM, so nothing lights (visibility is enforced in tabbar.js).
 });
 
-test("activeTab is null for non-tab routes (admin routes now excepted)", () => {
-  for (const hash of ["#/help", "#/login", "#/onboarding", "#/terms", "#/diagnostics"]) {
+test("activeTab lights the Help tab for #/help and its sub-paths (TM-1092)", () => {
+  assert.equal(activeTab("#/help"), "help");
+  assert.equal(activeTab("#/help/faq"), "help");
+});
+
+test("activeTab is null for non-tab routes (admin + help routes now excepted)", () => {
+  for (const hash of ["#/login", "#/onboarding", "#/terms", "#/diagnostics"]) {
     assert.equal(activeTab(hash), null, `${hash} should not activate a tab`);
   }
-  // A near-miss on the admin prefix must not false-match (exact-or-sub-path guard).
+  // Near-misses on the admin / help prefixes must not false-match (exact-or-sub-path guard).
   assert.equal(activeTab("#/administrators"), null);
+  assert.equal(activeTab("#/helpdesk"), null);
 });
 
 test("activeTab never throws on empty / non-string input (fails safe to null)", () => {
