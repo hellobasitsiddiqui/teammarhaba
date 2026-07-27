@@ -27,8 +27,8 @@
 // Home feed so the feed's own "Events near you" heading is the first content. Events (`#/events`,
 // TM-909) NOW opts in too: its content-first rework retires the brand block so the tab's own city
 // heading (`me.city`) is the first content. Admin joined here in TM-1025 (its hub + consoles are all
-// self-headed). Chat keeps the global brand chrome for now — extending to it is the same one-line
-// SELF_HEADED addition.
+// self-headed). Chat (`#/chat`, TM-1030) now opts in too — the Chats list leads with its own "Chats"
+// heading, content-first like Home/Events; the notification bell (corner-bell.js) stays, pinned separately.
 
 /**
  * The routes whose screens own their full-page header, so the shell brand block must NOT paint
@@ -43,6 +43,9 @@
  *     with its own city heading (`me.city`), so the walking-skeleton wordmark/tagline/#status must not
  *     paint above it — the twin of Home (TM-908). The event detail (`#/events/{id}`) is covered by the
  *     same prefix rule.
+ *   • `#/chat` — the Chat tab (`#/chat/*` via the prefix rule), added TM-1030. The Chats list is
+ *     content-first (its own "Chats" heading leads); the notification bell (corner-bell.js) is a
+ *     separate pinned element and is unaffected.
  *   • `#/admin` — the admin hub + every console (`#/admin/*` via the prefix rule), added TM-1025.
  *     The hub is self-headed (admin-hub.js `<h1>Admin</h1>`) and each console renders its own heading
  *     (users `<h2>Users</h2>`, events/venues/interests/messages), so the global Circle
@@ -55,7 +58,7 @@
  *   • `#/terms` — the sibling first-run gate (TM-170), rendered as the same self-headed full-page
  *     card in the same gate chain; scoped together so the two gates can't drift apart visually.
  */
-export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/events", "#/admin", "#/onboarding", "#/terms"]);
+export const SELF_HEADED_ROUTES = Object.freeze(["#/profile", "#/home", "#/events", "#/chat", "#/admin", "#/onboarding", "#/terms"]);
 
 /**
  * Whether the app-shell brand block (wordmark h1 + tagline + #status line) should be hidden for
