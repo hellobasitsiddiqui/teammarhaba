@@ -3804,17 +3804,83 @@ html {
     min-width: 10rem;
 }
 
-/* Security settings section on the profile page. */
+/* Security settings section on the profile page. Since TM-879/TM-924 it lives INSIDE a collapsible
+ * "Security" card (profile.js) whose panel already supplies its heading + padding, so it no longer
+ * needs the old standalone top border/margin — the sub-blocks below space themselves. */
 .tm-security-settings {
-    margin-top: 2rem;
-    padding-top: 1.5rem;
-    border-top: var(--border-width) solid var(--fg-line);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
 }
 
 .tm-security-settings h3 {
     margin: 0 0 0.75rem;
     font-size: 1.05rem;
     color: var(--fg);
+}
+
+/* Sub-block heading inside the Security card (Your devices / Sign out everywhere) — smaller than the
+ * card's own header, so the two device controls read as sub-sections of the one Security group. */
+.tm-security-subhead {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+    color: var(--fg);
+}
+
+/* App-lock sub-block: hidden by default (revealed only on a native device with usable biometry). */
+.tm-security-applock[hidden] {
+    display: none;
+}
+
+/* TM-924 "Your devices" list — one row per push-registered device (platform + last-seen). */
+.tm-security-devices .tm-device-note {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+}
+
+.tm-device-status {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
+}
+
+.tm-device-status[hidden] {
+    display: none;
+}
+
+.tm-device-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tm-device-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    border: var(--border-width) solid var(--fg-line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+}
+
+.tm-device-name {
+    font-weight: 600;
+    color: var(--fg);
+}
+
+.tm-device-seen {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+/* TM-924 "Sign out everywhere" — a danger action; the button inherits .tm-btn-danger tokens. */
+.tm-signout-everywhere {
+    margin-top: 0.5rem;
 }
 
 .tm-switch-hint {
