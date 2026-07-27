@@ -60,12 +60,16 @@ test("the content-first Events tab and its detail are self-headed (TM-909)", () 
   assert.equal(shellBrandHidden("#/events/42"), true, "an event detail matches via the prefix rule");
 });
 
-test("brand block stays on every other route (login/chat unchanged)", () => {
-  // #/home, #/admin and #/events are NOW self-headed (TM-908 / TM-1025 / TM-909) so they are deliberately
-  // absent here — see the Home + admin + Events tests above.
+test("the content-first Chat tab and its threads are self-headed (TM-1030)", () => {
+  assert.equal(shellBrandHidden("#/chat"), true, "the Chat tab");
+  assert.equal(shellBrandHidden("#/chat/7"), true, "a chat thread matches via the prefix rule");
+});
+
+test("brand block stays on non-tab routes (login/help/notifications unchanged)", () => {
+  // The four content tabs (#/home, #/events, #/chat, #/admin) + #/profile are NOW self-headed
+  // (TM-908 / TM-909 / TM-1030 / TM-1025 / TM-910), so they're deliberately absent here.
   // #/login stays shown: the signed-out auth landing card owns its own lockup and is unaffected.
-  for (const route of ["#/login", "#/chat", "#/chat/7",
-    "#/help", "#/notifications", "#/diagnostics"]) {
+  for (const route of ["#/login", "#/help", "#/notifications", "#/diagnostics"]) {
     assert.equal(shellBrandHidden(route), false, `expected the brand block to stay on ${route}`);
   }
 });
@@ -85,8 +89,8 @@ test("fails safe (shown) on junk input", () => {
 
 test("the self-headed route list is frozen and exactly the decided set", () => {
   assert.ok(Object.isFrozen(SELF_HEADED_ROUTES));
-  // #/home added by TM-908 (content-first Home); #/events by TM-909; #/admin by TM-1025.
-  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/events", "#/admin", "#/onboarding", "#/terms"]);
+  // #/home added by TM-908 (content-first Home); #/events by TM-909; #/chat by TM-1030; #/admin by TM-1025.
+  assert.deepEqual([...SELF_HEADED_ROUTES], ["#/profile", "#/home", "#/events", "#/chat", "#/admin", "#/onboarding", "#/terms"]);
 });
 
 // --- (2) the DOM bridge ------------------------------------------------------------------------------
@@ -111,15 +115,14 @@ function fakeDoc({ withStatus = true } = {}) {
   };
 }
 
-test("updateShellBrand hides all three brand elements on #/profile and restores them on #/chat", () => {
+test("updateShellBrand hides all three brand elements on #/profile and restores them on a non-self-headed route", () => {
   const doc = fakeDoc();
   updateShellBrand({ route: "#/profile" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [true, true, true]);
   // Navigating to a route that still shows the block restores it (render() reruns this on every
-  // hashchange/auth change). #/chat is chosen deliberately: #/home (TM-908) and #/events (TM-909) are
-  // now self-headed and would keep the block hidden, so Chat is the only tab route that can still stand
-  // in for a "block restored" route here.
-  updateShellBrand({ route: "#/chat" }, doc);
+  // hashchange/auth change). All four tabs (#/home, #/events, #/chat, #/admin) + #/profile are now
+  // self-headed, so a non-tab route like #/notifications stands in for a "block restored" route here.
+  updateShellBrand({ route: "#/notifications" }, doc);
   assert.deepEqual([doc.h1.hidden, doc.tagline.hidden, doc.status.hidden], [false, false, false]);
 });
 
