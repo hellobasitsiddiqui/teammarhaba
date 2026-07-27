@@ -50,18 +50,21 @@ function firstPhoneBlock(css) {
 
 // ---- TM-963: the select-all header survives the mobile thead-hide -----------------------------
 
-test("admin.js still puts the select-all in a th.tm-check-cell header (the element the CSS reveals)", () => {
-  const src = read("admin.js");
+// TM-972: the broadcast recipient picker (the ONLY roster with a select-all) moved OUT of the users
+// console (admin.js) into its own "Send notification" screen (admin-notifications.js). The mobile
+// thead-reveal it depends on is unchanged — but the select-all header now lives in admin-notifications.js.
+test("admin-notifications.js still puts the select-all in a th.tm-check-cell header (the element the CSS reveals)", () => {
+  const src = read("admin-notifications.js");
   // The header <th> carrying the select-all must have class tm-check-cell — that's the hook the CSS
-  // `:has(.tm-check-cell)` reveal targets. If the console stops using that class the fix silently
+  // `:has(.tm-check-cell)` reveal targets. If the screen stops using that class the fix silently
   // stops applying, so pin it here alongside the id.
   assert.ok(
     /el\("th",\s*\{[^}]*class:\s*"tm-check-cell"/.test(src),
-    "admin.js should render the select-all header as `el(\"th\", { class: \"tm-check-cell\" })` (the CSS reveal hook)",
+    "admin-notifications.js should render the select-all header as `el(\"th\", { class: \"tm-check-cell\" })` (the CSS reveal hook)",
   );
   assert.ok(
     /id:\s*"admin-select-all"/.test(src),
-    "admin.js should give the select-all checkbox id `admin-select-all`",
+    "admin-notifications.js should give the select-all checkbox id `admin-select-all`",
   );
 });
 

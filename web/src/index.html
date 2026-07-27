@@ -443,6 +443,17 @@
              (#/admin/messages/new), which now returns here after a send. -->
         <section id="admin-message-list-view" class="admin-console" aria-label="Sent messages" hidden></section>
 
+        <!-- Send notification (TM-972): the ADMIN-only #/admin/notifications view — the push-broadcast
+             compose + its recipient picker (user roster + push-eligibility + select-all), LIFTED out of
+             the users console. admin-notifications.js (imported by router.js) builds it here; router.js
+             owns visibility + the ADMIN gate (same as every #/admin route). Heading-first (its own <h1>). -->
+        <section id="admin-notifications-view" class="admin-console" aria-label="Send notification" hidden></section>
+
+        <!-- Developer tools (TM-972): the ADMIN-only #/admin/ops view — the Operations panel (health /
+             diagnostics / API docs / consoles), LIFTED out of the users console. admin-ops.js (imported by
+             router.js) builds it here; router.js owns visibility + the ADMIN gate. Heading-first (its own <h1>). -->
+        <section id="admin-ops-view" class="admin-console" aria-label="Developer tools" hidden></section>
+
         <!-- Edit-profile view (TM-167): self-service #/profile view for any signed-in user. profile.js
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
         <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>

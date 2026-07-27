@@ -46,6 +46,19 @@ import { enterAdminMessageCompose } from "./admin-messages.js";
 // exact-match #/admin/messages predicate) is the pure admin-message-route.js. Additive to this router.
 import { enterAdminSentHistory } from "./admin-sent-history.js";
 import { isAdminMessageComposeRoute, ADMIN_MESSAGES_ROUTE } from "./admin-message-route.js";
+// Send notification (TM-972): the push-broadcast compose + its recipient picker, LIFTED out of the
+// users console to its own #/admin/notifications fold. admin-notifications.js mounts it into
+// #admin-notifications-view; the route string + predicate live in the pure admin-hub-route.js. ADMIN-only
+// (same gate as every #/admin route). Developer tools (TM-972): the Operations panel, LIFTED out of the
+// users console to its own #/admin/ops fold. admin-ops.js mounts it into #admin-ops-view; same gate.
+import { enterAdminNotifications } from "./admin-notifications.js";
+import { enterAdminOps } from "./admin-ops.js";
+import {
+  ADMIN_NOTIFICATIONS_ROUTE,
+  ADMIN_OPS_ROUTE,
+  isAdminNotificationsRoute,
+  isAdminOpsRoute,
+} from "./admin-hub-route.js";
 import { enterProfile, editFormIsDirty } from "./profile.js";
 // TM-1027: the unsaved-changes guard for the profile edit form. The pure "should this nav be
 // intercepted?" decision (leaving the edit form while dirty) + the confirm-dialog copy live in
@@ -143,6 +156,13 @@ const ADMIN_INTERESTS = "#/admin/interests"; // TM-779
 // admin-sent-history.js mounts into #admin-message-list-view. The one route string lives in
 // admin-message-route.js (ADMIN_MESSAGES_ROUTE), imported here so it isn't duplicated.
 const ADMIN_MESSAGES = ADMIN_MESSAGES_ROUTE;
+// Send notification (TM-972) — the push-broadcast compose + recipient picker, its own exact hash,
+// ADMIN-only (same gate as #/admin). admin-notifications.js mounts into #admin-notifications-view. The
+// one route string lives in admin-hub-route.js (ADMIN_NOTIFICATIONS_ROUTE), imported so it isn't dupd.
+const ADMIN_NOTIFICATIONS = ADMIN_NOTIFICATIONS_ROUTE;
+// Developer tools (TM-972) — the Operations panel, its own exact hash, ADMIN-only (same gate as #/admin).
+// admin-ops.js mounts into #admin-ops-view. Route string lives in admin-hub-route.js (ADMIN_OPS_ROUTE).
+const ADMIN_OPS = ADMIN_OPS_ROUTE;
 // Full-page create/edit event form (TM-426) — ADMIN-only, same gate as #/admin/events. The form used
 // to be a modal that overflowed short viewports (TM-421); it's now its own page at #/admin/events/new
 // (create) and #/admin/events/{id}/edit (edit). The edit route carries a dynamic id, so — like the
@@ -201,7 +221,7 @@ const MEMBERSHIP = "#/membership";
 // PROTECTED set (flag-independent) and handled by the flag-aware isReceiptsRoute() instead, exactly like
 // the membership tier route.
 const RECEIPTS = "#/receipts";
-const PROTECTED = new Set([HOME, ADMIN, ADMIN_USERS, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS (the moved users console must stay auth-gated like the old #/admin — a signed-out deep-link is remembered + bounced to login, not flashed then home-bounced)
+const PROTECTED = new Set([HOME, ADMIN, ADMIN_USERS, ADMIN_EVENTS, ADMIN_VENUES, ADMIN_INTERESTS, ADMIN_MESSAGES, ADMIN_NOTIFICATIONS, ADMIN_OPS, PROFILE, CHAT, NOTIFICATIONS, ONBOARDING, TERMS, DIAGNOSTICS]); // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS (the moved users console must stay auth-gated like the old #/admin — a signed-out deep-link is remembered + bounced to login, not flashed then home-bounced); TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS (the two lifted folds must stay auth-gated too — a missing PROTECTED entry is a real signed-out-auth regression, learned on TM-917)
 
 /** True for the events list (`#/events`), the list with a query (`#/events?similarTo=…`, TM-827-C),
  *  or any event detail (`#/events/{id}`). */
@@ -362,6 +382,14 @@ let adminMessageComposeEntered = false;
 // entry into #/admin/messages and reset on leaving (mirrors the single-route views like the events
 // console). Re-entry reloads from page 0 so a just-sent campaign shows at the top.
 let adminMessagesActive = false;
+// Send notification (TM-972): whether the notification screen is currently mounted, so we mount it once
+// on entry into #/admin/notifications and reset on leaving. Single exact route → a boolean is enough
+// (mirrors the sent-history list). enterAdminNotifications() reloads its recipient roster each entry.
+let adminNotificationsActive = false;
+// Developer tools (TM-972): whether the ops screen is currently mounted, so we mount it once on entry
+// into #/admin/ops and reset on leaving. The screen is static (links from injected config), so
+// enterAdminOps() is itself idempotent — mirrors the admin hub.
+let adminOpsActive = false;
 // Profile view (TM-167; TM-514): the last profile sub-route we entered (`#/profile` hub or
 // `#/profile/public` preview), so a repeated guard() for the SAME route doesn't rebuild/refetch, while
 // switching hub↔preview re-enters. Reset to null when leaving the profile area. (This route-entered
@@ -457,7 +485,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === ADMIN_NOTIFICATIONS || hash === ADMIN_OPS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS; TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
@@ -538,6 +566,12 @@ function render() {
   // Admin sent-history list (TM-444) — shown for the exact #/admin/messages route.
   const adminMessageListView = $("admin-message-list-view");
   if (adminMessageListView) adminMessageListView.hidden = route !== ADMIN_MESSAGES;
+  // Send notification (TM-972) — shown for the exact #/admin/notifications route.
+  const adminNotificationsView = $("admin-notifications-view");
+  if (adminNotificationsView) adminNotificationsView.hidden = route !== ADMIN_NOTIFICATIONS;
+  // Developer tools (TM-972) — shown for the exact #/admin/ops route.
+  const adminOpsView = $("admin-ops-view");
+  if (adminOpsView) adminOpsView.hidden = route !== ADMIN_OPS;
   if (profileView) profileView.hidden = !isProfileRoute(route);
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
@@ -773,6 +807,22 @@ function guard() {
     go(HOME);
     return;
   }
+  // Send notification (TM-972) is ADMIN-only too — same rule as #/admin; the backend (the push-broadcast
+  // endpoint under /api/v1/admin) is the real gate. A missing bounce here is a real regression (TM-917).
+  if (route === ADMIN_NOTIFICATIONS && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
+    toast("Admins only.", { type: "error" });
+    adminNotificationsActive = false;
+    go(HOME);
+    return;
+  }
+  // Developer tools (TM-972) is ADMIN-only too — same rule as #/admin. The diagnostics it links are
+  // themselves token-gated by the backend; this just avoids showing an unusable page to a non-admin.
+  if (route === ADMIN_OPS && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
+    toast("Admins only.", { type: "error" });
+    adminOpsActive = false;
+    go(HOME);
+    return;
+  }
   render();
   // TM-1027: we've passed every auth/admin bounce and are actually rendering `route` — this is the
   // "committed" hash the unsaved-changes intercept restores TO if the next navigation is cancelled.
@@ -886,6 +936,28 @@ function guard() {
     }
   } else {
     adminMessagesActive = false;
+  }
+  // Send notification (TM-972): mount once on entry into #/admin/notifications, reset on leaving so a
+  // future entry re-mounts + reloads the recipient roster. Single exact route → boolean guard is enough
+  // (mirrors the sent-history list above). enterAdminNotifications() reloads the account walk each entry.
+  if (route === ADMIN_NOTIFICATIONS && isAdmin) {
+    if (!adminNotificationsActive) {
+      adminNotificationsActive = true;
+      enterAdminNotifications();
+    }
+  } else {
+    adminNotificationsActive = false;
+  }
+  // Developer tools (TM-972): mount once on entry into #/admin/ops, reset on leaving. The screen is
+  // static (links from injected config; diagnostics fetch lazily on expand), so enterAdminOps() is
+  // itself idempotent — mirrors the admin hub lifecycle.
+  if (route === ADMIN_OPS && isAdmin) {
+    if (!adminOpsActive) {
+      adminOpsActive = true;
+      enterAdminOps();
+    }
+  } else {
+    adminOpsActive = false;
   }
   // Profile view (TM-167; TM-514): mount + (re)load on entry, and re-enter when the profile sub-route
   // CHANGES (hub ↔ public preview) so the right layout renders, without refetching on the repeated
