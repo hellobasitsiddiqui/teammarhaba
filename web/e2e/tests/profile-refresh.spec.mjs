@@ -76,8 +76,9 @@ test("@profile the refreshed Profile hub shows the completeness ring, badges and
     .toBeLessThanOrEqual(1);
 
   // The paper-profile menu is present (public-profile entry) and no longer carries the redundant
-  // "My events" row — it just duplicated the Events tab, removed in TM-1028.
-  await expect(page.getByRole("link", { name: /Public profile/ })).toBeVisible();
+  // "My events" row — it just duplicated the Events tab, removed in TM-1028. TM-1099: the row now
+  // reads "Your public profile" (+ a "See how people see your profile" subtitle).
+  await expect(page.getByRole("link", { name: /Your public profile/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /My events/ })).toHaveCount(0);
 });
 
