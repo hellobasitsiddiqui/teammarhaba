@@ -168,21 +168,32 @@ test("bell-anchoring headers are sticky + reserve the 44px clearance — Chat, H
   }
 });
 
-// ── TM-1090: the bell is pinned to the TRUE VIEWPORT top-right corner, not the centred clamp band —
-//    so it is identical top-right on every route at every width. The band-centring machinery must be GONE. ──
+// ── TM-1090: the bell is pinned to the top-right corner of the APP COLUMN/PANEL — it rides the SAME
+//    --app-max band as .app (so its right edge == the column's right edge) and widens WITH the admin panel,
+//    instead of floating at the narrow band edge (RC1) or flying out to the far viewport edge. ──
 
-test("the corner bell is viewport-anchored, not clamp-band-centred (TM-1090)", () => {
+test("the corner bell rides the app-column band + widens with the admin panel (TM-1090)", () => {
   // Isolate the `.app-topbar` rule body (the standalone bell chrome, not `.app-topbar > .tm-notif-bell`).
   const rule = NO_COMMENTS.match(/\.app-topbar\s*\{([^}]*)\}/);
   assert.ok(rule, ".app-topbar rule must exist");
   const body = rule[1];
   assert.match(body, /position:\s*fixed/, ".app-topbar must be position: fixed");
-  assert.match(body, /top:\s*0/, ".app-topbar must pin top: 0");
-  assert.match(body, /right:\s*0/, ".app-topbar must pin right: 0 (the true viewport corner)");
-  // The band-centring that made the bell drift must NOT come back.
-  assert.ok(!/var\(--app-max\)/.test(body), ".app-topbar must NOT read --app-max (that anchored it to the drifting band) (TM-1090)");
-  assert.ok(!/margin-inline/.test(body), ".app-topbar must NOT set margin-inline (no band centring) (TM-1090)");
-  assert.ok(!/\bwidth\s*:/.test(body), ".app-topbar must NOT set a width — it shrink-wraps the bell at the corner (TM-1090)");
+  // The bell rides the SAME clamp band as .app, so its right edge coincides with the app column's right edge.
+  assert.match(
+    body,
+    /width:\s*min\(\s*100%\s*,\s*var\(--app-max\)\s*\)/,
+    ".app-topbar must size to the .app clamp band — width: min(100%, var(--app-max)) (TM-1090)",
+  );
+  assert.match(body, /margin-inline:\s*auto/, ".app-topbar must centre the band (margin-inline: auto) so it tracks .app (TM-1090)");
+  assert.match(body, /justify-content:\s*flex-end/, ".app-topbar must push the bell to the band's right edge — the panel corner (TM-1090)");
+  // RC1: the admin --app-max widen must ALSO reach #app-topbar, or the bell strands at the narrow band edge
+  // (mid-panel) while the admin column is ~72rem. Find the widen rule; assert its selector includes the bell.
+  const widen = NO_COMMENTS.match(/([^{}]*)\{\s*--app-max:\s*min\(\s*72rem[^}]*\}/);
+  assert.ok(widen, "the admin --app-max widen (min(72rem, 96vw)) must exist");
+  assert.ok(
+    /#app-topbar/.test(widen[1]),
+    "the admin --app-max widen must also target #app-topbar so the bell tracks the wide admin panel (RC1, TM-1090)",
+  );
 });
 
 // ── TM-1073: soft shade page background, white content cards. The page ground (--page-bg on the phone
@@ -316,7 +327,9 @@ test(".app fills the viewport height so its background spans top→bottom (TM-10
 test("the admin surface widens the shell clamp via .app:has(> .admin-console:not([hidden])) (TM-1074)", () => {
   assert.match(
     NO_COMMENTS,
-    /\.app:has\(\s*>\s*\.admin-console:not\(\[hidden\]\)\s*\)\s*\{[^}]*--app-max:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
+    // `[^{}]*` after the selector allows TM-1090's added `, body:has(...) #app-topbar` in the same list
+    // (the bell rides the widened band too) — the .app widen itself is unchanged.
+    /\.app:has\(\s*>\s*\.admin-console:not\(\[hidden\]\)\s*\)[^{}]*\{[^}]*--app-max:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
     ".app:has(> .admin-console:not([hidden])) must re-point --app-max to min(72rem, 96vw) so the admin " +
       "column fits inside the shell (no right overflow) — gated on a VISIBLE admin console only (TM-1074)",
   );

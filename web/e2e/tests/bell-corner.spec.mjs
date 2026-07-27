@@ -1,13 +1,14 @@
-// TM-1090: the standalone notification bell must sit at the TRUE VIEWPORT top-right corner on EVERY
-// signed-in surface (Home, Events, Chat, Profile, Admin) at EVERY screen size — not drift inward with
-// the centred clamp band (the old bug: bell rode the column edge, so it was ~188/316/494px off the
-// corner at 768/1024/1440px, and floated mid-column on the widened Admin surface).
+// TM-1090: the standalone notification bell must sit at the top-right corner of the APP COLUMN/PANEL on
+// EVERY signed-in surface (Home, Events, Chat, Profile, Admin) at EVERY screen size — i.e. its right edge
+// hugs `main.app`'s right edge (the content panel's edge, level with the header's action button), NOT:
+//   • floating mid-panel on the WIDENED admin column (the old bug: bell used the narrow ≤480px band while
+//     the admin panel is ~72rem, so it sat ~300px inside the panel), and NOT
+//   • flung out to the far viewport edge on wide desktops.
 //
-// The invariant is pure route-independent CSS on `.app-topbar` (position:fixed; top:0; right:0; no width /
-// margin / --app-max), so this spec proves it holds across the full widths×routes matrix. Sign in as an
-// ADMIN so #/admin is reachable. The bell's `hidden` attribute (reveal logic) is owned elsewhere
-// (corner-bell-core / notification-center-bell-gate unit tests); here we force it measurable and assert
-// GEOMETRY only.
+// The bell rides the same --app-max clamp band as `.app` (and widens with it on admin), so this holds across
+// the full widths×routes matrix. Sign in as ADMIN so #/admin (the wide panel) is reachable. The bell's
+// `hidden` attribute (reveal logic) is owned elsewhere (corner-bell-core / notification-center-bell-gate
+// unit tests); here we force it measurable and assert GEOMETRY relative to the column.
 
 import { test, expect } from "@playwright/test";
 import { ADMIN } from "../fixtures.mjs";
@@ -26,11 +27,13 @@ async function signIn(page, account) {
 
 const WIDTHS = [320, 390, 768, 1024, 1440];
 const ROUTES = ["#/home", "#/events", "#/chat", "#/profile", "#/admin"];
-const CORNER_TOLERANCE = 24; // same bar profile-shell.spec.mjs applies at phone width — now universal
+// The bell's right edge sits inside the column's right edge by .app's content rail (2rem desktop / 0.85rem
+// phone ≈ ≤32px). Allow up to 40px inside; it must never sit further in (mid-panel) or beyond the column.
+const RAIL_MAX = 40;
 
-test("@app-shell notification bell hugs the true top-right corner on every route at every width (TM-1090)", async ({ page }) => {
+test("@app-shell notification bell hugs the app-column right edge on every route at every width (TM-1090)", async ({ page }) => {
   await signIn(page, ADMIN);
-  // ADMIN role resolves → tabbar.js injects the fifth Admin tab; wait so #/admin is reachable.
+  // ADMIN role resolves → tabbar.js injects the fifth Admin tab; wait so #/admin (the wide panel) is reachable.
   await expect(page.locator("#tab-admin")).toBeVisible();
 
   const samples = [];
@@ -42,32 +45,36 @@ test("@app-shell notification bell hugs the true top-right corner on every route
       await expect(page.locator("#app-tabbar")).toBeVisible(); // render() settled the chrome
       const g = await page.evaluate(() => {
         const bell = document.getElementById("nav-notif-bell");
-        if (bell) bell.hidden = false; // geometry is route-independent CSS — measure regardless of notif data
+        if (bell) bell.hidden = false; // geometry is CSS — measure regardless of notif data
+        const app = document.querySelector("main.app");
         const b = bell ? bell.getBoundingClientRect() : null;
+        const a = app ? app.getBoundingClientRect() : null;
         return {
-          vpW: document.documentElement.clientWidth,
-          right: b ? Math.round(b.right) : null,
-          top: b ? Math.round(b.top) : null,
+          bellRight: b ? Math.round(b.right) : null,
+          bellTop: b ? Math.round(b.top) : null,
+          colRight: a ? Math.round(a.right) : null,
         };
       });
       samples.push({ width, route, ...g });
     }
   }
 
-  // (1) On EVERY combination the bell's right edge is within 24px of the viewport's right edge.
+  // On EVERY combination the bell hugs the app column's right edge: at/just inside it, never mid-panel.
   for (const s of samples) {
-    expect(s.right, `bell not found at ${s.width}px ${s.route}`).not.toBeNull();
+    expect(s.bellRight, `bell not found at ${s.width}px ${s.route}`).not.toBeNull();
+    expect(s.colRight, `main.app not found at ${s.width}px ${s.route}`).not.toBeNull();
+    const inset = s.colRight - s.bellRight; // >0 = bell inside the column edge
     expect(
-      s.vpW - s.right,
-      `bell not in the top-right corner at ${s.width}px ${s.route} — gap ${s.vpW - s.right}px (should be ≤${CORNER_TOLERANCE})`,
-    ).toBeLessThanOrEqual(CORNER_TOLERANCE);
+      inset,
+      `bell floats mid-panel at ${s.width}px ${s.route} — ${inset}px inside the column edge (should be ≤${RAIL_MAX})`,
+    ).toBeLessThanOrEqual(RAIL_MAX);
+    expect(
+      inset,
+      `bell sits BEYOND the app column at ${s.width}px ${s.route} — bellRight ${s.bellRight} > colRight ${s.colRight}`,
+    ).toBeGreaterThanOrEqual(-4);
   }
 
-  // (2) The bell's TOP offset is identical across all samples — no per-route / per-width vertical term.
-  const tops = [...new Set(samples.map((s) => s.top))];
+  // The bell's TOP offset is identical across all samples — no per-route / per-width vertical term.
+  const tops = [...new Set(samples.map((s) => s.bellTop))];
   expect(tops.length, `bell top drifts across routes/widths: ${JSON.stringify(tops)}`).toBe(1);
-
-  // (3) The horizontal gap from the corner is identical too — a pure constant, nothing width/route can move.
-  const gaps = [...new Set(samples.map((s) => s.vpW - s.right))];
-  expect(gaps.length, `bell corner gap drifts across routes/widths: ${JSON.stringify(gaps)}`).toBe(1);
 });

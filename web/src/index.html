@@ -601,11 +601,11 @@
     </main>
 
     <!-- Notification bell (TM-455 / TM-1043; re-anchored in TM-1090): standalone, route-independent
-         chrome pinned to the TRUE VIEWPORT top-right corner on EVERY signed-in route at every width
-         (the top .app-nav is gone; the bottom tab bar is the only nav). Placed OUTSIDE <main class="app">
-         so no column/route style can move it — deliberately NOT aligned to the --app-max clamp band
-         (that made it drift per route/width; see styles.css .app-topbar). Visibility stays owned by
-         updateNotificationBell() (router-driven, signed-in + un-gated). Starts `hidden`. -->
+         chrome pinned to the top-right corner of the APP COLUMN/PANEL on EVERY signed-in route (the top
+         .app-nav is gone; the bottom tab bar is the only nav). Placed OUTSIDE <main class="app"> as fixed
+         chrome, but sized to the SAME --app-max clamp band as .app (and widened with it on admin) so it
+         sits at the content panel's right edge, level with the header's action button — see styles.css
+         .app-topbar. Visibility stays owned by updateNotificationBell(). Starts `hidden`. -->
     <div id="app-topbar" class="app-topbar">
         <button id="nav-notif-bell" class="tm-notif-bell" type="button" hidden aria-label="Notifications">
             <svg class="tm-notif-bell-glyph" viewBox="0 0 24 24" width="22" height="22" fill="none"
