@@ -144,19 +144,55 @@ test("no routed VIEW re-introduces a page-width cap wider than the 480px column 
 // ── TM-1072: the notification bell is fixed chrome; its companion screen headers must be STICKY so on
 //    scroll the bell stays anchored to its header instead of floating over list rows (the Chat-list bug). ──
 
-test("bell-anchoring headers are sticky + the Chat header clears the bell (TM-1072)", () => {
-  // The sticky rule that keeps the fixed bell with its header while content scrolls beneath.
-  const sticky = NO_COMMENTS.match(/\.tm-chat-head\s*,[\s\S]*?\{[\s\S]*?\}/);
-  assert.ok(
-    sticky && /position:\s*sticky/.test(sticky[0]),
-    ".tm-chat-head (+ #auth-signed-in .tm-home-head / #profile-view .tm-pf-topbar) must be position: sticky " +
-      "so the fixed bell stays anchored to its header on scroll, not floating over list rows (TM-1072)",
-  );
-  // The Chat header reserves the same 44px bell-clearance Home/Profile already had.
+test("bell-anchoring headers are sticky + reserve the 44px clearance — Chat, Home, Profile, Events, Admin (TM-1072/TM-1090)", () => {
+  // TM-1090 widened both allowlists to Events + Admin, so assert MEMBERSHIP of the selector list that
+  // precedes each declaration rather than an exact ordering (which the list growth would break).
+  const ANCHORS = [
+    ".tm-chat-head",
+    "#auth-signed-in .tm-home-head",
+    "#profile-view .tm-pf-topbar",
+    "#events-view .tm-event-head",
+    ".admin-console .tm-admin-head",
+  ];
+  // The 44px bell-clearance rule: capture the selector list immediately before `padding-right: calc(44px …)`.
+  const clearance = NO_COMMENTS.match(/([^{}]*)\{\s*padding-right:\s*calc\(\s*44px[^}]*\}/);
+  assert.ok(clearance, "a `padding-right: calc(44px …)` bell-clearance rule must exist");
+  for (const sel of ANCHORS) {
+    assert.ok(clearance[1].includes(sel), `bell-clearance selector list must include ${sel} (TM-1072/TM-1090)`);
+  }
+  // The sticky rule that keeps the fixed bell anchored to its header while content scrolls beneath.
+  const sticky = NO_COMMENTS.match(/([^{}]*)\{\s*position:\s*sticky;[^}]*\}/);
+  assert.ok(sticky, "a `position: sticky` bell-anchoring header rule must exist");
+  for (const sel of ANCHORS) {
+    assert.ok(sticky[1].includes(sel), `sticky bell-anchoring selector list must include ${sel} (TM-1072/TM-1090)`);
+  }
+});
+
+// ── TM-1090: the bell is pinned to the top-right corner of the APP COLUMN/PANEL — it rides the SAME
+//    --app-max band as .app (so its right edge == the column's right edge) and widens WITH the admin panel,
+//    instead of floating at the narrow band edge (RC1) or flying out to the far viewport edge. ──
+
+test("the corner bell rides the app-column band + widens with the admin panel (TM-1090)", () => {
+  // Isolate the `.app-topbar` rule body (the standalone bell chrome, not `.app-topbar > .tm-notif-bell`).
+  const rule = NO_COMMENTS.match(/\.app-topbar\s*\{([^}]*)\}/);
+  assert.ok(rule, ".app-topbar rule must exist");
+  const body = rule[1];
+  assert.match(body, /position:\s*fixed/, ".app-topbar must be position: fixed");
+  // The bell rides the SAME clamp band as .app, so its right edge coincides with the app column's right edge.
   assert.match(
-    NO_COMMENTS,
-    /\.tm-chat-head\s*\{\s*padding-right:\s*calc\(\s*44px/,
-    "the Chat header (.tm-chat-head) must reserve the 44px bell clearance (TM-1072)",
+    body,
+    /width:\s*min\(\s*100%\s*,\s*var\(--app-max\)\s*\)/,
+    ".app-topbar must size to the .app clamp band — width: min(100%, var(--app-max)) (TM-1090)",
+  );
+  assert.match(body, /margin-inline:\s*auto/, ".app-topbar must centre the band (margin-inline: auto) so it tracks .app (TM-1090)");
+  assert.match(body, /justify-content:\s*flex-end/, ".app-topbar must push the bell to the band's right edge — the panel corner (TM-1090)");
+  // RC1: the admin --app-max widen must ALSO reach #app-topbar, or the bell strands at the narrow band edge
+  // (mid-panel) while the admin column is ~72rem. Find the widen rule; assert its selector includes the bell.
+  const widen = NO_COMMENTS.match(/([^{}]*)\{\s*--app-max:\s*min\(\s*72rem[^}]*\}/);
+  assert.ok(widen, "the admin --app-max widen (min(72rem, 96vw)) must exist");
+  assert.ok(
+    /#app-topbar/.test(widen[1]),
+    "the admin --app-max widen must also target #app-topbar so the bell tracks the wide admin panel (RC1, TM-1090)",
   );
 });
 
@@ -291,7 +327,9 @@ test(".app fills the viewport height so its background spans top→bottom (TM-10
 test("the admin surface widens the shell clamp via .app:has(> .admin-console:not([hidden])) (TM-1074)", () => {
   assert.match(
     NO_COMMENTS,
-    /\.app:has\(\s*>\s*\.admin-console:not\(\[hidden\]\)\s*\)\s*\{[^}]*--app-max:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
+    // `[^{}]*` after the selector allows TM-1090's added `, body:has(...) #app-topbar` in the same list
+    // (the bell rides the widened band too) — the .app widen itself is unchanged.
+    /\.app:has\(\s*>\s*\.admin-console:not\(\[hidden\]\)\s*\)[^{}]*\{[^}]*--app-max:\s*min\(\s*72rem\s*,\s*96vw\s*\)/,
     ".app:has(> .admin-console:not([hidden])) must re-point --app-max to min(72rem, 96vw) so the admin " +
       "column fits inside the shell (no right overflow) — gated on a VISIBLE admin console only (TM-1074)",
   );
