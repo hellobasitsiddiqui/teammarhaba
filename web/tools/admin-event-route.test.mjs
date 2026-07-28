@@ -9,8 +9,11 @@ import {
   ADMIN_EVENT_NEW_ROUTE,
   adminEventNewHash,
   adminEventEditHash,
+  adminEventRosterHash,
   isAdminEventFormRoute,
   parseAdminEventFormRoute,
+  isAdminEventRosterRoute,
+  parseAdminEventRosterRoute,
 } from "../src/assets/admin-event-route.js";
 
 test("new-hash builder points at the create route", () => {
@@ -61,5 +64,65 @@ test("unrelated / malformed hashes are not form routes", () => {
   ]) {
     assert.equal(isAdminEventFormRoute(h), false, `expected non-form: ${String(h)}`);
     assert.equal(parseAdminEventFormRoute(h), null, `expected null parse: ${String(h)}`);
+  }
+});
+
+// ---- roster route (TM-1115) --------------------------------------------------------------------
+
+test("roster-hash builder embeds and percent-encodes the id", () => {
+  assert.equal(adminEventRosterHash(42), "#/admin/events/42/roster");
+  assert.equal(adminEventRosterHash("abc"), "#/admin/events/abc/roster");
+  assert.equal(adminEventRosterHash("a b"), "#/admin/events/a%20b/roster");
+});
+
+test("parse recognises a roster route and decodes the id", () => {
+  assert.deepEqual(parseAdminEventRosterRoute("#/admin/events/42/roster"), { id: "42" });
+  assert.deepEqual(parseAdminEventRosterRoute("#/admin/events/a%20b/roster"), { id: "a b" });
+  assert.equal(isAdminEventRosterRoute("#/admin/events/99/roster"), true);
+});
+
+test("roster hash round-trips through parse", () => {
+  assert.deepEqual(parseAdminEventRosterRoute(adminEventRosterHash("evt-77")), { id: "evt-77" });
+});
+
+// ⚠ The single biggest parse-order risk: /edit and /roster must NEVER swallow each other. Each parser
+// fires ONLY on its own suffix — assert BOTH directions so the more-specific suffix is never eaten.
+test("edit and roster routes never cross-match (parse-order)", () => {
+  const editHash = "#/admin/events/42/edit";
+  const rosterHash = "#/admin/events/42/roster";
+
+  // The edit parser rejects a roster hash…
+  assert.equal(isAdminEventFormRoute(rosterHash), false);
+  assert.equal(parseAdminEventFormRoute(rosterHash), null);
+  // …and the roster parser rejects an edit hash.
+  assert.equal(isAdminEventRosterRoute(editHash), false);
+  assert.equal(parseAdminEventRosterRoute(editHash), null);
+
+  // Each fires only on its own suffix.
+  assert.deepEqual(parseAdminEventFormRoute(editHash), { mode: "edit", id: "42" });
+  assert.deepEqual(parseAdminEventRosterRoute(rosterHash), { id: "42" });
+
+  // The create route is neither an edit-with-id nor a roster route.
+  assert.equal(isAdminEventRosterRoute("#/admin/events/new"), false);
+});
+
+test("bare list route + unrelated / malformed hashes are not roster routes", () => {
+  for (const h of [
+    ADMIN_EVENTS_ROUTE,
+    "#/admin/events",
+    "#/admin/events/new",
+    "#/admin",
+    "#/home",
+    "#/events/42/roster", // user events area, not admin
+    "#/admin/events/", // no id + no suffix
+    "#/admin/events//roster", // empty id
+    "#/admin/events/a/b/roster", // nested id
+    "#/admin/events/%/roster", // bad percent-escape
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(isAdminEventRosterRoute(h), false, `expected non-roster: ${String(h)}`);
+    assert.equal(parseAdminEventRosterRoute(h), null, `expected null parse: ${String(h)}`);
   }
 });

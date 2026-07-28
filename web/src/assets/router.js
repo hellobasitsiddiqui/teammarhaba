@@ -22,8 +22,8 @@ import { enterAdmin } from "./admin.js";
 // Admin tab (TM-916). admin-hub.js mounts it into #admin-hub-view; the users console moved to
 // #/admin/users. ADMIN-only, same server gate as every other admin route (TM-133).
 import { enterAdminHub } from "./admin-hub.js";
-import { enterAdminEvents, enterAdminEventForm } from "./admin-events.js";
-import { isAdminEventFormRoute, parseAdminEventFormRoute } from "./admin-event-route.js";
+import { enterAdminEvents, enterAdminEventForm, enterAdminEventRoster } from "./admin-events.js";
+import { isAdminEventFormRoute, parseAdminEventFormRoute, isAdminEventRosterRoute, parseAdminEventRosterRoute } from "./admin-event-route.js";
 // Admin venues console + create/edit form (TM-519) — ADMIN-only, same gate as #/admin/events. The
 // list is #/admin/venues; the form is #/admin/venues/new (create) and #/admin/venues/{id}/edit (edit).
 // admin-venues.js mounts the list into #admin-venues-view and the form into #admin-venue-form-view;
@@ -304,6 +304,9 @@ function isProtected(route) {
     isEventsRoute(route) ||
     isChatRoute(route) ||
     isAdminEventFormRoute(route) ||
+    // Admin roster page (TM-1115) — ADMIN-only, so protected too (auth-gated like the edit route; a
+    // signed-out deep-link is remembered + bounced to login, not flashed then home-bounced — TM-917).
+    isAdminEventRosterRoute(route) ||
     // Admin venue create/edit form (TM-519) — ADMIN-only, so protected too.
     isAdminVenueFormRoute(route) ||
     // Admin interest create/edit form (TM-779) — ADMIN-only, so protected too.
@@ -360,6 +363,10 @@ let adminEventsActive = false;
 // repeated guard() for the SAME route doesn't re-render, while switching create↔edit↔another-edit does.
 // Reset to null when leaving the form (mirrors eventsRouteEntered).
 let adminEventFormEntered = null;
+// Admin roster page (TM-1115): the last roster route we entered (#/admin/events/{id}/roster), so a
+// repeated guard() for the SAME route doesn't re-render, while switching to another event's roster
+// re-enters. Reset to null when leaving the roster page (mirrors adminEventFormEntered).
+let adminEventRosterEntered = null;
 // Admin venues console (TM-519): whether the venues list is currently mounted, so we (re)load it only
 // on entry (mirrors adminEventsActive).
 let adminVenuesActive = false;
@@ -492,6 +499,8 @@ function currentRoute() {
   if (isChatRoute(hash)) return hash;
   // Admin event form (create/edit): return the raw hash so the {id} in an edit route survives (TM-426).
   if (isAdminEventFormRoute(hash)) return hash;
+  // Admin roster page: return the raw hash so the {id} in the roster route survives (TM-1115).
+  if (isAdminEventRosterRoute(hash)) return hash;
   // Admin venue form (create/edit): return the raw hash so the {id} in an edit route survives (TM-519).
   if (isAdminVenueFormRoute(hash)) return hash;
   // Admin interest form (create/edit): return the raw hash so the {id} in an edit route survives (TM-779).
@@ -533,6 +542,7 @@ function render() {
   const adminView = $("admin-view");
   const adminEventsView = $("admin-events-view");
   const adminEventFormView = $("admin-event-form-view");
+  const adminEventRosterView = $("admin-event-roster-view");
   const adminVenuesView = $("admin-venues-view");
   const adminVenueFormView = $("admin-venue-form-view");
   const adminInterestsView = $("admin-interests-view"); // TM-779
@@ -552,6 +562,8 @@ function render() {
   if (adminEventsView) adminEventsView.hidden = route !== ADMIN_EVENTS;
   // Admin event form (TM-426) — shown for the create route and any {id} edit route.
   if (adminEventFormView) adminEventFormView.hidden = !isAdminEventFormRoute(route);
+  // Admin roster page (TM-1115) — shown for any {id} roster route (#/admin/events/{id}/roster).
+  if (adminEventRosterView) adminEventRosterView.hidden = !isAdminEventRosterRoute(route);
   // Admin venues console (TM-519) — shown for the exact #/admin/venues route.
   if (adminVenuesView) adminVenuesView.hidden = route !== ADMIN_VENUES;
   // Admin venue form (TM-519) — shown for the create route and any {id} edit route.
@@ -762,6 +774,14 @@ function guard() {
     go(HOME);
     return;
   }
+  // The full-page roster (TM-1115) is ADMIN-only too — same rule as the events console + edit form; the
+  // backend (TM-1114 roster endpoint) is the real gate, this just avoids showing an unusable page.
+  if (isAdminEventRosterRoute(route) && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
+    toast("Admins only.", { type: "error" });
+    adminEventRosterEntered = null;
+    go(HOME);
+    return;
+  }
   // Admin venues console (TM-519) is ADMIN-only too — same rule as #/admin/events; the backend is the
   // real gate, this just avoids showing an unusable page to a non-admin.
   if (route === ADMIN_VENUES && shouldBounceNonAdmin({ isAdmin, roleResolved })) {
@@ -870,6 +890,19 @@ function guard() {
     }
   } else {
     adminEventFormEntered = null;
+  }
+  // Full-page roster (TM-1115): (re)enter whenever the roster route CHANGES (a different event's roster)
+  // so switching targets re-renders + reloads, without refetching on the repeated guard() calls for the
+  // same route (mirrors the event form). Reset on leaving — and returning to #/admin/events re-runs
+  // enterAdminEvents(), which reloads the list so a just-evicted/added attendee reflects in the counts.
+  if (isAdminEventRosterRoute(route) && isAdmin) {
+    if (route !== adminEventRosterEntered) {
+      adminEventRosterEntered = route;
+      const target = parseAdminEventRosterRoute(route);
+      enterAdminEventRoster(target.id);
+    }
+  } else {
+    adminEventRosterEntered = null;
   }
   // Admin venues console (TM-519): mount on entry, (re)load its list each entry, reset on leaving so a
   // future entry reloads. Same lifecycle as the events console above.
