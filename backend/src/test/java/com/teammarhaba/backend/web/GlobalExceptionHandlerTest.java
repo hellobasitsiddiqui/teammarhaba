@@ -126,6 +126,17 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.interests.InterestSelectionConfig interestSelectionConfig;
 
+    // CityAdminController (TM-1089) needs a CityAdminService — supply it so the web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.city.CityAdminService cityAdminService;
+
+    // CityCatalogueController (TM-1089, the public city picker read) injects the JPA
+    // CityCatalogueRepository directly — a @WebMvcTest slice doesn't bootstrap Spring Data
+    // repositories, so supply it or the web slice can't construct the controller (mirrors the
+    // InterestCatalogueRepository case above).
+    @MockitoBean
+    private com.teammarhaba.backend.city.CityCatalogueRepository cityCatalogueRepository;
+
     // AlertController + AlertAdminController (TM-243) need an AlertService — supply it so the web slice can load.
     @MockitoBean
     private com.teammarhaba.backend.alert.AlertService alertService;
