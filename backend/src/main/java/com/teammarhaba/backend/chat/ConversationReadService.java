@@ -267,9 +267,9 @@ public class ConversationReadService {
     public PageResponse<ConversationMessageResponse> messages(
             VerifiedUser caller, Long conversationId, Pageable pageable) {
         Long userId = users.provision(caller).getId();
-        requireMember(conversationId, userId);
+        ConversationMember membership = requireMember(conversationId, userId);
 
-        Page<Message> page = messages.findByConversationIdAndDeletedAtIsNull(conversationId, pageable);
+        Page<Message> page = timeline(conversationId, membership, pageable);
         // Attach each message's reaction summary (TM-461) so the timeline renders chips inline — one
         // batched query for the page (no N+1), reusing the reaction service's shared summariser.
         Map<Long, List<EmojiReactionCount>> summaries =
@@ -322,6 +322,34 @@ public class ConversationReadService {
                 receipts.get(message.getId()),
                 quotedParent(message, parents),
                 userId.equals(message.getSenderId())));
+    }
+
+    /**
+     * The thread's live timeline page, scoped by the thread's {@link HistoryVisibility} (TM-1055) — the
+     * seam Phase 2 (epic TM-468) extends to honour a join-scoped history without re-opening {@link
+     * #messages}.
+     *
+     * <p><b>Phase-1: zero behaviour change.</b> Every thread is {@link HistoryVisibility#FULL} today (the
+     * V51 column default), so this reads the flag but returns the WHOLE thread exactly as before —
+     * {@link MessageRepository#findByConversationIdAndDeletedAtIsNull}, no join-time predicate — preserving
+     * the TM-709 late-joiner guarantee (a member who joined after messages were posted still reads the
+     * full history). {@link HistoryVisibility#FROM_JOIN} is reserved: no thread is ever set to it in Phase 1,
+     * and it deliberately falls through to the same full read until Phase 2 adds the {@code
+     * membership.joinedAt}-relative filter (and the {@code history_cutoff_at} it needs). The {@code
+     * membership} is already resolved by the access gate and threaded through here so that Phase-2 filter
+     * has the join instant in hand.
+     */
+    private Page<Message> timeline(Long conversationId, ConversationMember membership, Pageable pageable) {
+        Conversation thread = conversations.findById(conversationId).orElseThrow(
+                () -> new AccessDeniedException("Not a member of this conversation."));
+        return switch (thread.getHistoryVisibility()) {
+            // FULL — the whole thread, today's behaviour and the only value in play in Phase 1.
+            // FROM_JOIN — Phase 2 (TM-468): reserved, not yet honoured, so it reads the full thread too.
+            // Both branches are identical by design in Phase 1 (ZERO behaviour change); Phase 2 replaces
+            // the FROM_JOIN branch with a `membership.getJoinedAt()`-relative read.
+            case FULL, FROM_JOIN ->
+                messages.findByConversationIdAndDeletedAtIsNull(conversationId, pageable);
+        };
     }
 
     /**
