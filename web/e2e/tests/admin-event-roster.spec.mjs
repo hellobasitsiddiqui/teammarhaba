@@ -68,6 +68,10 @@ test("@admin @admin-events admin manages a roster on its own page: 4-state badge
   await page.goto("/#/admin/events");
   await expect(page.locator("#admin-events-view")).toBeVisible();
   await expect(page.locator("#admin-events-table")).toBeVisible();
+  // The console lands on the "Happening now" lifecycle chip (TM-1096), which filters OUT a freshly-seeded
+  // Upcoming/Scheduled event — so click "All" to show every bucket before locating the row (the same
+  // step admin-events.spec.mjs / admin-event-clone.spec.mjs do).
+  await page.locator("#admin-events-lifecycle-all").click();
   // The just-seeded event is in the list (search to be robust against pagination / other events).
   await page.fill("#admin-events-search", heading);
   const row = page.locator(`#admin-events-table tr[data-event-id="${event.id}"]`);
