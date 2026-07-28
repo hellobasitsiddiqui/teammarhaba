@@ -7081,9 +7081,10 @@ button.tm-pf-chip[disabled] {
    bar pinned to the bottom of the viewport. Reuses the .tm-pf-chip / -on tokens for chips; theme
    tokens only (no hard-coded colours). */
 .tm-interests-route {
-    /* Leave room at the bottom so the sticky bar never covers the last section's chips (bar height +
-       its own safe-area padding). The scroll body is the view itself. */
-    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+    /* Leave room at the bottom so neither the sticky Save bar NOR the fixed tab bar below it covers the
+       last section's chips: the tab bar (~4.75rem) + the sticky bar's own height + the safe-area inset.
+       The scroll body is the view itself. */
+    padding-bottom: calc(9.5rem + env(safe-area-inset-bottom));
 }
 .tm-interests-summary {
     margin-bottom: var(--space-3);
@@ -7147,16 +7148,20 @@ button.tm-pf-chip[disabled] {
     margin: var(--space-3) 0;
     font-size: var(--fs-1);
 }
-/* The sticky Save/Cancel bar — pinned to the bottom of the viewport so Save is always reachable on a
-   phone regardless of catalogue length (the overlay's TM-830 bug is structurally impossible here: the
-   bar isn't inside a scroll container). Sits above the bottom tab bar via the safe-area inset. */
+/* The sticky Save/Cancel bar — pinned near the bottom so Save is always reachable regardless of
+   catalogue length (the overlay's TM-830 bug is structurally impossible here: the bar isn't inside a
+   scroll container). It sits ABOVE the fixed bottom tab bar (.app-tabbar: position:fixed; bottom:0;
+   z-index:900; ~4.75rem tall; shown at EVERY width when signed-in, TM-1043) — offsetting by the tab-bar
+   height + z-index:901 so the tab bar can never paint over Save/Cancel (the earlier bottom:0 + no
+   z-index let it, defeating the whole Save-reachability point). */
 .tm-interests-stickybar {
     position: sticky;
-    bottom: 0;
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    z-index: 901;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
-    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+    padding: var(--space-2) 0;
     background: var(--surface);
     border-top: var(--border-width) solid var(--border);
 }

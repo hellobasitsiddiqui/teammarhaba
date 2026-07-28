@@ -82,8 +82,19 @@ test.describe("@responsive TM-1095 profile interests full-screen route", () => {
     await expect(saveBtn).toBeVisible();
 
     // ── Root-cause assertion (the TM-830 legacy): Save is reachable + in the viewport. The sticky bar is
-    // pinned to the viewport bottom, so Save is visible without scrolling regardless of catalogue length.
+    // pinned near the viewport bottom, so Save is visible without scrolling regardless of catalogue length.
     await expect(saveBtn).toBeInViewport();
+
+    // ── Occlusion guard (TM-1095): toBeInViewport() does NOT detect that the fixed bottom tab bar
+    // (.app-tabbar, z-index:900) paints OVER the Save button. Assert Save is the TOPMOST element at its
+    // own centre — i.e. a real tap lands on Save, not the tab bar sitting on top of it. This fails
+    // before the sticky-bar tab-bar offset fix (the tab bar wins the centre point) and passes after.
+    const saveIsTopmost = await saveBtn.evaluate((btn) => {
+      const r = btn.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!hit && (btn === hit || btn.contains(hit));
+    });
+    expect(saveIsTopmost, "Save button is occluded by the bottom tab bar").toBe(true);
 
     // ── Search filters the catalogue: typing a category name can only ever REMOVE options (a robust,
     // seed-independent check).
