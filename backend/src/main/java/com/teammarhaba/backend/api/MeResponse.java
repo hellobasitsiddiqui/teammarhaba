@@ -14,6 +14,13 @@ import java.util.List;
  * Unfilled fields are {@code null}.
  *
  * @param uid                  the Firebase UID (always present on a verified token)
+ * @param circleUserId         the numeric {@code users.id} database primary key (TM-1105) — the account's
+ *                             stable "Circle User ID" (the app is branded Circle, TM-668). This is the
+ *                             SAME numeric id the admin surfaces use (e.g. the admin force-add, TM-592),
+ *                             distinct from {@code uid} (the Firebase uid string): it is a support/identity
+ *                             handle a user can read off their own profile and quote. Additive,
+ *                             non-breaking. {@code null} only in the degenerate case where the account row
+ *                             has not been provisioned yet (never on {@code GET /me}, which provisions first)
  * @param email                the caller's email if the token carries one (may be {@code null})
  * @param displayName          the profile name — {@code null} until the persisted profile lands (TM-112)
  * @param firstName            given name (may be {@code null})
@@ -78,6 +85,7 @@ import java.util.List;
  */
 public record MeResponse(
         String uid,
+        Long circleUserId,
         String email,
         String displayName,
         String firstName,

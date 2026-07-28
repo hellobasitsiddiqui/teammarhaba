@@ -106,6 +106,33 @@ export function accountContact(me) {
   };
 }
 
+/**
+ * The "Circle User ID" line shown on the Profile hub next to the phone (TM-1105): the account's numeric
+ * `users.id` database primary key, surfaced from `/me` as `circleUserId`. It is the SAME stable id the
+ * admin surfaces use (the app is branded Circle, TM-668), so a user can read it off their own profile and
+ * quote it to support — distinct from the Firebase `uid` string.
+ *
+ * Pure so the render + the copy value can't drift and are unit-testable without a DOM: `value` is the
+ * canonical string to COPY (empty when there's no id), `display` is what to SHOW (the id, or a muted
+ * "Not available yet" prompt so the line is never a silently-blank row), and `hasId` gates both the copy
+ * control and the muted styling. A `circleUserId` of `0` is a legitimate id, so presence is a null/blank
+ * check, not a truthiness check.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object carrying `circleUserId` (a number)
+ * @returns {{ id: (number|null), value: string, hasId: boolean, display: string }}
+ */
+export function circleUserId(me) {
+  const raw = (me || {}).circleUserId;
+  // A real id is a finite number (0 included). Anything else (null/undefined/NaN/non-numeric) = "no id".
+  const hasId = typeof raw === "number" && Number.isFinite(raw);
+  return {
+    id: hasId ? raw : null,
+    value: hasId ? String(raw) : "",
+    hasId,
+    display: hasId ? String(raw) : "Not available yet",
+  };
+}
+
 // The fields that count toward "profile strength" (the paper-profile completeness bar) and the
 // friendly label each contributes to the "what's missing" nudge. Photo is tracked separately (it's a
 // Firebase photoURL, not a /me field) but counts the same. Kept declarative so the bar, the percentage
