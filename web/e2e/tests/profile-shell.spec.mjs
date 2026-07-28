@@ -6,7 +6,7 @@ import { ADMIN, dbConfig } from "../fixtures.mjs";
 // reported at (390×844 — the tab bar reveals ≤ 33rem/528px).
 //
 // TM-886 (REPRODUCED on main): the walking-skeleton shell brand block — the "Circle" wordmark h1,
-// the "Find your people — complete your circle" tagline and the #status "Ready when you are." line —
+// the "Find your people — complete the circle" tagline and the #status "Ready when you are." line —
 // painted ABOVE the Profile screen's own "Profile" header (and above the first-run gates). The boot
 // splash and the auth card were correctly dismissed; the leak was this block, whose copy is the same
 // brand copy as the auth landing + boot splash (why the report described those). The fix scopes it

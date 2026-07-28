@@ -45,7 +45,7 @@
          handoff and the SPA's first paint. It's the FIRST element in <body> and styled (styles.css "Web boot
          screen") to fill the viewport in the native splash's teal from frame one, so there's no white/unstyled
          flash while the app's modules load underneath. The white ring (continuing the native-splash ring,
-         TM-664) draws in, eyes pop and a smile sweeps across, then "Find your people" → "Complete your circle"
+         TM-664) draws in, eyes pop and a smile sweeps across, then "Find your people" → "Complete the circle"
          before boot-screen.js lifts the overlay (teal → paper). Unlike the original, boot-screen.js holds it a
          short minimum so the sequence is seen (reduced-motion opts out — see boot-screen.js). aria-hidden:
          transient loading chrome kept out of the a11y tree. The Android/iOS WebView inherits it automatically
@@ -62,10 +62,10 @@
                 <path class="boot-smile" d="M96 138 Q120 166 144 138" pathLength="100" />
             </svg>
             <!-- Two brand lines that swap in the same slot: "Find your people" fades in then out, then
-                 "Complete your circle" fades in and holds (it nods to the ring motif + the Circle name). -->
+                 "Complete the circle" fades in and holds (it nods to the ring motif + the Circle name). -->
             <div class="boot-words" aria-hidden="true">
                 <p class="boot-word boot-word-1">Find your people</p>
-                <p class="boot-word boot-word-2">Complete your circle</p>
+                <p class="boot-word boot-word-2">Complete the circle</p>
             </div>
         </div>
     </div>
@@ -91,7 +91,7 @@
              the header is a clean wordmark + single line on every surface. No background is set here
              or on `.app`/`.tagline`, so the lockup inherits each surface's Paper background (the
              per-user accent + wavy/sketchy toggle) rather than imposing a fixed colour. -->
-        <p class="tagline">Find your people — complete your circle</p>
+        <p class="tagline">Find your people — complete the circle</p>
         <p id="status" class="status">loading…</p>
 
         <!-- Auth views (TM-106 panels, routed by TM-109): #auth-signed-out = #/login,
@@ -133,7 +133,7 @@
                          wave doodle-decor.js used to prepend to the "Sign in" heading, so the auth head
                          is a clean centred mark + heading + one tagline. `.auth-head` centres it and sets
                          no background, so it inherits the card/surface theme. -->
-                    <p class="auth-subtitle">Find your people — complete your circle</p>
+                    <p class="auth-subtitle">Find your people — complete the circle</p>
                 </div>
 
                 <!-- Step 1 — default: ask for the email to send a 6-digit code to. -->

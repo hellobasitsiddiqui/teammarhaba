@@ -2,7 +2,7 @@
 // picked up by the CI glob `node --test web/tools/*.test.mjs`.
 //
 // THE BUG (TM-886, reproduced at 390×844): the walking-skeleton brand block at the top of
-// <main class="app"> — the "Circle" wordmark h1, the "Find your people — complete your circle"
+// <main class="app"> — the "Circle" wordmark h1, the "Find your people — complete the circle"
 // tagline, and the #status "Ready when you are." line — painted above EVERY non-login screen,
 // including the Profile screen (and the first-run gates), which render their own full-page headers.
 // The leaked copy is the same brand copy as the auth landing card + boot splash, which is why the

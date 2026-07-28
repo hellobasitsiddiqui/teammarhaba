@@ -20,8 +20,8 @@ test("boot screen carries the animated ring→smiley marks", () => {
 
 test("boot screen shows the two brand lines in order", () => {
   const first = html.indexOf("Find your people");
-  const second = html.indexOf("Complete your circle");
+  const second = html.indexOf("Complete the circle");
   assert.notEqual(first, -1, "boot screen should include 'Find your people'");
-  assert.notEqual(second, -1, "boot screen should include 'Complete your circle'");
-  assert.ok(first < second, "'Find your people' should appear before 'Complete your circle'");
+  assert.notEqual(second, -1, "boot screen should include 'Complete the circle'");
+  assert.ok(first < second, "'Find your people' should appear before 'Complete the circle'");
 });

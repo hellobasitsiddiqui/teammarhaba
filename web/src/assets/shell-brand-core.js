@@ -1,7 +1,7 @@
 // App-shell brand block — pure route rule (TM-885 / TM-886).
 //
 // The walking-skeleton app shell (index.html) opens <main class="app"> with a brand block: the
-// "Circle" wordmark <h1>, the "Find your people — complete your circle" tagline, and the #status
+// "Circle" wordmark <h1>, the "Find your people — complete the circle" tagline, and the #status
 // line app.js fills with "Ready when you are.". That block pre-dates every product screen — it was
 // the whole landing surface in TM-49 — and until TM-886 it was only ever scoped OFF on the login
 // route (a styles.css :has() rule hides the h1 + tagline there because the sign-in card carries its
