@@ -441,6 +441,40 @@
         },
         "type" : "object"
       },
+      "BroadcastHistoryResponse" : {
+        "properties" : {
+          "body" : {
+            "type" : "string"
+          },
+          "delivered" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "recipientCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "route" : {
+            "type" : "string"
+          },
+          "sentAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "BroadcastPushRequest" : {
         "properties" : {
           "body" : {
@@ -1952,6 +1986,33 @@
         },
         "type" : "object"
       },
+      "PageResponseBroadcastHistoryResponse" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/BroadcastHistoryResponse"
+            },
+            "type" : "array"
+          },
+          "page" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "size" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totalElements" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "totalPages" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PageResponseConversationMessageResponse" : {
         "properties" : {
           "items" : {
@@ -2814,9 +2875,17 @@
           "firstName" : {
             "type" : "string"
           },
+          "gender" : {
+            "enum" : [ "FEMALE", "MALE", "PREFER_NOT_TO_SAY" ],
+            "type" : "string"
+          },
           "id" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "lastActiveAt" : {
+            "format" : "date-time",
+            "type" : "string"
           },
           "lastName" : {
             "type" : "string"
@@ -3785,6 +3854,48 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/BroadcastPushResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "push-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/push/broadcasts" : {
+      "get" : {
+        "operationId" : "history_3",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "page",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "size",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseBroadcastHistoryResponse"
                 }
               }
             },

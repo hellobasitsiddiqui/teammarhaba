@@ -2908,6 +2908,76 @@ h3,
     display: none;
 }
 
+/* Send-notification tabs (TM-373): Compose | History across the top of #/admin/notifications. A simple
+   underline-style tab row; the active tab reads with an accent underline + accent text. */
+.tm-tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: var(--border-width) solid var(--accent-line);
+    margin-bottom: 1rem;
+}
+.tm-tab {
+    padding: 0.5rem 0.9rem;
+    font: inherit;
+    font-weight: 600;
+    color: var(--muted, var(--accent));
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    cursor: pointer;
+}
+.tm-tab:hover {
+    color: var(--accent);
+}
+.tm-tab.tm-tab-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.tm-notify-pane[hidden] {
+    display: none;
+}
+
+/* Audience-targeting chip bar (TM-1098): the City / Age / Gender / Active-24h filter chips above the
+   recipient roster. Each labelled category is a group; chips wrap at 390px. Reuses .tm-chip (incl. the
+   aria-pressed active fill). */
+.tm-chip-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 0.4rem 0 0.8rem;
+}
+.tm-chip-bar:empty {
+    margin: 0;
+}
+.tm-chip-bar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.tm-chip-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.tm-chip-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.tm-chip-group-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted, var(--accent));
+}
+.tm-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
 /* The create/edit form — a single comfortable column of fields. Lives on its own full-page admin
    route now (TM-426), not a modal. */
 .tm-event-form {

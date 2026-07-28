@@ -147,6 +147,26 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void listExposesGenderCityAgeAndLastActiveForAudienceTargeting() throws Exception {
+        // TM-1098: the notification audience-targeting chips (City / Age / Gender / Active-24h) filter the
+        // SELECTABLE recipient list client-side, so the admin list response must carry these fields. city
+        // and age were already exposed; this asserts the new gender + lastActiveAt are too.
+        User u = new User("audience-target", "audience-target@example.com", null);
+        u.setCity("London");
+        u.setAge(30);
+        u.setGender(com.teammarhaba.backend.user.Gender.FEMALE);
+        u.markActive(Instant.parse("2026-07-22T10:00:00Z"));
+        long id = users.saveAndFlush(u).getId();
+
+        mockMvc.perform(get("/api/v1/admin/users").param("size", "100").with(admin("admin-audience")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].city").value("London"))
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].age").value(30))
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].gender").value("FEMALE"))
+                .andExpect(jsonPath("$.items[?(@.id == " + id + ")].lastActiveAt").value("2026-07-22T10:00:00Z"));
+    }
+
+    @Test
     void adminDisablesAnotherUser() throws Exception {
         long id = seed("to-disable");
 

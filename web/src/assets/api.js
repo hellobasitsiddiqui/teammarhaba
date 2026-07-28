@@ -1265,6 +1265,38 @@ export async function adminBroadcastPush({ title, body, route, userIds }) {
 }
 
 /**
+ * GET /api/v1/admin/push/broadcasts — the calling admin's push-broadcast sent-history (TM-373 endpoint →
+ * the History tab on the Send-notification screen). Newest-first, paged, in the shared page envelope
+ * `{ items, page, size, totalElements, totalPages }` (zero-based `page`). Each item is a
+ * BroadcastHistoryResponse header row — `{ id, sentAt, title, body, route, recipientCount, delivered,
+ * skipped }`. Mirrors {@link listSentAdminMessages} (the sibling message sent-history): ADMIN-gated on the
+ * backend (a non-admin gets a friendly 403 {@link ApiError}, a 401 already refreshed/redirected via
+ * {@link apiFetch}), and `sort` is allow-listed server-side to time/identity so an unknown property is a
+ * clean 400.
+ *
+ * @param {{page?: number, size?: number, sort?: string}} [opts]
+ * @returns {Promise<{items: Object[], page: number, size: number, totalElements: number, totalPages: number}>}
+ * @throws {ApiError}
+ */
+export async function listBroadcastHistory({ page, size, sort } = {}) {
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (size != null) params.set("size", String(size));
+  if (sort != null) params.set("sort", sort);
+  const query = params.toString();
+  const response = await apiFetch(`/api/v1/admin/push/broadcasts${query ? `?${query}` : ""}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (response.status === 403) {
+    throw new ApiError(403, "You need an admin role to view sent notifications.");
+  }
+  if (!response.ok) {
+    throw await toApiError(response, `Could not load sent notifications (${response.status}).`);
+  }
+  return response.json();
+}
+
+/**
  * POST /api/v1/admin/messages — send an admin message (title + body + optional deep-link) to a
  * resolved audience of ONE target type (TM-441 endpoint → TM-443 compose UI). The body is built by
  * admin-messages-core.buildAdminMessagePayload: `{ title, body, deepLink?, userIds | cities | eventIds }`
@@ -1584,6 +1616,7 @@ if (typeof window !== "undefined") {
     rejoinConversation,
     getPushRoutes,
     adminBroadcastPush,
+    listBroadcastHistory,
     sendAdminMessage,
     listSentAdminMessages,
     recallAdminMessage,

@@ -19,11 +19,40 @@
 // source (getPushRoutes) with the client KNOWN_ROUTES fallback — the same single source the in-app
 // message compose (admin-messages.js) uses.
 
-import { apiFetch, adminBroadcastPush, getPushRoutes, ApiError as ApiClientError } from "./api.js";
-import { clear, el, stackableTable, toast, confirmDialog } from "./ui.js";
+import { apiFetch, adminBroadcastPush, listBroadcastHistory, getPushRoutes, ApiError as ApiClientError } from "./api.js";
+import { clear, el, stackableTable, toast, confirmDialog, relativeTime } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { KNOWN_ROUTES } from "./push-deeplink.js";
 import { clampPage } from "./admin-paging-core.js";
+// TM-1098: the pure audience-targeting filter — City / Age group / Gender / Active-24h chips that
+// narrow the SELECTABLE recipient set client-side over the loaded eligible list. Pure + unit-tested in
+// notification-audience-core.test.mjs (this DOM module can't run under `node --test`).
+import {
+  AGE_GROUPS,
+  GENDER_CHIPS,
+  emptyAudienceFilter,
+  hasActiveFilter,
+  applyAudienceFilter,
+  citiesOf,
+} from "./notification-audience-core.js";
+// TM-373: the pure broadcast sent-history row model (title / body / reach / outcome). Paging math +
+// formatRecipientCount are shared from admin-sent-history-core.js (same page envelope). Pure + tested.
+import {
+  broadcastTitle,
+  broadcastBody,
+  reachSummary,
+  outcomeCounts,
+} from "./notification-history-core.js";
+import {
+  DEFAULT_PAGE_SIZE as HISTORY_PAGE_SIZE,
+  normalisePageResponse,
+  hasPrevPage,
+  hasNextPage,
+  clampPage as clampHistoryPage,
+  pageIndicator,
+  rangeIndicator,
+  isEmptyHistory,
+} from "./admin-sent-history-core.js";
 import {
   MAX_TITLE,
   MAX_BODY,
@@ -72,6 +101,23 @@ const state = {
   // TM-976 (A8): which compose fields the admin has interacted with, so a pristine panel shows no
   // errors. title/body flip on input; recipients on any selection change; all reset after a send.
   broadcast: { routeOptions: null, touched: { title: false, body: false, recipients: false } },
+  // TM-1098: the audience-targeting chip selection — which cities / age groups / genders are picked and
+  // whether the Active-24h chip is on. Folded into the roster's derived set (see filteredUsers) so it
+  // narrows the SELECTABLE recipients; select-all + hand-pick then operate on the filtered set. Persists
+  // across paging (like the search) but is reset after a send along with the selection.
+  audienceFilter: emptyAudienceFilter(),
+  // Which top-level tab is showing: the compose+roster ("compose") or the sent-history ("history").
+  tab: "compose",
+  // TM-373: the push-broadcast sent-history state — the same page-envelope + prev/next model the
+  // message sent-history uses, loaded lazily the first time the History tab is opened.
+  history: {
+    data: { items: [], page: 0, size: HISTORY_PAGE_SIZE, totalElements: 0, totalPages: 0 },
+    page: 0,
+    loading: false,
+    loaded: false, // whether a first load has happened (so switching tabs doesn't refetch every time)
+    error: null,
+    expandedId: null,
+  },
 };
 
 let shell = null; // { roster, pager, compose, selectAll } persistent containers
@@ -130,13 +176,12 @@ async function loadUsers() {
 
 function filteredUsers() {
   const q = state.search.trim().toLowerCase();
-  return state.users.filter((u) => {
-    if (q) {
-      // TM-372: match the whole identity chain (name, email, auth phone raw + masked, "User #id").
-      if (!searchHaystack(u).includes(q)) return false;
-    }
-    return true;
-  });
+  // TM-1098: apply the audience-targeting chip filter (City / Age / Gender / Active-24h) FIRST — it
+  // narrows the selectable set client-side over the loaded list. `Date.now()` drives the Active-24h
+  // window (only consulted when that chip is on). Then the text search narrows further within the chips.
+  const byChips = applyAudienceFilter(state.users, state.audienceFilter, Date.now());
+  if (!q) return byChips;
+  return byChips.filter((u) => searchHaystack(u).includes(q)); // TM-372: whole identity chain
 }
 
 /** Roster order: by id ascending (stable, matches the fetch order) — the recipient picker doesn't need
@@ -409,8 +454,15 @@ async function sendBroadcast() {
     c.route.value = NO_ROUTE;
     // TM-976 (A8): the reset panel is pristine again, so the next compose starts quiet (no shout).
     state.broadcast.touched = { title: false, body: false, recipients: false };
+    // TM-1098: clear the targeting chips too, so the next compose starts from the whole eligible set.
+    state.audienceFilter = emptyAudienceFilter();
+    state.page = 0;
     renderRoster(); // repaint the row checkboxes now that the selection is empty
+    renderChips();
     refreshSelectionUi();
+    // TM-373: a broadcast just landed — if the History tab has been loaded, refresh it so this send
+    // shows at the top; otherwise leave it to lazy-load on first open.
+    if (state.history.loaded) loadHistoryPage(0);
   } catch (err) {
     const msg = err instanceof ApiClientError ? err.message : "Couldn't send the broadcast.";
     toast(msg, { type: "error" });
@@ -663,10 +715,297 @@ function renderPager(totalRows) {
 function render() {
   if (!shell) return;
   renderRoster();
+  renderChips();
   refreshCeilingWarning();
 }
 
+// ---- sent-history tab (TM-373) ------------------------------------------------------------
+//
+// A read-only list of the push broadcasts the signed-in admin has sent — mirrors the MESSAGE
+// sent-history (admin-sent-history.js). Reads GET /api/v1/admin/push/broadcasts (newest-first, paged),
+// paints one row per send (title + reach + sent-time), and expands a row to the full body + outcome
+// counts. NOT recall, NOT AI search (both explicitly out of scope for this MVP, TM-373 refinement).
+
+/**
+ * Fetch + show one page of the broadcast sent-history. Guards against landing on an empty page past the
+ * end (a shrunk total): a non-first empty page clamps back and refetches once (mirrors the message view).
+ * @param {number} page zero-based page to load.
+ */
+async function loadHistoryPage(page) {
+  const h = state.history;
+  if (h.loading) return; // re-entry guard — a second load would race two result sets into state
+  h.page = Math.max(0, page);
+  h.loading = true;
+  h.error = null;
+  h.expandedId = null;
+  renderHistory();
+  try {
+    const envelope = await listBroadcastHistory({ page: h.page, size: HISTORY_PAGE_SIZE });
+    const data = normalisePageResponse(envelope, { fallbackSize: HISTORY_PAGE_SIZE });
+    if (data.items.length === 0 && h.page > 0 && data.totalPages > 0) {
+      const clamped = clampHistoryPage(h.page, data.totalPages);
+      if (clamped !== h.page) {
+        h.loading = false;
+        await loadHistoryPage(clamped);
+        return;
+      }
+    }
+    h.data = data;
+    h.page = data.page;
+  } catch (err) {
+    h.error = err instanceof ApiClientError ? err.message : "Could not load sent notifications.";
+  } finally {
+    h.loading = false;
+    h.loaded = true;
+    renderHistory();
+  }
+}
+
+/** One expandable history row: a toggle header (title + reach + time) and, when open, its detail. */
+function renderHistoryRow(row) {
+  const expanded = state.history.expandedId === row.id;
+  const when = relativeTime(row.sentAt);
+
+  const header = el("button", {
+    class: "tm-sent-row-head",
+    type: "button",
+    "aria-expanded": expanded ? "true" : "false",
+    "aria-controls": `admin-notify-detail-${row.id}`,
+    onClick: () => {
+      state.history.expandedId = expanded ? null : row.id;
+      renderHistoryList();
+    },
+  }, [
+    el("span", { class: "tm-sent-row-main" }, [
+      el("span", { class: "tm-sent-row-title", text: broadcastTitle(row) }),
+      el("span", { class: "tm-muted tm-sent-row-audience", text: reachSummary(row) }),
+    ]),
+    el("span", { class: "tm-sent-row-meta" }, [
+      el("time", { class: "tm-muted tm-sent-row-time", datetime: String(row.sentAt || ""), title: when.title, text: when.text }),
+      el("span", { class: "tm-sent-row-caret", "aria-hidden": "true", text: expanded ? "▾" : "▸" }),
+    ]),
+  ]);
+
+  return el("li", { class: `tm-sent-row${expanded ? " tm-sent-row-open" : ""}` }, [
+    header,
+    expanded ? renderHistoryDetail(row) : null,
+  ]);
+}
+
+/** The expanded detail for a broadcast row: reach/delivered/skipped facts + the message body as sent. */
+function renderHistoryDetail(row) {
+  const counts = outcomeCounts(row);
+  const when = relativeTime(row.sentAt);
+  const body = broadcastBody(row);
+  const route = typeof row.route === "string" && row.route.trim() ? row.route.trim() : null;
+
+  return el("div", { class: "tm-sent-detail", id: `admin-notify-detail-${row.id}` }, [
+    el("h4", { class: "tm-sent-detail-title", text: broadcastTitle(row) }),
+    el("dl", { class: "tm-detail tm-sent-detail-facts" }, [
+      el("dt", { text: "Recipients" }),
+      el("dd", { text: String(counts.recipients) }),
+      el("dt", { text: "Delivered" }),
+      el("dd", { text: String(counts.delivered) }),
+      el("dt", { text: "Skipped" }),
+      el("dd", { text: String(counts.skipped) }),
+      el("dt", { text: "Deep-link" }),
+      el("dd", { text: route ? routeLabel(route) : "None" }),
+      el("dt", { text: "Sent" }),
+      el("dd", {}, [el("time", { datetime: String(row.sentAt || ""), title: when.title, text: when.title || when.text })]),
+    ]),
+    el("div", { class: "tm-sent-detail-body tm-sent-detail-body-body" }, [
+      el("h5", { class: "tm-sent-detail-body-label", text: "Message" }),
+      el("p", { class: body.trim() ? "tm-sent-detail-body-text" : "tm-muted tm-sent-detail-body-note", text: body.trim() ? body : "(no message body)" }),
+    ]),
+  ]);
+}
+
+/** Repaint just the history list body (rows / empty / loading / error). */
+function renderHistoryList() {
+  const box = shell?.historyBody;
+  if (!box) return;
+  clear(box);
+  const h = state.history;
+
+  if (h.loading) {
+    box.append(el("p", { class: "tm-muted", text: "Loading sent notifications…" }));
+    return;
+  }
+  if (h.error) {
+    box.append(el("div", { class: "tm-error" }, [
+      el("p", { text: h.error }),
+      el("button", { class: "tm-btn", type: "button", onClick: () => loadHistoryPage(h.page) }, "Retry"),
+    ]));
+    return;
+  }
+
+  const { items } = h.data;
+  if (isEmptyHistory(items, h.page)) {
+    box.append(el("div", { class: "tm-empty" }, [
+      doodle("crowd", { class: "tm-doodle-empty" }),
+      el("p", { class: "tm-empty-title", text: "No notifications sent yet" }),
+      el("p", { class: "tm-muted", text: "Push notifications you send from the Compose tab will show up here." }),
+    ]));
+    return;
+  }
+
+  box.append(el("ul", { class: "tm-sent-list" }, items.map(renderHistoryRow)));
+}
+
+/** Repaint the history pager (range + prev/next). Hidden while loading / on error / on an empty history. */
+function renderHistoryPager() {
+  const box = shell?.historyPager;
+  if (!box) return;
+  clear(box);
+  const h = state.history;
+  if (h.loading || h.error) return;
+  const { page, size, totalElements, totalPages, items } = h.data;
+  if (totalElements === 0) return;
+
+  box.append(
+    el("span", { class: "tm-muted", text: rangeIndicator(page, size, totalElements, items.length) }),
+    el("div", { class: "tm-pager-controls" }, [
+      el("button", { class: "tm-btn tm-btn-sm", type: "button", disabled: !hasPrevPage(page), onClick: () => loadHistoryPage(page - 1) }, "Prev"),
+      el("span", { class: "tm-muted", text: pageIndicator(page, totalPages) }),
+      el("button", { class: "tm-btn tm-btn-sm", type: "button", disabled: !hasNextPage(page, totalPages), onClick: () => loadHistoryPage(page + 1) }, "Next"),
+    ]),
+  );
+}
+
+/** Full repaint of the history pane (list + pager). */
+function renderHistory() {
+  renderHistoryList();
+  renderHistoryPager();
+}
+
+// ---- audience-targeting chips (TM-1098) ---------------------------------------------------
+//
+// Multi-select filter chips that narrow the SELECTABLE recipient set client-side over the loaded
+// eligible list: City / Age group / Gender (Male/Female) / Active-in-last-24h. Toggling a chip updates
+// state.audienceFilter (folded into filteredUsers) and repaints the roster + select-all against the new
+// filtered set; the send still posts the resolved explicit userId list. City chips are DERIVED from the
+// loaded users (citiesOf), so only cities that can actually match are offered.
+
+/** Toggle one value in a multi-select chip category (cities / ageGroups / genders), then re-narrow. */
+function toggleChip(category, value) {
+  const list = state.audienceFilter[category];
+  const idx = list.indexOf(value);
+  if (idx === -1) list.push(value);
+  else list.splice(idx, 1);
+  onAudienceFilterChanged();
+}
+
+/** Toggle the single Active-24h chip, then re-narrow. */
+function toggleActiveChip() {
+  state.audienceFilter.activeWithin24h = !state.audienceFilter.activeWithin24h;
+  onAudienceFilterChanged();
+}
+
+/** Clear every chip back to the no-op filter (the "Clear filters" affordance), then re-narrow. */
+function clearChips() {
+  state.audienceFilter = emptyAudienceFilter();
+  onAudienceFilterChanged();
+}
+
+/**
+ * A narrowing changed: reset to page 0 (a narrower set can shrink below the current page start),
+ * repaint the roster (rows + select-all against the new set) and the chip bar (active states + count).
+ * The selection is deliberately LEFT ALONE — an id picked then filtered out of view stays selected (it
+ * survives paging/filtering by id, TM-358), and the visible select-all only ever covers what's shown.
+ */
+function onAudienceFilterChanged() {
+  state.page = 0;
+  renderRoster();
+  renderChips();
+  refreshSelectionUi();
+}
+
+/** One chip button — pressed reflects its selected state (aria-pressed + a class the CSS styles). */
+function chipButton(label, pressed, onClick, extra = {}) {
+  return el("button", {
+    type: "button",
+    class: `tm-chip${pressed ? " tm-chip-on" : ""}`,
+    "aria-pressed": pressed ? "true" : "false",
+    onClick,
+    ...extra,
+  }, label);
+}
+
+/** A labelled group of chips (a category row): the category name + its chip buttons. */
+function chipGroup(name, chips) {
+  return el("div", { class: "tm-chip-group", role: "group", "aria-label": name }, [
+    el("span", { class: "tm-chip-group-label", text: name }),
+    el("div", { class: "tm-chip-row" }, chips),
+  ]);
+}
+
+/** (Re)paint the audience-targeting chip bar into its stable container (built once in buildShell). */
+function renderChips() {
+  const box = shell?.chips;
+  if (!box) return;
+  clear(box);
+  // No loaded users ⇒ nothing to target; keep the bar empty (the roster shows its own loading/empty).
+  if (!state.users.length) return;
+
+  const f = state.audienceFilter;
+  const groups = [];
+
+  // City chips are derived from the loaded set, so only real cities appear (no dead chips).
+  const cities = citiesOf(state.users);
+  if (cities.length) {
+    groups.push(chipGroup("City", cities.map((c) =>
+      chipButton(c, f.cities.includes(c), () => toggleChip("cities", c)))));
+  }
+
+  // Age-group chips are the fixed buckets (18–24 … 55+).
+  groups.push(chipGroup("Age group", AGE_GROUPS.map((g) =>
+    chipButton(g.label, f.ageGroups.includes(g.id), () => toggleChip("ageGroups", g.id)))));
+
+  // Gender chips are Male/Female only (the MVP set).
+  groups.push(chipGroup("Gender", GENDER_CHIPS.map((g) =>
+    chipButton(g.label, f.genders.includes(g.value), () => toggleChip("genders", g.value)))));
+
+  // The single Active-24h toggle.
+  groups.push(chipGroup("Activity", [
+    chipButton("Active in last 24h", f.activeWithin24h, () => toggleActiveChip()),
+  ]));
+
+  box.append(
+    el("div", { class: "tm-chip-bar-head" }, [
+      el("span", { class: "tm-field-label", text: "Filter recipients" }),
+      hasActiveFilter(f)
+        ? el("button", { type: "button", class: "tm-btn tm-btn-sm tm-chip-clear", onClick: () => clearChips() }, "Clear filters")
+        : null,
+    ]),
+    el("div", { class: "tm-chip-groups" }, groups),
+  );
+}
+
 // ---- mount --------------------------------------------------------------------------------
+
+/** Switch the active tab (compose | history), toggle the two panes, and lazy-load history on first open. */
+function setTab(tab) {
+  if (state.tab === tab) return;
+  state.tab = tab;
+  syncTabs();
+  if (tab === "history" && !state.history.loaded && !state.history.loading) loadHistoryPage(0);
+}
+
+/** Reflect the active tab onto the tab buttons + pane visibility (cheap; called on every tab change). */
+function syncTabs() {
+  if (!shell) return;
+  const compose = state.tab === "compose";
+  if (shell.composePane) shell.composePane.hidden = !compose;
+  if (shell.historyPane) shell.historyPane.hidden = compose;
+  if (shell.tabCompose) {
+    shell.tabCompose.classList.toggle("tm-tab-active", compose);
+    shell.tabCompose.setAttribute("aria-selected", compose ? "true" : "false");
+  }
+  if (shell.tabHistory) {
+    shell.tabHistory.classList.toggle("tm-tab-active", !compose);
+    shell.tabHistory.setAttribute("aria-selected", !compose ? "true" : "false");
+  }
+}
 
 function buildShell(view) {
   const search = el("input", {
@@ -681,11 +1020,51 @@ function buildShell(view) {
 
   const roster = el("div", { class: "tm-table-wrap", id: "admin-notifications-roster" });
   const pager = el("div", { class: "tm-pager", id: "admin-notifications-pager" });
+  // TM-1098: the stable chip-bar container, repainted by renderChips() after each load / chip toggle.
+  const chips = el("div", { class: "tm-chip-bar", id: "admin-notifications-chips" });
+  // TM-373: the History tab pane + its stable body/pager, repainted by the history renderers.
+  const historyBody = el("div", { class: "tm-sent-body", id: "admin-notifications-history-body" });
+  const historyPager = el("div", { class: "tm-pager", id: "admin-notifications-history-pager" });
 
   // Init shell before buildCompose (it stashes references on shell.compose). The compose panel is built
   // ONCE here and mounted OUTSIDE the roster, so renderRoster()'s clear(shell.roster) never wipes a draft.
-  shell = { roster, pager, compose: null, selectAll: null };
+  shell = { roster, pager, chips, compose: null, selectAll: null, historyBody, historyPager };
   const compose = buildCompose();
+
+  // Two tab buttons (Compose | History). ADMIN-only route is already gated by the router (TM-972); the
+  // history read is separately ADMIN-gated on the backend (TM-373).
+  const tabCompose = el("button", {
+    type: "button", role: "tab", id: "admin-notifications-tab-compose",
+    class: "tm-tab tm-tab-active", "aria-selected": "true", "aria-controls": "admin-notifications-compose-pane",
+    onClick: () => setTab("compose"),
+  }, "Compose");
+  const tabHistory = el("button", {
+    type: "button", role: "tab", id: "admin-notifications-tab-history",
+    class: "tm-tab", "aria-selected": "false", "aria-controls": "admin-notifications-history-pane",
+    onClick: () => setTab("history"),
+  }, "History");
+  shell.tabCompose = tabCompose;
+  shell.tabHistory = tabHistory;
+
+  const composePane = el("div", { class: "tm-notify-pane", id: "admin-notifications-compose-pane", role: "tabpanel", "aria-labelledby": "admin-notifications-tab-compose" }, [
+    compose,
+    el("h2", { class: "tm-broadcast-recipients-title", text: "Recipients" }),
+    chips,
+    el("div", { class: "tm-toolbar" }, [search, sizeSelect]),
+    roster,
+    pager,
+  ]);
+  const historyPane = el("div", { class: "tm-notify-pane", id: "admin-notifications-history-pane", role: "tabpanel", "aria-labelledby": "admin-notifications-tab-history", hidden: true }, [
+    el("div", { class: "tm-admin-head tm-sent-head" }, [
+      el("h2", {}, [doodle("crowd", { class: "tm-doodle-header" }), "Sent notifications"]),
+      el("button", { class: "tm-btn tm-btn-sm", id: "admin-notifications-history-refresh", type: "button", onClick: () => loadHistoryPage(state.history.page) }, "Refresh"),
+    ]),
+    el("p", { class: "tm-muted tm-sent-intro", text: "Push notifications you've sent, newest first. Open one to see the message and its reach." }),
+    historyBody,
+    historyPager,
+  ]);
+  shell.composePane = composePane;
+  shell.historyPane = historyPane;
 
   clear(view).append(
     el("div", { class: "tm-admin-head" }, [
@@ -693,16 +1072,15 @@ function buildShell(view) {
       el("h1", {}, [doodle("crowd", { class: "tm-doodle-header" }), "Send notification"]),
       el("button", { class: "tm-btn tm-btn-sm", type: "button", onClick: loadUsers }, "Refresh"),
     ]),
-    compose,
-    el("h2", { class: "tm-broadcast-recipients-title", text: "Recipients" }),
-    el("div", { class: "tm-toolbar" }, [search, sizeSelect]),
-    roster,
-    pager,
+    el("div", { class: "tm-tabs", role: "tablist", "aria-label": "Notifications" }, [tabCompose, tabHistory]),
+    composePane,
+    historyPane,
   );
 
   // Populate the deep-link picker from the backend allow-list and paint the initial preview / count.
   loadPushRoutes();
   refreshSelectionUi();
+  renderHistory();
 }
 
 /** Called by the router when the notification view becomes active. Builds the shell once, then loads. */
