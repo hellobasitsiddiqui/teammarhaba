@@ -80,6 +80,14 @@ export function rowMatchesQuery(row, normQuery) {
  * a "Featured" shelf plus the aisle. Toggling either instance toggles the same label (the renderer keys
  * chips by label, not by section).
  *
+ * Within-category ordering (TM-1094): featured/highlighted rows stay PINNED FIRST (they lead their
+ * category, mirroring the Popular shelf), then the NON-FEATURED tail is ordered by REAL selection
+ * popularity — `selectionCount` (from PublicInterestResponse) DESCENDING — with the label as a stable
+ * alphabetical tiebreak so equal-popularity (and zero-count) rows keep a deterministic A→Z order. A
+ * missing/undefined `selectionCount` is treated as 0. The synthetic "Popular" group keeps its
+ * highlights-first/first-seen order UNCHANGED — only the non-featured tail of each real category is
+ * re-ordered by popularity.
+ *
  * Filtering: only rows matching the query are kept; a section with no matching rows is dropped entirely
  * (so an empty "Music & Nightlife" header never shows while searching "coffee"). Retired rows
  * (active === false) and blank labels are skipped defensively, matching catalogueGroups.
@@ -89,7 +97,7 @@ export function rowMatchesQuery(row, normQuery) {
  * false) regardless of the stored state — hiding matches behind a collapsed header would make the search
  * feel broken. The stored collapse state is untouched; it simply doesn't apply during a search.
  *
- * @param {Array<{label?: string, category?: string, emoji?: string, highlighted?: boolean, active?: boolean}>|null|undefined} catalogue
+ * @param {Array<{label?: string, category?: string, emoji?: string, highlighted?: boolean, active?: boolean, selectionCount?: number}>|null|undefined} catalogue
  * @param {string[]} selectedLabels the pending selection (labels).
  * @param {{
  *   max?: number,
@@ -125,8 +133,18 @@ export function groupedSections(catalogue, selectedLabels, { max = DEFAULT_INTER
     };
   };
 
+  // A row's real selection popularity (PublicInterestResponse.selectionCount, TM-1094). A missing /
+  // non-numeric / negative value is treated as 0 so the popularity sort is total and never throws on an
+  // older payload that predates the field.
+  const selectionCountOf = (row) => {
+    const n = Number(row && row.selectionCount);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
   // Collect the category groups in first-seen order, and the highlighted rows for the synthetic Popular
-  // group, in ONE pass. Skip retired rows + blank labels.
+  // group, in ONE pass. Each category entry keeps its option view-model PLUS the two sort keys
+  // (highlighted, selectionCount) so the tail can be re-ordered by popularity afterwards. Skip retired
+  // rows + blank labels.
   const order = [];
   const byCategory = new Map();
   const popularOpts = [];
@@ -143,9 +161,29 @@ export function groupedSections(catalogue, selectedLabels, { max = DEFAULT_INTER
       order.push(category);
     }
     const opt = toOption(row);
-    byCategory.get(category).push(opt);
+    byCategory.get(category).push({
+      opt,
+      highlighted: !!row.highlighted,
+      selectionCount: selectionCountOf(row),
+      label,
+    });
+    // The Popular group keeps its incoming (highlights-first/first-seen) order — NOT re-sorted by
+    // popularity — so its membership + ordering are unchanged (TM-1095 contract).
     if (row.highlighted) popularOpts.push(opt);
   }
+
+  // Order each category: featured/highlighted rows PINNED FIRST (they lead the category, mirroring the
+  // Popular shelf), then the non-featured tail by real selectionCount DESC, with the label as a stable
+  // A→Z tiebreak for equal (and zero) counts. localeCompare gives a deterministic, accent-aware order.
+  const orderCategory = (entries) =>
+    entries
+      .slice()
+      .sort((a, b) => {
+        if (a.highlighted !== b.highlighted) return a.highlighted ? -1 : 1; // featured pinned on top
+        if (a.selectionCount !== b.selectionCount) return b.selectionCount - a.selectionCount; // popularity DESC
+        return a.label.localeCompare(b.label); // stable alphabetical tiebreak
+      })
+      .map((entry) => entry.opt);
 
   const sections = [];
   // Popular FIRST when it has any matches. It's collapsible like any section (default expanded), but a
@@ -164,7 +202,7 @@ export function groupedSections(catalogue, selectedLabels, { max = DEFAULT_INTER
       name: category,
       popular: false,
       collapsed: filtering ? false : foldedSet.has(category),
-      options: byCategory.get(category),
+      options: orderCategory(byCategory.get(category)),
     });
   }
   return { sections, matchCount, atMax, filtering };

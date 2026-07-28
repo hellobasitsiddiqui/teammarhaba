@@ -25,15 +25,22 @@ import {
 } from "../src/assets/interests-route-core.js";
 
 // A slice of the real PUBLIC catalogue (GET /api/v1/interests/catalogue → PublicInterestResponse shape:
-// {label, category, emoji, highlighted, sortWeight}). Two highlighted rows across two categories, plus
-// plain rows, plus a retired row that must never surface.
+// {label, category, emoji, highlighted, sortWeight, selectionCount}). Two highlighted rows across two
+// categories, plus plain rows, plus a retired row that must never surface.
+//
+// Rows are listed in the REAL backend delivery order (sortWeight DESC, then label ASC — see
+// findByActiveTrueOrderBySortWeightDescLabelAsc), so within Sport & Fitness the non-featured tail arrives
+// ALPHABETICAL: Swimming, then Yoga. selectionCount (TM-1094) is set so popularity DIVERGES from that
+// alphabetical order — Yoga(50) is more popular than Swimming(5) — so a test asserting the popularity
+// order (Yoga before Swimming) FAILS on origin/main (which preserves the alphabetical first-seen order)
+// and PASSES with the new within-category popularity sort. That divergence is the fail-before/after proof.
 const CATALOGUE = [
-  { label: "Running & jogging", category: "Sport & Fitness", emoji: "🏃", highlighted: true, sortWeight: 100, active: true },
-  { label: "Yoga", category: "Sport & Fitness", emoji: "🧘", highlighted: false, sortWeight: 0, active: true },
-  { label: "Swimming", category: "Sport & Fitness", emoji: "🏊", highlighted: false, sortWeight: 0, active: true },
-  { label: "Coffee & cafés", category: "Food & Drink", emoji: "☕", highlighted: true, sortWeight: 100, active: true },
-  { label: "Wine tasting", category: "Food & Drink", emoji: "🍷", highlighted: false, sortWeight: 0, active: true },
-  { label: "Retired thing", category: "Food & Drink", emoji: null, highlighted: false, sortWeight: 0, active: false },
+  { label: "Running & jogging", category: "Sport & Fitness", emoji: "🏃", highlighted: true, sortWeight: 100, active: true, selectionCount: 999 },
+  { label: "Swimming", category: "Sport & Fitness", emoji: "🏊", highlighted: false, sortWeight: 0, active: true, selectionCount: 5 },
+  { label: "Yoga", category: "Sport & Fitness", emoji: "🧘", highlighted: false, sortWeight: 0, active: true, selectionCount: 50 },
+  { label: "Coffee & cafés", category: "Food & Drink", emoji: "☕", highlighted: true, sortWeight: 100, active: true, selectionCount: 999 },
+  { label: "Wine tasting", category: "Food & Drink", emoji: "🍷", highlighted: false, sortWeight: 0, active: true, selectionCount: 0 },
+  { label: "Retired thing", category: "Food & Drink", emoji: null, highlighted: false, sortWeight: 0, active: false, selectionCount: 0 },
 ];
 
 // ── normaliseQuery / rowMatchesQuery ────────────────────────────────────────────────────────────────
@@ -78,6 +85,71 @@ test("groupedSections carries the emoji off the catalogue row", () => {
   const popular = sections.find((s) => s.popular);
   const running = popular.options.find((o) => o.label === "Running & jogging");
   assert.equal(running.emoji, "🏃");
+});
+
+// ── groupedSections: within-category popularity ordering (TM-1094) ──────────────────────────────────
+
+test("groupedSections orders the non-featured tail of a category by selectionCount DESC (not alphabetically)", () => {
+  // Sport & Fitness: Running & jogging is featured (pinned first); the tail is Yoga(50) then Swimming(5)
+  // — popularity DESC. This is the REVERSE of the old alphabetical order (Swimming before Yoga), so this
+  // assertion FAILS on origin/main (which sorts the tail alphabetically) and PASSES with the new sort.
+  const { sections } = groupedSections(CATALOGUE, [], { max: 3 });
+  const sport = sections.find((s) => s.name === "Sport & Fitness");
+  assert.deepEqual(
+    sport.options.map((o) => o.label),
+    ["Running & jogging", "Yoga", "Swimming"],
+    "featured first, then the tail by selectionCount desc (Yoga 50 before Swimming 5)",
+  );
+});
+
+test("groupedSections keeps featured/highlighted rows pinned first even when a plain row is more popular", () => {
+  // A plain row with a huge selectionCount must NOT jump ahead of the featured row — featured stays on top.
+  const catalogue = [
+    { label: "Featured Low", category: "Cat", emoji: null, highlighted: true, sortWeight: 100, active: true, selectionCount: 1 },
+    { label: "Plain High", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true, selectionCount: 500 },
+  ];
+  const { sections } = groupedSections(catalogue, [], { max: 5 });
+  const cat = sections.find((s) => s.name === "Cat");
+  assert.deepEqual(
+    cat.options.map((o) => o.label),
+    ["Featured Low", "Plain High"],
+    "the featured row leads its category despite a far more popular plain row",
+  );
+});
+
+test("groupedSections breaks a selectionCount tie alphabetically (stable A→Z tiebreak)", () => {
+  // Three plain rows with the SAME count fall back to alphabetical order regardless of input order.
+  const catalogue = [
+    { label: "Cherry", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true, selectionCount: 7 },
+    { label: "Apple", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true, selectionCount: 7 },
+    { label: "Banana", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true, selectionCount: 7 },
+  ];
+  const { sections } = groupedSections(catalogue, [], { max: 5 });
+  const cat = sections.find((s) => s.name === "Cat");
+  assert.deepEqual(cat.options.map((o) => o.label), ["Apple", "Banana", "Cherry"]);
+});
+
+test("groupedSections treats a missing/undefined selectionCount as 0 (graceful on an older payload)", () => {
+  // No row carries selectionCount → all treated as 0 → pure alphabetical tail, no throw.
+  const catalogue = [
+    { label: "Zebra", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true },
+    { label: "Alpha", category: "Cat", emoji: null, highlighted: false, sortWeight: 0, active: true },
+  ];
+  const { sections } = groupedSections(catalogue, [], { max: 5 });
+  const cat = sections.find((s) => s.name === "Cat");
+  assert.deepEqual(cat.options.map((o) => o.label), ["Alpha", "Zebra"]);
+});
+
+test("groupedSections leaves the Popular group membership + order unchanged (only the tail re-sorts)", () => {
+  // The synthetic Popular group is NOT re-ordered by popularity — it keeps its incoming highlights order.
+  // Membership = exactly the highlighted rows, regardless of selectionCount.
+  const { sections } = groupedSections(CATALOGUE, [], { max: 3 });
+  const popular = sections.find((s) => s.popular);
+  assert.deepEqual(
+    popular.options.map((o) => o.label).sort(),
+    ["Coffee & cafés", "Running & jogging"],
+    "Popular still holds exactly the highlighted rows",
+  );
 });
 
 // ── groupedSections: search filter ──────────────────────────────────────────────────────────────────
