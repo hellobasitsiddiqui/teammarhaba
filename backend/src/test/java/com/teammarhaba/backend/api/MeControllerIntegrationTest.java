@@ -104,6 +104,26 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void meCarriesTheNumericCircleUserId() throws Exception {
+        // Circle User ID (TM-1105): GET /me must return the numeric users.id PK as `circleUserId`,
+        // additively alongside the Firebase `uid` string. Provision the account first, read its real
+        // DB id, then assert the response carries exactly that number (and that it is distinct from the
+        // uid string — they are different identity handles).
+        var who = caller("uid-circle", "circle@example.com");
+        mockMvc.perform(get("/api/v1/me").with(who)).andExpect(status().isOk());
+
+        Long id = users.findByFirebaseUid("uid-circle").orElseThrow().getId();
+        assertThat(id).as("account row was provisioned with a numeric id").isNotNull();
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.uid").value("uid-circle"))
+                // The load-bearing assertion: the numeric users.id is present as circleUserId.
+                .andExpect(jsonPath("$.circleUserId").value(id))
+                .andExpect(jsonPath("$.circleUserId").isNumber());
+    }
+
+    @Test
     void patchUpdatesDisplayName() throws Exception {
         var who = caller("uid-patch", "grace@example.com");
 

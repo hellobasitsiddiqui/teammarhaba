@@ -1585,6 +1585,10 @@
           "ageVerified" : {
             "type" : "boolean"
           },
+          "circleUserId" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
           "city" : {
             "type" : "string"
           },

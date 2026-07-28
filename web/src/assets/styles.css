@@ -6810,6 +6810,40 @@ button.tm-c-reaction {
     color: var(--muted);
     font-style: italic;
 }
+/* Circle User ID (TM-1105): the "Circle User ID" label sits between the 🆔 icon and the numeric value,
+ * muted so the value itself is what reads; the value keeps the shared .tm-pf-contact-line styling. */
+.tm-pf-contact-label {
+    color: var(--muted);
+    white-space: nowrap;
+}
+/* Copy button for the Circle User ID — a quiet accent link (no default button chrome, matching the
+ * a.tm-pf-go / .tm-pf-barnudge idiom), pushed to the end of its row. Hidden by paintHub() when there's
+ * no id to copy yet. */
+.tm-pf-copy-id {
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: var(--fs-2);
+    font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tm-pf-copy-id:hover {
+    text-decoration: underline;
+}
+.tm-pf-copy-id:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+.tm-pf-copy-id[disabled] {
+    color: var(--muted);
+    cursor: default;
+    text-decoration: none;
+}
 .tm-pf-loading .tm-pf-contact {
     visibility: hidden;
 }

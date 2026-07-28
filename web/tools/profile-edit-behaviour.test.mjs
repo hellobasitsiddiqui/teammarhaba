@@ -71,6 +71,9 @@ function fakeEl(tag = "div") {
     innerHTML: undefined, // present but UNUSED — if the code ever wrote here, tests would notice.
     hidden: false,
     disabled: false,
+    // TM-1105: real elements always have a `.dataset`; paintHub stashes the Circle User ID copy value on
+    // the Copy button's dataset, so the fake needs one too (otherwise assigning to it throws under Node).
+    dataset: {},
     style: {},
     _attrs: {},
     _classes: new Set(),
@@ -156,6 +159,10 @@ function fakeElBuilder(tag, attrs = {}, children = []) {
 // The captured toast calls, so tests can assert what the user was told.
 let TOASTS = [];
 
+// TM-1105: the captured copyToClipboard calls, so the Circle User ID test can assert the numeric id
+// (not the uid string) is what the Copy button hands to the clipboard.
+let COPIED = [];
+
 // Load profile.js: strip its import block, inject the module's dependencies via a destructure from a
 // global, and append a small TEST SEAM (shell setter + state getter + internal-function exports). The
 // evaluated function bodies are the exact shipped source.
@@ -178,9 +185,11 @@ function loadProfileModule(deps) {
     // either side of that change (the fail-before proof evals main's copy) — unused names are harmless.
     "  onAvatarChanged, announceAvatarChanged, onAvatarChangedEvent,\n" +
     "  isNativeCameraAvailable, captureAvatarImage,\n" +
-    "  clear, el, modal, toast, doodle, renderAccountBadges,\n" +
+    // TM-1105: profile.js now also imports copyToClipboard (ui.js) for the Circle User ID copy control.
+    "  clear, copyToClipboard, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
+    // TM-1105: circleUserId (profile-core.js) — the pure Circle User ID render model paintHub now names.
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
     "  GENDER_OPTIONS, GENDER_VALUES,\n" +
@@ -213,6 +222,8 @@ function loadProfileModule(deps) {
 
   // A test seam appended to the eval copy only: reach the module-private shell/state + internals.
   const seam = "\nexport function __setShell(s){ shell = s; }\n" +
+    // TM-1105: reach the shell buildShell mounted (to assert the built Circle User ID Copy button).
+    "export function __getShell(){ return shell; }\n" +
     "export function __getState(){ return state; }\n" +
     // TM-1005: the phone verify controller (sendBtn/otpWrap/statusEl handles) so the affordance tests
     // can assert visibility + label without re-walking the built wrapper tree.
@@ -322,6 +333,12 @@ const deps = {
   toast: (msg, opts) => {
     TOASTS.push({ msg, opts });
   },
+  // TM-1105: the Circle User ID Copy button calls copyToClipboard — a fake that records what was copied
+  // so a test can assert the numeric id (not the uid string) is the value handed to the clipboard.
+  copyToClipboard: (text) => {
+    COPIED.push(text);
+    return Promise.resolve(true);
+  },
   doodle: () => fakeElBuilder("span"),
   renderAccountBadges: () => null,
   buildSecuritySettings: () => fakeElBuilder("section"),
@@ -330,6 +347,9 @@ const deps = {
   profileMode: core.profileMode,
   identitySummary: core.identitySummary,
   accountContact: core.accountContact,
+  // TM-1105: the REAL pure Circle User ID model, so paintHub's id render + copy-value wiring run the
+  // shipped decision under Node (not a stub).
+  circleUserId: core.circleUserId,
   profileStrength: core.profileStrength,
   strengthRingGeometry: core.strengthRingGeometry,
   publicSummary: core.publicSummary,
@@ -464,6 +484,11 @@ function makeShell(values = {}) {
     photo: wireClassList(fakeEl("img")),
     email: wireClassList(fakeEl("div")),
     phone: wireClassList(fakeEl("div")),
+    // TM-1105: the Circle User ID value node + its Copy button (paintHub sets the value's textContent +
+    // muted class, and the button's dataset.copy / hidden / disabled). Present regardless of the id so
+    // paintHub's guard runs; harmless for a pre-TM-1105 paintHub that ignores them.
+    userId: wireClassList(fakeEl("div")),
+    userIdCopy: wireClassList(fakeEl("button")),
     // `bar` is the pre-TM-913 horizontal-bar fill node (paintHub set hub.bar.style.width); kept so this
     // harness evals main's paintHub too. TM-913 swaps it for the progress RING: `ring` is the
     // role=progressbar container (paintHub sets aria-valuenow/valuetext on it) and `ringArc` the fill
@@ -707,6 +732,87 @@ test("paintHub paints a backend name as inert TEXT (textContent), never parsed H
     assert.equal(shell.hub.name.innerHTML, undefined, "paintHub must not write innerHTML");
     // The children list stays empty (no parsed element was inserted) — textContent doesn't append nodes.
     assert.equal(shell.hub.name._children.length, 0);
+  });
+});
+
+// ---- circleUserIdRenderAndCopy (TM-1105) -----------------------------------------------------
+// paintHub is where the pure circleUserId model reaches the DOM: it paints the numeric users.id next to
+// the phone and stages the Copy control (the raw value to copy is stashed on the button's dataset, which
+// its click handler reads). These pin (a) the id renders as text, (b) the copy VALUE staged for the
+// button is the RAW NUMERIC id (not the Firebase uid string), and (c) with no id the line reads as a
+// muted prompt and the Copy button is hidden/disabled with nothing to copy. Fail-before: on main paintHub
+// never touches hub.userId / hub.userIdCopy, so the id-text + dataset.copy + hidden assertions fail.
+// The click → copyToClipboard wiring itself is proven by buildShell's real Copy button below.
+
+test("paintHub renders the Circle User ID and stages the numeric id as the copy value (TM-1105)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ photoURL: null });
+
+    // A /me payload carrying the numeric users.id as circleUserId, distinct from the Firebase uid string.
+    profile.paintHub({ uid: "firebase-uid-xyz", circleUserId: 4242, city: "London", age: 30 });
+
+    // The value node shows the numeric id as text, and it is NOT the muted "not available" state.
+    assert.equal(shell.hub.userId._textContent, "4242");
+    assert.equal(shell.hub.userId._classes.has("tm-pf-contact-empty"), false);
+
+    // The Copy button is visible + enabled, and stages the RAW numeric id (a string) to copy — the
+    // users.id, never the Firebase uid string.
+    assert.equal(shell.hub.userIdCopy.hidden, false);
+    assert.equal(shell.hub.userIdCopy.disabled, false);
+    assert.equal(shell.hub.userIdCopy.dataset.copy, "4242");
+    assert.notEqual(shell.hub.userIdCopy.dataset.copy, "firebase-uid-xyz");
+  });
+});
+
+test("paintHub shows a muted prompt and hides the Copy button when no Circle User ID is present (TM-1105)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ photoURL: null });
+
+    // No circleUserId on the payload (the degenerate un-provisioned case).
+    profile.paintHub({ uid: "firebase-uid-xyz", city: "London", age: 30 });
+
+    assert.equal(shell.hub.userId._textContent, "Not available yet");
+    assert.equal(shell.hub.userId._classes.has("tm-pf-contact-empty"), true);
+    assert.equal(shell.hub.userIdCopy.hidden, true);
+    assert.equal(shell.hub.userIdCopy.disabled, true);
+    assert.equal(shell.hub.userIdCopy.dataset.copy, "", "nothing staged to copy when there's no id");
+  });
+});
+
+// buildShell builds the REAL Copy button via el() (with its onClick handler). Drive that handler after
+// staging a numeric id on its dataset — it must hand exactly that numeric string to copyToClipboard, and
+// with no id staged (nothing to copy) it must be a no-op. This is the click → clipboard proof the
+// paintHub tests above deliberately leave to the real button.
+test("TM-1105: buildShell's Copy button copies the staged numeric id (and no-ops when empty)", () => {
+  withFakeDocument(() => {
+    currentUserImpl = () => ({ uid: "smoke-uid" });
+    COPIED = [];
+    try {
+      profile.buildShell(wireClassList(fakeEl("div")));
+      const controls = profile.__sectionControls();
+      // The Circle User ID row lives in the pinned identity header, not a collapsible panel — reach the
+      // built Copy button off the live shell the buildShell mounted (same shell paintHub writes to).
+      const copyBtn = profile.__getShell().hub.userIdCopy;
+      assert.ok(copyBtn, "buildShell built the Circle User ID Copy button");
+
+      // Staged with a numeric id: the click copies exactly that string.
+      copyBtn.dataset.copy = "4242";
+      copyBtn.onClick();
+      assert.deepEqual(COPIED, ["4242"]);
+
+      // Staged empty (no id): the click is a no-op — nothing extra copied.
+      copyBtn.dataset.copy = "";
+      copyBtn.onClick();
+      assert.deepEqual(COPIED, ["4242"], "an empty staged value copies nothing");
+      // Guard against a redundant unused symbol warning under some linters.
+      void controls;
+    } finally {
+      currentUserImpl = () => null;
+    }
   });
 });
 

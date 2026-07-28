@@ -38,7 +38,7 @@ import { isStorageConfigured, uploadAvatar, validateAvatarFile, MAX_AVATAR_BYTES
 // by index.html — and this module for the control preview + the identity header / strength hub).
 import { announceAvatarChanged, onAvatarChangedEvent } from "./avatar-events.js";
 import { isNativeCameraAvailable, captureAvatarImage } from "./native-camera.js";
-import { clear, confirmDialog, el, modal, toast } from "./ui.js";
+import { clear, confirmDialog, copyToClipboard, el, modal, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
@@ -50,6 +50,9 @@ import {
   profileMode,
   identitySummary,
   accountContact,
+  // TM-1105: the pure "Circle User ID" model — the numeric users.id from /me, plus its copy value and
+  // the muted "Not available yet" fallback so the line is never a silently-blank row.
+  circleUserId,
   profileStrength,
   strengthRingGeometry,
   publicSummary,
@@ -962,6 +965,20 @@ function paintHub(profile) {
   // A missing phone reads as a muted prompt, not a real value.
   hub.phone.classList.toggle("tm-pf-contact-empty", !contact.hasPhone);
   hub.email.classList.toggle("tm-pf-contact-empty", !contact.email);
+
+  // Circle User ID (TM-1105): the numeric users.id from /me, with a copy control. When there's no id yet
+  // the line reads as a muted prompt and the Copy button is hidden (nothing to copy). The raw value the
+  // button copies is stashed on the button's dataset so the click handler stays a pure DOM read.
+  const uid = circleUserId(profile);
+  if (hub.userId) {
+    hub.userId.textContent = uid.display;
+    hub.userId.classList.toggle("tm-pf-contact-empty", !uid.hasId);
+  }
+  if (hub.userIdCopy) {
+    hub.userIdCopy.dataset.copy = uid.value;
+    hub.userIdCopy.hidden = !uid.hasId;
+    hub.userIdCopy.disabled = !uid.hasId;
+  }
 
   // Completeness: the photo counts too, read live off the same photoURL as the identity avatar above
   // (the single source of truth) rather than anything persisted on our side.
@@ -2330,6 +2347,22 @@ function buildShell(view) {
   // "No phone number added" prompt so the line is never silently blank.
   const hubEmail = el("div", { class: "tm-pf-contact-line", text: "" });
   const hubPhone = el("div", { class: "tm-pf-contact-line", text: "" });
+  // ── Circle User ID (TM-1105) ── the numeric users.id, shown next to the phone with a copy control so a
+  // user can read + quote their stable id (the app is branded Circle, TM-668). Painted by paintHub() from
+  // the same /me payload; the copy button is disabled + hidden when there's no id yet.
+  const hubUserId = el("div", { class: "tm-pf-contact-line", text: "" });
+  const hubUserIdCopy = el("button", {
+    type: "button",
+    class: "tm-pf-copy-id",
+    "aria-label": "Copy Circle User ID",
+    title: "Copy Circle User ID",
+    text: "Copy",
+    onClick: () => {
+      // Copy the raw numeric id (hubUserIdCopy.dataset.copy), set by paintHub(); no-op if unset.
+      const value = hubUserIdCopy.dataset.copy || "";
+      if (value) copyToClipboard(value);
+    },
+  });
   const hubContact = el("div", { class: "tm-pf-contact", "aria-label": "Account contact" }, [
     el("div", { class: "tm-pf-contact-row" }, [
       el("span", { class: "tm-pf-contact-ic", "aria-hidden": "true", text: "✉️" }),
@@ -2338,6 +2371,12 @@ function buildShell(view) {
     el("div", { class: "tm-pf-contact-row" }, [
       el("span", { class: "tm-pf-contact-ic", "aria-hidden": "true", text: "📞" }),
       hubPhone,
+    ]),
+    el("div", { class: "tm-pf-contact-row" }, [
+      el("span", { class: "tm-pf-contact-ic", "aria-hidden": "true", text: "🆔" }),
+      el("span", { class: "tm-pf-contact-label", text: "Circle User ID" }),
+      hubUserId,
+      hubUserIdCopy,
     ]),
   ]);
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
@@ -2501,7 +2540,7 @@ function buildShell(view) {
     // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
     // TM-913: the strength ring — `ring` is the progressbar container (aria lives here), `ringArc` the
     // fill <circle> paintHub() dash-offsets to the percent, `barPct` the centred percent label.
-    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
+    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, userId: hubUserId, userIdCopy: hubUserIdCopy, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.

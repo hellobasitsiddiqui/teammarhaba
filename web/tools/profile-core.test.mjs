@@ -16,6 +16,7 @@ import {
   profileMode,
   identitySummary,
   accountContact,
+  circleUserId,
   profileStrength,
   strengthRingGeometry,
   publicSummary,
@@ -108,6 +109,60 @@ test("accountContact trims whitespace and tolerates a missing/empty /me object",
   assert.equal(empty.email, "");
   assert.equal(empty.hasPhone, false);
   assert.equal(empty.phoneDisplay, "No phone number added");
+});
+
+// ---- circleUserId (TM-1105) -------------------------------------------------------------------
+
+test("circleUserId surfaces the numeric users.id, its copy value and a present flag", () => {
+  const c = circleUserId({ uid: "firebase-uid-xyz", circleUserId: 4242 });
+  assert.equal(c.id, 4242);
+  assert.equal(c.value, "4242", "the copy value is the id as a string");
+  assert.equal(c.hasId, true);
+  assert.equal(c.display, "4242");
+});
+
+test("circleUserId copies the numeric id, NOT the Firebase uid string", () => {
+  // The whole point of TM-1105: the id shown/copied is the numeric users.id, distinct from the uid.
+  const c = circleUserId({ uid: "firebase-uid-xyz", circleUserId: 7 });
+  assert.equal(c.value, "7");
+  assert.notEqual(c.value, "firebase-uid-xyz");
+});
+
+test("circleUserId treats a missing/null id as 'no id' with a muted prompt (never a blank line)", () => {
+  for (const raw of [undefined, null]) {
+    const c = circleUserId({ circleUserId: raw });
+    assert.equal(c.hasId, false);
+    assert.equal(c.id, null);
+    assert.equal(c.value, "", "nothing to copy when there's no id");
+    assert.equal(c.display, "Not available yet");
+  }
+  const missing = circleUserId({});
+  assert.equal(missing.hasId, false);
+  assert.equal(missing.display, "Not available yet");
+});
+
+test("circleUserId tolerates a null/undefined /me object", () => {
+  for (const me of [null, undefined]) {
+    const c = circleUserId(me);
+    assert.equal(c.hasId, false);
+    assert.equal(c.value, "");
+    assert.equal(c.display, "Not available yet");
+  }
+});
+
+test("circleUserId accepts 0 as a real id (presence is a null-check, not truthiness)", () => {
+  const c = circleUserId({ circleUserId: 0 });
+  assert.equal(c.hasId, true);
+  assert.equal(c.id, 0);
+  assert.equal(c.value, "0");
+  assert.equal(c.display, "0");
+});
+
+test("circleUserId rejects a non-numeric id (a string) as 'no id' — the contract is a number", () => {
+  // The backend types circleUserId as a Long → JSON number; a stray string is malformed, not an id.
+  const c = circleUserId({ circleUserId: "4242" });
+  assert.equal(c.hasId, false);
+  assert.equal(c.display, "Not available yet");
 });
 
 // ---- identitySummary --------------------------------------------------------------------------

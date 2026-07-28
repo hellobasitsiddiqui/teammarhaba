@@ -200,6 +200,10 @@ public class MeController {
     private MeResponse toResponse(User user, AccountState accountState) {
         return new MeResponse(
                 user.getFirebaseUid(),
+                // Circle User ID (TM-1105): the numeric users.id PK — the same stable id the admin
+                // surfaces use (TM-592), surfaced additively so the user can read + quote it from their
+                // own profile. Distinct from the Firebase uid string above.
+                user.getId(),
                 user.getEmail(),
                 user.getDisplayName(),
                 user.getFirstName(),
