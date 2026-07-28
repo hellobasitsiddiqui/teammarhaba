@@ -206,7 +206,9 @@ function loadProfileModule(deps) {
     // TM-879: the collapsible-sections pure model the buildShell renderer maps over.
     "  profileSectionsStateKey, resolveSectionState, toggleSectionState,\n" +
     "  COUNTRIES, flagOf,\n" +
-    "  normaliseInterestConfig, savedInterestLabels, interestChipsModel, catalogueGroups, toggleInterest, selectionError,\n" +
+    // TM-1095: catalogueGroups/toggleInterest/selectionError moved to the dedicated interests route
+    // (interests-route.js), so profile.js no longer imports them — the preamble mirrors that.
+    "  normaliseInterestConfig, savedInterestLabels, interestChipsModel,\n" +
     // TM-879: buildShell (now exercised by the section smoke tests) also names profileManageAffordance.
     "  profileMembershipRow, profileManageAffordance, membershipEnabled, MEMBERSHIP_ROUTE,\n" +
     "} = globalThis.__PROFILE_DEPS__;\n";
@@ -390,14 +392,12 @@ const deps = {
   toggleSectionState: core.toggleSectionState,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
-  // TM-778 interests-core: the REAL pure functions the card maps over, so paintInterests/openInterestPicker
-  // run the shipped chip/grouping/toggle logic through the renderer under Node.
+  // TM-778 interests-core: the REAL pure functions the hub card maps over, so paintInterests runs the
+  // shipped chip/hint logic through the renderer under Node. TM-1095 retired the overlay picker (the hub
+  // chip now routes to #/profile/interests), so catalogueGroups/toggleInterest/selectionError are gone.
   normaliseInterestConfig: interestsCore.normaliseInterestConfig,
   savedInterestLabels: interestsCore.savedInterestLabels,
   interestChipsModel: interestsCore.interestChipsModel,
-  catalogueGroups: interestsCore.catalogueGroups,
-  toggleInterest: interestsCore.toggleInterest,
-  selectionError: interestsCore.selectionError,
   // membership-tier.js is import-safe (no CDN); use the real pure mapping.
   profileMembershipRow: (await import(membershipTierUrl)).profileMembershipRow,
   // TM-879: the REAL "Manage" affordance decision (link vs coming-soon badge) so buildShell's

@@ -458,6 +458,12 @@
              (imported by router.js) builds the edit form into this container; router.js owns visibility. -->
         <section id="profile-view" class="profile-view" aria-label="Edit profile" hidden></section>
 
+        <!-- Interests-management route (TM-1095): the dedicated full-screen #/profile/interests view that
+             REPLACES the old in-place picker overlay — search + collapsible category sections + a sticky
+             Save/Cancel bar. interests-route.js (imported by router.js) builds it here; router.js owns
+             visibility. A Profile sub-route, so the bottom-nav Profile tab lights for it. -->
+        <section id="interests-view" class="profile-view" aria-label="Manage your interests" hidden></section>
+
         <!-- Membership tier management (TM-480): the self-serve #/membership screen — current tier +
              what each tier includes + a Switch action. membership-tier.js paints it here and owns its
              own visibility (its own hashchange listener, so it needs no router.js edit). Stays `hidden`

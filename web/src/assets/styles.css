@@ -7060,25 +7060,113 @@ button.tm-pf-chip[disabled] {
     font-size: 1.02em;
     line-height: 1;
 }
+/* The selected-count line — shared between the (retired TM-1095) overlay and the interests route's
+   summary + section counts. Kept: interests-route.js still uses it. */
 .tm-pf-picker-count {
     margin: 0 0 var(--space-2);
     font-size: var(--fs-1);
 }
-.tm-pf-picker-cat {
-    margin: var(--space-3) 0 var(--space-2);
-    font-size: var(--fs-2);
-    font-weight: 600;
-}
-.tm-pf-picker-actions {
-    margin-top: var(--space-4);
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-2);
-}
+/* TM-1095: .tm-pf-picker-cat and .tm-pf-picker-actions were the retired in-place picker overlay's
+   category headers + action row. The overlay is gone (replaced by the #/profile/interests route, whose
+   own .tm-interests-* styles live above), so those two rules were removed. .tm-pf-picker-opt (the toggle
+   chip) survives — the route reuses it. */
 .tm-pf-hint {
     margin: var(--space-2) 0 0;
     font-size: var(--fs-1);
+}
+
+/* ---- Interests-management route (TM-1095) ------------------------------------------------------
+   The dedicated #/profile/interests full-screen view that REPLACES the in-place picker overlay:
+   a current-selection summary, a search box, collapsible category sections, and a sticky Save/Cancel
+   bar pinned to the bottom of the viewport. Reuses the .tm-pf-chip / -on tokens for chips; theme
+   tokens only (no hard-coded colours). */
+.tm-interests-route {
+    /* Leave room at the bottom so the sticky bar never covers the last section's chips (bar height +
+       its own safe-area padding). The scroll body is the view itself. */
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+}
+.tm-interests-summary {
+    margin-bottom: var(--space-3);
+}
+.tm-interests-none {
+    margin: 0;
+    font-size: var(--fs-1);
+}
+.tm-interests-search-wrap {
+    margin-bottom: var(--space-3);
+}
+.tm-interests-search {
+    width: 100%;
+}
+.tm-interests-sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.tm-interests-section {
+    border-top: var(--border-width) solid var(--border);
+    padding-top: var(--space-2);
+}
+/* The section header is a full-width toggle button (chevron + title + count). It resets the UA button
+   chrome so it reads as a list header, not a form control. */
+.tm-interests-section-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 0.35rem 0;
+    font: inherit;
+    font-weight: 600;
+    color: var(--fg);
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.tm-interests-section-head-popular .tm-interests-section-title {
+    color: var(--accent);
+}
+.tm-interests-section-title {
+    flex: 1;
+}
+.tm-interests-section-count {
+    font-weight: 400;
+    font-size: var(--fs-1);
+}
+.tm-interests-chevron {
+    display: inline-block;
+    width: 1rem;
+    text-align: center;
+}
+.tm-interests-section-body {
+    margin-top: var(--space-1);
+    margin-bottom: var(--space-2);
+}
+.tm-interests-noresults,
+.tm-interests-unavailable {
+    margin: var(--space-3) 0;
+    font-size: var(--fs-1);
+}
+/* The sticky Save/Cancel bar — pinned to the bottom of the viewport so Save is always reachable on a
+   phone regardless of catalogue length (the overlay's TM-830 bug is structurally impossible here: the
+   bar isn't inside a scroll container). Sits above the bottom tab bar via the safe-area inset. */
+.tm-interests-stickybar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: var(--border-width) solid var(--border);
+}
+.tm-interests-stickybar-actions {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: flex-end;
+}
+.tm-interests-route-error {
+    margin: 0;
 }
 
 /* Membership row (paper-profile). */

@@ -1,31 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { EVENT_GOER } from "../fixtures.mjs";
 
-// TM-830 — the profile-edit Interests "+ add" picker MODAL must be reachable on a phone.
+// TM-1095 (was TM-830) — the profile interests editor must be reachable + saveable on a phone.
 //
-// The bug: opening the Interests picker from Profile → Interests → "+ add" (an existing user
-// adding/editing interests) mounts a `.tm-modal` overlay. With the seeded catalogue (V45 seeds dozens
-// of interests across many categories) that modal grows TALLER than the phone viewport, and — because
-// its height was capped with `max-height: 100%`, which only constrains when an ancestor has a *definite*
-// height and resolved to nothing under the `display:grid; place-items:center` backdrop — the modal grew
-// to full content height. That left `.tm-modal-body`'s `overflow-y:auto` inert (a body never needs to
-// overflow if its parent isn't height-constrained), so the Save button sat ~1650px below the fold,
-// unreachable even after force-scrolling every descendant. See the ticket's live-DOM evidence.
+// HISTORY: TM-830 fixed a bug where the interests picker OVERLAY (a `.tm-modal` opened from Profile →
+// Interests → "+ add") grew taller than the phone viewport, stranding its Save button below the fold.
+// TM-1095 RETIRED that overlay entirely: the hub's "＋ add" / "Manage" chip now navigates to a dedicated
+// full-screen route (`#/profile/interests`, interests-route.js) with a SEARCH field, COLLAPSIBLE category
+// sections, and a STICKY Save/Cancel bar. The old bug is now structurally impossible — Save lives in a
+// position:sticky bar pinned to the viewport bottom, not inside a scroll container — so this spec asserts
+// the ROUTE's mobile reachability + the new affordances instead of the retired modal geometry.
 //
-// SCOPE: this is the profile-edit MODAL path ONLY. The new-user onboarding interests step is a separate
-// FULL-PAGE picker (not a `.tm-modal`) and is deliberately NOT exercised here — an earlier "fix" only
-// covered onboarding, which is why the ticket was reopened.
+// SCOPE: the profile-edit interests EDITOR only. The new-user onboarding interests step is a separate
+// full-page picker and is deliberately NOT exercised here.
 //
-// The fix (styles.css .tm-modal): cap the modal to the *viewport* — `max-height: calc(100dvh - insets)`
-// (100vh fallback), mirroring the `body` dvh convention (TM-295) and subtracting the backdrop's
-// safe-area inset padding — so the flex column is definite-height and the body genuinely scrolls.
-//
-// This spec runs under the `mobile-chromium` project (Pixel 5 ≈ 393×727 CSS px) — see
-// playwright.config.mjs testMatch — so it exercises the real narrow-screen layout the bug lives in.
-// Patterns mirror responsive-mobile.spec.mjs (tour suppression, sign-in helper, in-viewport assertion).
+// Runs under the `mobile-chromium` project (Pixel 5 ≈ 393×727 CSS px) — see playwright.config.mjs
+// testMatch — so it exercises the real narrow-screen layout. Patterns mirror the prior TM-830 spec
+// (tour suppression, sign-in helper, in-viewport assertion).
 
-// Suppress the first-run product tour: its dimmed overlay would sit over the picker under test. Same
-// approach as responsive-mobile.spec.mjs / theme-visual.spec.mjs — make any `tm.tour.*` key read as done.
+// Suppress the first-run product tour: its dimmed overlay would sit over the editor under test. Same
+// approach as responsive-mobile.spec.mjs — make any `tm.tour.*` key read as done.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const orig = Storage.prototype.getItem;
@@ -38,8 +32,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 // Sign in as a seeded, onboarded + terms-accepted user (EVENT_GOER, provisioned by global-setup) so the
-// session lands straight in the app — no first-run gate to walk. Email+password is behind "Try another
-// way" (email-code is the default front door, TM-234).
+// session lands straight in the app. Email+password is behind "Try another way" (email-code is the
+// default front door, TM-234).
 async function signIn(page) {
   await page.goto("/#/login");
   await expect(page.locator("#auth-signed-out")).toBeVisible();
@@ -47,83 +41,88 @@ async function signIn(page) {
   await page.click("#try-another-btn");
   await page.fill("#password", EVENT_GOER.password);
   await page.click("#signin-btn");
-  // The viewport-independent "signed in" signal: the signed-OUT login panel disappears (the top-nav
-  // sign-out control was removed in TM-906; body[data-auth] from auth-state.mjs is the modern form).
+  // The viewport-independent "signed in" signal: the signed-OUT login panel disappears.
   await expect(page.locator("#auth-signed-out")).toBeHidden();
 }
 
-test.describe("@responsive TM-830 profile Interests '+ add' picker modal", () => {
-  test("the picker modal fits the phone viewport, its body scrolls, and Save is reachable", async ({
+// Open the interests editor from the profile hub. Arms the catalogue GETs so the sections have rendered
+// before the caller asserts. Returns once #interests-view is visible.
+async function openInterestsRoute(page) {
+  const hubCatalogue = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/interests/catalogue") && r.request().method() === "GET",
+  );
+  await page.evaluate(() => (window.location.hash = "#/profile"));
+  await expect(page.locator("#profile-view")).toBeVisible();
+  await hubCatalogue;
+  const routeCatalogue = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/interests/catalogue") && r.request().method() === "GET",
+  );
+  // The hub's persistent entry chip ("＋ add" under the max, "Manage" at the max — both carry
+  // `.tm-pf-chip-add`) NAVIGATES to the route rather than opening a modal.
+  await page.locator(".tm-pf-chip-add").click();
+  await expect(page.locator("#interests-view")).toBeVisible();
+  await routeCatalogue;
+}
+
+test.describe("@responsive TM-1095 profile interests full-screen route", () => {
+  test("the interests route is reachable from the hub, its sticky Save is in-viewport, and it saves", async ({
     page,
   }) => {
     await signIn(page);
+    await openInterestsRoute(page);
 
-    // Navigate to the profile HUB (the paper-profile view, not the edit form). Arm the interests-catalogue
-    // wait BEFORE the navigation that mounts the profile + fires the catalogue GET, so opening the picker
-    // never races an empty catalogue (an unreadable catalogue would render the honest "not available yet"
-    // modal — short, and NOT the tall picker the bug is about). paintInterests renders the "+ add" chip
-    // once the config + catalogue land.
-    const catalogueLoaded = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/interests/catalogue") && r.request().method() === "GET",
-    );
-    await page.evaluate(() => (window.location.hash = "#/profile"));
-    await expect(page.locator("#profile-view")).toBeVisible();
-    await catalogueLoaded;
+    // The dedicated route replaced the hub view (its own #interests-view; the hub is hidden).
+    await expect(page.locator("#profile-view")).toBeHidden();
+    expect(page.url()).toContain("#/profile/interests");
 
-    // Open the Interests "+ add" picker. The chip is the "＋ add" button (fullwidth plus) on the
-    // Interests card; it's shown while the user is under the max (a freshly-seeded goer has 0 interests).
-    const addChip = page.locator(".tm-pf-chip-add", { hasText: "add" });
-    await expect(addChip).toBeVisible();
-    await addChip.click();
-
-    // The picker mounts as the `.tm-modal` overlay (ui.js modal() → `.tm-dialog.tm-modal`), containing the
-    // grouped catalogue and, at the bottom, the Save button (`.tm-pf-picker-actions .tm-btn-primary`).
-    const modal = page.locator(".tm-dialog.tm-modal");
-    await expect(modal).toBeVisible();
-    // Confirm it's the tall CATALOGUE picker (the bug's subject), not the short "not available yet" body.
-    await expect(page.locator(".tm-pf-picker-count")).toBeVisible();
-    const saveBtn = page.locator(".tm-pf-picker-actions .tm-btn-primary", { hasText: "Save" });
+    // The route paints a search box, at least one collapsible section (Popular first), and the sticky bar.
+    await expect(page.locator("#interests-search")).toBeVisible();
+    await expect(page.locator(".tm-interests-section-head").first()).toBeVisible();
+    const saveBtn = page.locator(".tm-interests-save");
     await expect(saveBtn).toBeVisible();
 
-    // ── Root-cause assertion: the modal must not exceed the visible viewport. ──────────────────────────
-    // Pre-fix the modal grew to its full content height (evidence: clientHeight 2548 on a 844px viewport),
-    // so it far exceeded the viewport. Post-fix the viewport-relative cap keeps it within it. Allow a
-    // small slack for the backdrop inset padding + sub-pixel rounding.
-    const geom = await modal.evaluate((el) => {
-      const body = el.querySelector(".tm-modal-body");
-      return {
-        modalHeight: el.getBoundingClientRect().height,
-        viewportHeight: window.innerHeight,
-        bodyClientH: body.clientHeight,
-        bodyScrollH: body.scrollHeight,
-      };
-    });
-    expect(
-      geom.modalHeight,
-      `modal (${Math.round(geom.modalHeight)}px) must fit within the ${geom.viewportHeight}px viewport`,
-    ).toBeLessThanOrEqual(geom.viewportHeight + 1);
-
-    // ── The body genuinely scrolls: with the tall seeded catalogue the content overflows the (now
-    // height-constrained) body, so .tm-modal-body's overflow-y:auto engages (scrollHeight > clientHeight).
-    // Pre-fix these were EQUAL (2474 == 2474) — the body never needed to overflow because nothing capped
-    // its parent. This is the mechanism the Save-reachability depends on.
-    expect(
-      geom.bodyScrollH,
-      `modal body must be scrollable (scrollHeight ${geom.bodyScrollH} > clientHeight ${geom.bodyClientH})`,
-    ).toBeGreaterThan(geom.bodyClientH);
-
-    // ── The user-facing outcome: Save is reachable + clickable. Scroll it into view (a real user scrolls
-    // the picker body) and assert it's actually in the viewport and clickable. Pre-fix this FAILS: the
-    // button sat ~1650px below the fold and no descendant scroll could bring it in (nothing was
-    // scrollable), so scrollIntoViewIfNeeded left it out of the viewport.
-    await saveBtn.scrollIntoViewIfNeeded();
+    // ── Root-cause assertion (the TM-830 legacy): Save is reachable + in the viewport. The sticky bar is
+    // pinned to the viewport bottom, so Save is visible without scrolling regardless of catalogue length.
     await expect(saveBtn).toBeInViewport();
 
-    // Belt-and-braces: it's genuinely actionable (Playwright's actionability = visible, stable, receives
-    // events, enabled). A trial click asserts reachability without mutating state (no PATCH fires). The
-    // Save is disabled until the min is met, so pick one interest first to enable it.
+    // ── Search filters the catalogue: typing a category name can only ever REMOVE options (a robust,
+    // seed-independent check).
+    await page.fill("#interests-search", "sport");
+    const filteredCount = await page.locator(".tm-pf-picker-opt").count();
+    await page.fill("#interests-search", "");
+    const fullCount = await page.locator(".tm-pf-picker-opt").count();
+    expect(fullCount).toBeGreaterThan(0);
+    expect(filteredCount).toBeLessThanOrEqual(fullCount);
+
+    // ── Save is disabled until the min is met; pick the first visible option (seed-independent) to
+    // enable it, then Save PATCHes /me and returns to the hub.
+    await expect(saveBtn).toBeDisabled();
     await page.locator(".tm-pf-picker-opt").first().click();
     await expect(saveBtn).toBeEnabled();
-    await saveBtn.click({ trial: true });
+    const patch = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/me") && r.request().method() === "PATCH",
+    );
+    await saveBtn.click();
+    await patch;
+    await expect(page.locator("#profile-view")).toBeVisible();
+    await expect(page.locator("#interests-view")).toBeHidden();
+  });
+
+  test("a collapsible section folds and unfolds", async ({ page }) => {
+    await signIn(page);
+    await openInterestsRoute(page);
+
+    // The first section header starts expanded (aria-expanded=true); clicking it collapses its body.
+    const head = page.locator(".tm-interests-section-head").first();
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+    const body = page.locator(".tm-interests-section-body").first();
+    await expect(body).toBeVisible();
+    await head.click();
+    await expect(head).toHaveAttribute("aria-expanded", "false");
+    await expect(body).toBeHidden();
+    // Clicking again unfolds it.
+    await head.click();
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+    await expect(body).toBeVisible();
   });
 });
