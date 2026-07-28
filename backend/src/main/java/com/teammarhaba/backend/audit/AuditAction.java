@@ -309,5 +309,24 @@ public enum AuditAction {
      * /api/v1/admin/interests/config} (TM-774). One row per set, carrying the new {@code min}/{@code max}
      * in its metadata.
      */
-    INTERESTS_CONFIG_UPDATED
+    INTERESTS_CONFIG_UPDATED,
+
+    /** An admin created a catalogue city via {@code POST /api/v1/admin/cities} (TM-1089). */
+    CITY_CREATED,
+
+    /** An admin edited a catalogue city via {@code PATCH /api/v1/admin/cities/{id}} (TM-1089). */
+    CITY_UPDATED,
+
+    /**
+     * An admin retired (soft-deleted) a catalogue city via {@code POST /api/v1/admin/cities/{id}/retire}
+     * (TM-1089): the row is tombstoned + {@code active=false} but KEPT — retire is not delete, so any
+     * user/event referencing it by name is untouched. Idempotent (a repeat retire does not re-audit).
+     */
+    CITY_RETIRED,
+
+    /**
+     * An admin restored a retired catalogue city via {@code POST /api/v1/admin/cities/{id}/restore}
+     * (TM-1089). Idempotent mirror of {@link #CITY_RETIRED}.
+     */
+    CITY_RESTORED
 }
