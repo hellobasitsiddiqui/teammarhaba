@@ -1038,17 +1038,21 @@ export function matchesStatusFilter(event, filter, now = Date.now()) {
  * The admin list's lifecycle filter chips (TM-1096). Each chip is one lifecycle bucket the admin thinks
  * in: its `key` is the {@link eventLifecycle} label it matches, and `label` is the chip's copy. The
  * dropdown this replaced only offered a single label; chips are multi-select, so the console keeps a
- * Set of selected keys instead of one string. "Upcoming" surfaces the "Hidden" lifecycle (an event
- * scheduled but not yet inside its public window) under friendlier copy — the admin doesn't think of a
- * not-yet-public event as "hidden", they think of it as upcoming.
+ * Set of selected keys instead of one string.
  *
- * Order = the natural lifecycle reading order (live → upcoming → gone): Happening now · Visible ·
- * Upcoming · Unlisted · Finished · Cancelled.
+ * TM-1110 relabel: the admin's real "upcoming" events are PUBLISHED + not-yet-started — those carry the
+ * "Visible" lifecycle label, so the **Visible** bucket is the "Upcoming" chip. The **Hidden** lifecycle
+ * (published but not yet inside its public visibility window = not visible to anyone yet) gets the honest
+ * "Scheduled" chip. (Before TM-1110 the "Upcoming" chip was wired to Hidden, which is ~always empty, so
+ * it mislabelled the truly-upcoming events under a chip literally reading "Visible".)
+ *
+ * Order = the natural lifecycle reading order (live → upcoming → gone): Happening now · Upcoming
+ * (Visible) · Scheduled (Hidden) · Unlisted · Finished · Cancelled.
  */
 export const LIFECYCLE_FILTERS = [
   ["Happening", "Happening now"],
-  ["Visible", "Visible"],
-  ["Hidden", "Upcoming"],
+  ["Visible", "Upcoming"],
+  ["Hidden", "Scheduled"],
   ["Unlisted", "Unlisted"],
   ["Finished", "Finished"],
   ["Cancelled", "Cancelled"],
