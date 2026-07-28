@@ -115,9 +115,13 @@ class GlobalExceptionHandlerTest {
     // InterestCatalogueController (TM-776, the public picker read) is a @RestController that injects the
     // JPA InterestCatalogueRepository directly plus the InterestSelectionConfig @Component — neither of
     // which a @WebMvcTest slice bootstraps (no Spring Data repositories, and InterestSelectionConfig's own
-    // AppConfigService dependency isn't in the slice). Supply both so the web slice can load.
+    // AppConfigService dependency isn't in the slice). Supply both so the web slice can load. TM-1094: the
+    // controller also injects UserInterestRepository (for the per-interest selectionCount) — mock it too.
     @MockitoBean
     private com.teammarhaba.backend.interests.InterestCatalogueRepository interestCatalogueRepository;
+
+    @MockitoBean
+    private com.teammarhaba.backend.interests.UserInterestRepository userInterestRepository;
 
     @MockitoBean
     private com.teammarhaba.backend.interests.InterestSelectionConfig interestSelectionConfig;
