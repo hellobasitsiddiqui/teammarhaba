@@ -266,6 +266,37 @@ class ConversationReadIntegrationTest extends AbstractIntegrationTest {
         assertThat(page.get("totalElements").asLong()).isEqualTo(3);
     }
 
+    /**
+     * TM-1055 seam: with the thread on the default {@link com.teammarhaba.backend.chat.HistoryVisibility#FULL}
+     * history visibility, the read path returns the WHOLE thread exactly as before — the flag is read but
+     * the timeline is unchanged (zero behaviour change in Phase 1). A member (here a late joiner) reads
+     * every message, pre-join ones included, and the underlying thread is confirmed FULL.
+     */
+    @Test
+    void tm1055FullHistoryVisibilityReturnsTheWholeThreadUnchanged() throws Exception {
+        Long eventId = newEvent("Kayak trip");
+        Long thread = newEventThread(eventId);
+
+        // The thread is created FULL by default (the seam we're pinning).
+        assertThat(conversations.findById(thread).orElseThrow().getHistoryVisibility())
+                .isEqualTo(com.teammarhaba.backend.chat.HistoryVisibility.FULL);
+
+        Long organiser = newUser("conv-full-org-" + UUID.randomUUID());
+        addMember(thread, organiser, MemberRole.ADMIN, MuteState.NONE);
+        Long m1 = messages.save(Message.fromUser(thread, organiser, "before you joined")).getId();
+        Long m2 = messages.save(Message.fromUser(thread, organiser, "still before")).getId();
+
+        // A member who joins AFTER those messages — under FULL they must still read them.
+        String uid = "conv-full-late-" + UUID.randomUUID();
+        Long lateJoiner = newUser(uid);
+        addMember(thread, lateJoiner, MemberRole.MEMBER, MuteState.NONE);
+        Long m3 = messages.save(Message.fromUser(thread, organiser, "after you joined")).getId();
+
+        JsonNode page = getJson("/api/v1/conversations/" + thread + "/messages", caller(uid));
+        assertThat(ids(page)).containsExactly(m1, m2, m3);
+        assertThat(page.get("totalElements").asLong()).isEqualTo(3);
+    }
+
     @Test
     void threadIsMembersOnly() throws Exception {
         String memberUid = "conv-403-member-" + UUID.randomUUID();

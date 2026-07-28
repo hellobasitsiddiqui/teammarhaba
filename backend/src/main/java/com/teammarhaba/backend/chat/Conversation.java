@@ -56,6 +56,18 @@ public class Conversation {
     @Column(name = "owner_user_id", updatable = false)
     private Long ownerUserId;
 
+    /**
+     * How much of the thread's history a member may read (TM-1055) — {@link HistoryVisibility#FULL}
+     * (the whole timeline, today's behaviour) or {@link HistoryVisibility#FROM_JOIN} (Phase 2, from the
+     * member's join onward). <b>Phase-1 seam only:</b> the column defaults to {@code FULL} (V51), every
+     * thread is created {@code FULL} here, and {@link ConversationReadService} reads it but treats it
+     * identically to today. It is set once at construction (updatable/insertable use the DB default when
+     * the entity omits it); Phase 2 owns setting {@code FROM_JOIN}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "history_visibility", nullable = false)
+    private HistoryVisibility historyVisibility = HistoryVisibility.FULL;
+
     /** DB-authoritative creation instant ({@code DEFAULT now()}); read-only on the entity. */
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
@@ -128,6 +140,14 @@ public class Conversation {
      */
     public Long getOwnerUserId() {
         return ownerUserId;
+    }
+
+    /**
+     * How much of the thread's history a member may read (TM-1055). {@link HistoryVisibility#FULL} for
+     * every thread today (the default); {@link HistoryVisibility#FROM_JOIN} is reserved for Phase 2.
+     */
+    public HistoryVisibility getHistoryVisibility() {
+        return historyVisibility;
     }
 
     public Instant getCreatedAt() {

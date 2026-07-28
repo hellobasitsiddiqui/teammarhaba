@@ -116,6 +116,40 @@ class ConversationMessageRepositoryIntegrationTest extends AbstractIntegrationTe
         assertThat(reloaded.getCreatedAt()).isNotNull(); // DB-authoritative default now()
     }
 
+    @Test
+    void aNewConversationDefaultsToFullHistoryVisibility() {
+        // TM-1055 seam: history_visibility defaults to FULL for BOTH thread kinds, so nothing changes
+        // until Phase 2 opts specific threads into FROM_JOIN.
+
+        // (1) The ENTITY default — a thread created through the factories maps back as FULL.
+        Conversation broadcast = conversations.save(Conversation.adminBroadcast());
+        assertThat(conversations.findById(broadcast.getId()))
+                .get()
+                .extracting(Conversation::getHistoryVisibility)
+                .isEqualTo(HistoryVisibility.FULL);
+
+        Long eventId = newEvent("history-visibility-default");
+        Conversation eventThread = conversations.save(Conversation.forEvent(eventId));
+        assertThat(conversations.findById(eventThread.getId()))
+                .get()
+                .extracting(Conversation::getHistoryVisibility)
+                .isEqualTo(HistoryVisibility.FULL);
+
+        // (2) The DB COLUMN default (V51) — a raw INSERT that OMITS history_visibility (the shape of
+        // every pre-migration row Flyway backfills, and any future writer that doesn't set it) must land
+        // 'FULL'. This is what pins the migration's `DEFAULT 'FULL'`; the entity assertions above can't,
+        // since Hibernate writes the column explicitly on every insert.
+        Long rawId = jdbc.queryForObject(
+                "insert into conversation (type) values ('ADMIN_BROADCAST') returning id", Long.class);
+        assertThat(jdbc.queryForObject(
+                        "select history_visibility from conversation where id = ?", String.class, rawId))
+                .isEqualTo("FULL");
+        assertThat(conversations.findById(rawId))
+                .get()
+                .extracting(Conversation::getHistoryVisibility)
+                .isEqualTo(HistoryVisibility.FULL);
+    }
+
     // ── conversation_member ──────────────────────────────────────────────────────────────────────
 
     @Test
