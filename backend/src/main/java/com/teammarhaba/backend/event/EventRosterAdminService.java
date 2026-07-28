@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.event;
 
 import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditEvent;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.user.User;
@@ -10,9 +11,11 @@ import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
@@ -124,16 +127,52 @@ public class EventRosterAdminService {
      */
     public record RosterEntry(Long userId, String displayName, AttendanceState state, boolean overCapacity) {}
 
-    /** The full admin roster for one event: GOING (join order) then WAITLISTED (FIFO), plus the counts. */
-    public record Roster(
-            long eventId, Integer capacity, long going, long waitlist, List<RosterEntry> entries) {}
+    /**
+     * A past-attendance history row on the admin roster (TM-1114): a user who was once on the event but is
+     * no longer live — evicted by an admin, or who cancelled their own RSVP — reconstructed from the
+     * append-only audit log ({@code Event/{eventId}} rows). A user who rejoined AFTER a past exit appears
+     * both here (their history is kept) AND as a live {@link RosterEntry} — the live row supersedes for
+     * "are they attending", the past row records "they left before".
+     *
+     * @param userId      the {@code users.id} of the past attendee
+     * @param displayName their profile name (may be {@code null} — the console shows a placeholder)
+     * @param lastState   {@code "EVICTED"} (admin removal) or {@code "CANCELLED"} (self un-RSVP) — their
+     *                    most recent past exit
+     * @param at          when that exit was recorded (the audit row's {@code createdAt})
+     * @param byAdmin     {@code true} if an admin removed them ({@code EVICTED}); {@code false} for a
+     *                    self-cancellation ({@code CANCELLED})
+     */
+    public record PastEntry(Long userId, String displayName, String lastState, Instant at, boolean byAdmin) {}
 
     /**
-     * The admin roster for one event (TM-592) — GOING attendees in join order followed by the waitlist in
-     * FIFO order, each resolved to a display name through {@link UserRepository} (soft-deleted accounts
-     * silently drop out, exactly as the public avatar strip does). A GOING attendee whose 1-based position
-     * exceeds the current capacity is flagged {@code overCapacity} so the console can show which committed
-     * members currently sit over a lowered cap. Read-only; no lock needed (a plain snapshot for display).
+     * The full admin roster for one event: GOING (join order) then WAITLISTED (FIFO), plus the counts and
+     * {@code pastEntries} — the reconstructed history of users who left (evicted or self-cancelled), most
+     * recent exit first, excluding anyone currently live (a live row supersedes a past one).
+     */
+    public record Roster(
+            long eventId,
+            Integer capacity,
+            long going,
+            long waitlist,
+            List<RosterEntry> entries,
+            List<PastEntry> pastEntries) {}
+
+    /**
+     * The admin roster for one event (TM-592 / TM-1114) — GOING attendees in join order followed by the
+     * waitlist in FIFO order, each resolved to a display name through {@link UserRepository} (soft-deleted
+     * accounts silently drop out, exactly as the public avatar strip does). A GOING attendee whose 1-based
+     * position exceeds the current capacity is flagged {@code overCapacity} so the console can show which
+     * committed members currently sit over a lowered cap.
+     *
+     * <p><b>{@code pastEntries} (TM-1114)</b> — the reconstructed history of users who LEFT the event,
+     * merged from the append-only audit log ({@code Event/{eventId}} rows: admin evictions
+     * {@link AuditAction#EVENT_ATTENDEE_EVICTED} + self-cancellations {@link AuditAction#EVENT_RSVP_CANCELLED}).
+     * Rows come newest-first, so the FIRST audit row seen for a user is kept as their most recent past exit
+     * (a user with several past exits collapses to one row). <b>A live attendance row supersedes a past
+     * one</b>: a user evicted-then-rejoined shows up as a live GOING/WAITLISTED {@link RosterEntry} and is
+     * dropped from {@code pastEntries}, so the two lists never double-count "are they attending" — their
+     * rejoin is visible via the live row. Only users with NO current live row remain in {@code pastEntries}.
+     * Read-only; no lock needed (a plain snapshot for display).
      */
     @Transactional(readOnly = true)
     public Roster roster(long eventId) {
@@ -142,11 +181,23 @@ public class EventRosterAdminService {
                 attendance.findByEventIdAndState(eventId, AttendanceState.GOING, PageRequest.of(0, MAX_ROSTER));
         List<EventAttendance> waitlist = attendance.findWaitlistFifo(eventId);
 
-        // One batch read for every attendee's display name (no N+1); tombstoned accounts simply aren't
-        // returned, so they drop out of the roster.
+        // The user ids currently live (GOING or WAITLISTED) — a live row supersedes any past exit for the
+        // same user, so these are excluded from the reconstructed history below.
+        Set<Long> liveUserIds = new java.util.HashSet<>();
+        going.forEach(a -> liveUserIds.add(a.getUserId()));
+        waitlist.forEach(a -> liveUserIds.add(a.getUserId()));
+
+        // Reconstruct the past-attendance history from the audit log (newest first), collapsing each user to
+        // their most recent EVICTED/CANCELLED exit. A user with a LIVE attendance row is excluded — the live
+        // row supersedes their past history for "are they attending" (a rejoin shows as a live row).
+        List<PastEntry> pastRaw = reconstructPastEntries(eventId, liveUserIds);
+
+        // One batch read for every id we need a display name for — live attendees AND past-entry users (no
+        // N+1). Tombstoned accounts simply aren't returned, so they drop out of both lists.
         List<Long> ids = new ArrayList<>();
         going.forEach(a -> ids.add(a.getUserId()));
         waitlist.forEach(a -> ids.add(a.getUserId()));
+        pastRaw.forEach(p -> ids.add(p.userId()));
         Map<Long, User> byId =
                 users.findAllById(ids).stream().collect(Collectors.toMap(User::getId, u -> u));
 
@@ -169,9 +220,67 @@ public class EventRosterAdminService {
             }
             entries.add(new RosterEntry(u.getId(), u.getDisplayName(), AttendanceState.WAITLISTED, false));
         }
+
+        // Resolve the past entries' display names from the same batch; drop tombstoned accounts (null user),
+        // exactly as the live lists do.
+        List<PastEntry> pastEntries = new ArrayList<>();
+        for (PastEntry p : pastRaw) {
+            User u = byId.get(p.userId());
+            if (u == null) {
+                continue;
+            }
+            pastEntries.add(new PastEntry(u.getId(), u.getDisplayName(), p.lastState(), p.at(), p.byAdmin()));
+        }
+
         long goingCount = attendance.countByEventIdAndState(eventId, AttendanceState.GOING);
         long waitlistCount = attendance.countByEventIdAndState(eventId, AttendanceState.WAITLISTED);
-        return new Roster(eventId, capacity, goingCount, waitlistCount, entries);
+        return new Roster(eventId, capacity, goingCount, waitlistCount, entries, pastEntries);
+    }
+
+    /**
+     * Reconstruct the event's past-attendance history from the append-only audit log (TM-1114). Reads every
+     * {@code Event/{eventId}} audit row newest-first, keeps only the exit actions
+     * ({@link AuditAction#EVENT_ATTENDEE_EVICTED} → {@code EVICTED}/byAdmin, {@link AuditAction#EVENT_RSVP_CANCELLED}
+     * → {@code CANCELLED}/self), collapses each user to their MOST RECENT exit (the first row seen, since
+     * newest-first), and drops anyone who currently holds a LIVE attendance row (the live row supersedes).
+     * The user id is read from the audit row's {@code userId} metadata (a String {@code users.id}, as written
+     * by evict/cancel); a row with no parseable {@code userId} is skipped defensively. Display-name resolution
+     * happens in the caller's shared batch read.
+     */
+    private List<PastEntry> reconstructPastEntries(long eventId, Set<Long> liveUserIds) {
+        List<AuditEvent> history = audit.historyFor(TARGET_EVENT, String.valueOf(eventId));
+        // Insertion order preserves newest-first (the query is createdAt DESC); the first row per user wins.
+        Map<Long, PastEntry> mostRecentByUser = new LinkedHashMap<>();
+        for (AuditEvent e : history) {
+            boolean evicted = e.getAction() == AuditAction.EVENT_ATTENDEE_EVICTED;
+            boolean cancelled = e.getAction() == AuditAction.EVENT_RSVP_CANCELLED;
+            if (!evicted && !cancelled) {
+                continue; // not an exit action — ignore joins/claims/updates
+            }
+            Long userId = parseUserId(e.getMetadata());
+            if (userId == null || liveUserIds.contains(userId) || mostRecentByUser.containsKey(userId)) {
+                continue; // unparseable, currently live (superseded), or already recorded a newer exit
+            }
+            String lastState = evicted ? "EVICTED" : "CANCELLED";
+            mostRecentByUser.put(userId, new PastEntry(userId, null, lastState, e.getCreatedAt(), evicted));
+        }
+        return new ArrayList<>(mostRecentByUser.values());
+    }
+
+    /** Read the {@code userId} metadata (a String {@code users.id}) off an audit row; {@code null} if absent/unparseable. */
+    private static Long parseUserId(Map<String, Object> metadata) {
+        if (metadata == null) {
+            return null;
+        }
+        Object raw = metadata.get("userId");
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Long.valueOf(String.valueOf(raw));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     /** Cap the roster read to a sane page — an event's GOING list is bounded by capacity in practice. */

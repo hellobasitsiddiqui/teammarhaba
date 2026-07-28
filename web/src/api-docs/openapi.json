@@ -2141,6 +2141,28 @@
         },
         "type" : "object"
       },
+      "PastEntryView" : {
+        "properties" : {
+          "at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "byAdmin" : {
+            "type" : "boolean"
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "lastState" : {
+            "type" : "string"
+          },
+          "userId" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "PostAnnouncementRequest" : {
         "properties" : {
           "body" : {
@@ -2326,6 +2348,12 @@
           "going" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "pastEntries" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PastEntryView"
+            },
+            "type" : "array"
           },
           "waitlist" : {
             "format" : "int64",

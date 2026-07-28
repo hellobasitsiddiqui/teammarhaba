@@ -88,7 +88,8 @@ class EventRsvpServiceReliabilityTest {
                 entitlements,
                 orders,
                 memberships,
-                reliability);
+                reliability,
+                audit);
     }
 
     // ------------------------------------------------------------- downgrade BLOCKS a GOING landing

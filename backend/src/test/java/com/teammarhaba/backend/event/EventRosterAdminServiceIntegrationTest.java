@@ -518,6 +518,198 @@ class EventRosterAdminServiceIntegrationTest extends AbstractIntegrationTest {
         assertThat(r.entries().stream().filter(e -> e.state() == AttendanceState.WAITLISTED)).hasSize(1);
     }
 
+    // ------------------------------------------------ TM-1114: RSVP audit writes (join / cancel / claim)
+
+    @Test
+    void rsvpJoinWritesAnEventRsvpJoinedAuditRowWithUserIdAndState() {
+        // A fresh RSVP landing (GOING here — a free spot exists) records EVENT_RSVP_JOINED targeting the
+        // Event, with the users.id + resulting state in its metadata (mirrors the evict/force-add shape).
+        Event event = publishedEvent(2);
+        VerifiedUser joiner = newCaller("joiner");
+        rsvps.rsvp(joiner, event.getId());
+        long joinerId = idOf(joiner);
+
+        assertThat(auditCount(event, AuditAction.EVENT_RSVP_JOINED)).isEqualTo(1);
+        AuditEvent row = latestAudit(event, AuditAction.EVENT_RSVP_JOINED);
+        assertThat(row.getMetadata()).containsEntry("userId", String.valueOf(joinerId));
+        assertThat(row.getMetadata()).containsEntry("state", AttendanceState.GOING.name());
+    }
+
+    @Test
+    void waitlistedRsvpRecordsJoinedWithWaitlistedState() {
+        Event event = publishedEvent(1);
+        rsvp("holder", event); // fills the single spot
+        VerifiedUser queued = newCaller("queued");
+        rsvps.rsvp(queued, event.getId()); // lands WAITLISTED
+        long queuedId = idOf(queued);
+
+        AuditEvent row = auditFor(event, AuditAction.EVENT_RSVP_JOINED, queuedId);
+        assertThat(row.getMetadata()).containsEntry("userId", String.valueOf(queuedId));
+        assertThat(row.getMetadata()).containsEntry("state", AttendanceState.WAITLISTED.name());
+    }
+
+    @Test
+    void idempotentReRsvpDoesNotWriteASecondJoinedRow() {
+        Event event = publishedEvent(2);
+        VerifiedUser joiner = newCaller("joiner");
+        rsvps.rsvp(joiner, event.getId());
+        rsvps.rsvp(joiner, event.getId()); // idempotent — returns current state, no new landing
+        assertThat(auditCount(event, AuditAction.EVENT_RSVP_JOINED)).as("only the first landing is audited").isEqualTo(1);
+    }
+
+    @Test
+    void unRsvpWritesAnEventRsvpCancelledAuditRowWithTheStateHeld() {
+        Event event = publishedEvent(2);
+        VerifiedUser leaver = newCaller("leaver");
+        rsvps.rsvp(leaver, event.getId()); // GOING
+        long leaverId = idOf(leaver);
+
+        rsvps.cancelRsvp(leaver, event.getId());
+
+        assertThat(auditCount(event, AuditAction.EVENT_RSVP_CANCELLED)).isEqualTo(1);
+        AuditEvent row = latestAudit(event, AuditAction.EVENT_RSVP_CANCELLED);
+        assertThat(row.getMetadata()).containsEntry("userId", String.valueOf(leaverId));
+        assertThat(row.getMetadata()).containsEntry("state", AttendanceState.GOING.name());
+    }
+
+    @Test
+    void noOpLeaveAndPreviewDoNotWriteACancelledRow() {
+        Event event = publishedEvent(2);
+        VerifiedUser stranger = newCaller("never-joined");
+        rsvps.cancelRsvp(stranger, event.getId()); // held no attendance — a quiet no-op
+        assertThat(auditCount(event, AuditAction.EVENT_RSVP_CANCELLED)).as("a no-op leave audits nothing").isZero();
+
+        // A preview dry-run of a real attendee also writes nothing (it returns before any delete).
+        VerifiedUser attendee = newCaller("previewer");
+        rsvps.rsvp(attendee, event.getId());
+        rsvps.cancelRsvp(attendee, event.getId(), true); // preview
+        assertThat(auditCount(event, AuditAction.EVENT_RSVP_CANCELLED)).as("a preview audits nothing").isZero();
+    }
+
+    @Test
+    void claimWritesAnEventSpotClaimedAuditRow() {
+        Event event = publishedEvent(1);
+        rsvp("holder", event); // fills the spot
+        VerifiedUser claimer = newCaller("claimer");
+        rsvps.rsvp(claimer, event.getId()); // WAITLISTED
+        long claimerId = idOf(claimer);
+        // Free the spot so the claim can land GOING.
+        roster.adjustCapacity(adminCaller, event.getId(), 2);
+
+        assertThat(rsvps.claim(claimer, event.getId()).state()).isEqualTo(AttendanceState.GOING);
+
+        assertThat(auditCount(event, AuditAction.EVENT_SPOT_CLAIMED)).isEqualTo(1);
+        AuditEvent row = latestAudit(event, AuditAction.EVENT_SPOT_CLAIMED);
+        assertThat(row.getMetadata()).containsEntry("userId", String.valueOf(claimerId));
+        assertThat(row.getMetadata()).containsEntry("state", AttendanceState.GOING.name());
+    }
+
+    @Test
+    void doubleTapClaimAfterAlreadyGoingDoesNotWriteASecondClaimedRow() {
+        Event event = publishedEvent(2);
+        VerifiedUser member = newCaller("member");
+        rsvps.rsvp(member, event.getId()); // already GOING (free spot)
+        rsvps.claim(member, event.getId()); // double-tap — already GOING short-circuit
+        assertThat(auditCount(event, AuditAction.EVENT_SPOT_CLAIMED)).as("a double-tap claim audits nothing").isZero();
+    }
+
+    // ------------------------------------------------ TM-1114: roster pastEntries merge + supersession
+
+    @Test
+    void rosterPastEntriesMergesEvictionsAndSelfCancellationsWithNamesAndByAdminFlag() {
+        Event event = publishedEvent(5);
+
+        // An admin evicts one attendee, and another self-cancels — both become past entries.
+        VerifiedUser evicted = newCaller("evicted-past");
+        rsvps.rsvp(evicted, event.getId());
+        long evictedId = idOf(evicted);
+        roster.evictAttendee(adminCaller, event.getId(), evictedId);
+
+        VerifiedUser cancelled = newCaller("cancelled-past");
+        rsvps.rsvp(cancelled, event.getId());
+        long cancelledId = idOf(cancelled);
+        rsvps.cancelRsvp(cancelled, event.getId());
+
+        EventRosterAdminService.Roster r = roster.roster(event.getId());
+
+        // Neither is live any more.
+        assertThat(r.entries()).isEmpty();
+        assertThat(r.pastEntries()).hasSize(2);
+
+        EventRosterAdminService.PastEntry evictedPast = pastOf(r, evictedId);
+        assertThat(evictedPast.lastState()).isEqualTo("EVICTED");
+        assertThat(evictedPast.byAdmin()).as("an admin eviction is byAdmin=true").isTrue();
+        assertThat(evictedPast.displayName()).as("names resolved via the batch users.findAllById").isNotNull();
+        assertThat(evictedPast.at()).isNotNull();
+
+        EventRosterAdminService.PastEntry cancelledPast = pastOf(r, cancelledId);
+        assertThat(cancelledPast.lastState()).isEqualTo("CANCELLED");
+        assertThat(cancelledPast.byAdmin()).as("a self-cancellation is byAdmin=false").isFalse();
+    }
+
+    @Test
+    void aLiveRowSupersedesAPastEntryForARejoinedUser() {
+        // The core supersession contract: evicted → rejoined shows as a LIVE entry AND is dropped from
+        // pastEntries (a live row supersedes a past exit for "are they attending").
+        Event event = publishedEvent(5);
+        VerifiedUser user = newCaller("rejoiner");
+        rsvps.rsvp(user, event.getId()); // GOING
+        long userId = idOf(user);
+        roster.evictAttendee(adminCaller, event.getId(), userId); // EVICTED (past)
+        rsvps.rsvp(user, event.getId()); // re-RSVP → live GOING again
+
+        EventRosterAdminService.Roster r = roster.roster(event.getId());
+
+        // Live: they are GOING.
+        assertThat(r.entries().stream().filter(e -> e.userId().equals(userId)))
+                .as("the rejoined user is a live GOING row")
+                .hasSize(1);
+        assertThat(r.entries().get(0).state()).isEqualTo(AttendanceState.GOING);
+        // Superseded: NOT in pastEntries despite the prior eviction (a live row wins).
+        assertThat(r.pastEntries().stream().filter(p -> p.userId().equals(userId)))
+                .as("a live row supersedes the past eviction — not double-counted in pastEntries")
+                .isEmpty();
+    }
+
+    @Test
+    void pastEntryCollapsesToTheMostRecentExitPerUser() {
+        // A user who leaves, rejoins, and leaves AGAIN collapses to ONE past entry carrying their LATEST
+        // exit state (CANCELLED here — the second exit was a self-cancel, superseding the first eviction).
+        Event event = publishedEvent(5);
+        VerifiedUser user = newCaller("serial-leaver");
+        rsvps.rsvp(user, event.getId());
+        long userId = idOf(user);
+        roster.evictAttendee(adminCaller, event.getId(), userId); // exit #1: EVICTED
+        rsvps.rsvp(user, event.getId()); // rejoin
+        rsvps.cancelRsvp(user, event.getId()); // exit #2: CANCELLED (more recent)
+
+        EventRosterAdminService.Roster r = roster.roster(event.getId());
+
+        List<EventRosterAdminService.PastEntry> theirs =
+                r.pastEntries().stream().filter(p -> p.userId().equals(userId)).toList();
+        assertThat(theirs).as("collapsed to one row").hasSize(1);
+        assertThat(theirs.get(0).lastState()).as("the most recent exit wins").isEqualTo("CANCELLED");
+        assertThat(theirs.get(0).byAdmin()).isFalse();
+    }
+
+    /** The audit row of {@code action} against this event whose {@code userId} metadata matches (order-independent). */
+    private AuditEvent auditFor(Event event, AuditAction action, long userId) {
+        return audit
+                .search(null, EventRosterAdminService.TARGET_EVENT, String.valueOf(event.getId()), PageRequest.of(0, 50))
+                .stream()
+                .filter(e -> e.getAction() == action)
+                .filter(e -> String.valueOf(userId).equals(e.getMetadata().get("userId")))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private EventRosterAdminService.PastEntry pastOf(EventRosterAdminService.Roster r, long userId) {
+        return r.pastEntries().stream()
+                .filter(p -> p.userId().equals(userId))
+                .findFirst()
+                .orElseThrow();
+    }
+
     // ---------------------------------------------------------------- finished-event freeze
 
     @Test

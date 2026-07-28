@@ -121,6 +121,34 @@ public enum AuditAction {
      */
     EVENT_ATTENDEE_ADDED,
 
+    /**
+     * A user RSVP'd to an event via {@code POST /api/v1/events/{id}/rsvp} (TM-1114): a NEW attendance
+     * landing (GOING or WAITLISTED) — the idempotent re-RSVP branch is not recorded. One row per landing
+     * carrying the event id as the target and the {@code userId} ({@code users.id}) + the resulting
+     * {@code state} in its metadata. The actor is the user themselves (not an admin). Forward-only: rows
+     * begin at the ticket, there is no backfill of historical RSVPs.
+     */
+    EVENT_RSVP_JOINED,
+
+    /**
+     * A user cancelled their own RSVP (un-RSVP'd / left) via {@code DELETE /api/v1/events/{id}/rsvp}
+     * (TM-1114): a committed removal of a {@code GOING}/{@code WAITLISTED} attendance row — an idempotent
+     * no-op leave (they held no attendance) is not recorded, and a {@code preview} dry-run never writes.
+     * One row per actual leave carrying the event id as the target and the {@code userId} ({@code users.id})
+     * + the {@code state} they held in its metadata. The actor is the user themselves. Distinct from
+     * {@link #EVENT_ATTENDEE_EVICTED} (an admin removing someone) — the roster's {@code pastEntries} history
+     * (TM-1114) tells a self-cancel apart from an admin eviction by this action + the actor.
+     */
+    EVENT_RSVP_CANCELLED,
+
+    /**
+     * A user claimed an open waitlist spot via {@code POST /api/v1/events/{id}/claim} (TM-1114): a genuine
+     * {@code WAITLISTED -> GOING} promotion — the double-tap-already-GOING short-circuit is not recorded.
+     * One row per claim carrying the event id as the target and the {@code userId} ({@code users.id}) + the
+     * resulting {@code GOING} state in its metadata. The actor is the user themselves. Forward-only.
+     */
+    EVENT_SPOT_CLAIMED,
+
     /** An admin created a reusable venue via {@code POST /api/v1/admin/venues} (TM-519). */
     VENUE_CREATED,
 

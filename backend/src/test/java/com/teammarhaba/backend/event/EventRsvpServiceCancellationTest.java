@@ -101,7 +101,8 @@ class EventRsvpServiceCancellationTest {
                 // the cancel path exercises the true strike + ledger + standing behaviour; only the audit
                 // ledger write is mocked. Built here (not as a field) so the @Mock audit is injected first.
                 new ReliabilityService(
-                        new ReliabilityPolicy(new ReliabilityProperties(null, null, null, null)), audit));
+                        new ReliabilityPolicy(new ReliabilityProperties(null, null, null, null)), audit),
+                audit);
     }
 
     // ------------------------------------------------------------------ late cancel (a strike)

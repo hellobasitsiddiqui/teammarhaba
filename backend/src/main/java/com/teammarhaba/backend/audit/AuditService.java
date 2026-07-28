@@ -1,5 +1,6 @@
 package com.teammarhaba.backend.audit;
 
+import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -72,6 +73,18 @@ public class AuditService {
     public Page<AuditEvent> profileHistory(String uid, Pageable pageable) {
         return events.findByTargetTypeAndTargetIdAndAction(
                 TARGET_USER, uid, AuditAction.PROFILE_UPDATED, pageable);
+    }
+
+    /**
+     * All audit events targeting one entity, newest first (TM-1114). Used by the admin roster to
+     * reconstruct an event's {@code pastEntries} history (past evictions + self-cancellations) from the
+     * append-only log. Returns every action against {@code (targetType, targetId)} — the caller filters to
+     * the actions it cares about — ordered by {@code createdAt} descending, so the first row seen for a
+     * given user is their most recent past state.
+     */
+    @Transactional(readOnly = true)
+    public List<AuditEvent> historyFor(String targetType, String targetId) {
+        return events.findByTargetTypeAndTargetIdOrderByCreatedAtDesc(targetType, targetId);
     }
 
     private static String blankToNull(String value) {
