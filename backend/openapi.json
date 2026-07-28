@@ -2304,6 +2304,10 @@
           "label" : {
             "type" : "string"
           },
+          "selectionCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "sortWeight" : {
             "format" : "int32",
             "type" : "integer"

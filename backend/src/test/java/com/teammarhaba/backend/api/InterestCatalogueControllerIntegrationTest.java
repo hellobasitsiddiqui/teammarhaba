@@ -8,6 +8,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.appconfig.AppConfigService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.interests.UserInterest;
+import com.teammarhaba.backend.interests.UserInterestRepository;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserRepository;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +40,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 @AutoConfigureMockMvc
 class InterestCatalogueControllerIntegrationTest extends AbstractIntegrationTest {
 
+    /** UID prefix for this class's throwaway active users (TM-1094 selection-count seeding). */
+    private static final String UID_PREFIX = "tm1094-";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -45,11 +52,32 @@ class InterestCatalogueControllerIntegrationTest extends AbstractIntegrationTest
     @Autowired
     private AppConfigService appConfig;
 
+    @Autowired
+    private UserRepository users;
+
+    @Autowired
+    private UserInterestRepository userInterests;
+
     @AfterEach
     void cleanup() {
+        // Order matters: user_interest rows first (FK to users), then the throwaway users, then the
+        // throwaway catalogue rows. Every throwaway is keyed by a 'ZZ '/'tm1094-' prefix so the
+        // never-rolled-back shared DB and every sibling suite's seed assumptions stay intact.
+        jdbc.update("DELETE FROM user_interest WHERE label LIKE 'ZZ %'");
+        jdbc.update("DELETE FROM users WHERE firebase_uid LIKE ?", UID_PREFIX + "%");
         jdbc.update("DELETE FROM interest_catalogue WHERE label LIKE 'ZZ %'");
         appConfig.setInt("interests.min_selections", 1);
         appConfig.setInt("interests.max_selections", 3);
+    }
+
+    /** Create an active (enabled, non-deleted) throwaway account and return its id. */
+    private Long newActiveUser(String suffix) {
+        return users.save(new User(UID_PREFIX + suffix, UID_PREFIX + suffix + "@example.com", suffix)).getId();
+    }
+
+    /** Record one selection snapshot of {@code label} for {@code userId} (no catalogue provenance). */
+    private void select(Long userId, String label) {
+        userInterests.save(new UserInterest(userId, label, "Food & Drink", null));
     }
 
     private static RequestPostProcessor user(String uid) {
@@ -132,6 +160,55 @@ class InterestCatalogueControllerIntegrationTest extends AbstractIntegrationTest
                 .andExpect(jsonPath("$[?(@.label == 'ZZ Active Extra')]").exists())
                 .andExpect(jsonPath("$[?(@.label == 'ZZ Inactive Extra')]").doesNotExist())
                 .andExpect(jsonPath("$[?(@.label == 'ZZ Retired Extra')]").doesNotExist());
+    }
+
+    // --- Per-interest selection count (TM-1094) ---
+
+    @Test
+    void catalogueRowsCarryASelectionCountField() throws Exception {
+        // Every row exposes the new selectionCount, and it is an integer (0 for a never-picked seed row).
+        mockMvc.perform(get("/api/v1/interests/catalogue").with(user("cat-count-shape-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].selectionCount").exists())
+                .andExpect(jsonPath("$[0].selectionCount").isNumber());
+    }
+
+    @Test
+    void selectionCountReflectsRealUserInterestRows() throws Exception {
+        // A throwaway offered row picked by exactly 3 active users, plus an offered row nobody has picked.
+        insertRow("ZZ Popular Pick", true, false);
+        insertRow("ZZ Nobody Pick", true, false);
+
+        Long u1 = newActiveUser("p1");
+        Long u2 = newActiveUser("p2");
+        Long u3 = newActiveUser("p3");
+        select(u1, "ZZ Popular Pick");
+        select(u2, "ZZ Popular Pick");
+        select(u3, "ZZ Popular Pick");
+
+        mockMvc.perform(get("/api/v1/interests/catalogue").with(user("cat-count-real-user")))
+                .andExpect(status().isOk())
+                // The picked row's selectionCount equals the real COUNT(*) of its user_interest rows (3)…
+                .andExpect(jsonPath("$[?(@.label == 'ZZ Popular Pick')].selectionCount").value(3))
+                // …and an offered row nobody selected reports 0 (a missing label defaults to 0, never null).
+                .andExpect(jsonPath("$[?(@.label == 'ZZ Nobody Pick')].selectionCount").value(0));
+    }
+
+    @Test
+    void selectionCountCountsOnlyActiveUsers() throws Exception {
+        // Same label picked by one active + one suspended account: only the active selection is counted,
+        // matching the admin "Selected by" analytics population (TM-832/TM-961) — a suspended owner's
+        // snapshot outlives their tombstone but must not inflate the public popularity count.
+        insertRow("ZZ Active Scoped", true, false);
+        Long active = newActiveUser("a-active");
+        Long suspended = newActiveUser("a-suspended");
+        select(active, "ZZ Active Scoped");
+        select(suspended, "ZZ Active Scoped");
+        jdbc.update("UPDATE users SET enabled = false WHERE id = ?", suspended);
+
+        mockMvc.perform(get("/api/v1/interests/catalogue").with(user("cat-count-active-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.label == 'ZZ Active Scoped')].selectionCount").value(1));
     }
 
     @Test
