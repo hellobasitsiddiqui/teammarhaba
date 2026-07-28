@@ -139,7 +139,9 @@ public class ConversationController {
 
     /**
      * Post a new message to the thread (TM-447). Member + open-thread gated in the service; the body is
-     * validated (non-blank, ≤ 500 chars) before it gets here. An optional {@code replyToMessageId}
+     * validated (≤ 500 chars) before it gets here. It may carry an optional media attachment (TM-1125) —
+     * {@code attachmentPath} + {@code mediaType} — and may be attachment-only (empty body) as long as an
+     * attachment is present (the "body OR attachment" edge rule). An optional {@code replyToMessageId}
      * (TM-466) quotes an earlier message in the same thread — the service validates it names a live,
      * same-thread message ({@code 400} otherwise). Returns the created message ({@code 201}, carrying
      * the quoted-parent snippet when it's a reply), which also triggers the push fan-out to the thread's
@@ -151,7 +153,8 @@ public class ConversationController {
             @AuthenticationPrincipal VerifiedUser caller,
             @PathVariable Long id,
             @Valid @RequestBody PostMessageRequest body) {
-        return posts.post(caller, id, body.body(), body.replyToMessageId());
+        return posts.post(
+                caller, id, body.body(), body.attachmentPath(), body.mediaType(), body.replyToMessageId());
     }
 
     /**

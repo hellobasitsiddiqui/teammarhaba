@@ -739,6 +739,9 @@
       },
       "ConversationMessageResponse" : {
         "properties" : {
+          "attachmentPath" : {
+            "type" : "string"
+          },
           "body" : {
             "type" : "string"
           },
@@ -758,6 +761,9 @@
             "type" : "integer"
           },
           "kind" : {
+            "type" : "string"
+          },
+          "mediaType" : {
             "type" : "string"
           },
           "mine" : {
@@ -2255,8 +2261,18 @@
       },
       "PostMessageRequest" : {
         "properties" : {
+          "attachmentPath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "body" : {
             "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "mediaType" : {
+            "maxLength" : 16,
             "minLength" : 0,
             "type" : "string"
           },
@@ -2265,7 +2281,6 @@
             "type" : "integer"
           }
         },
-        "required" : [ "body" ],
         "type" : "object"
       },
       "PublicInterestResponse" : {

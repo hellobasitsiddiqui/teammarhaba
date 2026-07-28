@@ -1,0 +1,25 @@
+-- V51__message_attachment — a generic media attachment on a chat message (TM-1125, epic Chat Media)
+--
+-- The wave-2 chat-media FOUNDATION: one nullable attachment reference that image, voice and (later)
+-- video messages all ride, rather than a per-media-kind column set. A message may now carry EITHER
+-- body text, an attachment, or both — an attachment-only message (e.g. a bare photo or voice note with
+-- no caption) is allowed, so this migration does NOT touch body's NOT NULL (the write path relaxes the
+-- body-required rule at the edge; the column stays NOT NULL and an attachment-only message persists an
+-- empty-string body — see PostMessageRequest / Message).
+--
+-- Mirrors the venue.photo_path convention (V41): a Firebase Storage OBJECT PATH, not a signed URL, so
+-- the stored value never expires and the client mints a fresh download URL on demand.
+--
+--   attachment_path  Firebase Storage object path of the attached media (image / voice / video-later);
+--                    NULL = a plain text message with no attachment. VARCHAR(512) matches
+--                    venue.photo_path and the PostMessageRequest @Size(max = 512) edge cap. Set once at
+--                    post time, never updated (an author edit rewrites the body only) — the entity maps
+--                    it updatable = false. Hibernate runs validate-only, so this DDL type must match the
+--                    Message mapping exactly.
+--   media_type       A short discriminator of what the attachment IS (e.g. "image", "voice", "video"),
+--                    so the client renders the right bubble without sniffing the object. NULL whenever
+--                    attachment_path is NULL (a text-only message). VARCHAR(16) matches the
+--                    PostMessageRequest @Size(max = 16) cap; kept as a plain VARCHAR (not an enum column)
+--                    so a new media kind is additive with no schema change. Set once at post time.
+ALTER TABLE message ADD COLUMN attachment_path VARCHAR(512);
+ALTER TABLE message ADD COLUMN media_type VARCHAR(16);

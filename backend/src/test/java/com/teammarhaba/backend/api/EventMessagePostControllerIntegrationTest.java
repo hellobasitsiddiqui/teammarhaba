@@ -142,6 +142,73 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
                 .andExpect(jsonPath("$.body").value(maxBody));
     }
 
+    // ── media attachment (TM-1125) ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void messageWithAnAttachmentPersistsTheAttachmentAndEchoesIt() throws Exception {
+        // A caption + a media attachment: the generic attachment (object path + media type) persists
+        // set-once on the message and rides the POST echo, alongside the text body.
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("post-attach")));
+        long senderId = activeMember(thread, "a-sender", "tok-a-sender");
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("a-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"here's the venue\",\"attachmentPath\":\"chat/9/photo.jpg\","
+                                + "\"mediaType\":\"image\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.body").value("here's the venue"))
+                .andExpect(jsonPath("$.attachmentPath").value("chat/9/photo.jpg"))
+                .andExpect(jsonPath("$.mediaType").value("image"));
+
+        // Persisted with the attachment on the row.
+        List<Message> stored = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                thread.getId());
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getSenderId()).isEqualTo(senderId);
+        assertThat(stored.get(0).getAttachmentPath()).isEqualTo("chat/9/photo.jpg");
+        assertThat(stored.get(0).getMediaType()).isEqualTo("image");
+    }
+
+    @Test
+    void attachmentOnlyMessageWithNoBodyIsAccepted() throws Exception {
+        // The TM-1125 relax: a bare attachment (voice note / photo) with NO body is a valid message —
+        // this was a 400 before @NotBlank body was relaxed to "body OR attachment present".
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("post-attach-only")));
+        activeMember(thread, "ao-sender", "tok-ao-sender");
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("ao-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attachmentPath\":\"chat/9/note.m4a\",\"mediaType\":\"voice\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.attachmentPath").value("chat/9/note.m4a"))
+                .andExpect(jsonPath("$.mediaType").value("voice"));
+
+        Message stored = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                        thread.getId())
+                .get(0);
+        assertThat(stored.getAttachmentPath()).isEqualTo("chat/9/note.m4a");
+        assertThat(stored.getMediaType()).isEqualTo("voice");
+    }
+
+    @Test
+    void emptyMessageWithNeitherBodyNorAttachmentIsRejected() throws Exception {
+        // The cross-field rule still bites: a request with no text AND no attachment is an empty message,
+        // a uniform 400 — the attachment relax didn't open the door to a truly empty post.
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("post-empty")));
+        activeMember(thread, "em-sender", "tok-em");
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("em-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"   \"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
+                .isEmpty();
+    }
+
     // ── reply / quote (TM-466) ─────────────────────────────────────────────────────────────────────
 
     @Test
@@ -218,6 +285,37 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
 
         assertThat(messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(thread.getId()))
                 .isEmpty();
+    }
+
+    @Test
+    void replyWithABlankBodyButAnAttachmentIsRejectedAndNothingIsPersisted() throws Exception {
+        // TM-1125 hole-close: reply + attachment isn't a shape this slice supports — the reply path
+        // (Message.replyFromUser) persists text only and DROPS the attachment. Before the guard, a reply
+        // with a BLANK body + an attachmentPath sneaked past the "body OR attachment present" cross-field
+        // rule (the attachment satisfied it) and 201-persisted a genuinely EMPTY message (body="",
+        // attachment lost). Now attachments are rejected outright on the reply path, so a reply with a
+        // blank body has nothing to stand on → a uniform 400, and nothing lands in the thread.
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-attach")));
+        activeMember(thread, "ra-sender", "tok-ra");
+
+        Long parentId = messages
+                .saveAndFlush(Message.fromUser(thread.getId(), provision("ra-parent-author"), "the parent"))
+                .getId();
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("ra-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attachmentPath\":\"chat/9/photo.jpg\",\"mediaType\":\"image\","
+                                + "\"replyToMessageId\":" + parentId + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[?(@.field=='attachmentNotOnReply')]").exists());
+
+        // Only the parent exists — no empty reply was persisted, and nothing was pushed.
+        List<Message> stored = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                thread.getId());
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getId()).isEqualTo(parentId);
+        assertThat(sender.deliveries()).isEmpty();
     }
 
     @Test
@@ -320,12 +418,14 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
         Conversation thread = conversations.save(Conversation.forEvent(openEvent("post-blank")));
         activeMember(thread, "b-member", "tok-b");
 
+        // A blank body with no attachment is now the cross-field "body OR attachment present" violation
+        // (TM-1125 relaxed the old @NotBlank on body), reported on the bodyOrAttachmentPresent property.
         mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
                         .with(user("b-member"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"body\":\"   \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors[0].field").value("body"));
+                .andExpect(jsonPath("$.errors[?(@.field=='bodyOrAttachmentPresent')]").exists());
     }
 
     @Test
