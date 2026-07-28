@@ -621,6 +621,24 @@
         },
         "type" : "object"
       },
+      "ChatMediaSignedUrlResponse" : {
+        "properties" : {
+          "downloadUrl" : {
+            "type" : "string"
+          },
+          "expiresInSeconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "objectPath" : {
+            "type" : "string"
+          },
+          "uploadUrl" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "CheckoutCancelResult" : {
         "properties" : {
           "cancel" : {
@@ -4412,6 +4430,33 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ConversationMembershipResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "conversation-controller" ]
+      }
+    },
+    "/api/v1/conversations/{id}/media/signed-url" : {
+      "post" : {
+        "operationId" : "mediaSignedUrl",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChatMediaSignedUrlResponse"
                 }
               }
             },
