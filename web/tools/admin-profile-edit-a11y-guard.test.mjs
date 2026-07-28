@@ -85,3 +85,19 @@ test("focus is managed when the profile-edit disclosure opens and closes", () =>
   );
   assert.match(showFormRegion, /editBtn\.focus\(\)/, "closing the form must return focus to the edit button");
 });
+
+test("the edit form builds controls from the EDITABLE subset, not the full display list (TM-1109)", () => {
+  // notificationPref is view-only: the form must iterate EDITABLE_ADMIN_PROFILE_FIELDS so it never
+  // renders an editable control for a read-only field. A revert to the full ADMIN_PROFILE_FIELDS here
+  // would re-expose the pref as editable — this guard goes red on that.
+  assert.match(
+    formRegion,
+    /for \(const field of EDITABLE_ADMIN_PROFILE_FIELDS\)/,
+    "buildForm must loop over EDITABLE_ADMIN_PROFILE_FIELDS (excludes the view-only notificationPref)",
+  );
+  assert.doesNotMatch(
+    formRegion,
+    /for \(const field of ADMIN_PROFILE_FIELDS\)/,
+    "buildForm must NOT loop the full display list — that would render the read-only pref as editable",
+  );
+});

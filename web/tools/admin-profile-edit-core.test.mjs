@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 import {
   ADMIN_PROFILE_FIELDS,
+  EDITABLE_ADMIN_PROFILE_FIELDS,
   validateAdminField,
   validateAdminForm,
   buildAdminProfilePatch,
@@ -19,7 +20,7 @@ import {
 
 const field = (key) => ADMIN_PROFILE_FIELDS.find((f) => f.key === key);
 
-test("ADMIN_PROFILE_FIELDS is exactly the TM-162 admin-editable set (no identity/role/enabled/theme/interests)", () => {
+test("ADMIN_PROFILE_FIELDS is the TM-162 display set (notificationPref still SHOWN read-only, TM-1109)", () => {
   const keys = ADMIN_PROFILE_FIELDS.map((f) => f.key);
   assert.deepEqual(keys, [
     "firstName",
@@ -31,6 +32,28 @@ test("ADMIN_PROFILE_FIELDS is exactly the TM-162 admin-editable set (no identity
     "timezone",
     "locale",
   ]);
+});
+
+test("notificationPref is marked read-only in the display field list (TM-1109)", () => {
+  assert.equal(field("notificationPref").readOnly, true);
+  // No other field is read-only — the rest stay editable.
+  for (const f of ADMIN_PROFILE_FIELDS) {
+    if (f.key !== "notificationPref") assert.notEqual(f.readOnly, true, `${f.key} must stay editable`);
+  }
+});
+
+test("EDITABLE_ADMIN_PROFILE_FIELDS EXCLUDES notificationPref — the admin can't edit it (TM-1109)", () => {
+  const editableKeys = EDITABLE_ADMIN_PROFILE_FIELDS.map((f) => f.key);
+  assert.deepEqual(editableKeys, [
+    "firstName",
+    "lastName",
+    "city",
+    "age",
+    "phone",
+    "timezone",
+    "locale",
+  ]);
+  assert.ok(!editableKeys.includes("notificationPref"), "notificationPref must not be an editable field");
 });
 
 test("validateAdminField reuses the shared rules: off-list city rejects, allow-list + blank pass", () => {
@@ -108,4 +131,26 @@ test("buildAdminProfilePatch sends an explicit '' to CLEAR a previously-set text
 test("buildAdminProfilePatch trims whitespace before comparing (a padded no-op is omitted)", () => {
   assert.deepEqual(buildAdminProfilePatch({ firstName: "  Aisha  " }, { firstName: "Aisha" }), {});
   assert.deepEqual(buildAdminProfilePatch({ firstName: "  Aisha  " }, { firstName: "Old" }), { firstName: "Aisha" });
+});
+
+test("buildAdminProfilePatch NEVER sends notificationPref, even when it differs from saved (TM-1109)", () => {
+  // The admin form can't produce a pref value (no control), but even if one is injected into the raw
+  // values the patch builder must drop it — notificationPref is view-only, so it can never be PATCHed.
+  const saved = { notificationPref: "BOTH", firstName: "Aisha" };
+  const patch = buildAdminProfilePatch({ notificationPref: "EMAIL", firstName: "Aisha" }, saved);
+  assert.deepEqual(patch, {}); // the changed pref is dropped; firstName is unchanged → nothing to send
+  assert.equal(patch.notificationPref, undefined);
+
+  // And it stays dropped even when a REAL editable field also changes — the editable change goes
+  // through, the pref change does not.
+  const mixed = buildAdminProfilePatch({ notificationPref: "PUSH", firstName: "New" }, saved);
+  assert.deepEqual(mixed, { firstName: "New" });
+  assert.equal(mixed.notificationPref, undefined);
+});
+
+test("validateAdminForm NEVER flags notificationPref — it isn't an editable field (TM-1109)", () => {
+  // Even a bogus pref value must not surface as a form error (the control doesn't exist to fix it).
+  const errors = validateAdminForm({ firstName: "Aisha", notificationPref: "NONSENSE" }, {});
+  assert.equal(errors.notificationPref, undefined);
+  assert.deepEqual(errors, {}); // firstName is valid, pref is ignored → no errors at all
 });

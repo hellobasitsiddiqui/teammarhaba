@@ -32,7 +32,7 @@ import { statsCards } from "./admin-stats-core.js";
 import { roleLabel } from "./admin-role-label-core.js";
 // TM-172: the admin user-detail PROFILE edit — pure field descriptors + validators + patch builder,
 // reusing the SAME shared self-edit validation (profile-core.js) so the admin edit can't drift looser.
-import { ADMIN_PROFILE_FIELDS, validateAdminField, validateAdminForm, buildAdminProfilePatch } from "./admin-profile-edit-core.js";
+import { ADMIN_PROFILE_FIELDS, EDITABLE_ADMIN_PROFILE_FIELDS, validateAdminField, validateAdminForm, buildAdminProfilePatch } from "./admin-profile-edit-core.js";
 import {
   // TM-372: the display-identity fallback chain (displayName → email → masked auth phone →
   // uid-prefix → "User #id"), so phone-only accounts never render as blank, unfindable rows.
@@ -371,7 +371,9 @@ function profileSection(user) {
   function buildForm() {
     clear(form);
     controls.clear();
-    for (const field of ADMIN_PROFILE_FIELDS) {
+    // Build controls only for the EDITABLE fields (TM-1109): notificationPref is view-only, so it gets
+    // NO editable control here — it is still SHOWN in the read-only summary above via ADMIN_PROFILE_FIELDS.
+    for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) {
       const fieldId = `admin-profile-${field.key}-${current.id}`;
       const errorId = `${fieldId}-error`;
       // Describe the control by BOTH hint and error (like buildField in profile.js) so a screen
@@ -448,7 +450,7 @@ function profileSection(user) {
     // becomes hidden (out of tab order), so move focus into the first field; on hide, return it to
     // the now-visible editBtn. The shared modal() has no focus trap, so without this focus falls to <body>.
     if (on) {
-      const first = controls.get(ADMIN_PROFILE_FIELDS[0].key);
+      const first = controls.get(EDITABLE_ADMIN_PROFILE_FIELDS[0].key);
       first?.input?.focus();
     } else {
       editBtn.focus();
@@ -462,7 +464,7 @@ function profileSection(user) {
 
     // Validate the whole form with the SHARED rules before sending (fail fast in the browser).
     const errors = validateAdminForm(values, current);
-    for (const field of ADMIN_PROFILE_FIELDS) setControlError(field.key, errors[field.key] || "");
+    for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) setControlError(field.key, errors[field.key] || "");
     if (Object.keys(errors).length > 0) {
       toast("Fix the highlighted fields.", { type: "error" });
       return;

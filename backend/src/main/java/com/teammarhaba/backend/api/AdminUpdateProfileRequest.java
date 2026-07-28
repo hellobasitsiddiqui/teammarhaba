@@ -31,7 +31,13 @@ import jakarta.validation.constraints.Size;
  *                         behind the unchanged-guard, TM-900 — grandfathered values re-send fine)
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed between
  *                         digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
- * @param notificationPref delivery preference (EMAIL/PUSH/BOTH); an unknown value is a uniform 400
+ * @param notificationPref delivery preference (EMAIL/PUSH/BOTH). <strong>View-only for admins</strong>
+ *                         (TM-1109): an admin may SEE the current value but never CHANGE it — the
+ *                         notification preference is the user's own personal delivery choice, edited
+ *                         only via their own {@code PATCH /api/v1/me}. An unknown value is still a
+ *                         uniform 400 at this boundary; a value that DIFFERS from the target's stored
+ *                         preference is a {@code 422} in the service ({@code adminUpdateProfile}); a
+ *                         re-sent no-op (same value) or an omitted field is accepted and never written.
  * @param timezone         IANA timezone id, e.g. {@code Europe/London} (resolved in the service)
  * @param locale           BCP-47 language tag, e.g. {@code en-GB} (resolved in the service)
  */
@@ -60,9 +66,16 @@ public record AdminUpdateProfileRequest(
 
     /**
      * Map onto the service-layer {@link ProfileUpdate} value object. The self-only fields
-     * ({@code displayName}, {@code gender}, {@code themeAccent}, {@code themeSketchy},
-     * {@code interests}) are passed as {@code null} so the shared {@code applyProfileFields} leaves
-     * them untouched — an admin edit only ever writes the profile subset above.
+     * ({@code displayName}, {@code gender}, {@code notificationPref}, {@code themeAccent},
+     * {@code themeSketchy}, {@code interests}) are passed as {@code null} so the shared
+     * {@code applyProfileFields} leaves them untouched — an admin edit only ever writes the profile
+     * subset above.
+     *
+     * <p>{@code notificationPref} is deliberately passed as {@code null} (TM-1109): it is view-only for
+     * admins, so the shared field-application path must never mutate it via the admin edit. The service
+     * ({@code adminUpdateProfile}) still inspects the raw {@link #notificationPref()} to REJECT (422) an
+     * attempted change before this mapping is applied — this {@code null} is the belt-and-braces second
+     * guard so a change can never slip through even if that check were bypassed.
      */
     ProfileUpdate toProfileUpdate() {
         return new ProfileUpdate(
@@ -73,7 +86,7 @@ public record AdminUpdateProfileRequest(
                 age,
                 null, // gender (TM-955) — the user's own choice (like interests), not admin-editable
                 phone,
-                notificationPref,
+                null, // notificationPref (TM-1109) — VIEW-ONLY for admins; never written via this path
                 timezone,
                 locale,
                 null, // themeAccent — user's own personalisation

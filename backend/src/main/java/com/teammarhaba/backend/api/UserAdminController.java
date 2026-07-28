@@ -123,13 +123,20 @@ public class UserAdminController {
      * soft-deleted target is a {@code 404} (no existence leak); an invalid value is a {@code 400} from
      * the shared rules; a non-admin is a {@code 403} (inherited class gate). Returns the updated account,
      * enriched like {@link #update} so the console can swap its row/detail in place.
+     *
+     * <p><b>notificationPref is VIEW-ONLY (TM-1109)</b>: the admin console renders it read-only and this
+     * endpoint refuses to CHANGE it — a body that carries a {@code notificationPref} differing from the
+     * target's stored value is a {@code 422} (the raw requested value is passed through for that guard;
+     * {@code toProfileUpdate()} strips it so the shared apply-path can never write it). The user's OWN
+     * self-edit ({@code PATCH /api/v1/me}) still changes it.
      */
     @PatchMapping("/{id}/profile")
     public UserResponse updateProfile(
             @PathVariable long id,
             @RequestBody @Valid AdminUpdateProfileRequest request,
             @AuthenticationPrincipal VerifiedUser caller) {
-        User user = userService.adminUpdateProfile(id, request.toProfileUpdate(), caller.uid());
+        User user = userService.adminUpdateProfile(
+                id, request.toProfileUpdate(), request.notificationPref(), caller.uid());
         return enriched(user);
     }
 

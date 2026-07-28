@@ -381,12 +381,15 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
     void adminEditsAnotherUsersProfileFieldsAndAudits() throws Exception {
         long id = seed("profile-target");
 
+        // TM-1109: notificationPref is VIEW-ONLY for admins, so the happy-path edit re-sends the target's
+        // STORED value (BOTH = the new-account default) — a no-op that stays accepted — rather than a
+        // change (which is now a 422, asserted separately below). The other fields still edit normally.
         mockMvc.perform(patch(PROFILE_PATH, id)
                         .with(admin("admin-profile-editor"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                                 "{\"firstName\":\"Aisha\",\"lastName\":\"Khan\",\"city\":\"London\",\"age\":30,"
-                                        + "\"phone\":\"+442079461099\",\"notificationPref\":\"EMAIL\","
+                                        + "\"phone\":\"+442079461099\",\"notificationPref\":\"BOTH\","
                                         + "\"timezone\":\"Europe/London\",\"locale\":\"en-GB\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.firstName").value("Aisha"))
@@ -394,7 +397,7 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.city").value("London"))
                 .andExpect(jsonPath("$.age").value(30))
                 .andExpect(jsonPath("$.phone").value("+442079461099"))
-                .andExpect(jsonPath("$.notificationPref").value("EMAIL"))
+                .andExpect(jsonPath("$.notificationPref").value("BOTH"))
                 .andExpect(jsonPath("$.timezone").value("Europe/London"))
                 .andExpect(jsonPath("$.locale").value("en-GB"));
 
@@ -403,7 +406,8 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(saved.getCity()).isEqualTo("London");
         assertThat(saved.getAge()).isEqualTo(30);
         assertThat(saved.getPhone()).isEqualTo("+442079461099");
-        assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.EMAIL);
+        // The pref is unchanged: a re-sent no-op leaves the stored default (BOTH) exactly as it was.
+        assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.BOTH);
 
         // Audited as an ADMIN action, actor = the admin, target = the edited account's uid, source=admin.
         AuditEvent edit = latestAdminProfileEdit("profile-target");
@@ -413,6 +417,83 @@ class UserAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(edit.getMetadata()).containsEntry("source", "admin");
         assertThat(edit.getMetadata()).containsEntry("actorUid", "admin-profile-editor");
         assertThat(edit.getMetadata()).containsEntry("targetUid", "profile-target");
+    }
+
+    @Test
+    void adminProfileEditRejectsANotificationPrefChangeAndLeavesItUnchanged() throws Exception {
+        // TM-1109: notificationPref is VIEW-ONLY for admins. The target's stored pref is EMAIL; an admin
+        // PATCH that tries to change it to PUSH is a 422 (well-formed but not permitted) and writes
+        // NOTHING — the stored value stays EMAIL and the attempt is not audited.
+        long id = seedWithPref("profile-pref-lock", NotificationPref.EMAIL);
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-pref-lock"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"notificationPref\":\"PUSH\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+
+        // The stored preference is untouched, and a rejected edit leaves no audit trail.
+        assertThat(users.findById(id).orElseThrow().getNotificationPref()).isEqualTo(NotificationPref.EMAIL);
+        assertThat(latestAdminProfileEdit("profile-pref-lock"))
+                .as("a rejected pref change is not audited")
+                .isNull();
+    }
+
+    @Test
+    void adminProfileEditRejectsANotificationPrefChangeEvenAlongsideOtherFields() throws Exception {
+        // TM-1109: the pref guard runs BEFORE any field is applied, so a body that ALSO carries a valid
+        // edit (firstName) is still a 422 and writes nothing at all — the other field must not sneak
+        // through on the back of a rejected pref change (the whole edit is atomic and refused).
+        long id = seedWithPref("profile-pref-lock-mixed", NotificationPref.BOTH);
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-pref-lock-mixed"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Sneaky\",\"notificationPref\":\"EMAIL\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+
+        User saved = users.findById(id).orElseThrow();
+        assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.BOTH);
+        assertThat(saved.getFirstName()).as("the co-submitted field is not written when the edit is refused").isNull();
+    }
+
+    @Test
+    void adminProfileEditAcceptsANotificationPrefNoOp() throws Exception {
+        // TM-1109: re-sending the STORED pref (no change) is accepted — the admin can submit the full
+        // form (which includes the read-only current value) without a spurious 422. The co-edited field
+        // still applies; the pref stays as it was.
+        long id = seedWithPref("profile-pref-noop", NotificationPref.PUSH);
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-pref-noop"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Ada\",\"notificationPref\":\"PUSH\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Ada"))
+                .andExpect(jsonPath("$.notificationPref").value("PUSH"));
+
+        User saved = users.findById(id).orElseThrow();
+        assertThat(saved.getFirstName()).isEqualTo("Ada");
+        assertThat(saved.getNotificationPref()).isEqualTo(NotificationPref.PUSH);
+    }
+
+    @Test
+    void adminProfileEditOmittingNotificationPrefLeavesItUntouched() throws Exception {
+        // TM-1109: omitting notificationPref entirely (the normal case now the control is read-only) is
+        // fine and leaves the stored value exactly as it was.
+        long id = seedWithPref("profile-pref-omitted", NotificationPref.EMAIL);
+
+        mockMvc.perform(patch(PROFILE_PATH, id)
+                        .with(admin("admin-pref-omitted"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"Noor\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Noor"))
+                .andExpect(jsonPath("$.notificationPref").value("EMAIL"));
+
+        assertThat(users.findById(id).orElseThrow().getNotificationPref()).isEqualTo(NotificationPref.EMAIL);
     }
 
     @Test
