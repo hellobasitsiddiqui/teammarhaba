@@ -506,7 +506,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === ADMIN_NOTIFICATIONS || hash === ADMIN_OPS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS; TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === ADMIN_NOTIFICATIONS || hash === ADMIN_OPS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === PROFILE_INTERESTS || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS; TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS; TM-1095: + PROFILE_INTERESTS (else #/profile/interests normalises to the fallback and its view never shows)
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
