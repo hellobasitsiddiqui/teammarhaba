@@ -24,8 +24,29 @@ public interface EventAttendanceRepository extends JpaRepository<EventAttendance
 
     Optional<EventAttendance> findByEventIdAndUserId(Long eventId, Long userId);
 
-    /** Capacity check ({@code GOING} vs {@code events.capacity}) and per-state badge counts. */
-    long countByEventIdAndState(Long eventId, AttendanceState state);
+    /**
+     * The capacity-authoritative per-state count ({@code GOING} vs {@code events.capacity}, and the
+     * "N going" badge). Counts only rows whose attendee is a <em>live</em> account: it joins each
+     * attendance row to its {@code User} by the plain {@code userId} FK, and {@link com.teammarhaba.backend.user.User User}'s
+     * {@code @SQLRestriction("deleted_at is null")} silently drops soft-deleted accounts from the
+     * join — so a tombstoned attendee's {@code GOING} row no longer eats a capacity spot (TM-996).
+     *
+     * <p>This is the <b>single</b> place capacity is derived, so every consumer inherits the fix in
+     * one go: the full-gate ({@code going < capacity}) in {@code EventRsvpService}, the free-spot
+     * count ({@code capacity − going}) that drives waitlist promotion in
+     * {@code WaitlistOfferCascadeService}, the roster/admin summaries, and the public "N going" badge.
+     * The row itself is untouched (history stays truthful, no association is added) — only its weight
+     * against capacity changes. Accounts are only ever soft-deleted in-app (never hard-DELETEd, see
+     * {@link EventAttendance}), so an inner join never drops a live attendee's row.
+     */
+    @Query(
+            """
+            select count(a) from EventAttendance a, com.teammarhaba.backend.user.User u
+            where a.eventId = :eventId
+              and a.state = :state
+              and u.id = a.userId
+            """)
+    long countByEventIdAndState(@Param("eventId") Long eventId, @Param("state") AttendanceState state);
 
     /** The caller's rows across many events in one query — the listing's "my-state" without an N+1. */
     List<EventAttendance> findByUserIdAndEventIdIn(Long userId, Collection<Long> eventIds);

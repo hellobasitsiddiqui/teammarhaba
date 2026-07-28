@@ -129,13 +129,15 @@ class EventControllerIntegrationTest extends AbstractIntegrationTest {
             mockMvc.perform(post("/api/v1/events/" + event.getId() + "/rsvp").with(joiner))
                     .andExpect(status().isOk());
         }
-        // Tombstone the second attendee: their spot still counts, but the avatar must drop out
-        // because people resolve through the User aggregate (which hides soft-deleted accounts).
+        // Tombstone the second attendee: TM-996 FREES their held spot (a soft-deleted attendee no
+        // longer counts toward goingCount), and their avatar drops out too — both resolve through the
+        // User aggregate, which hides soft-deleted accounts. So goingCount falls 3 -> 2, matching the
+        // 2 avatars (previously the count kept the tombstoned spot; TM-996 stops that leak).
         userService.softDelete("uid-av-Bilal-" + tag);
 
         mockMvc.perform(get("/api/v1/events/" + event.getId()).with(joiners.get(0)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.goingCount").value(3))
+                .andExpect(jsonPath("$.goingCount").value(2)) // TM-996: soft-deleted attendee's spot is freed, no longer counted
                 .andExpect(jsonPath("$.waitlistedCount").value(0))
                 .andExpect(jsonPath("$.myState").value("GOING"))
                 .andExpect(jsonPath("$.spotAvailableToClaim").value(false))

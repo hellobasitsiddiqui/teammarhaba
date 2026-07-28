@@ -136,18 +136,24 @@ class EventAttendanceRepositoryIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void attendanceSurvivesAnAttendeeSoftDeleteAndPeopleResolveThroughUser() {
+    void attendanceSurvivesAnAttendeeSoftDeleteButNoLongerCountsTowardCapacity() {
         Long eventId = newEvent("tombstone");
         Long userId = newUser("tombstone-attendee");
         attendance.save(new EventAttendance(eventId, userId, AttendanceState.GOING));
 
+        // Baseline: while the account is live, the GOING row counts toward capacity.
+        assertThat(attendance.countByEventIdAndState(eventId, AttendanceState.GOING)).isEqualTo(1);
+
         // Account soft-delete is a tombstone, not a hard DELETE — the FK never fires.
         jdbc.update("update users set deleted_at = now() where id = ?", userId);
 
-        // The attendance row survives (history/counts stay truthful)...
+        // The attendance row itself survives (history stays truthful — no hard delete)...
         assertThat(attendance.findByEventIdAndUserId(eventId, userId)).isPresent();
-        assertThat(attendance.countByEventIdAndState(eventId, AttendanceState.GOING)).isEqualTo(1);
-        // ...but the person no longer resolves through the User aggregate — which is exactly why
+        // ...but a soft-deleted attendee's GOING row NO LONGER eats a capacity spot (TM-996): the
+        // count joins through User, whose @SQLRestriction drops the tombstoned account, so the spot
+        // frees automatically at the query level. This assertion was `isEqualTo(1)` pre-fix (the leak).
+        assertThat(attendance.countByEventIdAndState(eventId, AttendanceState.GOING)).isZero();
+        // The person no longer resolves through the User aggregate either — which is exactly why
         // callers must resolve people through UserRepository, never through this child table.
         assertThat(users.findById(userId)).isEmpty();
     }
