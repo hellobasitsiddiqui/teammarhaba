@@ -396,6 +396,11 @@ test("@admin @admin-events edit-mode dirty-guard: Reset restores saved values; d
   await expect(page.locator("#event-heading")).toHaveValue(`${HEADING_RESET} DIRTY AGAIN`);
 
   // ── 4: a PRISTINE edit-open exits SILENTLY — re-open fresh, click back, land on the list, no dialog. ─
+  // The form above is still dirty ("...DIRTY AGAIN"). A goto() to the SAME edit hash-URL is a router no-op
+  // (no route change ⇒ no re-mount), so force a genuine route change FIRST — navigate to the list route —
+  // then re-open the edit URL so the router re-mounts a fresh (pristine) form from the saved in-memory event.
+  await page.goto("/#/admin/events");
+  await expect(page.locator("#admin-events-view")).toBeVisible();
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
   await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET); // saved value (the DIRTY edit was never saved)
