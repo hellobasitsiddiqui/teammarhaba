@@ -937,6 +937,118 @@ export function toFormModel(event = {}) {
   };
 }
 
+// --- clone / duplicate an event with a time offset (TM-1061) ----------------------------------
+//
+// Clone/Duplicate (TM-1061, absorbing TM-796) turns ANY source event — past, current, or cancelled —
+// into a NEW pre-filled CREATE draft the admin reviews/edits then Saves (nothing is persisted until
+// Save; the clone goes through the ordinary create POST). The pure half lives here so the offset
+// arithmetic + the past-start warning are unit-testable without a browser (admin-events.js can't be
+// imported in Node — a transitive Firebase `https:` import). The DOM half (admin-events.js) prefills
+// the form from {@link buildCloneDraft}'s model, seeds the source image as the create form's pending
+// upload (so it re-uploads to a DISTINCT `event-images/{newId}` object), and renders the warning.
+//
+// LOCKED decisions this encodes (TM-1061):
+//   - Offset presets ONLY (+7 days / +7 hours) — no free-form offset field (deferred follow-up). The
+//     chosen offset shifts startAt/endAt/visibilityStart/visibilityEnd TOGETHER so the whole interval
+//     lands later, preserving the gaps between them.
+//   - Opening message → BLANK on clone (avoid carrying stale text).
+//   - Everything else is copied from the source (heading, description, location, timezone, capacity,
+//     price, age band, format signals, …) via {@link toFormModel} — the same model the edit prefill uses.
+//   - A shifted start that still lands in the past is ALLOWED but WARNED (non-blocking) so the admin
+//     fixes it before Save — no auto-bump, no silent bad data.
+
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * The clone time-offset presets (TM-1061) — the ONLY offsets round 1 offers (a custom offset is a
+ * deferred follow-up, so there is deliberately NO free-form field). Each is `{ label, ms }`; the chosen
+ * offset shifts all four datetime fields by the same REAL millisecond delta. Add/adjust a preset here.
+ */
+export const CLONE_OFFSET_PRESETS = Object.freeze([
+  Object.freeze({ label: "+7 days", ms: 7 * MS_PER_DAY }),
+  Object.freeze({ label: "+7 hours", ms: 7 * MS_PER_HOUR }),
+]);
+
+/** The four datetime fields a clone offset shifts together (in the event's own timezone). */
+const CLONE_SHIFTED_DATETIME_FIELDS = Object.freeze([
+  "startAt",
+  "endAt",
+  "visibilityStart",
+  "visibilityEnd",
+]);
+
+/**
+ * Shift a draft's four datetime fields (startAt/endAt/visibilityStart/visibilityEnd) LATER by `offsetMs`
+ * real milliseconds, in the draft's own `timezone` (TM-1061). Uses {@link shiftZonedLocal} per field so a
+ * "+7 hours"/"+7 days" shift stays a real span across a DST boundary (the same real-ms arithmetic the
+ * scheduling chips use). A blank field stays blank (an open-ended event with no endAt is not invented),
+ * and the four move by the SAME delta so the interval between them is preserved. Every other field is
+ * copied through untouched. Pure — no DOM. Returns a NEW draft object (the input is not mutated).
+ *
+ * @param {object} draft a form-model draft (as from {@link toFormModel}) — must carry `timezone`.
+ * @param {number} offsetMs the signed millisecond shift (the presets are positive → later).
+ * @returns {object} a new draft with the four datetimes shifted, everything else copied.
+ */
+export function shiftDraftTimes(draft = {}, offsetMs = 0) {
+  const tz = cleanText(draft.timezone);
+  const shifted = { ...draft };
+  const delta = Number(offsetMs);
+  if (!Number.isFinite(delta) || delta === 0) return shifted;
+  for (const key of CLONE_SHIFTED_DATETIME_FIELDS) {
+    const local = cleanText(draft[key]);
+    if (local === "") continue; // blank stays blank (never invent an open-ended event's endAt)
+    shifted[key] = shiftZonedLocal(local, delta, tz);
+  }
+  return shifted;
+}
+
+/**
+ * Build the pre-filled CREATE draft for a clone/duplicate of `event`, with the chosen `offsetMs` applied
+ * (TM-1061). Starts from {@link toFormModel} (the SAME model the edit prefill uses, so every field is
+ * copied identically), shifts the four datetime fields later by the offset ({@link shiftDraftTimes}), and
+ * BLANKS the opening message (the locked decision — stale opening text must not carry over). The source
+ * `imagePath` is preserved on the returned draft so the DOM layer can fetch that image and re-upload it as
+ * a NEW storage object (a distinct `event-images/{newId}`), never a shared reference. Works for a past,
+ * current, OR cancelled source — the clone is a fresh unsaved draft, so the source's status is irrelevant
+ * (a cancelled source clones to a normal new event, not a cancelled one). Pure — no DOM.
+ *
+ * @param {object} event the source EventResponse to clone.
+ * @param {number} [offsetMs] the chosen offset (0 = no shift; the presets pass a positive value).
+ * @returns {object} the create-form draft (form-model shape) to prefill the clone form from.
+ */
+export function buildCloneDraft(event = {}, offsetMs = 0) {
+  const base = toFormModel(event);
+  const shifted = shiftDraftTimes(base, offsetMs);
+  // Opening message → BLANK on clone (LOCKED, TM-1061) — never carry stale opening text.
+  shifted.openingMessage = "";
+  return shifted;
+}
+
+/**
+ * The non-blocking past-start warning for a clone draft (TM-1061), or "" when the start is present and in
+ * the future. A clone whose shifted `startAt` still lands in the past (e.g. +7h on an old event) is ALLOWED
+ * — Save isn't blocked — but the admin must SEE that they're about to create an event in the past so they
+ * fix the time first (no auto-bump, no silent bad data). This is a distinct VALIDITY NOTE, separate from
+ * the required-field errors {@link validateEventDraft} returns (which DO block Save). Compares the draft's
+ * local wall-clock `startAt` (interpreted in its timezone) against `now` on the real instant, so it's
+ * DST-correct and zone-correct. Returns "" for a blank/unparseable start (that's a required-field error's
+ * job, not this warning's). Pure — no DOM.
+ *
+ * @param {object} draft the form-model draft (must carry `startAt` + `timezone`).
+ * @param {Date|number|string} [now] the current instant (defaults to Date.now(); injectable for tests).
+ * @returns {string} the warning copy, or "" when the start is in the future / absent / unparseable.
+ */
+export function pastStartWarning(draft = {}, now = Date.now()) {
+  const iso = zonedToUtcIso(draft.startAt, cleanText(draft.timezone));
+  if (!iso) return ""; // blank/unparseable start → not this warning's concern (required-field error)
+  const startMs = new Date(iso).getTime();
+  const nowMs = toEpochMs(now);
+  if (!Number.isFinite(startMs) || !Number.isFinite(nowMs)) return "";
+  if (startMs >= nowMs) return "";
+  return "This event's start time is in the past. Pick a later start (or a bigger offset) before saving,"
+    + " or it'll be created already finished.";
+}
+
 // --- dirty-guard on exit + Clear/Reset (TM-1101) ----------------------------------------------
 
 /**

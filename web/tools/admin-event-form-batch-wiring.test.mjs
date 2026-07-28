@@ -71,7 +71,8 @@ test("TM-1101: a Clear all / Reset button re-mounts the form to its opened state
   assert.match(SRC, /mode\s*===\s*["']create["']\s*\?\s*["']Clear all["']\s*:\s*["']Reset["']/, "the label is Clear all on create, Reset on edit");
   // Reset routes through onReset, which mountEventForm wires to a full re-mount of the same target.
   assert.match(SRC, /onReset\?\.\(\)/, "Reset must invoke the onReset callback");
-  assert.match(SRC, /doReset\s*=\s*\(\)\s*=>\s*mountEventForm\(\s*view\s*,\s*mode\s*,\s*event\s*\)/, "onReset must re-mount the same form target");
+  // TM-1061 threaded the clone draft through the re-mount so a clone's Reset restores the cloned values.
+  assert.match(SRC, /doReset\s*=\s*\(\)\s*=>\s*mountEventForm\(\s*view\s*,\s*mode\s*,\s*event\s*,\s*cloneDraft\s*\)/, "onReset must re-mount the same form target (with the clone draft when cloning)");
 });
 
 // --- TM-1113: description template chips ------------------------------------------------------

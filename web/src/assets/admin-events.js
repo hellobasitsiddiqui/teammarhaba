@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, stackableTable, toast } from "./ui.js";
+import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, modal, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
@@ -81,6 +81,9 @@ import {
   priceChipToPence,
   penceToPriceChip,
   penceToPounds,
+  CLONE_OFFSET_PRESETS,
+  buildCloneDraft,
+  pastStartWarning,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
@@ -404,10 +407,25 @@ function pastSectionRow() {
 }
 
 function rowActions(event, now = Date.now()) {
+  // Clone/Duplicate (TM-1061, absorbing TM-796): available on EVERY row — past, current, AND cancelled.
+  // A clone is a brand-new unsaved draft (nothing about the source's lifecycle carries over), so unlike
+  // Edit/Cancel it's never disabled by the source being past or cancelled. It opens the offset-preset
+  // picker, then a pre-filled create draft.
+  const clone = el(
+    "button",
+    {
+      class: "tm-btn tm-btn-sm",
+      type: "button",
+      "aria-label": `Clone ${event.heading}`,
+      onClick: () => startCloneEvent(event),
+    },
+    "Clone",
+  );
   // A past event is READ-ONLY (TM-518): both Edit and Cancel are unavailable (the server rejects them
   // too, with a 409). Render a single DISABLED "Edit" so the control is visibly present-but-inert, and
   // no Cancel — a finished event has nothing left to call off. Kept in lock-step with the server-side
-  // reject via the same `past` flag the projection carries.
+  // reject via the same `past` flag the projection carries. Clone is still offered (TM-1061) — cloning a
+  // past event forward is a primary use case.
   if (isPastEvent(event, now)) {
     return [
       el(
@@ -421,6 +439,7 @@ function rowActions(event, now = Date.now()) {
         },
         "Edit",
       ),
+      clone,
     ];
   }
   const edit = el(
@@ -436,8 +455,9 @@ function rowActions(event, now = Date.now()) {
   );
   const cancelled = String(event.status).toUpperCase() === "CANCELLED";
   if (cancelled) {
-    // A cancelled event keeps its history (cancel ≠ delete) — nothing left to cancel, so only Edit.
-    return [edit];
+    // A cancelled event keeps its history (cancel ≠ delete) — nothing left to cancel, so Edit + Clone
+    // (TM-1061: a cancelled event is a valid clone source — re-run it as a fresh event).
+    return [edit, clone];
   }
   // Roster + capacity control (TM-592): opens an inline panel below the row with the attendee list
   // (evict), a force-add form and a first-class capacity adjust that surfaces the over-cap warning.
@@ -454,6 +474,7 @@ function rowActions(event, now = Date.now()) {
   return [
     roster,
     edit,
+    clone,
     el(
       "button",
       { class: "tm-btn tm-btn-sm tm-btn-danger", type: "button", "aria-label": `Cancel ${event.heading}`, onClick: () => cancelEvent(event) },
@@ -530,6 +551,81 @@ async function cancelEvent(event) {
   } catch (err) {
     toast(err instanceof ApiError ? err.message : "Couldn't cancel the event.", { type: "error" });
   }
+}
+
+// ---- clone / duplicate an event with a time offset (TM-1061) -------------------------------
+//
+// The DOM half of Clone (the pure buildCloneDraft / pastStartWarning live in event-form.js). A row's
+// Clone action opens an offset-preset picker; on a pick it builds the pre-filled create draft, stashes
+// it, and navigates to the create route — where enterAdminEventForm mounts the form in CLONE mode from
+// the stash. Nothing is persisted until the admin reviews the draft and Saves (the ordinary create POST).
+
+/**
+ * The clone draft handed to the next create-form mount (TM-1061). A one-shot baton: startCloneEvent sets
+ * it before navigating to `#/admin/events/new`; enterAdminEventForm reads-and-clears it so a plain "New
+ * event" (or a refresh) never accidentally re-opens a stale clone. Holds the source event (for context)
+ * + the pure clone draft (source fields copied, times shifted, opening message blanked).
+ */
+let pendingClone = null;
+
+/** Take (and clear) the pending clone draft, or null if the create route was reached any other way. */
+function takePendingClone() {
+  const c = pendingClone;
+  pendingClone = null;
+  return c;
+}
+
+/**
+ * Offset-preset picker for a clone (TM-1061) — LOCKED to the two presets (+7 days / +7 hours); there is
+ * deliberately NO free-form offset field (a custom offset is a deferred follow-up). Built on the shared
+ * `modal` primitive (ui.js) so it inherits the backdrop/Esc/focus-trap semantics. The admin must
+ * EXPLICITLY pick a preset — nothing is auto-applied. Resolves to the chosen offset ms, or null if the
+ * admin dismissed the picker (Esc / close / backdrop) without choosing.
+ *
+ * @param {object} event the source event (its heading titles the picker).
+ * @returns {Promise<?number>} the chosen offset in ms, or null on dismiss.
+ */
+function pickCloneOffset(event) {
+  return new Promise((resolve) => {
+    let picked = null; // the chosen offset, captured before close; onClose resolves it (or null on dismiss)
+    let ref = null;
+    const choose = (ms) => { picked = ms; ref?.close(); };
+    const buttons = CLONE_OFFSET_PRESETS.map((preset) =>
+      el(
+        "button",
+        {
+          class: "tm-btn tm-btn-primary tm-clone-offset-btn",
+          type: "button",
+          dataset: { offset: preset.label },
+          onClick: () => choose(preset.ms),
+        },
+        preset.label,
+      ),
+    );
+    const body = [
+      el("p", {
+        class: "tm-muted",
+        text: "Duplicate this event into a new draft with its times shifted later. Pick how far to shift — you can review and edit everything before saving.",
+      }),
+      el("div", { class: "tm-clone-offset-choices", role: "group", "aria-label": "Clone time offset" }, buttons),
+    ];
+    // The picker resolves the chosen offset on a pick, or null on ANY dismiss (Esc / close / backdrop) via
+    // modal()'s onClose — the admin must EXPLICITLY pick a preset; nothing is auto-applied.
+    ref = modal(`Clone “${event.heading || "event"}”`, body, { onClose: () => resolve(picked) });
+  });
+}
+
+/**
+ * Start a clone (TM-1061): pick the offset preset, build the pre-filled create draft (pure buildCloneDraft
+ * — source fields copied, the four datetimes shifted, opening message blanked), stash it, and navigate to
+ * the create route. The create-form mount picks the stash up in clone mode. Available for a past, current,
+ * OR cancelled source (the clone is a fresh unsaved event; the source lifecycle is irrelevant).
+ */
+async function startCloneEvent(event) {
+  const offsetMs = await pickCloneOffset(event);
+  if (offsetMs == null) return; // dismissed without choosing — nothing happens
+  pendingClone = { source: event, draft: buildCloneDraft(event, offsetMs) };
+  window.location.hash = adminEventNewHash();
 }
 
 // ---- roster + capacity control (TM-592) ---------------------------------------------------
@@ -1082,7 +1178,56 @@ function buildImageControl(event) {
     ]),
   ]);
 
-  return { node, getFile: () => pendingFile, setProgress, resetProgress, setError };
+  // Seed a pending image programmatically (TM-1061 clone): the cloned draft fetches the SOURCE event's
+  // image as a Blob and hands it here as a File, so the create submit re-uploads it to a fresh
+  // `event-images/{newId}` object (a DISTINCT storage object, never the source URL). Behaves exactly like
+  // a hand-picked file — validate, hold it, show a local preview — so the ordinary submit path uploads it.
+  const setPendingFile = (picked) => {
+    if (!configured || !picked) return;
+    const invalid = validateEventImageFile(picked);
+    if (invalid) { setError(invalid); pendingFile = null; return; }
+    setError("");
+    pendingFile = picked;
+    preview.src = URL.createObjectURL(picked);
+    preview.hidden = false;
+    placeholder.hidden = true;
+  };
+
+  return { node, getFile: () => pendingFile, setPendingFile, setProgress, resetProgress, setError };
+}
+
+/**
+ * Duplicate a SOURCE event's image into the clone's create form (TM-1061), producing a NEW storage object
+ * (never a shared reference to the source URL). Resolves the source `imagePath` to a fetchable URL — a
+ * Storage object path (`event-images/{sourceId}`) via `downloadUrlForPath`, or an http(s) URL used directly
+ * — fetches its bytes as a Blob, wraps it in a File, and seeds it as the create form's PENDING image. The
+ * ordinary create submit then re-uploads that File to `event-images/{newId}` (a DISTINCT object), so the
+ * clone gets its own image, exactly as if the admin had re-picked the same picture. Reuses the existing
+ * event-image upload path end-to-end — no new plumbing, no backend work. Best-effort + non-fatal: any
+ * failure (Storage off, object gone, a cross-origin fetch the browser blocks) just leaves the clone with
+ * no image (the admin can add one) rather than breaking the form or silently sharing the source URL.
+ *
+ * @param {string} imagePath the SOURCE event's imagePath (a Storage object path or an http(s) URL).
+ * @param {{ setPendingFile: (file: File) => void }} image the clone form's image control.
+ */
+async function seedCloneImage(imagePath, image) {
+  try {
+    const ref = eventImageRef(imagePath);
+    if (!ref) return; // no image on the source → clone opens image-less
+    const url = ref.kind === "url" ? ref.value : await downloadUrlForPath(ref.value);
+    if (!url) return; // couldn't resolve a fetchable URL (Storage off / object gone)
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    // Name/type the File so validateEventImageFile accepts it (it checks type.startsWith("image/")). Fall
+    // back to a jpeg content-type if the blob carries none (a resolved download URL usually does).
+    const type = blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+    const ext = type.split("/")[1] || "jpg";
+    const file = new File([blob], `cloned-event-image.${ext}`, { type });
+    image.setPendingFile(file);
+  } catch {
+    // Non-fatal: a failed duplication leaves the clone image-less; never share the source URL.
+  }
 }
 
 /**
@@ -1507,7 +1652,14 @@ function buildPriceControl(priceInput, initialPrice, onChange) {
  * the page's back link) call `onCancel`. Returns { node } to mount + a `focusHeading` to call once the
  * node is in the document.
  */
-function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
+function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCancel, onReset }) {
+  // Clone mode (TM-1061): `mode` is "create" (the clone goes through the ordinary create POST — nothing
+  // persisted until Save) but the form opens PRE-FILLED from `cloneDraft` (a form-model built by the pure
+  // buildCloneDraft: source fields copied, times shifted by the chosen offset, opening message blanked).
+  // It's a distinct concept from an EDIT (there's no source `event` to PATCH), so it rides the create path
+  // everywhere `event` is checked — `event` stays null. `cloneDraft.imagePath` (if any) is duplicated to a
+  // NEW storage object below by seeding the create form's pending image from the source image blob.
+  const isClone = mode === "create" && cloneDraft != null;
   const fields = new Map();
   const fieldNodes = FORM_FIELDS.map((f) => buildField(f, fields));
   const headingInput = fields.get("heading").input;
@@ -1570,7 +1722,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
   // chosen format is inferred on edit (formatFromEvent) and fed into the draft so validateEventDraft /
   // buildEventPayload apply the format-conditional rules. `mapUrl`/`onlineUrl` share the "links" row, so
   // we toggle the individual field WRAPPERS (not the row) to hide one while showing the other.
-  let currentFormat = event ? formatFromEvent(event) : EVENT_FORMAT_INPERSON;
+  // Clone (TM-1061) carries the source's inferred format on its draft (toFormModel set draft.format via
+  // formatFromEvent) so an Online source clones as Online; a plain create is In person. Fall back to
+  // re-deriving from the draft's signals if a hand-built draft omitted format.
+  let currentFormat = event
+    ? formatFromEvent(event)
+    : isClone
+      ? (cloneDraft.format || formatFromEvent(cloneDraft))
+      : EVENT_FORMAT_INPERSON;
   // Physical-only nodes hidden in Online mode; the venue picker node is spliced in later, so it's toggled
   // via a mutable ref set once it exists.
   const formatToggle = buildFormatSelector(currentFormat, (next) => setFormat(next));
@@ -1700,8 +1859,10 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
     tzEdit.addEventListener("change", markEdited);
   }
 
-  // Prefill: timezone options first (needs the selected zone), then the rest of the values.
-  const model = event ? toFormModel(event) : { timezone: guessTimeZone() };
+  // Prefill: timezone options first (needs the selected zone), then the rest of the values. A CLONE
+  // (TM-1061) prefills from its clone draft (source fields copied, times shifted, opening message blanked)
+  // — the same shape toFormModel produces, so the identical prefill loop below fills every field.
+  const model = event ? toFormModel(event) : isClone ? cloneDraft : { timezone: guessTimeZone() };
   fillTimeZoneOptions(fields.get("timezone").input, model.timezone);
   for (const f of FORM_FIELDS) {
     if (f.type === "timezone") continue;
@@ -1717,8 +1878,10 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
   // Age band (TM-1065): on CREATE the default band is 18-99 (attendees are 18-99, TM-884) — seed the two
   // age inputs so the whole adult range is pre-filled and untouched. 18-99 is a non-preset band, so the
   // control opens on Custom showing 18/99 (see buildAgeBandControl → minMaxToAgeBand). On EDIT the prefill
-  // already seeded ageMin/ageMax from the event (loop above), so leave them.
-  if (mode === "create") {
+  // already seeded ageMin/ageMax from the event (loop above), so leave them. A CLONE (TM-1061) likewise
+  // already carries the source event's age band in its draft (prefilled above), so it's NOT re-defaulted —
+  // only a PLAIN create (no clone draft) gets the 18-99 default.
+  if (mode === "create" && !isClone) {
     fields.get("ageMin").input.value = String(AGE_DEFAULT_MIN);
     fields.get("ageMax").input.value = String(AGE_DEFAULT_MAX);
   }
@@ -1819,6 +1982,25 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
   // seeds the Map URL preview from a prefilled value on an In-person edit-open (via applyFormatView).
   applyFormatView();
 
+  // Past-start warning (TM-1061): a NON-BLOCKING, visible note shown ONLY on a clone whose (offset-shifted)
+  // start still lands in the past — e.g. +7h on an old event. Save is NOT blocked (distinct from the
+  // required-field errors), but the admin must SEE they're about to create an already-past event so they
+  // fix the time first (no auto-bump, no silent bad data). Recomputed live from the pure pastStartWarning
+  // whenever the Start or timezone changes, so it clears the moment the admin picks a future start. Not
+  // shown on a plain create/edit (only a clone opens with a pre-filled, possibly-past start).
+  const pastStartNote = el("p", {
+    class: "tm-field-error tm-event-past-start-note",
+    id: "event-past-start-warning",
+    role: "alert",
+    hidden: true,
+  });
+  const refreshPastStartWarning = () => {
+    if (!isClone) return; // the warning is a clone-only affordance
+    const message = pastStartWarning(readDraft());
+    pastStartNote.textContent = message;
+    pastStartNote.hidden = message === "";
+  };
+
   // Scheduling preset chips (TM-1064): a `.tm-chips` row under each datetime field + the reveal field,
   // one-tap SEEDS the input (fields stay editable — the TM-382 contract) then re-validates so an ordering
   // error clears/appears live. The datetime chips are ZONE-AWARE and, for the offset ones (Ends/Visible),
@@ -1856,9 +2038,10 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
   mountChipsFor("visibilityEnd", (tz) => visibleUntilChips(startInput.value, tz));
   mountChipsFor("locationRevealHours", () => revealHourChips());
   // Start or timezone changing by hand shifts the offset/relative chips — recompute them all (the reveal
-  // chips are constant, but rebuilding every row is cheap and keeps a single code path).
-  tzInput.addEventListener("change", refreshScheduleChips);
-  startInput.addEventListener("input", refreshScheduleChips);
+  // chips are constant, but rebuilding every row is cheap and keeps a single code path). The clone
+  // past-start warning (TM-1061) reads Start + timezone too, so refresh it on the same edits.
+  tzInput.addEventListener("change", () => { refreshScheduleChips(); refreshPastStartWarning(); });
+  startInput.addEventListener("input", () => { refreshScheduleChips(); refreshPastStartWarning(); });
 
   // Tap-to-prefill sample templates ABOVE a textarea (TM-1065 opening message + TM-1113 description). Both
   // work identically: tapping a chip SEEDS the textarea (free text after — the TM-382 seeding contract),
@@ -1991,8 +2174,22 @@ function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
     ]),
     ...layout.filter((node) => node !== byKey.get("heading")),
     image.node,
+    // Clone past-start warning (TM-1061) — non-blocking, sits just above the actions so it's next to Save.
+    pastStartNote,
     el("div", { class: "tm-form-actions" }, [reset, cancel, save]),
   ]);
+
+  // Clone (TM-1061): compute the initial past-start warning now the form is assembled — a clone can open
+  // already in the past (e.g. +7h on an old event), so the note must show on open, not just after an edit.
+  refreshPastStartWarning();
+  // Clone image duplication (TM-1061): the source event's image is duplicated to a NEW storage object, not
+  // shared. Fetch the source image as a Blob and hand it to the image control as a pending File — the
+  // ordinary create submit then uploads it to `event-images/{newId}` (a distinct object). Best-effort: if
+  // the source has no image, or it can't be fetched (Storage off, object gone, a cross-origin legacy URL),
+  // the clone simply opens with no image and the admin can add one — never a broken share of the source URL.
+  if (isClone && cloneDraft.imagePath) {
+    seedCloneImage(cloneDraft.imagePath, image);
+  }
 
   // Snapshot the dirty-guard baseline NOW — after the whole form (incl. the sub-controls that seed the
   // timezone/age/price defaults) is built, so a freshly-opened form reads as pristine (TM-1101). readDraft
@@ -2120,7 +2317,11 @@ export async function enterAdminEventForm(mode, id = null) {
   const mine = ++formToken;
 
   if (mode === "create") {
-    mountEventForm(view, "create", null);
+    // Clone (TM-1061): a Clone action stashed a pre-filled draft before navigating here; take it (one-shot,
+    // so a later plain "New event" or a refresh opens a blank form, not a stale clone) and mount in clone
+    // mode. No stash → an ordinary blank create.
+    const clone = takePendingClone();
+    mountEventForm(view, "create", null, clone ? clone.draft : null);
     return;
   }
 
@@ -2176,15 +2377,17 @@ function redirectPastEventEdit() {
 }
 
 /** Mount the page chrome (a "← Events" back-link header) + the form into the view, then focus heading. */
-function mountEventForm(view, mode, event) {
+function mountEventForm(view, mode, event, cloneDraft = null) {
   const back = () => { window.location.hash = ADMIN_EVENTS_ROUTE; };
   // Clear/Reset (TM-1101): re-mount the SAME target from scratch — create → a fresh blank form, edit → the
   // saved event re-prefilled — so every control returns to its opened state and a fresh dirty baseline is
   // re-snapshotted. `event` is the saved EventResponse (unchanged by an unsaved edit), so an edit reset
-  // restores exactly the saved values.
-  const doReset = () => mountEventForm(view, mode, event);
-  const { node, focusHeading, confirmExit } = buildEventForm({ mode, event, onDone: back, onCancel: back, onReset: doReset });
-  const title = mode === "create" ? "New event" : `Edit · ${event.heading || "event"}`;
+  // restores exactly the saved values. A CLONE (TM-1061) re-mounts from the SAME clone draft, so Reset
+  // restores the cloned-and-shifted values (not a blank form) — the clone's "opened state".
+  const doReset = () => mountEventForm(view, mode, event, cloneDraft);
+  const { node, focusHeading, confirmExit } = buildEventForm({ mode, event, cloneDraft, onDone: back, onCancel: back, onReset: doReset });
+  // A clone is a create-in-progress; title it as such so the admin knows this is a NEW event, not an edit.
+  const title = mode === "create" ? (cloneDraft ? "Clone event" : "New event") : `Edit · ${event.heading || "event"}`;
   clear(view).append(formHeader(title, confirmExit), node);
   focusHeading();
 }
