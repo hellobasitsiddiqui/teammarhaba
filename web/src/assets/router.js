@@ -60,6 +60,10 @@ import {
   isAdminOpsRoute,
 } from "./admin-hub-route.js";
 import { enterProfile, editFormIsDirty } from "./profile.js";
+// TM-1095: the dedicated interests-management ROUTE (#/profile/interests) that replaces the in-place
+// picker overlay. A sub-route of the Profile area (lights the Profile tab), but its own full-screen view
+// with its own mount so the profile hub isn't rebuilt for it.
+import { enterInterests } from "./interests-route.js";
 // TM-1027: the unsaved-changes guard for the profile edit form. The pure "should this nav be
 // intercepted?" decision (leaving the edit form while dirty) + the confirm-dialog copy live in
 // profile-guard-core.js so they're unit-testable; this router owns the restore-hash intercept that
@@ -174,6 +178,12 @@ const ADMIN_OPS = ADMIN_OPS_ROUTE;
 // and both light the bottom-nav Profile tab (tabbar-core treats any `#/profile/...` as the Profile tab).
 const PROFILE = "#/profile";
 const PROFILE_PUBLIC = "#/profile/public";
+// TM-1095: the dedicated interests-management route. A Profile SUB-route (so the bottom-nav Profile tab
+// lights for it — tabbar-core matches any `#/profile/...` prefix) but its OWN full-screen view
+// (#interests-view), NOT part of the profile hub. Deliberately kept OUT of isProfileRoute() (which drives
+// #profile-view visibility + enterProfile) so entering it doesn't rebuild/refetch the hub; it has its own
+// mount block + view-visibility toggle below, exactly like the public-preview lifecycle.
+const PROFILE_INTERESTS = "#/profile/interests";
 // First-login profile gate (TM-250) — protected; a signed-in but not-yet-onboarded user is forced
 // here and can't reach any other app view until they complete it.
 const ONBOARDING = "#/onboarding";
@@ -265,6 +275,11 @@ function eventDetailId(hash) {
 function isProfileRoute(hash) {
   return hash === PROFILE || hash === PROFILE_PUBLIC;
 }
+/** True for the dedicated interests-management route (`#/profile/interests`, TM-1095). Kept separate from
+ *  isProfileRoute so entering it doesn't rebuild the hub — it has its own view + mount lifecycle. */
+function isInterestsRoute(hash) {
+  return hash === PROFILE_INTERESTS;
+}
 /** True for the chat list (`#/chat`) or any chat thread (`#/chat/{id}`). */
 function isChatRoute(hash) {
   return hash === CHAT || hash.startsWith(`${CHAT}/`);
@@ -301,6 +316,9 @@ function isProtected(route) {
   return (
     PROTECTED.has(route) ||
     isProfileRoute(route) ||
+    // Interests-management route (TM-1095) — any signed-in user; protected like the profile hub so a
+    // signed-out deep link is remembered + bounced to login rather than firing GET /me with no token.
+    isInterestsRoute(route) ||
     isEventsRoute(route) ||
     isChatRoute(route) ||
     isAdminEventFormRoute(route) ||
@@ -395,6 +413,9 @@ let adminOpsActive = false;
 // switching hub↔preview re-enters. Reset to null when leaving the profile area. (This route-entered
 // lifecycle from TM-514 replaces the old single `profileActive` flag.)
 let profileRouteEntered = null;
+// Interests-management route (TM-1095): whether #/profile/interests is currently mounted, so we mount it
+// once on entry and reset on leaving (single exact route → a boolean, mirroring the notifications feed).
+let interestsRouteEntered = false;
 // Chat (TM-515): the last chat route we entered (`#/chat` or `#/chat/{id}`), so repeated guard() calls
 // for the SAME route don't re-render, while a list↔thread↔another-thread change re-enters (mirrors
 // eventsRouteEntered). Reset to null when leaving the chat area. Replaces the TM-434 `chatActive`
@@ -485,7 +506,7 @@ const $ = (id) => document.getElementById(id);
 /** Normalise the current location hash to one of our known routes. */
 function currentRoute() {
   const hash = window.location.hash;
-  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === ADMIN_NOTIFICATIONS || hash === ADMIN_OPS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS; TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS
+  if (hash === LOGIN || hash === HOME || hash === ADMIN || hash === ADMIN_USERS || hash === ADMIN_EVENTS || hash === ADMIN_VENUES || hash === ADMIN_INTERESTS || hash === ADMIN_MESSAGES || hash === ADMIN_NOTIFICATIONS || hash === ADMIN_OPS || hash === PROFILE || hash === PROFILE_PUBLIC || hash === PROFILE_INTERESTS || hash === CHAT || hash === NOTIFICATIONS || hash === ONBOARDING || hash === TERMS || hash === HELP || hash === DIAGNOSTICS) return hash; // TM-779: + ADMIN_INTERESTS; TM-917: + ADMIN_USERS; TM-972: + ADMIN_NOTIFICATIONS + ADMIN_OPS; TM-1095: + PROFILE_INTERESTS (else #/profile/interests normalises to the fallback and its view never shows)
   // Events area (list or a dynamic-id detail): return the raw hash so the detail id survives.
   if (isEventsRoute(hash)) return hash;
   // Chat area (list or a dynamic-id thread): return the raw hash so the thread id survives (TM-515).
@@ -573,6 +594,10 @@ function render() {
   const adminOpsView = $("admin-ops-view");
   if (adminOpsView) adminOpsView.hidden = route !== ADMIN_OPS;
   if (profileView) profileView.hidden = !isProfileRoute(route);
+  // Interests-management route (TM-1095) — shown for the exact #/profile/interests route. Its own
+  // full-screen section, distinct from #profile-view (the hub stays hidden while managing interests).
+  const interestsView = $("interests-view");
+  if (interestsView) interestsView.hidden = !isInterestsRoute(route);
   if (onboardingView) onboardingView.hidden = route !== ONBOARDING;
   if (termsView) termsView.hidden = route !== TERMS;
   if (helpView) helpView.hidden = route !== HELP;
@@ -969,6 +994,16 @@ function guard() {
     }
   } else {
     profileRouteEntered = null;
+  }
+  // Interests-management route (TM-1095): mount + load on entry, reset on leaving so a future entry
+  // re-mounts fresh (mirrors the profile view lifecycle). Only one route value, so the flag is a boolean.
+  if (isInterestsRoute(route)) {
+    if (!interestsRouteEntered) {
+      interestsRouteEntered = true;
+      enterInterests();
+    }
+  } else {
+    interestsRouteEntered = false;
   }
   // Chat (TM-515): (re)enter whenever the chat route CHANGES (list vs a specific thread id) so
   // list↔thread↔another-thread navigation always repaints, without re-rendering on the repeated

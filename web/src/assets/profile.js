@@ -112,15 +112,14 @@ import { COUNTRIES, flagOf } from "./countries.js";
 // gate below (phoneNeedsVerify) is a no-op — a CHANGED number saves without an OTP, and since the
 // Send-code affordance keys off the same rule, no verify UI sprouts either. ON = TM-982, unchanged.
 import { verifiedPhoneRequired } from "./verified-phone-flag.js";
-// Pure Interests-card logic (TM-778) — chip view-model, catalogue grouping, add/remove-within-min/max,
-// and the min/max config normaliser, unit-tested in web/tools/interests-core.test.mjs.
+// Pure Interests-card logic (TM-778) — chip view-model + the min/max config normaliser, unit-tested in
+// web/tools/interests-core.test.mjs. TM-1095 retired the in-place picker overlay (the hub chip now routes
+// to the dedicated #/profile/interests screen), so catalogueGroups/toggleInterest/selectionError moved to
+// that route (interests-route.js) and are no longer imported here.
 import {
   normaliseInterestConfig,
   savedInterestLabels,
   interestChipsModel,
-  catalogueGroups,
-  toggleInterest,
-  selectionError,
 } from "./interests-core.js";
 // Membership tier metadata (TM-643) — the membership row now reflects the caller's REAL tier via the
 // pure, unit-tested profileMembershipRow() (which sources tier NAMES from the shared tier catalogue),
@@ -1190,112 +1189,16 @@ function removeInterest(label) {
 }
 
 /**
- * Open the catalogue ADD picker — a modal of the grouped, offered interests as toggle chips, with a
- * live selection count and a Save that PATCHes the whole chosen set. Starts from the caller's currently
- * saved interests so the picker doubles as an editor. When the catalogue can't be read (a transient
- * failure on the public catalogue endpoint — see the api.js note), the modal explains the ADD picker
- * isn't available yet rather than showing an empty list, so the affordance never silently does nothing.
+ * Open the interests manager (TM-1095). The in-place picker OVERLAY (a `.tm-modal` grouped chip list,
+ * TM-970/TM-860) is RETIRED — the hub's "＋ add" / "Manage" chip now navigates to the dedicated
+ * full-screen route `#/profile/interests` (interests-route.js), which adds a search field, collapsible
+ * category sections, and a sticky Save/Cancel bar while keeping the same min/max bounds and the same
+ * PATCH /me full-set-replace save. Nothing here fetches or renders the catalogue any more — the route
+ * loads its own /me + config + catalogue, so an unreadable catalogue is that route's honest "not
+ * available yet" state rather than a dead-end modal.
  */
 function openInterestPicker() {
-  const max = state.interestConfig.max;
-  const catalogue = state.interestCatalogue;
-
-  // No readable catalogue → honest "not available yet" body (VIEW + REMOVE still work on the card).
-  if (!Array.isArray(catalogue) || catalogue.length === 0) {
-    modal(
-      "Add interests",
-      el("div", { class: "tm-pf-picker-empty" }, [
-        el("p", { text: "The interests list isn't available right now. Please try again later." }),
-      ]),
-    );
-    return;
-  }
-
-  // Pending selection seeded from the saved set; Save PATCHes it. `let` so the toggle handlers can swap
-  // it and refresh the picker's selection state in place.
-  let selected = savedInterestLabels(state.profile?.interests);
-  const bodyWrap = el("div", { class: "tm-pf-picker" });
-  const dialog = modal("Add interests", bodyWrap);
-
-  // ── TM-860: the picker body is built ONCE; toggles repaint IN PLACE. ────────────────────────────
-  // The old renderPicker() clear(bodyWrap)-and-rebuilt every chip on each toggle. Wiping the scroll
-  // container's content collapses its height mid-frame, and real mobile engines (iOS Safari / Android
-  // WebView — NOT desktop Chromium, which rebuilds synchronously and keeps scrollTop) clamp
-  // .tm-modal-body's scrollTop to 0 — so selecting a chip near the bottom bounced the user back to the
-  // top of the list. Instead we keep handles to every selection-dependent node and mutate only those,
-  // mirroring onboarding.js's paintChip pattern (which is why onboarding never had this bug).
-  const chipHandles = []; // { label, button } for every catalogue chip, in render order
-  let countNode = null; //  the "N of max selected" line
-  let errorNode = null; //  the selection-error line (always present; hidden when the set is savable)
-  let saveBtn = null; //    the Save button (disabled while the selection violates min/max)
-
-  /**
-   * Repaint everything that depends on `selected`, WITHOUT touching the DOM structure: each chip's
-   * on/off modifier + aria-pressed, the at-max dimming of the *other* chips, the count line, and the
-   * error + Save-disabled pair. Same rules the initial build used (catalogueGroups/selectionError) —
-   * this is just those decisions re-applied to the existing nodes.
-   */
-  const refreshPicker = () => {
-    const chosen = new Set(selected);
-    const atMax = chosen.size >= max;
-    countNode.textContent = `${chosen.size} of ${max} selected`;
-    for (const { label, button } of chipHandles) {
-      const on = chosen.has(label);
-      // Like onboarding's paintChip: `.tm-pf-chip-on` is a MODIFIER layered on the base `.tm-pf-chip`
-      // (which carries the padding/border) — toggle only the modifier, never the base class.
-      button.classList.toggle("tm-pf-chip-on", on);
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-      // Disabled only at the cap AND not selected (deselecting to make room must always stay possible)
-      // — the same predicate catalogueGroups computes for its options' `disabled` flag.
-      button.disabled = atMax && !on;
-    }
-    const err = selectionError(selected, state.interestConfig);
-    errorNode.textContent = err;
-    errorNode.hidden = !err;
-    saveBtn.disabled = Boolean(err);
-  };
-
-  // Build the static structure once: the count line, the grouped chips, and the actions row. All
-  // selection-dependent state (on/off, disabled, count, error) is painted by refreshPicker() below —
-  // one source of truth, so the initial paint and every toggle repaint can never drift apart.
-  const { groups } = catalogueGroups(catalogue, selected, { max });
-  countNode = el("p", { class: "tm-muted tm-pf-picker-count" });
-  bodyWrap.append(countNode);
-  for (const group of groups) {
-    bodyWrap.append(el("h4", { class: "tm-pf-picker-cat", text: group.category }));
-    const row = el("div", { class: "tm-pf-chips" });
-    for (const opt of group.options) {
-      // Leading catalogue emoji (TM-805) on the picker chip, only when the row carries one.
-      const emojiSpan = opt.emoji
-        ? el("span", { class: "tm-pf-chip-emoji", "aria-hidden": "true", text: opt.emoji })
-        : null;
-      const button = el("button", {
-        type: "button",
-        class: "tm-pf-chip tm-pf-picker-opt",
-        onClick: () => {
-          selected = toggleInterest(selected, opt.label, { max });
-          refreshPicker(); // in place — never clear/rebuild, so the body's scroll position survives
-        },
-      }, [emojiSpan, el("span", { text: opt.label })]);
-      chipHandles.push({ label: opt.label, button });
-      row.append(button);
-    }
-    bodyWrap.append(row);
-  }
-  // The error line is ALWAYS in the tree (hidden when savable) so refreshPicker only flips text +
-  // hidden — inserting/removing it per toggle would be a structural change again. role="alert" makes
-  // a newly-revealed message announce itself to assistive tech.
-  errorNode = el("p", { class: "tm-field-error", role: "alert", hidden: true });
-  saveBtn = el("button", {
-    type: "button",
-    class: "tm-btn tm-btn-primary",
-    onClick: async () => {
-      dialog.close();
-      await saveInterests(selected);
-    },
-  }, "Save");
-  bodyWrap.append(el("div", { class: "tm-pf-picker-actions" }, [errorNode, saveBtn]));
-  refreshPicker();
+  if (typeof window !== "undefined") window.location.hash = INTERESTS_ROUTE_HASH;
 }
 
 /** Build the PATCH body: trimmed values, age coerced to a number; blank fields are omitted. */
@@ -2677,6 +2580,9 @@ async function loadPublic() {
 // ---- mount ----------------------------------------------------------------------------------
 
 const PROFILE_ROUTE_HASH = "#/profile";
+// TM-1095: the dedicated interests-management route the hub's "＋ add" / "Manage" chip now routes to
+// (replacing the retired in-place picker overlay).
+const INTERESTS_ROUTE_HASH = "#/profile/interests";
 
 /**
  * Called by the router when a Profile route becomes active. Builds the layout for the requested mode

@@ -115,3 +115,16 @@ test("resolveRoleThenGuard guards by UID, not mere presence, so a mid-flight acc
   assert.match(body, /const\s+uid\s*=\s*user\.uid;/, "the resolving user's uid is pinned up front");
   assert.match(body, /now\.uid\s*!==\s*uid/, "after the lookups it re-checks the SAME uid (not just signed-in)");
 });
+
+// ── TM-1095: #/profile/interests must be a KNOWN route in currentRoute() ─────────────────────────────
+// The interests route (TM-1095) was wired into isInterestsRoute()/the view-reveal/the mount/isProtected,
+// but NOT into currentRoute()'s known-route allow-list — so the hash fell through to the fallback route
+// and #interests-view was never revealed (the e2e caught it; the DOM-reveal capture masked it). This
+// source-guard pins the allow-list line so the route can't silently drop out again.
+test("TM-1095: currentRoute() recognises #/profile/interests (else it normalises to the fallback and its view never shows)", () => {
+  // Anchor on `hash === LOGIN` — unique to currentRoute()'s allow-list (isProfileRoute also has
+  // `return hash === PROFILE …` but never LOGIN), so we pin the right line.
+  const line = ROUTER_SRC.split("\n").find((l) => /hash === LOGIN\b/.test(l) && /return hash;/.test(l));
+  assert.ok(line, "found the currentRoute() known-route allow-list line");
+  assert.match(line, /hash === PROFILE_INTERESTS/, "PROFILE_INTERESTS must be in the currentRoute() known-route allow-list");
+});
