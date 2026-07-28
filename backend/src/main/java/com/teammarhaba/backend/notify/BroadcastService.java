@@ -23,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -282,6 +284,22 @@ public class BroadcastService {
         // Record the cooldown window only now the broadcast has actually completed.
         lastBroadcast.put(actorUid, now);
         return result;
+    }
+
+    /**
+     * The calling admin's push-broadcast sent-history (TM-373): the {@link NotificationBroadcast}
+     * header rows this actor sent, in whatever order the {@link Pageable}'s sort asks for (the caller
+     * passes newest-first). Read-only over the append-only header table — no new schema, no mutation.
+     * Scoped to {@code actorUid} (never a client-supplied id), so an admin only ever sees their own
+     * broadcasts — exactly like {@code AdminMessageService.sentHistory} for the sibling message history.
+     *
+     * @param actorUid Firebase UID of the admin whose broadcasts to read (from the verified principal)
+     * @param pageable page/size/sort (the controller allow-lists the sort and defaults to newest-first)
+     * @return the page of this admin's broadcast headers
+     */
+    @Transactional(readOnly = true)
+    public Page<NotificationBroadcast> history(String actorUid, Pageable pageable) {
+        return broadcasts.findByActorUid(actorUid, pageable);
     }
 
     /**

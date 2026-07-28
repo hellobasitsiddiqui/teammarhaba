@@ -2,6 +2,7 @@ package com.teammarhaba.backend.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,6 +13,7 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.device.DevicePlatform;
 import com.teammarhaba.backend.device.DeviceToken;
 import com.teammarhaba.backend.device.DeviceTokenRepository;
+import com.teammarhaba.backend.notify.NotificationBroadcast;
 import com.teammarhaba.backend.notify.NotificationBroadcastRepository;
 import com.teammarhaba.backend.notify.PushDelivery;
 import com.teammarhaba.backend.notify.PushMessage;
@@ -415,6 +417,81 @@ class PushAdminControllerIntegrationTest extends AbstractIntegrationTest {
 
         // The token was delivered once (the first send only) — the blocked resubmit didn't re-push.
         assertThat(sender.sentTokens()).containsExactly("tok-cd");
+    }
+
+    // --- Sent-history read (TM-373) --------------------------------------------------------------
+
+    /** Persist a broadcast header row directly (createdAt is DB-generated) so history tests control order. */
+    private void seedBroadcast(String actorUid, String title, int recipientCount, int delivered, int skipped) {
+        broadcasts.save(new NotificationBroadcast(
+                actorUid, title, "body of " + title, "#/home", recipientCount, delivered + skipped, delivered, 0, 0, skipped));
+    }
+
+    @Test
+    void historyAnonymousGetsUniform401() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.title").value("Unauthorized"));
+    }
+
+    @Test
+    void historyNonAdminGetsUniform403() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts").with(regularUser("plain-user")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void historyReturnsOnlyTheCallersBroadcastsNewestFirstWithTheRowShape() throws Exception {
+        // Two sends from THIS admin (oldest first), plus one from another admin that must NOT appear.
+        seedBroadcast("admin-hist", "Older broadcast", 5, 4, 1);
+        seedBroadcast("admin-hist", "Newer broadcast", 12, 10, 2);
+        seedBroadcast("other-admin", "Someone else's", 3, 3, 0);
+
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts").with(admin("admin-hist")))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                // Only the caller's two broadcasts, newest first (id desc tiebreak == insertion order desc).
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.items[0].title").value("Newer broadcast"))
+                .andExpect(jsonPath("$.items[1].title").value("Older broadcast"))
+                // The row carries the facts the History tab paints (title / body / reach / outcome / sent-at).
+                .andExpect(jsonPath("$.items[0].recipientCount").value(12))
+                .andExpect(jsonPath("$.items[0].delivered").value(10))
+                .andExpect(jsonPath("$.items[0].skipped").value(2))
+                .andExpect(jsonPath("$.items[0].body").value("body of Newer broadcast"))
+                .andExpect(jsonPath("$.items[0].route").value("#/home"))
+                .andExpect(jsonPath("$.items[0].sentAt").exists())
+                .andExpect(jsonPath("$.items[0].id").exists());
+    }
+
+    @Test
+    void historyIsPagedAndHonoursSizeParam() throws Exception {
+        for (int i = 1; i <= 3; i++) {
+            seedBroadcast("admin-page", "Broadcast " + i, i, i, 0);
+        }
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts").with(admin("admin-page")).param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.page").value(0));
+    }
+
+    @Test
+    void historyRejectsAnUnknownSortPropertyWith400() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts").with(admin("admin-sort")).param("sort", "title"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void historyIsEmptyForAnAdminWhoHasSentNothing() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/push/broadcasts").with(admin("admin-nothing-sent-yet")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     /**

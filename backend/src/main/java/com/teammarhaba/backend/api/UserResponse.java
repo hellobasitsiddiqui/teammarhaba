@@ -1,8 +1,10 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.event.ReliabilityStatus;
+import com.teammarhaba.backend.user.Gender;
 import com.teammarhaba.backend.user.NotificationPref;
 import com.teammarhaba.backend.user.User;
+import java.time.Instant;
 
 /**
  * An account as exposed by the admin user-management API (TM-111). Deliberately a <em>projection</em>
@@ -34,6 +36,14 @@ import com.teammarhaba.backend.user.User;
  *                    {@code WARNED} or {@code DOWNGRADED}. Computed by the admin controller from the
  *                    strike count against the configured thresholds, so the console can flag limited
  *                    accounts; {@code OK} when the reliability feature is off.
+ * @param gender      the account's self-reported gender (TM-955): {@code FEMALE}, {@code MALE},
+ *                    {@code PREFER_NOT_TO_SAY}, or {@code null} (unknown / never onboarded). Exposed
+ *                    here so the notification-compose audience-targeting chips (TM-1098) can narrow the
+ *                    selectable recipient set by Male/Female client-side, over the already-loaded list.
+ * @param lastActiveAt the last time the account was seen active (TM-1098): {@code users.last_active_at},
+ *                    bumped on {@code GET /me} (the client hits it on app open / route changes). Exposed
+ *                    so the "Active in last 24h" targeting chip can filter recent accounts client-side;
+ *                    {@code null} for an account with no recorded activity.
  */
 public record UserResponse(
         Long id,
@@ -45,6 +55,8 @@ public record UserResponse(
         boolean pushEligible,
         int lateCancelCount,
         ReliabilityStatus reliabilityStatus,
+        Gender gender,
+        Instant lastActiveAt,
         // The admin-editable profile fields (TM-162 set), surfaced so the admin console can DISPLAY
         // them and PREFILL the admin edit form (TM-172). Distinct from {@code phoneNumber} above, which
         // is the read-only verified AUTH phone from Firebase (TM-372); {@code phone} here is the
@@ -87,6 +99,8 @@ public record UserResponse(
                 pushEligible,
                 user.getLateCancelCount(),
                 reliabilityStatus,
+                user.getGender(),
+                user.getLastActiveAt(),
                 user.getFirstName(),
                 user.getLastName(),
                 user.getCity(),
