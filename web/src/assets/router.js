@@ -656,7 +656,7 @@ function render() {
 
   // App-shell brand block (TM-885/TM-886): hide the walking-skeleton wordmark/tagline/#status on the
   // screens that render their OWN full-page header — the Profile hub/preview and the first-run gates
-  // — so e.g. #/profile tops with "Profile", not a stray "Find your people — complete your circle" +
+  // — so e.g. #/profile tops with "Profile", not a stray "Find your people — complete the circle" +
   // "Ready when you are." above it (the leak the tickets reported as the auth brand / boot splash not
   // being dismissed; the splash + auth card were in fact fine — this block was the leak). Router-
   // driven for the same single-source-of-truth reason as the tab bar / footer above.

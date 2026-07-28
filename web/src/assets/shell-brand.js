@@ -3,7 +3,7 @@
 // The thin DOM half of the shell-brand rule: router.js calls `updateShellBrand()` from its render()
 // pass (the single source of truth for signed-in / route state — the same driving mechanism as
 // updateTabbar / updateFooter), and this reflects the pure shell-brand-core.js verdict onto the
-// three brand elements: the "Circle" wordmark <h1>, the "Find your people — complete your circle"
+// three brand elements: the "Circle" wordmark <h1>, the "Find your people — complete the circle"
 // tagline, and the #status line ("Ready when you are.", app.js).
 //
 // Visibility is driven with the `hidden` ATTRIBUTE — like every other piece of router-owned chrome —
