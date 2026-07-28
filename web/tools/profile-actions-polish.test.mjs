@@ -31,8 +31,10 @@ test("TM-1091: Sign out is a dark filled button (no chevron), not a muted nav ro
   assert.ok(!/menuRow\("Sign out"[^)]*muted:\s*true/.test(profileJs), "Sign out is no longer the muted nav row");
   // menuRow's signout branch renders the label only — no trailing chevron.
   assert.match(profileJs, /signout\s*\n?\s*\?\s*\[el\("span",\s*\{\s*text:\s*label\s*\}\)\]/, "signout row omits the chevron");
-  // The dark-button styling exists and uses theme tokens (Paper --ink on a light card colour).
+  // TM-1100: the filled-button styling exists and uses the user's MAIN APPEARANCE colour (--accent /
+  // --on-accent — the same tokens .tm-btn-primary uses), so it follows the chosen theme (was --ink).
   assert.ok(signoutBlock, ".tm-pf-menu-signout rule must exist");
-  assert.match(signoutBlock, /background:\s*var\(--ink\)/, "dark ink fill");
-  assert.match(signoutBlock, /color:\s*var\(--surface-card\)/, "light text on the dark button");
+  assert.match(signoutBlock, /background:\s*var\(--accent\)/, "appearance-accent fill");
+  assert.match(signoutBlock, /color:\s*var\(--on-accent\)/, "legible on-accent text");
+  assert.ok(!/var\(--ink\)/.test(signoutBlock), "no longer the fixed dark ink fill");
 });

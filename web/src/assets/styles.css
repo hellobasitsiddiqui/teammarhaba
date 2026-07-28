@@ -7249,19 +7249,22 @@ a.tm-pf-go:focus-visible {
     color: var(--muted);
     overflow-wrap: anywhere;
 }
-/* TM-1091: Sign out is a dark filled ACTION button — centred label, no chevron — distinct from the
-   navigation rows above it (the industry-standard sign-out affordance). Dark = the Paper --ink. */
+/* TM-1091 / TM-1100: Sign out is a filled ACTION button — centred label, no chevron — distinct from
+   the navigation rows above it (the industry-standard sign-out affordance). TM-1100: it now takes the
+   user's MAIN APPEARANCE colour (--accent / --on-accent, the same tokens .tm-btn-primary uses and the
+   Appearance settings re-point per user), so the button follows the chosen theme rather than a fixed
+   dark ink. */
 .tm-pf-menu-signout {
     justify-content: center;
-    background: var(--ink);
-    color: var(--surface-card);
-    border-color: var(--ink);
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
     font-weight: 700;
 }
 .tm-pf-menu-signout:hover {
-    background: var(--ink);
-    color: var(--surface-card);
-    filter: brightness(1.25);
+    background: var(--accent);
+    color: var(--on-accent);
+    filter: brightness(1.1);
 }
 .tm-pf-chev {
     color: var(--muted);
