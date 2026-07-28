@@ -144,6 +144,13 @@ public class MessagePostService {
      * created), and the quoted-parent snippet when it's a reply — so the client can append it to the
      * timeline optimistically, receipt and quote and all.
      *
+     * @param attachmentPath   the media attachment's Firebase Storage object path (TM-1125), or {@code
+     *     null} for a plain text message. Set once on the persisted message alongside {@code mediaType};
+     *     an attachment-only message (empty {@code body}) is allowed — the "body OR attachment present"
+     *     rule is enforced at the edge (Bean Validation on {@code PostMessageRequest}), so this path takes
+     *     the already-validated pair.
+     * @param mediaType        the attachment's media-kind discriminator (TM-1125) — {@code "image"} /
+     *     {@code "voice"} / {@code "video"} — or {@code null} for a text-only message.
      * @param replyToMessageId the message being replied to, or {@code null} for a plain message. When
      *     non-null it must name a live message in THIS thread, else a {@code 400} (below) — the reply
      *     target is checked AFTER the member/open gate, so it can't be used to probe other threads.
@@ -155,9 +162,21 @@ public class MessagePostService {
      */
     @Transactional
     public ConversationMessageResponse post(
-            VerifiedUser caller, Long conversationId, String body, Long replyToMessageId) {
+            VerifiedUser caller,
+            Long conversationId,
+            String body,
+            String attachmentPath,
+            String mediaType,
+            Long replyToMessageId) {
         User author = users.provision(caller);
         Long userId = author.getId();
+
+        // The message.body column is NOT NULL (V27), but an attachment-only message (TM-1125) carries no
+        // text — the caller omits body entirely. Coalesce a null/blank body to an empty string so the
+        // attachment-only insert satisfies the NOT NULL constraint (the "body OR attachment present" edge
+        // rule has already guaranteed there IS an attachment when the body is blank). A text message is
+        // untouched.
+        String messageBody = body == null ? "" : body;
 
         // Membership gate FIRST (TM-573): an unknown thread has no membership row and falls through to
         // the same 403 as a non-member / REMOVED member, so a POST can't probe which thread ids exist —
@@ -180,11 +199,15 @@ public class MessagePostService {
         Message parent = requireReplyTarget(conversationId, replyToMessageId);
 
         // Persist, flushing so the @Generated DB-authoritative created_at is read straight back for the
-        // DTO. A reply carries its parent id; a plain message doesn't.
+        // DTO. A reply carries its parent id; a plain message may instead carry a media attachment
+        // (TM-1125) — a bare attachment-only message is allowed (body may be empty). Reply + attachment
+        // together isn't a shape this foundation slice supports, so the attachment rides only the
+        // non-reply branch; a reply persists text only, exactly as before.
         Message saved = messages.saveAndFlush(
-                replyToMessageId == null
-                        ? Message.fromUser(conversationId, userId, body)
-                        : Message.replyFromUser(conversationId, userId, body, replyToMessageId));
+                replyToMessageId != null
+                        ? Message.replyFromUser(conversationId, userId, messageBody, replyToMessageId)
+                        : Message.fromUserWithAttachment(
+                                conversationId, userId, messageBody, attachmentPath, mediaType));
 
         // Audit the post (the durable text lives in the message row; the audit only names it).
         audit.record(

@@ -160,7 +160,12 @@ class ConversationStreamIntegrationTest extends AbstractIntegrationTest {
 
         // Poster posts through the real service — persist + audit + push + LIVE broadcast (the C2 seam).
         messagePostService.post(
-                new VerifiedUser("poster", "poster@example.com"), thread.getId(), "live hello everyone", null);
+                new VerifiedUser("poster", "poster@example.com"),
+                thread.getId(),
+                "live hello everyone",
+                null,
+                null,
+                null);
 
         // The new message was streamed down the listener's open connection as an SSE `message` event.
         String streamed = stream.getResponse().getContentAsString();

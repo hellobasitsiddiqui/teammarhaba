@@ -128,6 +128,30 @@ public class Message {
     @Column(name = "kind", nullable = false, updatable = false)
     private MessageKind kind = MessageKind.ATTENDEE;
 
+    /**
+     * Firebase Storage object PATH of a media attachment this message carries (TM-1125, the wave-2
+     * chat-media foundation) — an image, voice note, or (video-later) clip; {@code null} = a plain text
+     * message with no attachment. A generic single reference so every media kind rides one column set
+     * rather than a per-kind schema. Stored as an object path (not a signed URL, mirroring
+     * {@code venue.photo_path} V41) so it never expires; the client mints a fresh download URL on demand.
+     *
+     * <p>Set once at post time and NEVER updated ({@code updatable = false}) — an author edit (TM-467)
+     * rewrites the {@code body} only, never the attachment. Nullable to match the {@code attachment_path}
+     * column (V51); Hibernate runs validate-only, so this mapping must match the DDL exactly.
+     */
+    @Column(name = "attachment_path", updatable = false)
+    private String attachmentPath;
+
+    /**
+     * Short discriminator of what {@link #attachmentPath} IS (TM-1125) — e.g. {@code "image"},
+     * {@code "voice"}, {@code "video"} — so the client renders the right bubble without sniffing the
+     * object. {@code null} whenever {@code attachmentPath} is {@code null} (a text-only message). A plain
+     * VARCHAR (not an enum column) so a new media kind is additive with no schema change. Set once at post
+     * time, never updated ({@code updatable = false}); nullable to match the {@code media_type} column (V51).
+     */
+    @Column(name = "media_type", updatable = false)
+    private String mediaType;
+
     /** Required by JPA. */
     protected Message() {
     }
@@ -138,23 +162,40 @@ public class Message {
             String body,
             String deepLink,
             Long replyToMessageId,
-            MessageKind kind) {
+            MessageKind kind,
+            String attachmentPath,
+            String mediaType) {
         this.conversationId = conversationId;
         this.senderId = senderId;
         this.body = body;
         this.deepLink = deepLink;
         this.replyToMessageId = replyToMessageId;
         this.kind = kind;
+        this.attachmentPath = attachmentPath;
+        this.mediaType = mediaType;
     }
 
     /** A message posted by a human member ({@code senderId} is their {@code users.id}). */
     public static Message fromUser(Long conversationId, Long senderId, String body) {
-        return new Message(conversationId, senderId, body, null, null, MessageKind.ATTENDEE);
+        return new Message(conversationId, senderId, body, null, null, MessageKind.ATTENDEE, null, null);
     }
 
     /** As {@link #fromUser} but carrying an in-app deep link. */
     public static Message fromUser(Long conversationId, Long senderId, String body, String deepLink) {
-        return new Message(conversationId, senderId, body, deepLink, null, MessageKind.ATTENDEE);
+        return new Message(conversationId, senderId, body, deepLink, null, MessageKind.ATTENDEE, null, null);
+    }
+
+    /**
+     * A message posted by a human member optionally carrying a media attachment (TM-1125): as
+     * {@link #fromUser} but with the generic {@code attachmentPath} + {@code mediaType} the image / voice
+     * / video-later bubbles all ride. Both {@code null} = a plain text message (identical to
+     * {@link #fromUser}); a set pair = an attachment (with, per the write path, either a caption or an
+     * empty {@code body} for an attachment-only message).
+     */
+    public static Message fromUserWithAttachment(
+            Long conversationId, Long senderId, String body, String attachmentPath, String mediaType) {
+        return new Message(
+                conversationId, senderId, body, null, null, MessageKind.ATTENDEE, attachmentPath, mediaType);
     }
 
     /**
@@ -163,7 +204,7 @@ public class Message {
      * validated the target is a live, same-conversation message.
      */
     public static Message replyFromUser(Long conversationId, Long senderId, String body, Long replyToMessageId) {
-        return new Message(conversationId, senderId, body, null, replyToMessageId, MessageKind.ATTENDEE);
+        return new Message(conversationId, senderId, body, null, replyToMessageId, MessageKind.ATTENDEE, null, null);
     }
 
     /**
@@ -175,12 +216,12 @@ public class Message {
      * {@link MessageKind#ATTENDEE}.
      */
     public static Message announcement(Long conversationId, Long senderId, String body) {
-        return new Message(conversationId, senderId, body, null, null, MessageKind.ANNOUNCEMENT);
+        return new Message(conversationId, senderId, body, null, null, MessageKind.ANNOUNCEMENT, null, null);
     }
 
     /** A system / admin "from TeamMarhaba" message (null sender) — the admin-broadcast payload. */
     public static Message fromSystem(Long conversationId, String body, String deepLink) {
-        return new Message(conversationId, null, body, deepLink, null, MessageKind.ATTENDEE);
+        return new Message(conversationId, null, body, deepLink, null, MessageKind.ATTENDEE, null, null);
     }
 
     /**
@@ -247,6 +288,30 @@ public class Message {
     /** The id of the message this one replies to (TM-466), or {@code null} for a non-reply message. */
     public Long getReplyToMessageId() {
         return replyToMessageId;
+    }
+
+    /**
+     * Firebase Storage object path of this message's media attachment (TM-1125), or {@code null} for a
+     * plain text message with no attachment. A scalar getter (no lazy association), so it is safe for the
+     * {@link MessageCreatedEvent} consumers (push + SSE broadcast) to read post-commit off the detached
+     * entity.
+     */
+    public String getAttachmentPath() {
+        return attachmentPath;
+    }
+
+    /**
+     * The attachment's media-kind discriminator (TM-1125) — e.g. {@code "image"} / {@code "voice"} /
+     * {@code "video"} — or {@code null} for a text-only message. Scalar (same post-commit-safe contract
+     * as {@link #getAttachmentPath()}).
+     */
+    public String getMediaType() {
+        return mediaType;
+    }
+
+    /** {@code true} once this message carries a media attachment (TM-1125). */
+    public boolean hasAttachment() {
+        return attachmentPath != null;
     }
 
     /** What this message is (TM-710): an ordinary attendee post or an admin/host announcement. */

@@ -72,7 +72,12 @@ import java.util.List;
  * @param kind        the message kind (TM-710) — {@code "ATTENDEE"} for an ordinary post,
  *                    {@code "ANNOUNCEMENT"} for an admin/host announcement (the opening message or an
  *                    admin-sent announcement); the client renders an announcement visually distinct
- * @param body        the message text (the CURRENT text — an author edit (TM-467) rewrites it in place)
+ * @param body        the message text (the CURRENT text — an author edit (TM-467) rewrites it in place);
+ *                    may be empty for an attachment-only message (TM-1125)
+ * @param attachmentPath the Firebase Storage object path of the message's media attachment (TM-1125), or
+ *                    {@code null} for a plain text message; the client mints a download URL from it on demand
+ * @param mediaType   the attachment's media-kind discriminator (TM-1125) — {@code "image"} / {@code "voice"}
+ *                    / {@code "video"} — so the client renders the right bubble; {@code null} for text-only
  * @param deepLink    optional in-app route the message opens (e.g. {@code /events/42}); {@code null} if none
  * @param createdAt   DB-authoritative post instant — the in-thread (chronological) order
  * @param editedAt    when the author last edited the body (TM-467), or {@code null} if never edited —
@@ -91,6 +96,8 @@ public record ConversationMessageResponse(
         Boolean mine,
         String kind,
         String body,
+        String attachmentPath,
+        String mediaType,
         String deepLink,
         Instant createdAt,
         Instant editedAt,
@@ -127,6 +134,10 @@ public record ConversationMessageResponse(
                 mine,
                 message.getKind().name(),
                 message.getBody(),
+                // The generic media attachment (TM-1125) — object path + kind — rides the read, the POST
+                // echo and the SSE broadcast unchanged; null for a plain text message.
+                message.getAttachmentPath(),
+                message.getMediaType(),
                 message.getDeepLink(),
                 message.getCreatedAt(),
                 message.getEditedAt(),

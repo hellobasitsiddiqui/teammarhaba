@@ -21,8 +21,11 @@ package com.teammarhaba.backend.chat;
  * <p><b>Why carry the whole {@link Message}.</b> The message is passed straight to
  * {@link NewMessageNotifier#onMessageCreated(Message)}, whose contract is unchanged. That consumer only
  * reads the message's <em>scalar</em> getters (id, conversation id, sender id, body, deep-link,
- * system/deleted flags) — never a lazy association — and those columns are all loaded at flush time, so
- * the entity is safe to carry across the commit boundary even once detached.
+ * attachment path + media type (TM-1125), system/deleted flags) — never a lazy association — and those
+ * columns are all loaded at flush time, so the entity is safe to carry across the commit boundary even
+ * once detached. The same scalar contract lets the SSE broadcast frame
+ * ({@link MessageCreatedStreamListener}) re-map the created message — attachment included — post-commit
+ * without a re-fetch.
  *
  * @param message the just-persisted message whose creation should fan a push out after commit
  */
