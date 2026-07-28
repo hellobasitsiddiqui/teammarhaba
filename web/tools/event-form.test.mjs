@@ -61,6 +61,10 @@ import {
   AGE_BAND_CUSTOM,
   AGE_BAND_PRESETS,
   OPENING_MESSAGE_TEMPLATES,
+  DESCRIPTION_TEMPLATES,
+  blankFormModel,
+  isDirtyDraft,
+  DIRTY_COMPARE_FIELDS,
   ageBandToMinMax,
   minMaxToAgeBand,
   deriveVenueTimezone,
@@ -1205,4 +1209,75 @@ test("edit-prefill: a saved pricePence resolves to the SAME active chip the cont
   assert.equal(activeChipFor(1), PRICE_CHIP_CUSTOM);
   // A legacy response with no pricePence defaults to Free (never leaves the control with no active chip).
   assert.equal(activeChipFor(null), PRICE_DEFAULT_CHIP);
+});
+
+// --- description templates (TM-1113) ---------------------------------------------------------
+// Mirror the opening-message templates (TM-1065): 2-3 generic, non-blank, tap-to-prefill starters that
+// SEED the Description textarea (free text after) and each fit DESCRIPTION_MAX so a tap can't over-fill.
+
+test("description templates are 2-3 generic, non-blank starters within the cap (TM-1113)", () => {
+  assert.ok(Array.isArray(DESCRIPTION_TEMPLATES));
+  assert.ok(DESCRIPTION_TEMPLATES.length >= 2 && DESCRIPTION_TEMPLATES.length <= 3);
+  for (const t of DESCRIPTION_TEMPLATES) {
+    assert.equal(typeof t, "string");
+    assert.ok(t.trim().length > 0, "template must be non-blank");
+    // Each must fit the field cap so a tap can never over-fill the textarea (cap unchanged).
+    assert.ok(t.length <= DESCRIPTION_MAX);
+    // A tapped template seeds a VALID description (no description error — required + length both satisfied).
+    const { errors } = validateEventDraft(validDraft({ description: t }));
+    assert.equal(errors.description, undefined);
+  }
+  // Frozen — the single source can't be mutated by a consumer (matches OPENING_MESSAGE_TEMPLATES).
+  assert.throws(() => DESCRIPTION_TEMPLATES.push("x"), TypeError);
+});
+
+// --- dirty-guard on exit + Clear/Reset (TM-1101) ---------------------------------------------
+// isDirtyDraft(draft, baseline) drives the confirm-on-exit; blankFormModel() is the "Clear all" target
+// on create. Both are pure so the exit-gate + reset decisions are testable without the DOM.
+
+test("isDirtyDraft: a draft equal to its baseline is NOT dirty (TM-1101)", () => {
+  // A pristine create form: readDraft() equals blankFormModel() (bar the guessed timezone, compared below).
+  const baseline = blankFormModel();
+  assert.equal(isDirtyDraft({ ...baseline }, baseline), false);
+  // An edit form freshly prefilled from an event: readDraft() equals toFormModel(event) → not dirty.
+  const event = {
+    heading: "Coffee & Code",
+    description: "Bring a laptop.",
+    locationText: "Marhaba Cafe",
+    timezone: "Europe/London",
+    startAt: "2026-07-10T17:00:00.000Z",
+    visibilityStart: "2026-07-01T08:00:00.000Z",
+    visibilityEnd: "2026-07-10T17:00:00.000Z",
+    pricePence: 0,
+  };
+  const model = toFormModel(event);
+  assert.equal(isDirtyDraft({ ...model }, model), false);
+});
+
+test("isDirtyDraft: any changed compared field reads dirty (TM-1101)", () => {
+  const baseline = blankFormModel();
+  // Editing the heading makes it dirty.
+  assert.equal(isDirtyDraft({ ...baseline, heading: "New" }, baseline), true);
+  // So does a venue pick (venueId), a timezone, a datetime, the price, or the format toggle.
+  assert.equal(isDirtyDraft({ ...baseline, venueId: "7" }, baseline), true);
+  assert.equal(isDirtyDraft({ ...baseline, startAt: "2026-07-10T18:00" }, baseline), true);
+  assert.equal(isDirtyDraft({ ...baseline, price: "5" }, baseline), true);
+  assert.equal(isDirtyDraft({ ...baseline, format: "online" }, baseline), true);
+});
+
+test("isDirtyDraft: whitespace-only differences do NOT count as dirty (TM-1101)", () => {
+  const baseline = blankFormModel();
+  // A field that is "" vs "   " (trailing spaces) is not a real edit.
+  assert.equal(isDirtyDraft({ ...baseline, heading: "   " }, baseline), false);
+  // "Coffee" vs "Coffee " (a stray trailing space) is likewise not dirty.
+  const b2 = { ...baseline, heading: "Coffee" };
+  assert.equal(isDirtyDraft({ ...b2, heading: "Coffee " }, b2), false);
+});
+
+test("blankFormModel: every compared field is blank except the in-person format default (TM-1101)", () => {
+  const blank = blankFormModel();
+  for (const key of DIRTY_COMPARE_FIELDS) {
+    if (key === "format") assert.equal(blank[key], "inperson", "a cleared form defaults to In person");
+    else assert.equal(blank[key], "", `${key} must be blank on a cleared create form`);
+  }
 });

@@ -70,6 +70,9 @@ import {
   AGE_BAND_CUSTOM,
   AGE_BAND_PRESETS,
   OPENING_MESSAGE_TEMPLATES,
+  DESCRIPTION_TEMPLATES,
+  blankFormModel,
+  isDirtyDraft,
   ageBandToMinMax,
   minMaxToAgeBand,
   PRICE_CHIP_CUSTOM,
@@ -1504,7 +1507,7 @@ function buildPriceControl(priceInput, initialPrice, onChange) {
  * the page's back link) call `onCancel`. Returns { node } to mount + a `focusHeading` to call once the
  * node is in the document.
  */
-function buildEventForm({ mode, event = null, onDone, onCancel }) {
+function buildEventForm({ mode, event = null, onDone, onCancel, onReset }) {
   const fields = new Map();
   const fieldNodes = FORM_FIELDS.map((f) => buildField(f, fields));
   const headingInput = fields.get("heading").input;
@@ -1749,7 +1752,15 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
         }
       }
     }
-    revalidate("locationText");
+    // TM-1112: the one-shot `initial` echo fires on LOAD (right after the venue list resolves), before the
+    // admin has touched anything. Painting `locationText` as the changedKey then would render its required
+    // error on a pristine create form — the "Location is required" bug shown before any input. On the
+    // initial echo, revalidate with NO changedKey so ONLY fields already showing an error repaint (none on
+    // a fresh create form) and no pristine required error is surfaced. A REAL pick (initial === false)
+    // still passes "locationText" so its live validation fires as before. Save (paintAllErrors) is
+    // untouched, so it still blocks an empty required field; edit-open (locationText prefilled) is
+    // unaffected — the field is non-empty, so it validates clean either way.
+    revalidate(initial ? undefined : "locationText");
   });
   const locationNode = byKey.get("locationText");
   const locIdx = layout.indexOf(locationNode);
@@ -1849,32 +1860,41 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   tzInput.addEventListener("change", refreshScheduleChips);
   startInput.addEventListener("input", refreshScheduleChips);
 
-  // Opening-message sample templates (TM-1065): 2-3 GENERIC tap-to-prefill starters ABOVE the textarea.
-  // Tapping one SEEDS the textarea (free text after — the TM-382 seeding contract) then re-validates; the
-  // OPENING_MESSAGE_MAX cap is unchanged. Category-specific templates are deferred to TM-219. The chips
-  // are labelled "Template 1/2/3" (their full text is long) with the real text in a title tooltip.
-  const openingInput = fields.get("openingMessage").input;
-  const templateDefs = OPENING_MESSAGE_TEMPLATES.map((text, i) => ({ label: `Template ${i + 1}`, value: text }));
-  const templateChips = buildPresetChips(
-    templateDefs,
-    (value) => {
-      openingInput.value = value;
-      openingInput.focus();
-      revalidate("openingMessage");
-    },
-    { ariaLabel: "Opening-message templates" },
-  );
-  // A full-text title on each chip so hovering/long-pressing reveals what it will insert.
-  [...templateChips.querySelectorAll(".tm-chip")].forEach((btn, i) => {
-    btn.setAttribute("title", OPENING_MESSAGE_TEMPLATES[i]);
-  });
-  // Mount ABOVE the textarea: insert the chips right after the field's <label>, before the textarea.
-  const openingWrapper = byKey.get("openingMessage");
-  if (openingWrapper) {
-    const label = openingWrapper.querySelector(".tm-field-label");
-    if (label && label.nextSibling) openingWrapper.insertBefore(templateChips, label.nextSibling);
-    else openingWrapper.insertBefore(templateChips, openingWrapper.firstChild);
-  }
+  // Tap-to-prefill sample templates ABOVE a textarea (TM-1065 opening message + TM-1113 description). Both
+  // work identically: tapping a chip SEEDS the textarea (free text after — the TM-382 seeding contract),
+  // focuses it, then re-validates so the field's cap/required state repaints live; the field's max length is
+  // unchanged (each template already fits its cap). The chips are labelled "Template 1/2/3" (the full text
+  // is long) with the real text in a `title` tooltip. Category-specific copy is deferred to TM-219. Mounted
+  // right after the field's <label>, before the textarea.
+  const mountTemplateChips = (fieldKey, templates, ariaLabel) => {
+    const input = fields.get(fieldKey).input;
+    const defs = templates.map((text, i) => ({ label: `Template ${i + 1}`, value: text }));
+    const chips = buildPresetChips(
+      defs,
+      (value) => {
+        input.value = value;
+        input.focus();
+        revalidate(fieldKey);
+      },
+      { ariaLabel },
+    );
+    // A full-text title on each chip so hovering/long-pressing reveals what it will insert.
+    [...chips.querySelectorAll(".tm-chip")].forEach((btn, i) => {
+      btn.setAttribute("title", templates[i]);
+    });
+    const wrapper = byKey.get(fieldKey);
+    if (wrapper) {
+      const label = wrapper.querySelector(".tm-field-label");
+      if (label && label.nextSibling) wrapper.insertBefore(chips, label.nextSibling);
+      else wrapper.insertBefore(chips, wrapper.firstChild);
+    }
+    return chips;
+  };
+  // Description templates (TM-1113): generic tap-to-insert starters above the Description textarea, the same
+  // primitive + seeding contract as the opening-message templates (DESCRIPTION_MAX cap unchanged).
+  mountTemplateChips("description", DESCRIPTION_TEMPLATES, "Description templates");
+  // Opening-message templates (TM-1065): generic tap-to-prefill starters above the opening-message textarea.
+  mountTemplateChips("openingMessage", OPENING_MESSAGE_TEMPLATES, "Opening-message templates");
 
   // "More options" (TM-1066): the timezone field is DERIVED from the picked venue, so its raw selector
   // moves out of the main body into a native <details> disclosure near the form bottom — reachable for
@@ -1897,15 +1917,66 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
   // Render it near the bottom of the main fields (after the last body field, before the image + actions).
   layout.push(moreOptions);
 
+  // Dirty-guard baseline (TM-1101): the values the form OPENED with, captured AFTER every control has
+  // seeded its defaults (below, once the sub-controls exist) — the guessed timezone + age defaults + the
+  // Free-price seed on create, or the toFormModel prefill on edit. `isDirty()` compares the LIVE draft to
+  // this baseline (via the pure isDirtyDraft) and ALSO treats a freshly-picked (not-yet-uploaded) image as
+  // dirty — a picked File never shows up in the text draft, so it's ORed in here at the DOM layer. Mutable
+  // so a "Clear all / Reset" can re-snapshot the fresh baseline after it resets the fields.
+  let baselineDraft = null;
+  const isDirty = () => {
+    // Before the baseline snapshot exists (during construction) nothing is dirty yet.
+    if (!baselineDraft) return false;
+    return isDirtyDraft(readDraft(), baselineDraft) || image.getFile() != null;
+  };
+  // Confirm-on-exit (TM-1101): a DIRTY form warns before discarding; a PRISTINE form leaves silently.
+  // Returns true when it's safe to leave (pristine, or the admin confirmed the discard). Shared by the
+  // Cancel button and the "← Events" back link (wired in mountEventForm via the returned `confirmExit`).
+  const confirmExit = async () => {
+    if (busy || !isDirty()) return true;
+    return confirmDialog({
+      title: "Discard your changes?",
+      message: "This form has unsaved changes. Leaving now discards them.",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      danger: true,
+    });
+  };
+
   const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.
-  const cancel = el("button", { class: "tm-btn", id: "event-cancel", type: "button", onClick: () => onCancel?.() }, "Cancel");
+  // Both now gate on confirmExit so a dirty form warns before discarding (TM-1101).
+  const cancel = el("button", { class: "tm-btn", id: "event-cancel", type: "button", onClick: async () => {
+    if (await confirmExit()) onCancel?.();
+  } }, "Cancel");
+  // Clear all / Reset (TM-1101): create → a blank form; edit → the saved event restored. Re-mounts the form
+  // from scratch (via onReset) so EVERY control — fields, format, venue, age band, price, image — returns to
+  // its opened state without hand-reversing each. Only acts when there's something to reset (dirty); a
+  // pristine form's Reset is a harmless no-op, and it never prompts (nothing to lose).
+  const resetLabel = mode === "create" ? "Clear all" : "Reset";
+  const reset = el("button", {
+    class: "tm-btn", id: "event-reset", type: "button",
+    onClick: async () => {
+      if (busy || !isDirty()) return;
+      const ok = await confirmDialog({
+        title: mode === "create" ? "Clear the whole form?" : "Reset your changes?",
+        message: mode === "create"
+          ? "This empties every field back to a blank event."
+          : "This restores every field to the event's saved values, discarding your changes.",
+        confirmLabel: resetLabel,
+        cancelLabel: "Keep editing",
+        danger: true,
+      });
+      if (ok) onReset?.();
+    },
+  }, resetLabel);
   let busy = false;
 
   const setBusy = (on, labelWhileBusy) => {
     busy = on;
     save.disabled = on;
     cancel.disabled = on;
+    reset.disabled = on;
     save.textContent = on ? labelWhileBusy : mode === "create" ? "Create event" : "Save changes";
   };
 
@@ -1920,8 +1991,14 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
     ]),
     ...layout.filter((node) => node !== byKey.get("heading")),
     image.node,
-    el("div", { class: "tm-form-actions" }, [cancel, save]),
+    el("div", { class: "tm-form-actions" }, [reset, cancel, save]),
   ]);
+
+  // Snapshot the dirty-guard baseline NOW — after the whole form (incl. the sub-controls that seed the
+  // timezone/age/price defaults) is built, so a freshly-opened form reads as pristine (TM-1101). readDraft
+  // reads the venue picker + currentFormat, both set by this point. The venue picker's async initial echo
+  // (create) re-selects the blank one-off option (no field change), so it never dirties this baseline.
+  baselineDraft = readDraft();
 
   const revealSummaryText = event ? revealSummary(event) : "";
   // The full-page shell (TM-426): the form + the reveal-timing note, mounted into #admin-event-form-view
@@ -2022,7 +2099,9 @@ function buildEventForm({ mode, event = null, onDone, onCancel }) {
 
   // The heading is focused for immediate typing after the node is mounted (see mountEventForm) — a
   // small, house-consistent nicety. focus() only takes effect once the node is in the document.
-  return { node, focusHeading: () => headingInput.focus() };
+  // `confirmExit` lets the page's "← Events" back link share the dirty-guard (TM-1101); `isDirty` is
+  // exposed for the same gate / for tests.
+  return { node, focusHeading: () => headingInput.focus(), confirmExit, isDirty };
 }
 
 /** Module-level guard so a slow edit-by-id fetch that resolves AFTER the admin has navigated away (or
@@ -2099,17 +2178,38 @@ function redirectPastEventEdit() {
 /** Mount the page chrome (a "← Events" back-link header) + the form into the view, then focus heading. */
 function mountEventForm(view, mode, event) {
   const back = () => { window.location.hash = ADMIN_EVENTS_ROUTE; };
-  const { node, focusHeading } = buildEventForm({ mode, event, onDone: back, onCancel: back });
+  // Clear/Reset (TM-1101): re-mount the SAME target from scratch — create → a fresh blank form, edit → the
+  // saved event re-prefilled — so every control returns to its opened state and a fresh dirty baseline is
+  // re-snapshotted. `event` is the saved EventResponse (unchanged by an unsaved edit), so an edit reset
+  // restores exactly the saved values.
+  const doReset = () => mountEventForm(view, mode, event);
+  const { node, focusHeading, confirmExit } = buildEventForm({ mode, event, onDone: back, onCancel: back, onReset: doReset });
   const title = mode === "create" ? "New event" : `Edit · ${event.heading || "event"}`;
-  clear(view).append(formHeader(title), node);
+  clear(view).append(formHeader(title, confirmExit), node);
   focusHeading();
 }
 
-/** The "← Events" back-link header, reusing the events-detail chrome (.tm-admin-head + an anchor). */
-function formHeader(title) {
+/**
+ * The "← Events" back-link header, reusing the events-detail chrome (.tm-admin-head + an anchor). The back
+ * link now gates on `confirmExit` (TM-1101): a dirty form warns before discarding, a pristine one leaves
+ * silently. It stays a real anchor (right href, focusable, middle-click-openable) but intercepts a plain
+ * left-click to run the async confirm first, then navigate on confirm.
+ */
+function formHeader(title, confirmExit) {
+  const back = el("a", { class: "tm-btn tm-btn-sm", id: "admin-event-form-back", href: ADMIN_EVENTS_ROUTE }, "← Events");
+  if (typeof confirmExit === "function") {
+    back.addEventListener("click", (e) => {
+      // Let modified clicks (new tab/window) and non-primary buttons through untouched.
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      confirmExit().then((ok) => {
+        if (ok) window.location.hash = ADMIN_EVENTS_ROUTE;
+      });
+    });
+  }
   return el("div", { class: "tm-admin-head tm-event-form-head" }, [
     el("h2", {}, [doodle("calendar", { class: "tm-doodle-header" }), title]),
-    el("a", { class: "tm-btn tm-btn-sm", id: "admin-event-form-back", href: ADMIN_EVENTS_ROUTE }, "← Events"),
+    back,
   ]);
 }
 
