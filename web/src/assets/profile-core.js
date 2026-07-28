@@ -13,7 +13,7 @@
 
 // Country dial-code data (TM-781) — pure and Node-importable like this module, so importing it here
 // keeps profile-core testable under `node --test` with no DOM/browser shims.
-import { countryByIso2, countryForDial, DIALS_LONGEST_FIRST, cityCountryHint } from "./countries.js";
+import { countryByIso2, countryForDial, DIALS_LONGEST_FIRST, cityCountryHint, flagOf } from "./countries.js";
 
 // The Profile routes. `#/profile` is the Profile hub + inline edit form (kept as ONE route so the
 // existing self-service edit e2e — which navigates to #/profile and expects #profile-form — stays
@@ -103,6 +103,37 @@ export function accountContact(me) {
     phone,
     hasPhone: Boolean(phone),
     phoneDisplay: phone || "No phone number added",
+  };
+}
+
+/**
+ * The nationality shown on the Profile hub identity area (TM-1134), resolved from the stored
+ * ISO-3166 alpha-2 code on the `/me` payload. Pure — turns the raw code into a human line (flag +
+ * country name) via the shared countries.js data, so the hub renderer stays a thin painter and this
+ * is unit-testable with no DOM. An unset or unrecognised code yields `hasNationality: false` and an
+ * empty `display`, so the renderer can hide the line entirely (nationality is optional — no prompt
+ * is forced when it's blank, unlike the always-present contact lines).
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object
+ * @returns {{ code: string, name: string, flag: string, hasNationality: boolean, display: string }}
+ *   `code` = the upper-cased iso2 (or ""); `name`/`flag` = the resolved country (or ""); `display` =
+ *   "<flag> <name>" when known, else "".
+ */
+export function nationalityDisplay(me) {
+  const code = String((me || {}).nationality ?? "").trim().toUpperCase();
+  const country = code ? countryByIso2(code) : null;
+  if (!country) {
+    return { code: "", name: "", flag: "", hasNationality: false, display: "" };
+  }
+  const flag = flagOf(country.iso2);
+  return {
+    code: country.iso2,
+    name: country.name,
+    flag,
+    hasNationality: true,
+    // The flag is decorative; keep a space only when it rendered (flagOf returns "" for a code with
+    // no glyph, e.g. XK on some platforms), so the line never leads with a stray space.
+    display: flag ? `${flag} ${country.name}` : country.name,
   };
 }
 

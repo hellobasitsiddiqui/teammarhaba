@@ -22,6 +22,9 @@ public record ProfileUpdate(
         String city,
         Integer age,
         Gender gender,
+        // TM-1134: self-reported nationality as an ISO-3166 alpha-2 code (or "" to leave blank). A
+        // partial-PATCH field like the rest — null/omitted leaves the stored value unchanged.
+        String nationality,
         String phone,
         NotificationPref notificationPref,
         String timezone,

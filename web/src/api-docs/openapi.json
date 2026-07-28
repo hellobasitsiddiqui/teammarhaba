@@ -1689,6 +1689,9 @@
           "nameLocked" : {
             "type" : "boolean"
           },
+          "nationality" : {
+            "type" : "string"
+          },
           "notificationPref" : {
             "enum" : [ "EMAIL", "PUSH", "BOTH" ],
             "type" : "string"
@@ -2761,6 +2764,10 @@
           "locale" : {
             "maxLength" : 35,
             "minLength" : 0,
+            "type" : "string"
+          },
+          "nationality" : {
+            "pattern" : "^$|^[A-Za-z]{2}$",
             "type" : "string"
           },
           "notificationPref" : {

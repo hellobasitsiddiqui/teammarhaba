@@ -51,6 +51,8 @@ import {
   profileMode,
   identitySummary,
   accountContact,
+  // TM-1134: the pure "resolve the stored nationality iso2 → flag + country name" model the hub paints.
+  nationalityDisplay,
   // TM-1105: the pure "Circle User ID" model — the numeric users.id from /me, plus its copy value and
   // the muted "Not available yet" fallback so the line is never a silently-blank row.
   circleUserId,
@@ -104,9 +106,11 @@ import {
   PHONE_RECOVERY_LINK_TEXT,
   PHONE_RECOVERY_SUFFIX,
 } from "./phone-reverify-core.js";
-// Country data for the phone picker (TM-781): the pinned+sorted list and the emoji-flag derivation.
-// CSP-safe — flags are Unicode regional-indicator emoji built from the iso2, no external assets.
-import { COUNTRIES, flagOf } from "./countries.js";
+// Country data for the phone picker (TM-781) + the nationality field (TM-1134): the pinned+sorted
+// list, the emoji-flag derivation, and the iso2 → {name, ...} lookup used to render a stored
+// nationality on the hub. CSP-safe — flags are Unicode regional-indicator emoji built from the iso2,
+// no external assets.
+import { COUNTRIES, flagOf, countryByIso2 } from "./countries.js";
 // TM-1009: the deploy-time switch over the whole verified-phone requirement
 // (config.flags.requireVerifiedPhone, shipped OFF). With the flag OFF the TM-982 phone-edit save
 // gate below (phoneNeedsVerify) is a no-op — a CHANGED number saves without an OTP, and since the
@@ -183,6 +187,19 @@ const FIELDS = [
     label: "Gender",
     type: "select",
     options: [["", "Not set…"], ...GENDER_OPTIONS],
+  },
+  {
+    // TM-1134: nationality is a country dropdown — the SAME select machinery as city/gender, sourced
+    // from the shared countries.js list (GB, AE pinned, then name-sorted) so it can't drift from the
+    // phone picker's country data. The stored/sent value is the ISO-3166 alpha-2 code (option value =
+    // c.iso2); the label is "<flag emoji> <Country name>" (flag is a CSP-safe regional-indicator
+    // emoji, no image asset). Leading blank keeps "not set" honest for an account that never chose;
+    // collectPatch's blank-omission then means "no change" (a set nationality is never wiped just by
+    // opening the form). Optional — never required at onboarding, unlike gender.
+    key: "nationality",
+    label: "Nationality",
+    type: "select",
+    options: [["", "Choose a country…"], ...COUNTRIES.map((c) => [c.iso2, `${flagOf(c.iso2)} ${c.name}`])],
   },
   {
     key: "phone",
@@ -738,6 +755,11 @@ function fillForm(profile) {
     const input = entry.input;
     if (field.key === "city") {
       fillCitySelect(input, value);
+    } else if (field.key === "nationality") {
+      // TM-1134: select the stored ISO-3166 code (upper-cased, since the backend stores "GB" and the
+      // option values are upper-case). A blank/unknown code falls back to the leading blank so
+      // collectPatch omits it (no change) until the user picks a country.
+      fillNationalitySelect(input, value);
     } else if (field.key === "gender") {
       // TM-955: select the stored bucket, or the leading blank ("not set") for a null-gender legacy
       // account. An unknown/absent value falls back to blank rather than silently selecting the first
@@ -897,6 +919,28 @@ function fillCitySelect(select, value) {
   select.value = saved;
 }
 
+/**
+ * Select the caller's saved nationality in the country dropdown (TM-1134). The stored value is an
+ * ISO-3166 alpha-2 code; upper-case it so a lower-case-stored "gb" still matches the upper-case option
+ * values. A blank/unknown code leaves the leading "Choose a country…" blank selected. Defensive
+ * off-list fallback (mirroring fillCitySelect): if the stored code isn't in the offered list — which
+ * shouldn't happen, since the backend validates against a SUPERSET of what the picker offers — inject
+ * it (labelled with its flag + code) so an existing profile is never silently blanked or overwritten.
+ * The `data-offlist` marker keeps re-fills from stacking duplicate options.
+ *
+ * @param {HTMLSelectElement} select the nationality <select>.
+ * @param {*} value the stored `me.nationality` (an iso2 code, or null).
+ */
+function fillNationalitySelect(select, value) {
+  const saved = value == null ? "" : String(value).trim().toUpperCase();
+  const known = saved !== "" && countryByIso2(saved) != null;
+  if (saved !== "" && !known && select.getAttribute("data-offlist") !== saved) {
+    select.append(el("option", { value: saved, text: `${flagOf(saved)} ${saved}` }));
+    select.setAttribute("data-offlist", saved);
+  }
+  select.value = saved;
+}
+
 // ── Next-day interests nudge persistence (TM-777 / I5) ──────────────────────────────────────────
 // The "last time we showed the add-more-interests CTA" is stored client-side in localStorage, keyed
 // per-uid exactly like tour.js's `stateKey` (`tm.<feature>.v1.<uid>`) — NO backend field, NO API call.
@@ -943,6 +987,14 @@ function paintHub(profile) {
   const id = identitySummary(profile);
   hub.name.textContent = id.short;
   hub.meta.textContent = id.metaLine || "Add your city and age";
+  // Nationality (TM-1134): a real demographic line next to "City · age", from the stored ISO code.
+  // Optional, so the whole line is HIDDEN when unset/unknown (no forced placeholder) and shown as
+  // "<flag> <Country>" when set. Guarded for older shells built before this element existed.
+  if (hub.nationality) {
+    const nat = nationalityDisplay(profile);
+    hub.nationality.textContent = nat.display;
+    hub.nationality.hidden = !nat.hasNationality;
+  }
   // TM-846: the identity avatar is a real avatar SURFACE — the photo when the Firebase user has one
   // (photoURL, the single source of truth — read live, same as the avatar control), else the initial
   // glyph. Exactly one of the pair is visible at a time.
@@ -2246,6 +2298,11 @@ function buildShell(view) {
   const hubAvatar = el("span", { class: "tm-pf-avatar", "aria-hidden": "true" }, [hubGlyph, hubPhoto]);
   const hubName = el("div", { class: "tm-pf-name", text: "" });
   const hubMeta = el("div", { class: "tm-pf-sub", text: "" });
+  // ── Nationality (TM-1134) ── a real demographic line shown in the identity area next to the "City ·
+  // age" meta, painted by paintHub() from the stored ISO-3166 code on /me (flag + country name). The
+  // whole line is HIDDEN when the account has no nationality set — it's optional, so an unset value
+  // shows nothing (unlike the always-present contact lines below), never a placeholder prompt.
+  const hubNationality = el("div", { class: "tm-pf-sub tm-pf-nationality", text: "", hidden: true });
   // ── Account contact (TM-783) ── the email + phone this account is registered with, painted by
   // paintHub() from the same /me payload. Email is the account identity; phone shows the number or a
   // "No phone number added" prompt so the line is never silently blank.
@@ -2285,7 +2342,7 @@ function buildShell(view) {
   ]);
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
     hubAvatar,
-    el("div", {}, [hubName, hubMeta, hubContact]),
+    el("div", {}, [hubName, hubMeta, hubNationality, hubContact]),
   ]);
 
   // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
@@ -2451,7 +2508,7 @@ function buildShell(view) {
     // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
     // TM-913: the strength ring — `ring` is the progressbar container (aria lives here), `ringArc` the
     // fill <circle> paintHub() dash-offsets to the percent, `barPct` the centred percent label.
-    hub: { name: hubName, meta: hubMeta, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, userId: hubUserId, userIdCopy: hubUserIdCopy, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
+    hub: { name: hubName, meta: hubMeta, nationality: hubNationality, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, userId: hubUserId, userIdCopy: hubUserIdCopy, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.

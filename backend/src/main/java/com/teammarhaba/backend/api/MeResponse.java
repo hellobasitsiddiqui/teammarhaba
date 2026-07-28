@@ -31,6 +31,10 @@ import java.util.List;
  *                             {@code null} = unknown (legacy / never-onboarded accounts). PRIVATE — it
  *                             is on the caller's OWN {@code /me} only and is never rendered on the
  *                             public profile ({@code #/profile/public})
+ * @param nationality          self-reported nationality (TM-1134) as an ISO-3166 alpha-2 code (e.g.
+ *                             {@code GB}), or {@code null} = unknown (legacy / never chose). A real
+ *                             demographic attribute like {@code city}/{@code gender} — persisted and
+ *                             shown on the profile hub. Editable via {@code PATCH /me}
  * @param phone                phone number (may be {@code null})
  * @param notificationPref     delivery preference — new accounts default to {@code BOTH} (email + push, TM-427)
  * @param timezone             IANA timezone id (may be {@code null})
@@ -93,6 +97,7 @@ public record MeResponse(
         String city,
         Integer age,
         Gender gender,
+        String nationality,
         String phone,
         NotificationPref notificationPref,
         String timezone,
