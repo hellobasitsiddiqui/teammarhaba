@@ -99,6 +99,21 @@ export const OPENING_MESSAGE_TEMPLATES = Object.freeze([
 ]);
 
 /**
+ * Generic event-description starter templates (TM-1113) — the 2–3 tap-to-prefill starters shown above the
+ * Description textarea. They mirror {@link OPENING_MESSAGE_TEMPLATES} (TM-1065) exactly: they only SEED the
+ * textarea (the free-text seeding contract, like the TM-382 heading chips + the Coffee & X themes) — the
+ * admin edits freely after a tap and `DESCRIPTION_MAX` still caps it. Deliberately GENERIC and hardcoded
+ * (v1): they echo the existing opening-message + Coffee & X copy so a brand-new event has a sensible
+ * starting shape. Category-specific description copy is deferred (the same TM-219 deferral the opening-
+ * message templates carry). Add/adjust a starter by editing THIS list; the form renders whatever is here.
+ */
+export const DESCRIPTION_TEMPLATES = Object.freeze([
+  "Join us for a relaxed Coffee & Code session — bring a laptop and whatever you're working on, or just come to chat. All levels welcome.",
+  "A friendly get-together over coffee. Come meet the group, say hello, and see what we're about — no agenda, just good company.",
+  "We'll gather, grab a drink, and spend a couple of hours together. Details and any last-minute updates will be shared in the group chat.",
+]);
+
+/**
  * Map an age-band preset LABEL to its `{ min, max }` as form-field STRINGS (or "" for a null bound), so
  * the caller can drop them straight into the two number inputs (TM-1065). An unknown label (including the
  * Custom sentinel) returns `{ min: "", max: "" }` — Custom carries no fixed numbers, the admin types them.
@@ -920,6 +935,75 @@ export function toFormModel(event = {}) {
     // locationText) — the backend carries no format field. Seeds the form's In person/Online selector.
     format: formatFromEvent(event),
   };
+}
+
+// --- dirty-guard on exit + Clear/Reset (TM-1101) ----------------------------------------------
+
+/**
+ * The form field keys a dirty-check compares (TM-1101) — the values the form actually reads back on save
+ * (`readDraft` in admin-events.js) that a {@link toFormModel} baseline can express. `imagePath` is
+ * deliberately EXCLUDED: the image control carries its own separate "pending file" state (a picked File is
+ * never in the text draft), so image dirtiness is tracked by the DOM layer, not this string compare. All
+ * other keys are plain strings on both sides, so equality after {@link cleanText} normalisation is a sound
+ * "differs from baseline" test.
+ */
+export const DIRTY_COMPARE_FIELDS = Object.freeze([
+  "heading",
+  "description",
+  "locationText",
+  "mapUrl",
+  "onlineUrl",
+  "city",
+  "openingMessage",
+  "venueId",
+  "timezone",
+  "startAt",
+  "endAt",
+  "visibilityStart",
+  "visibilityEnd",
+  "capacity",
+  "locationRevealHours",
+  "ageMin",
+  "ageMax",
+  "price",
+  "format",
+]);
+
+/**
+ * A blank create-form model (TM-1101) — the field values a brand-new event form opens with, so the
+ * "Clear all" button on CREATE can reset every field to empty. Every {@link DIRTY_COMPARE_FIELDS} key is
+ * "" EXCEPT `format`, which defaults to {@link EVENT_FORMAT_INPERSON} (the create default — a blank format
+ * isn't a valid view state). `timezone` is intentionally "" here: the caller re-seeds the browser-guessed
+ * zone after a reset the same way {@link buildEventForm}'s create path does (a guessed zone isn't part of
+ * the "cleared" baseline — it's a convenience default the form layer applies).
+ *
+ * @returns {object} the draft a freshly-cleared create form holds.
+ */
+export function blankFormModel() {
+  const model = {};
+  for (const key of DIRTY_COMPARE_FIELDS) model[key] = "";
+  model.format = EVENT_FORMAT_INPERSON;
+  return model;
+}
+
+/**
+ * Whether the form's CURRENT values differ from its initial baseline (TM-1101) — the dirty check that
+ * gates the confirm-on-exit. `draft` is the live `readDraft()` shape; `baseline` is the model the form
+ * opened with ({@link toFormModel} of the edited event, or {@link blankFormModel} on create). Compares
+ * only {@link DIRTY_COMPARE_FIELDS}, each after {@link cleanText} normalisation, so incidental whitespace
+ * or a missing-vs-"" key never reads as dirty. Pure — no DOM — so the exit-gate decision is unit-testable
+ * without a browser (admin-events.js can't be imported in Node). Image dirtiness is tracked separately by
+ * the DOM layer (a picked File isn't in the text draft); the caller ORs it in.
+ *
+ * @param {object} draft the current form values (readDraft()).
+ * @param {object} baseline the values the form opened with (toFormModel / blankFormModel).
+ * @returns {boolean} true when any compared field differs from the baseline.
+ */
+export function isDirtyDraft(draft = {}, baseline = {}) {
+  for (const key of DIRTY_COMPARE_FIELDS) {
+    if (cleanText(draft[key]) !== cleanText(baseline[key])) return true;
+  }
+  return false;
 }
 
 // --- display derivations (the list + form read these) -----------------------------------------

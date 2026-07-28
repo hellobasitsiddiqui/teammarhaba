@@ -117,6 +117,14 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await expect(page.locator("#event-heading")).toHaveValue("Coffee & Code");
   // Overwrite with a unique heading so the row + DB row are findable.
   await page.fill("#event-heading", HEADING);
+  // Description templates (TM-1113): a tap-to-insert chip above the Description textarea prefills it
+  // (free text after — the same seeding contract as the Coffee & X heading chips). Scope to the
+  // description templates group (aria-label) so it doesn't collide with the opening-message templates.
+  const descTemplates = page.locator('[aria-label="Description templates"] .tm-chip').first();
+  await expect(descTemplates).toBeVisible();
+  await descTemplates.click();
+  await expect(page.locator("#event-description")).not.toHaveValue("");
+  // Overwrite with the test's own copy (the prefill is only a starter, still fully editable).
   await page.fill("#event-description", "Bring a laptop and a mug — we pair on the app.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
   await page.locator("#event-city").selectOption("London"); // City is now a dropdown (TM-1063)
