@@ -18,7 +18,9 @@ class ProdSecretsValidatorTest {
 
     private static ProdSecretsValidator validator(String password, String icn, String projectId) {
         AppProperties props =
-                new AppProperties(new Db("teammarhaba", "app", password, icn), new Firebase(projectId));
+                new AppProperties(
+                        new Db("teammarhaba", "app", password, icn),
+                        new Firebase(projectId, "teammarhaba.firebasestorage.app"));
         return new ProdSecretsValidator(props);
     }
 

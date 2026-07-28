@@ -2,9 +2,12 @@ package com.teammarhaba.backend.auth;
 
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.cloud.StorageClient;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.teammarhaba.backend.config.AppProperties;
 import java.io.IOException;
@@ -44,11 +47,18 @@ public class FirebaseConfig {
     @Lazy
     FirebaseApp firebaseApp(AppProperties props) throws IOException {
         if (FirebaseApp.getApps().isEmpty()) {
-            FirebaseOptions options = FirebaseOptions.builder()
+            FirebaseOptions.Builder options = FirebaseOptions.builder()
                     .setCredentials(resolveCredentials())
-                    .setProjectId(props.firebase().projectId())
-                    .build();
-            return FirebaseApp.initializeApp(options);
+                    .setProjectId(props.firebase().projectId());
+            // The chat-media signed-URL path (TM-1126) needs a default Storage bucket on the app so
+            // StorageClient.getInstance().bucket() resolves without a per-call name. It is optional
+            // (dev/test/CI run with no Storage), so only set it when configured; when unset the
+            // ChatMediaService is the single feature that refuses, not the whole app.
+            String bucket = props.firebase().storageBucket();
+            if (bucket != null && !bucket.isBlank()) {
+                options.setStorageBucket(bucket);
+            }
+            return FirebaseApp.initializeApp(options.build());
         }
         return FirebaseApp.getInstance();
     }
@@ -63,6 +73,22 @@ public class FirebaseConfig {
     @Lazy
     FirebaseMessaging firebaseMessaging(FirebaseApp app) {
         return FirebaseMessaging.getInstance(app);
+    }
+
+    /**
+     * The Cloud Storage client the chat-media signed-URL path (TM-1126) signs upload/download URLs with.
+     * Derived from the same shared {@link FirebaseApp} (and therefore the same ADC credential + project),
+     * so there is one credential/project init for auth, push <em>and</em> storage — not a separate
+     * {@link StorageOptions} chain. {@link Lazy} like its siblings: only built when the chat-media
+     * endpoint first runs, so dev/test/CI (no ADC, no Storage) never trigger it.
+     *
+     * <p>{@link StorageClient#getInstance(FirebaseApp)} returns the SDK's storage handle for the app;
+     * {@link StorageClient#bucket()} (used by the service) resolves the default bucket configured above.
+     */
+    @Bean
+    @Lazy
+    Storage storage(FirebaseApp app) {
+        return StorageClient.getInstance(app).bucket().getStorage();
     }
 
     /**

@@ -194,6 +194,11 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.chat.MessageAuthorService messageAuthorService;
 
+    // ConversationController's media/signed-url (TM-1126) needs a ChatMediaService — supply it so the
+    // web slice can load.
+    @MockitoBean
+    private com.teammarhaba.backend.chat.ChatMediaService chatMediaService;
+
     // ConversationTypingController (TM-465) needs a TypingSignalService — supply it so the web slice can
     // load. Its other collaborators (ConversationReadService, ChatStreamService) are already mocked above.
     @MockitoBean
