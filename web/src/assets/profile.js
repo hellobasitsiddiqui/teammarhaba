@@ -43,6 +43,7 @@ import { doodle } from "./doodles.js";
 import { renderAccountBadges } from "./account-badges.js";
 import { buildSecuritySettings } from "./biometric-settings.js";
 import { buildAppearanceSettings } from "./appearance-settings.js";
+import { buildLocaleCurrencySettings } from "./locale-currency-settings.js";
 // Pure Profile-screen logic (TM-514) — the identity/strength/public-preview models + route→mode map,
 // unit-tested in web/tools/profile-core.test.mjs.
 import {
@@ -2465,11 +2466,18 @@ function buildShell(view) {
   // "Privacy & my data" menu row (focusOnPage) still lands there.
   const security = buildSecuritySettings();
   const appearance = buildAppearanceSettings();
+  // TM-1124: language + currency preference pickers — VISUAL-ONLY placeholders. Selecting one persists
+  // to localStorage but has NO functional effect (no i18n layer, GBP-only billing; real wiring = TM-1104).
+  // Self-contained (imports only the el() kit — never api.js) so it can never make a backend call.
+  const preferences = buildLocaleCurrencySettings();
   // ── Security (#5) ── the biometric/security settings block (self-rendering).
   const securityCard = collapsibleSection("security", "Security", [security]);
   // ── Appearance (#6) ── the Paper per-user controls; the panel carries id=profile-settings (the
   // "Privacy & my data" scroll target — kept so that menu row still resolves).
-  const appearanceBody = el("div", { class: "tm-pf-settings", id: "profile-settings" }, [appearance]);
+  const appearanceBody = el("div", { class: "tm-pf-settings", id: "profile-settings" }, [
+    appearance,
+    preferences,
+  ]);
   const appearanceCard = collapsibleSection("appearance", "Appearance", [appearanceBody]);
   // ── Diagnostics / Debug (#7) ── the QA diagnostics link (TM-297) into #/diagnostics.
   const diagnosticsCard = collapsibleSection("diagnostics", "Diagnostics", [

@@ -4179,6 +4179,14 @@ html {
     color: var(--fg);
 }
 
+/* TM-1124: the language + currency PLACEHOLDER pickers — two stacked labelled <select> fields. These
+   are visual-only (no i18n / no currency conversion; the pick just persists to localStorage), so they
+   need no bespoke chrome — they reuse .tm-form-field / .tm-input / .tm-field-label like every other
+   form field; this only spaces the two fields apart within the Preferences sub-section. */
+.tm-preferences .tm-form-field + .tm-form-field {
+    margin-top: 0.9rem;
+}
+
 /* Curated accent palette (TM-529): a row of round swatch buttons. Each carries its swatch colour in
    the `--tm-swatch` custom prop (set inline, no free-text colour in CSS). The selected swatch
    (aria-pressed) gets a ring. Also used by the component gallery. Reuses the 2px inky Paper border. */

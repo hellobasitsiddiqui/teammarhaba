@@ -189,6 +189,9 @@ function loadProfileModule(deps) {
     "  clear, copyToClipboard, el, modal, toast, doodle, renderAccountBadges,\n" +
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     // TM-1105: circleUserId (profile-core.js) — the pure Circle User ID render model paintHub now names.
+    // TM-1124: the language/currency preference pickers (locale-currency-settings.js) — a placeholder
+    // section built into the Appearance panel. Import-safe (el() kit only, no api.js), injected below.
+    "  buildLocaleCurrencySettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
@@ -343,6 +346,7 @@ const deps = {
   renderAccountBadges: () => null,
   buildSecuritySettings: () => fakeElBuilder("section"),
   buildAppearanceSettings: () => fakeElBuilder("section"),
+  buildLocaleCurrencySettings: () => fakeElBuilder("section"),
   PROFILE_PUBLIC_ROUTE: core.PROFILE_PUBLIC_ROUTE,
   profileMode: core.profileMode,
   identitySummary: core.identitySummary,
