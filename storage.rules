@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Firebase Storage security rules (TM-166 avatars, TM-392 event images).
+// Firebase Storage security rules (TM-166 avatars, TM-392 event images, TM-1127 chat media).
 //
 // The web app uploads a user's avatar image to `avatars/{uid}` and then sets the Firebase user's
 // `photoURL` to the resulting download URL (the single source of truth). These rules are the real
@@ -34,6 +34,15 @@ service firebase.storage {
     // here (avatars, event-images, venue-images) is world-readable, so all restrict to raster formats.
     function isPublicRasterImage() {
       return request.resource.contentType.matches('image/(png|jpeg|jpg|gif|webp|avif|heic|heif)');
+    }
+
+    // Audio content types for chat voice notes (TM-1127). Consistent with isPublicRasterImage: an
+    // explicit allow-list of inert media formats (no active/document types). These bound what the
+    // backend accepts when it mints a chat-media signed URL (task B); the storage.rules block below
+    // still DENIES all direct client access, so this helper documents the intended envelope rather
+    // than gating a client write path.
+    function isChatAudio() {
+      return request.resource.contentType.matches('audio/(mpeg|mp4|aac|ogg|webm|wav|x-m4a|m4a)');
     }
 
     match /avatars/{uid} {
@@ -82,6 +91,26 @@ service firebase.storage {
 
       // Admins may delete a venue photo (re-upload cleanup / venue retired).
       allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
+    }
+
+    // Chat media — images and voice notes attached to a conversation (TM-1127, epic TM-468).
+    //
+    // UNLIKE avatars/event/venue images (which are world-readable display assets), a chat attachment
+    // is PRIVATE to its conversation. It is uploaded AND served ONLY through a backend-minted signed
+    // URL (task B): the backend authorises the caller against conversation membership, then hands out
+    // a short-lived signed URL scoped to the single object. Signed URLs bypass Storage security rules
+    // entirely, so this block does NOT need to grant any access for the real flow to work — and it
+    // MUST NOT, or it would let any (or every) client read/plant conversation media directly.
+    //
+    // Therefore every direct client operation is DENIED. A public read would leak private
+    // conversation media off an origin whose object names are guessable; a direct client write would
+    // let a caller plant bytes outside the backend's membership check + content-type/size envelope
+    // (isPublicRasterImage / isChatAudio above — the formats the signed-URL minter accepts). All of
+    // that is enforced by the backend, not here.
+    match /chat-media/{conversationId}/{imageId} {
+      // No public or authenticated direct access — everything goes through the backend signed URL.
+      allow read: if false;
+      allow write: if false;
     }
   }
 }

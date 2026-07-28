@@ -28,3 +28,79 @@ export function missingStoragePathCoverage(rulesText, required = REQUIRED_STORAG
   // A path is covered when the ruleset declares a match block for it: `match /event-images/{id}`.
   return required.filter((prefix) => !new RegExp(`match\\s+/${prefix}/`).test(text));
 }
+
+/**
+ * Extract the body of a top-level Storage `match /<segment>/…` block from a rules document, walking
+ * the braces so nested `match`/`function` blocks are captured whole rather than truncated at the
+ * first `}`. Tolerates a multi-segment path (`/chat-media/{conversationId}/{imageId}`) — it anchors on
+ * the segment header and then finds the FIRST `{` that opens the block body (the one after all the
+ * `{var}` path captures), not the path captures themselves.
+ *
+ * @param {string} rulesText a Storage rules document (the committed storage.rules).
+ * @param {string} segment the leading path segment to find, e.g. "chat-media".
+ * @returns {string|null} the block body between the outermost braces, or null if no such block.
+ */
+export function matchBlockBodyFor(rulesText, segment) {
+  const text = String(rulesText || "");
+  // Locate `match /<segment>/…` then scan forward for the block-opening `{`. Path captures like
+  // `{conversationId}` open+close on the same token, so track depth from the match keyword: the block
+  // body is the `{` that is NOT immediately closed.
+  const header = new RegExp(`match\\s+/${segment}/`);
+  const h = header.exec(text);
+  if (!h) return null;
+  // From the header, find the opening brace of the block body: skip `{seg}` path captures (which are
+  // `{...}` pairs sitting on the path) and take the next standalone `{`.
+  let i = h.index + h[0].length;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "{") {
+      // Is this a path capture like `{imageId}` (closes before the next `/` or `{`) or the block body?
+      const close = text.indexOf("}", i);
+      const nextSlashOrBrace = text.slice(i + 1).search(/[/{]/);
+      const isPathCapture = close !== -1 && (nextSlashOrBrace === -1 || i + 1 + nextSlashOrBrace > close);
+      if (!isPathCapture) break; // this `{` opens the block body
+      i = close + 1;
+      // skip a trailing path separator/whitespace before the next capture or the body brace
+      while (i < text.length && /[\s/]/.test(text[i])) i++;
+    } else {
+      i++;
+    }
+  }
+  if (i >= text.length || text[i] !== "{") return null;
+  // Walk from this opening brace to its balanced close.
+  let depth = 0;
+  const start = i;
+  for (let j = start; j < text.length; j++) {
+    if (text[j] === "{") depth++;
+    else if (text[j] === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start + 1, j);
+    }
+  }
+  return null; // unbalanced braces — treated as "no usable block"
+}
+
+/**
+ * True when a match-block body denies ALL direct client read AND write — i.e. every `allow` rule in
+ * the block is `allow <ops>: if false;` (or the block declares no `allow` at all, which is also a
+ * default-deny). This backs the chat-media property: all access is via a backend-minted signed URL
+ * (signed URLs bypass rules), so a public/authenticated caller must never read or write these objects
+ * directly. A single `allow …: if true;` (or any non-`false` condition) fails the check.
+ *
+ * @param {string} blockBody the body returned by {@link matchBlockBodyFor}.
+ * @returns {boolean} true iff the block grants no direct read or write access.
+ */
+export function deniesAllAccess(blockBody) {
+  const body = String(blockBody || "");
+  // Every `allow <ops>: if <cond>;` rule must have a `false` condition. Collect all allow rules.
+  const allowRe = /allow\s+[a-z,\s]+:\s*if\s+([^;]+);/gi;
+  let m;
+  let sawAllow = false;
+  while ((m = allowRe.exec(body)) !== null) {
+    sawAllow = true;
+    const cond = m[1].replace(/\s+/g, " ").trim();
+    if (cond !== "false") return false; // any non-`false` allow means some access is granted
+  }
+  // No `allow` at all → default-deny (fine). At least one allow, and all were `false` → deny (fine).
+  return true;
+}
