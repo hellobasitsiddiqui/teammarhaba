@@ -86,4 +86,23 @@ public record PostMessageRequest(
     public boolean isBodyOrAttachmentPresent() {
         return StringUtils.hasText(body) || StringUtils.hasText(attachmentPath);
     }
+
+    /**
+     * A reply may not carry a media attachment (TM-1125). The reply path
+     * ({@link com.teammarhaba.backend.chat.MessagePostService#post}) routes through
+     * {@code Message.replyFromUser}, which persists text only and DROPS any {@code attachmentPath} —
+     * so a reply + attachment isn't a shape this foundation slice supports; the attachment rides only
+     * the non-reply branch. Without this guard, a reply with a blank {@code body} but an
+     * {@code attachmentPath} would satisfy {@link #isBodyOrAttachmentPresent()} (the attachment stands
+     * in for the body) yet persist a genuinely EMPTY message — the attachment silently lost and the
+     * body coalesced to {@code ""}. Rejecting the combination at the edge closes that hole: a reply must
+     * carry real text, never an attachment, so a reply with a blank body has nothing to stand on and is
+     * a uniform {@code 400}. Kept as an {@code @AssertTrue} so it reports through the same per-field
+     * validation body; anchored on the {@code attachmentPath} field since that's the offending input.
+     */
+    @JsonIgnore
+    @AssertTrue(message = "attachments are not yet supported on replies")
+    public boolean isAttachmentNotOnReply() {
+        return replyToMessageId == null || attachmentPath == null;
+    }
 }

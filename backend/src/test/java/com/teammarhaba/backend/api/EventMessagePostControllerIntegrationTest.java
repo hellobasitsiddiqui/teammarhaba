@@ -288,6 +288,37 @@ class EventMessagePostControllerIntegrationTest extends AbstractIntegrationTest 
     }
 
     @Test
+    void replyWithABlankBodyButAnAttachmentIsRejectedAndNothingIsPersisted() throws Exception {
+        // TM-1125 hole-close: reply + attachment isn't a shape this slice supports — the reply path
+        // (Message.replyFromUser) persists text only and DROPS the attachment. Before the guard, a reply
+        // with a BLANK body + an attachmentPath sneaked past the "body OR attachment present" cross-field
+        // rule (the attachment satisfied it) and 201-persisted a genuinely EMPTY message (body="",
+        // attachment lost). Now attachments are rejected outright on the reply path, so a reply with a
+        // blank body has nothing to stand on → a uniform 400, and nothing lands in the thread.
+        Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-attach")));
+        activeMember(thread, "ra-sender", "tok-ra");
+
+        Long parentId = messages
+                .saveAndFlush(Message.fromUser(thread.getId(), provision("ra-parent-author"), "the parent"))
+                .getId();
+
+        mockMvc.perform(post("/api/v1/conversations/{id}/messages", thread.getId())
+                        .with(user("ra-sender"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attachmentPath\":\"chat/9/photo.jpg\",\"mediaType\":\"image\","
+                                + "\"replyToMessageId\":" + parentId + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[?(@.field=='attachmentNotOnReply')]").exists());
+
+        // Only the parent exists — no empty reply was persisted, and nothing was pushed.
+        List<Message> stored = messages.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                thread.getId());
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getId()).isEqualTo(parentId);
+        assertThat(sender.deliveries()).isEmpty();
+    }
+
+    @Test
     void replyToANonExistentMessageIsRejectedAsBadRequest() throws Exception {
         Conversation thread = conversations.save(Conversation.forEvent(openEvent("reply-missing")));
         activeMember(thread, "rn-sender", "tok-rn");
