@@ -191,8 +191,9 @@ function loadProfileModule(deps) {
     // TM-1105: circleUserId (profile-core.js) — the pure Circle User ID render model paintHub now names.
     // TM-1124: the language/currency preference pickers (locale-currency-settings.js) — a placeholder
     // section built into the Appearance panel. Import-safe (el() kit only, no api.js), injected below.
+    // TM-1134: nationalityDisplay (profile-core.js) — the pure nationality-line model paintHub now names.
     "  buildLocaleCurrencySettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, nationalityDisplay, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
     "  GENDER_OPTIONS, GENDER_VALUES,\n" +
@@ -217,7 +218,8 @@ function loadProfileModule(deps) {
     "  isProfileDirty, BEFOREUNLOAD_PROMPT,\n" +
     // TM-879: the collapsible-sections pure model the buildShell renderer maps over.
     "  profileSectionsStateKey, resolveSectionState, toggleSectionState,\n" +
-    "  COUNTRIES, flagOf,\n" +
+    // TM-1134: countryByIso2 (countries.js) — the iso2 lookup fillForm's nationality off-list fallback names.
+    "  COUNTRIES, flagOf, countryByIso2,\n" +
     // TM-1095: catalogueGroups/toggleInterest/selectionError moved to the dedicated interests route
     // (interests-route.js), so profile.js no longer imports them — the preamble mirrors that.
     "  normaliseInterestConfig, savedInterestLabels, interestChipsModel,\n" +
@@ -353,6 +355,9 @@ const deps = {
   profileMode: core.profileMode,
   identitySummary: core.identitySummary,
   accountContact: core.accountContact,
+  // TM-1134: the REAL pure nationality-display model, so paintHub's hub-nationality line renders the
+  // shipped "<flag> <Country>" (and its hidden-when-unset behaviour) under Node.
+  nationalityDisplay: core.nationalityDisplay,
   // TM-1105: the REAL pure Circle User ID model, so paintHub's id render + copy-value wiring run the
   // shipped decision under Node (not a stub).
   circleUserId: core.circleUserId,
@@ -416,6 +421,9 @@ const deps = {
   toggleSectionState: core.toggleSectionState,
   COUNTRIES: countries.COUNTRIES,
   flagOf: countries.flagOf,
+  // TM-1134: the REAL iso2 → country lookup, so the nationality <select> option render + fillForm's
+  // off-list fallback run the shipped countries.js data under Node.
+  countryByIso2: countries.countryByIso2,
   // TM-778 interests-core: the REAL pure functions the hub card maps over, so paintInterests runs the
   // shipped chip/hint logic through the renderer under Node. TM-1095 retired the overlay picker (the hub
   // chip now routes to #/profile/interests), so catalogueGroups/toggleInterest/selectionError are gone.
@@ -480,6 +488,9 @@ function makeShell(values = {}) {
   const hub = {
     name: wireClassList(fakeEl("div")),
     meta: wireClassList(fakeEl("div")),
+    // TM-1134: the hub nationality line paintHub sets textContent + hidden on (guarded, so a pre-TM-1134
+    // paintHub that ignores it is fine).
+    nationality: wireClassList(fakeEl("div")),
     // `initial` is the pre-TM-846 single identity glyph node; kept alongside the TM-846 glyph/photo
     // pair so this harness drives BOTH sides of that change (the fail-before proof evals main's
     // paintHub, which still writes hub.initial) — the extra node is inert for whichever side ignores it.
@@ -716,6 +727,79 @@ test("collectPatch sends a chosen gender, and OMITS blank so a null gender is ne
   profile.__setShell(shell);
   const patch = profile.collectPatch();
   assert.ok(!("gender" in patch), "a blank gender is omitted (untouched = no change, never overwrites null)");
+});
+
+// ---- nationality (TM-1134) --------------------------------------------------------------------
+
+test("the nationality field is a SELECT of every country behind a placeholder (TM-1134)", () => {
+  // Fail-before/pass-after: on clean main there is NO nationality field at all; with TM-1134 the edit
+  // form carries a nationality <select> sourced from the shared countries.js list (value = iso2 code),
+  // behind a leading blank "Choose a country…" placeholder.
+  const nationality = field("nationality");
+  assert.ok(nationality, "the edit form now has a nationality field");
+  assert.equal(nationality.type, "select", "nationality is a dropdown, not free text");
+  const values = nationality.options.map(([value]) => value);
+  assert.equal(values[0], "", "a leading blank placeholder");
+  // Every country in the shared list is offered (plus the placeholder) — no hand-rolled list.
+  assert.equal(values.length, countries.COUNTRIES.length + 1, "every country is offered (plus the placeholder)");
+  // Option values are ISO-3166 alpha-2 codes (GB/AE pinned first, matching the picker's order).
+  assert.deepEqual(values.slice(1, 3), ["GB", "AE"], "GB then AE are pinned first (shared countries.js order)");
+  // The label carries the country name (so the option is human-readable, flag + name).
+  const gb = nationality.options.find(([value]) => value === "GB");
+  assert.match(gb[1], /United Kingdom/, "the GB option label names the country");
+});
+
+test("fillForm selects the stored nationality code; a null/unknown code shows blank (TM-1134)", async () => {
+  await withFakeDocumentAsync(async () => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMembershipImpl = async () => ({});
+
+    // A stored ISO code is selected on load.
+    getMeImpl = async () => ({ firstName: "Ada", nationality: "GB" });
+    await profile.load();
+    assert.equal(shell.fields.get("nationality").input.value, "GB", "the stored nationality code is selected");
+
+    // A lower-case stored code is upper-cased to match the (upper-case) option values.
+    profile.fillForm({ firstName: "Ada", nationality: "ae" });
+    assert.equal(shell.fields.get("nationality").input.value, "AE", "a lower-case stored code is upper-cased");
+
+    // A legacy account with NO nationality (null) shows the blank placeholder.
+    profile.fillForm({ firstName: "Ada", nationality: null });
+    assert.equal(shell.fields.get("nationality").input.value, "", "a null nationality shows blank, not a country");
+  });
+});
+
+test("collectPatch sends a chosen nationality, and OMITS blank so a set value is never wiped (TM-1134)", () => {
+  // A real choice is sent as the iso2 code…
+  let shell = makeShell({ firstName: "Ada", nationality: "GB" });
+  profile.__setShell(shell);
+  assert.equal(profile.collectPatch().nationality, "GB", "a chosen nationality is sent as its iso2 code");
+
+  // …but the blank placeholder is OMITTED — opening the form on an account with no nationality and
+  // saving an unrelated field must never write a nationality (blank = no change, like city/gender).
+  shell = makeShell({ firstName: "Ada", nationality: "" });
+  profile.__setShell(shell);
+  assert.ok(!("nationality" in profile.collectPatch()), "a blank nationality is omitted (untouched = no change)");
+});
+
+test("paintHub renders the nationality line as '<flag> <Country>' and HIDES it when unset (TM-1134)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ photoURL: null });
+
+    // A set nationality paints the resolved country name on the hub line (and reveals it).
+    profile.paintHub({ firstName: "Ada", city: "London", age: 30, nationality: "GB" });
+    assert.match(shell.hub.nationality.textContent, /United Kingdom/, "the hub shows the resolved country name");
+    assert.equal(shell.hub.nationality.hidden, false, "the nationality line is shown when set");
+
+    // No nationality → the whole line is hidden (optional field, no forced placeholder).
+    profile.paintHub({ firstName: "Ada", city: "London", age: 30, nationality: null });
+    assert.equal(shell.hub.nationality.textContent, "", "an unset nationality clears the line");
+    assert.equal(shell.hub.nationality.hidden, true, "the nationality line is hidden when unset");
+  });
 });
 
 // ---- identitySummaryDoesNotRenderNameAsHtml ---------------------------------------------------

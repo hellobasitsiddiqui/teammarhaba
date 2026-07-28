@@ -295,4 +295,117 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
         assertThat(users.findByFirebaseUid("uid-clear-phone").orElseThrow().getPhone())
                 .isEqualTo("");
     }
+
+    // ------------------------------------------------------------------
+    // TM-1134 — nationality (ISO-3166 alpha-2 code): the PATCH /me + GET /me
+    // contract, mirroring the city allow-list + gender partial-PATCH rules.
+    // ------------------------------------------------------------------
+
+    @Test
+    void patchMeAcceptsAKnownNationalityCodeAndMeResponseCarriesIt() throws Exception {
+        // A recognised alpha-2 code round-trips through PATCH, is echoed on the mutation response, is
+        // genuinely persisted on the row, and — the key contract — MeResponse carries `nationality` on
+        // a fresh GET /me read (not just the write echo).
+        var who = caller("uid-nat-ok", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"GB\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("GB"));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("GB"));
+        assertThat(users.findByFirebaseUid("uid-nat-ok").orElseThrow().getNationality())
+                .isEqualTo("GB");
+    }
+
+    @Test
+    void patchMeUpperCasesALowerCaseNationalityCode() throws Exception {
+        // The stored/echoed value is canonical upper-case so a lower-case "ae" reads as "AE" — this
+        // keeps the client's next-save unchanged-guard comparison stable (a stored "AE" vs a re-sent
+        // "AE"), and matches the frontend option values (upper-case iso2).
+        var who = caller("uid-nat-lower", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"ae\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("AE"));
+        assertThat(users.findByFirebaseUid("uid-nat-lower").orElseThrow().getNationality())
+                .isEqualTo("AE");
+    }
+
+    @Test
+    void patchMeRejectsAnUnknownNationalityCodeWith400() throws Exception {
+        // "ZZ" is a well-formed two-letter shape (passes the boundary @Pattern) but is NOT a known
+        // country code, so the service rejects it with a 400 — the "unknown code" branch, mirroring
+        // the city allow-list check. The rejected write leaves no nationality on the row.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-nat-unknown", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"ZZ\"}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-nat-unknown")
+                .ifPresent(u -> assertThat(u.getNationality()).isNull());
+    }
+
+    @Test
+    void patchMeRejectsAMalformedNationalityShapeWith400() throws Exception {
+        // A value that isn't blank-or-two-letters (e.g. three letters) is refused by the boundary
+        // @Pattern before it even reaches the service — a uniform 400.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-nat-malformed", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"GBR\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void patchMeAcceptsABlankNationalityWhichClearsToNull() throws Exception {
+        // Blank is allowed (the optional-field contract). Set a code, then send "" to clear it: the
+        // stored value goes back to null (the "unknown" state), not the empty string — so it reads
+        // exactly like a legacy never-chose row.
+        var who = caller("uid-nat-clear", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"FR\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("FR"));
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").doesNotExist());
+
+        assertThat(users.findByFirebaseUid("uid-nat-clear").orElseThrow().getNationality())
+                .isNull();
+    }
+
+    @Test
+    void patchOmittingNationalityLeavesAPreviouslySetOneUnchanged() throws Exception {
+        // Partial-PATCH (like gender/city): a PATCH that omits nationality must leave a set value alone.
+        var who = caller("uid-nat-keep", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nationality\":\"PK\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("PK"));
+
+        // Edit only the display name — nationality must survive untouched.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Sara\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nationality").value("PK"));
+        assertThat(users.findByFirebaseUid("uid-nat-keep").orElseThrow().getNationality())
+                .isEqualTo("PK");
+    }
 }

@@ -16,6 +16,7 @@ import {
   profileMode,
   identitySummary,
   accountContact,
+  nationalityDisplay,
   circleUserId,
   profileStrength,
   strengthRingGeometry,
@@ -109,6 +110,34 @@ test("accountContact trims whitespace and tolerates a missing/empty /me object",
   assert.equal(empty.email, "");
   assert.equal(empty.hasPhone, false);
   assert.equal(empty.phoneDisplay, "No phone number added");
+});
+
+// ---- nationalityDisplay (TM-1134) -------------------------------------------------------------
+
+test("nationalityDisplay resolves a stored iso2 code to its flag + country name", () => {
+  const n = nationalityDisplay(me({ nationality: "GB" }));
+  assert.equal(n.code, "GB");
+  assert.equal(n.name, "United Kingdom");
+  assert.equal(n.hasNationality, true);
+  assert.match(n.display, /United Kingdom/, "the display line names the country");
+});
+
+test("nationalityDisplay upper-cases + trims a lower-case/padded stored code", () => {
+  const n = nationalityDisplay(me({ nationality: "  ae  " }));
+  assert.equal(n.code, "AE");
+  assert.equal(n.name, "United Arab Emirates");
+  assert.equal(n.hasNationality, true);
+});
+
+test("nationalityDisplay reports no nationality for a null/blank/unknown code (line hidden)", () => {
+  for (const val of [null, undefined, "", "   ", "ZZ", "not-a-code"]) {
+    const n = nationalityDisplay(me({ nationality: val }));
+    assert.equal(n.hasNationality, false, `${JSON.stringify(val)} → no nationality`);
+    assert.equal(n.display, "", `${JSON.stringify(val)} → empty display (renderer hides the line)`);
+  }
+  // A missing field and a null /me object are both safe.
+  assert.equal(nationalityDisplay({}).hasNationality, false);
+  assert.equal(nationalityDisplay(null).hasNationality, false);
 });
 
 // ---- circleUserId (TM-1105) -------------------------------------------------------------------

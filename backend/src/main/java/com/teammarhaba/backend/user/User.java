@@ -83,6 +83,19 @@ public class User {
     @Column(name = "gender")
     private Gender gender;
 
+    /**
+     * Self-reported nationality (TM-1134), stored as an ISO-3166 alpha-2 country code (e.g. {@code GB},
+     * {@code AE}). A real demographic attribute like {@code city}/{@code age}/{@code gender} — persisted
+     * and shown, not a visual-only placeholder. Nullable — {@code null} = unknown, the state of every
+     * legacy / pre-existing row and any account provisioned just-in-time. Stored as a plain
+     * {@code VARCHAR} code (not an enum: the country set is ~250 entries and lives in the web
+     * {@code countries.js} list, so a validated free code mirrors {@code city} rather than the closed
+     * {@code Gender} enum); the {@code V53__users_nationality} migration owns the (nullable)
+     * {@code VARCHAR(2)} column. Optional at every write path — never required at the onboarding gate.
+     */
+    @Column(name = "nationality")
+    private String nationality;
+
     @Column(name = "phone")
     private String phone;
 
@@ -241,6 +254,19 @@ public class User {
 
     public void setGender(Gender gender) {
         this.gender = gender;
+    }
+
+    /**
+     * Self-reported nationality (TM-1134) as an ISO-3166 alpha-2 code (e.g. {@code GB}); {@code null} =
+     * unknown (legacy / never chose). Validated to a known code (or blank) at the write path, mirroring
+     * {@code city}.
+     */
+    public String getNationality() {
+        return nationality;
+    }
+
+    public void setNationality(String nationality) {
+        this.nationality = nationality;
     }
 
     public String getPhone() {

@@ -75,6 +75,25 @@ public class UserService {
     private static final Set<String> ALLOWED_CITIES = Set.of("London", "Milton Keynes", "Sharjah", "Karachi");
 
     /**
+     * The set of accepted nationality codes (TM-1134): every ISO-3166 alpha-2 country code the JDK
+     * knows ({@link Locale#getISOCountries()}), PLUS the extras the web country picker
+     * ({@code web/src/assets/countries.js}) offers that the JDK's list omits — currently {@code XK}
+     * (Kosovo), which has a widely-used user-assigned code but no official ISO-3166 entry. Codes are
+     * UPPERCASE; validation upper-cases the caller's input before checking. Deriving the base set from
+     * the JDK keeps it self-maintaining for future ISO additions; the explicit extras keep it a
+     * SUPERSET of exactly what the picker can send, so a user can never pick a country the server then
+     * rejects. A NEW nationality must be in this set (or blank); an unchanged saved code re-sends as a
+     * no-op (mirroring the {@code city} allow-list guard), so no existing profile is invalidated.
+     */
+    private static final Set<String> KNOWN_NATIONALITY_CODES;
+
+    static {
+        Set<String> codes = new HashSet<>(java.util.Arrays.asList(Locale.getISOCountries()));
+        codes.add("XK"); // Kosovo — offered by the web picker, not in the JDK's ISO-3166 list
+        KNOWN_NATIONALITY_CODES = Set.copyOf(codes);
+    }
+
+    /**
      * The platform age band, 18–99 (TM-884). For {@code PATCH /me} it is enforced HERE — behind the
      * unchanged-value guard in {@link #updateProfile} (TM-900) — not by bean validation on
      * {@code UpdateMeRequest}: the boundary would reject an unchanged grandfathered age (a 13–120-era
@@ -441,6 +460,25 @@ public class UserService {
                     update.gender().name()));
             user.setGender(update.gender());
         }
+        // Nationality (TM-1134): an ISO-3166 alpha-2 code, editable here. Partial-update like the rest —
+        // null/omitted leaves the stored value unchanged. Mirrors the CITY pattern (not the closed-enum
+        // gender one): normalise to an upper-case code, then behind the Objects.equals no-op guard a NEW
+        // value must be a KNOWN country code, while an unchanged saved code re-sends as a no-op and ""
+        // clears. Storing the canonical upper-case form keeps a caller's lower-case "gb" from reading as
+        // a change against a stored "GB" on the next save.
+        if (update.nationality() != null) {
+            // Store null (not "") for the "unknown / cleared" state so it reads exactly like a legacy
+            // row; a blank/absent input therefore compares equal to a stored null (no spurious change).
+            String nationality = normaliseNationality(update.nationality());
+            String stored = nationality.isEmpty() ? null : nationality;
+            if (!Objects.equals(user.getNationality(), stored)) {
+                if (stored != null && !KNOWN_NATIONALITY_CODES.contains(stored)) {
+                    throw new BadRequestException("Choose a valid country");
+                }
+                changes.add(change("nationality", user.getNationality(), stored));
+                user.setNationality(stored);
+            }
+        }
         if (update.phone() != null && phoneChanged(user.getPhone(), update.phone())) {
             changes.add(change("phone", user.getPhone(), update.phone()));
             user.setPhone(update.phone());
@@ -793,6 +831,16 @@ public class UserService {
      */
     private static String trimmedOrNull(String value) {
         return value == null ? null : value.trim();
+    }
+
+    /**
+     * Canonicalise a caller-supplied nationality (TM-1134): trim and upper-case so an ISO-3166 alpha-2
+     * code is compared and stored in one canonical form ({@code "gb"} → {@code "GB"}). A {@code null}
+     * or blank value normalises to {@code ""} — the "leave blank / clear" sentinel the update path maps
+     * onto a {@code null} stored column.
+     */
+    private static String normaliseNationality(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
     /**

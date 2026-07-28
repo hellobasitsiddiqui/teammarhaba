@@ -47,6 +47,12 @@ import java.util.List;
  *       There is no empty-string "clear" — gender is a closed enum, not free text; a user changes it
  *       between the three buckets (including {@code PREFER_NOT_TO_SAY}) but the edit form never sends
  *       a "no gender" value.</li>
+ *   <li>{@code nationality} — an ISO-3166 alpha-2 country code (TM-1134). The boundary {@code @Pattern}
+ *       enforces only the coarse shape (blank, or two ASCII letters); whether the code names a REAL
+ *       country is checked in {@link com.teammarhaba.backend.user.UserService} against the known-code
+ *       set, behind the unchanged-value guard — a NEW code must be recognised, but the caller's
+ *       already-saved code (or {@code ""}) re-sends as a no-op, so no existing profile is invalidated.
+ *       Optional partial-PATCH: {@code null}/omitted leaves it unchanged, {@code ""} clears it.</li>
  *   <li>{@code notificationPref} — the {@link NotificationPref} enum; an unknown value is rejected
  *       by Jackson at deserialization time (uniform {@code 400}).
  *   <li>{@code timezone} (IANA id) and {@code locale} (BCP-47 tag) — best-effort validated in
@@ -62,6 +68,11 @@ import java.util.List;
  *                         behind the unchanged-guard, TM-900 — grandfathered values re-send fine)
  * @param gender           self-reported gender (TM-955): FEMALE / MALE / PREFER_NOT_TO_SAY; optional
  *                         partial-PATCH ({@code null}/omitted leaves it unchanged)
+ * @param nationality      self-reported nationality (TM-1134) as an ISO-3166 alpha-2 code (e.g.
+ *                         {@code GB}); optional partial-PATCH ({@code null}/omitted leaves it
+ *                         unchanged, {@code ""} clears). A NEW value must be a recognised country
+ *                         code (validated in the service like {@code city}); an unchanged saved code
+ *                         re-sends as a no-op
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
  *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -96,6 +107,13 @@ public record UpdateMeRequest(
         // TM-955: the self-reported gender bucket. A closed Gender enum, so Jackson rejects an unknown
         // value with a uniform 400 at deserialization; null/omitted leaves it unchanged (partial PATCH).
         Gender gender,
+        // TM-1134: self-reported nationality as an ISO-3166 alpha-2 code (e.g. "GB"). Optional partial
+        // PATCH — null/omitted leaves it unchanged; "" clears it. The boundary @Pattern only enforces
+        // the coarse SHAPE (blank, or exactly two ASCII letters); the real "is a KNOWN country code"
+        // check lives in UserService.updateProfile behind the Objects.equals no-op guard (mirroring
+        // city, TM-877), so an unchanged saved code re-sends as a no-op and only a NEW value must be a
+        // recognised code.
+        @Pattern(regexp = NATIONALITY_PATTERN, message = NATIONALITY_MESSAGE) String nationality,
         // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
         // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).
@@ -130,4 +148,14 @@ public record UpdateMeRequest(
     static final String PHONE_PATTERN = "^$|^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$";
 
     static final String PHONE_MESSAGE = "must be a valid phone number";
+
+    /**
+     * The TM-1134 nationality boundary SHAPE rule: blank (leave/clear), or exactly two ASCII letters
+     * (an ISO-3166 alpha-2 code, any case). This is only the coarse shape — whether the two letters
+     * name a REAL country is checked in {@link com.teammarhaba.backend.user.UserService} against the
+     * known-code set, behind the unchanged-value guard, exactly like the {@code city} allow-list.
+     */
+    static final String NATIONALITY_PATTERN = "^$|^[A-Za-z]{2}$";
+
+    static final String NATIONALITY_MESSAGE = "must be a valid country code";
 }

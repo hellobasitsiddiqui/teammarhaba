@@ -1,0 +1,14 @@
+-- V53__users_nationality — add the self-reported user nationality column (TM-1134)
+--
+-- TM-1134 adds a user nationality field, full-stack. This migration lands the DB half: a single
+-- NULLABLE VARCHAR(2) column on users, mirroring the nullable free-profile columns (city, V5; gender,
+-- V50). Stored as an ISO-3166 alpha-2 country code (e.g. "GB", "AE") — the same codes the web
+-- countries.js list (TM-781) uses — so VARCHAR(2) exactly fits a 2-letter code. NOT an enum: the
+-- country set is ~250 entries, so nationality validates like a code'd free field (city) rather than
+-- the closed Gender enum.
+--
+-- NULLABLE is load-bearing: NULL = unknown, the state of every legacy / pre-existing row (created
+-- before this field existed) AND any account provisioned just-in-time. Nationality is OPTIONAL at
+-- every write path (unlike gender, which onboarding requires): a user may leave it blank, and existing
+-- rows are left untouched — never backfilled to a guessed value.
+ALTER TABLE users ADD COLUMN nationality VARCHAR(2);
