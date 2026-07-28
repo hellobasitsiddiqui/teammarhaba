@@ -1,5 +1,7 @@
 package com.teammarhaba.backend.event;
 
+import com.teammarhaba.backend.audit.AuditAction;
+import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.config.MembershipProperties;
 import com.teammarhaba.backend.membership.Entitlement;
@@ -15,6 +17,7 @@ import com.teammarhaba.backend.user.UserService;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import java.time.Instant;
+import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -92,6 +95,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class EventRsvpService {
 
+    /** Audit {@code target_type} for event rows (mirrors {@link EventRosterAdminService#TARGET_EVENT}). */
+    static final String TARGET_EVENT = "Event";
+
     static final String EVENT_NOT_FOUND = "Event not found.";
     static final String EVENT_STARTED = "This event has already started, so attendance can no longer be changed.";
     static final String NOT_ON_WAITLIST = "You are not on the waitlist for this event.";
@@ -129,6 +135,7 @@ public class EventRsvpService {
     private final OrderRepository orders;
     private final MembershipService memberships;
     private final ReliabilityService reliability;
+    private final AuditService audit;
 
     public EventRsvpService(
             EventRepository events,
@@ -144,7 +151,8 @@ public class EventRsvpService {
             EntitlementService entitlements,
             OrderRepository orders,
             MembershipService memberships,
-            ReliabilityService reliability) {
+            ReliabilityService reliability,
+            AuditService audit) {
         this.events = events;
         this.attendance = attendance;
         this.users = users;
@@ -159,6 +167,7 @@ public class EventRsvpService {
         this.orders = orders;
         this.memberships = memberships;
         this.reliability = reliability;
+        this.audit = audit;
     }
 
     /**
@@ -253,6 +262,18 @@ public class EventRsvpService {
                         guardOneActiveEvent(user.getId(), eventId, now);
                     }
                     attendance.save(new EventAttendance(eventId, user.getId(), state));
+                    // Audit the RSVP landing (TM-1114): forward-only, in this same transaction so the audit
+                    // row and the attendance write commit or roll back together. Only a NEW landing is
+                    // recorded — the idempotent re-RSVP branch above returns before reaching here. The actor
+                    // is the account itself (its Firebase uid), attributed even on the settled-order path
+                    // where there is no VerifiedUser caller. Metadata mirrors the evict/force-add shape
+                    // ({@code userId} = users.id, {@code state} = the landing state).
+                    audit.record(
+                            user.getFirebaseUid(),
+                            AuditAction.EVENT_RSVP_JOINED,
+                            TARGET_EVENT,
+                            String.valueOf(eventId),
+                            Map.of("userId", String.valueOf(user.getId()), "state", state.name()));
                     // A FREE-first direct landing is a COMMITMENT, so it spends the one first-event
                     // credit (TM-629) — exactly as checkout does. Without this, the direct verb read
                     // the FIRST_EVENT_FREE entitlement but never consumed it, so a pay-per-event
@@ -330,10 +351,13 @@ public class EventRsvpService {
 
         // A late cancel is giving up a spot you actually HELD (GOING) inside the window. Leaving a
         // WAITLISTED or absent slot surrenders no committed spot, so it never counts as a strike.
-        boolean holdingSpot = attendance
+        // Capture the held state once (TM-1114): it drives both the late-cancel decision and the audit
+        // of the state the user surrendered — an absent row means an idempotent no-op leave (no audit).
+        AttendanceState heldState = attendance
                 .findByEventIdAndUserId(eventId, user.getId())
-                .map(a -> a.getState() == AttendanceState.GOING)
-                .orElse(false);
+                .map(EventAttendance::getState)
+                .orElse(null);
+        boolean holdingSpot = heldState == AttendanceState.GOING;
         boolean lateCancel = holdingSpot && cancellationPolicy.isLateCancellation(event, now);
 
         if (preview) {
@@ -348,6 +372,18 @@ public class EventRsvpService {
         }
 
         attendance.deleteByEventIdAndUserId(eventId, user.getId());
+        // Audit the un-RSVP (TM-1114): only a real removal is recorded — an idempotent no-op leave (the
+        // user held no attendance, heldState == null) writes nothing, and a preview dry-run returned above
+        // before any delete. In-transaction, so the audit row commits atomically with the attendance
+        // delete (and rolls back if anything downstream fails). The actor is the account itself.
+        if (heldState != null) {
+            audit.record(
+                    caller.uid(),
+                    AuditAction.EVENT_RSVP_CANCELLED,
+                    TARGET_EVENT,
+                    String.valueOf(eventId),
+                    Map.of("userId", String.valueOf(user.getId()), "state", heldState.name()));
+        }
         // Event-chat lifecycle (TM-446): leaving the event removes the member from its group thread
         // (a no-op for the host, or someone who was never a chat member). In-transaction, so the
         // membership change commits atomically with the attendance delete.
@@ -418,6 +454,15 @@ public class EventRsvpService {
         guardOneActiveEvent(user.getId(), eventId, now); // claiming lands GOING — the one-active rule applies
 
         mine.promote(); // WAITLISTED -> GOING, own offer stamp cleared; dirty-checking flushes on commit
+        // Audit the claim (TM-1114): a genuine WAITLISTED -> GOING promotion — the double-tap-already-GOING
+        // path returned above, so this only fires on a real spot claim. In-transaction, so the audit row
+        // commits atomically with the promotion. The actor is the account itself; state is the GOING result.
+        audit.record(
+                caller.uid(),
+                AuditAction.EVENT_SPOT_CLAIMED,
+                TARGET_EVENT,
+                String.valueOf(eventId),
+                Map.of("userId", String.valueOf(user.getId()), "state", AttendanceState.GOING.name()));
         // A FREE-first claim spends the credit too (TM-629) — normally a no-op re-stamp, because the
         // waitlist landing already consumed it for this same event; it only bites for a legacy
         // waitlist row that predates consumption on the RSVP verb.
