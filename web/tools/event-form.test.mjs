@@ -671,17 +671,23 @@ test("eventLifecycle: Happening edges at exactly startAt and exactly endAt (TM-1
 
 // --- TM-1096: the lifecycle filter chips (LIFECYCLE_FILTERS) + matchesLifecycleFilter --------------
 
-test("LIFECYCLE_FILTERS: the chip buckets + their lifecycle labels (TM-1096)", () => {
-  // One chip per lifecycle bucket, in reading order. The chip COPY differs from the lifecycle label for
-  // "Upcoming" (surfaces the "Hidden" lifecycle) — the admin thinks "upcoming", not "hidden".
+test("LIFECYCLE_FILTERS: the chip buckets + their lifecycle labels (TM-1096, relabel TM-1110)", () => {
+  // One chip per lifecycle bucket, in reading order. TM-1110: the chip COPY differs from the lifecycle
+  // label for the "upcoming"/"scheduled" pair — a PUBLISHED, not-yet-started event carries the "Visible"
+  // lifecycle label and is what the admin means by "Upcoming"; a not-yet-visible ("Hidden") event is
+  // "Scheduled". (Pre-TM-1110 the "Upcoming" chip was wired to Hidden, which is ~always empty.)
   assert.deepEqual(LIFECYCLE_FILTERS, [
     ["Happening", "Happening now"],
-    ["Visible", "Visible"],
-    ["Hidden", "Upcoming"],
+    ["Visible", "Upcoming"],
+    ["Hidden", "Scheduled"],
     ["Unlisted", "Unlisted"],
     ["Finished", "Finished"],
     ["Cancelled", "Cancelled"],
   ]);
+  // The load-bearing label↔bucket mapping (TM-1110 AC): "Upcoming" surfaces Visible, "Scheduled" Hidden.
+  const byLabel = new Map(LIFECYCLE_FILTERS.map(([key, label]) => [label, key]));
+  assert.equal(byLabel.get("Upcoming"), "Visible", "the 'Upcoming' chip matches the Visible lifecycle");
+  assert.equal(byLabel.get("Scheduled"), "Hidden", "the 'Scheduled' chip matches the Hidden lifecycle");
   // Every key is a real lifecycle label eventLifecycle can emit (no orphan chip that matches nothing).
   const emitted = new Set(["Happening", "Visible", "Hidden", "Unlisted", "Finished", "Cancelled"]);
   for (const [key] of LIFECYCLE_FILTERS) assert.ok(emitted.has(key), `${key} is a real lifecycle label`);

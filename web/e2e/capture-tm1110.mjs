@@ -1,22 +1,18 @@
-// TM-1096 — visual evidence capture for the admin events LIST at 390px: the status filter changes
-// from a single-select dropdown (default "All statuses") to multi-toggle lifecycle chips (default
-// "Happening now"), and a started-not-finished event reads a "Happening" status badge.
+// TM-1110 — visual evidence capture for the admin events lifecycle CHIP ROW at 390px.
 //
-// Mock-mode only (pattern: capture-tm1066.mjs). Boots the real SPA via serve.mjs, mocks the admin
-// events list API with a spread of lifecycle states, then reveals the list through the router bridge
-// window.tmAdminEvents.enterAdminEvents() (mock mode has no Firebase session).
+// TM-1096 shipped the chips with a mislabelled "Upcoming" chip that maps to the Hidden lifecycle
+// (now < visibilityStart = not visible yet) — so it's ~always empty, and the admin's real upcoming
+// (published, not-yet-started = "Visible") events hide under a chip literally labelled "Visible".
+// TM-1110 relabels: Visible bucket → "Upcoming" chip, Hidden bucket → "Scheduled" chip.
 //
-// Shots (390px, the mobile admin width):
-//   01-list-default   — the list on first load. AFTER: lifecycle chips, "Happening now" pressed, ONLY
-//                       the live event shown with a "Happening" badge. BEFORE (main's JS): the status
-//                       dropdown defaulting "All statuses", every event shown.
-//   02-list-all       — AFTER: clicking "All" shows every lifecycle bucket. (BEFORE tree has no chip,
-//                       so the script logs the miss and skips this shot.)
+// BEFORE (main's JS): chip row reads  Happening now · Visible · Upcoming · Unlisted · Finished · Cancelled
+// AFTER  (this branch): chip row reads Happening now · Upcoming · Scheduled · Unlisted · Finished · Cancelled
 //
-// The BEFORE tree has no #admin-events-lifecycle-chips — running this same script against main's JS
-// yields the dropdown list (all events shown by default), which is the before/after contrast.
+// Mock-mode only (pattern: capture-tm1096.mjs). Boots the real SPA via serve.mjs, mocks the admin
+// events list API, reveals the list via the router bridge, clicks "All" so every chip is pressed, then
+// screenshots the chip row so all bucket labels are visible.
 //
-// Usage:  CAPTURE_OUT=/abs/path CAPTURE_PORT=8296 node capture-tm1096.mjs
+// Usage:  CAPTURE_OUT=/abs/path CAPTURE_PORT=8297 node capture-tm1110.mjs
 
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
@@ -25,51 +21,36 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = process.env.CAPTURE_OUT || join(HERE, "capture-out-tm1096");
-const PORT = Number(process.env.CAPTURE_PORT || 8296);
+const OUT = process.env.CAPTURE_OUT || join(HERE, "capture-out-tm1110");
+const PORT = Number(process.env.CAPTURE_PORT || 8297);
 const BASE = `http://127.0.0.1:${PORT}`;
 
-// A spread of lifecycle states around "now" so the before/after filter contrast is visible.
 const now = Date.now();
 const iso = (ms) => new Date(ms).toISOString();
 const H = 3600e3;
 const D = 24 * H;
 
+// A spread of lifecycle states so the row body has content; the chip row is what we screenshot.
 const EVENTS = [
   {
-    // HAPPENING: started 1h ago, ends in 2h, window open, not past.
     id: 1, heading: "Coffee & Code (live now)", status: "PUBLISHED", city: "London",
     timezone: "Europe/London", capacity: 20, past: false,
     startAt: iso(now - H), endAt: iso(now + 2 * H),
     visibilityStart: iso(now - 7 * D), visibilityEnd: iso(now + 1 * D),
   },
   {
-    // VISIBLE (chip: Upcoming, TM-1110): listed, starts in 5 days.
+    // VISIBLE: listed, starts in 5 days → this is the real "Upcoming" event.
     id: 2, heading: "Weekend Walk (upcoming)", status: "PUBLISHED", city: "London",
     timezone: "Europe/London", capacity: 30, past: false,
     startAt: iso(now + 5 * D), endAt: iso(now + 5 * D + 2 * H),
     visibilityStart: iso(now - 2 * D), visibilityEnd: iso(now + 10 * D),
   },
   {
-    // HIDDEN (chip: Scheduled, TM-1110): scheduled, window not yet open.
+    // HIDDEN: scheduled, window not yet open → the real "Scheduled" event.
     id: 3, heading: "Book Club (scheduled)", status: "PUBLISHED", city: "London",
     timezone: "Europe/London", capacity: 12, past: false,
     startAt: iso(now + 20 * D), endAt: iso(now + 20 * D + 2 * H),
     visibilityStart: iso(now + 14 * D), visibilityEnd: iso(now + 25 * D),
-  },
-  {
-    // FINISHED: server past flag.
-    id: 4, heading: "Last Month's Meetup (finished)", status: "PUBLISHED", city: "London",
-    timezone: "Europe/London", capacity: 40, past: true,
-    startAt: iso(now - 30 * D), endAt: iso(now - 30 * D + 2 * H),
-    visibilityStart: iso(now - 40 * D), visibilityEnd: iso(now - 30 * D),
-  },
-  {
-    // CANCELLED.
-    id: 5, heading: "Rained-off Picnic (cancelled)", status: "CANCELLED", city: "London",
-    timezone: "Europe/London", capacity: 25, past: false,
-    startAt: iso(now + 3 * D), endAt: iso(now + 3 * D + 2 * H),
-    visibilityStart: iso(now - 2 * D), visibilityEnd: iso(now + 8 * D),
   },
 ];
 
@@ -87,7 +68,6 @@ async function mockApi(page) {
   await page.route(/\/api\/v1\/.*/, (route) => json(route, { title: "Not found" }, 404));
   await page.route(/\/api\/v1\/me$/, (route) => json(route, me));
   await page.route(/\/api\/v1\/me\/membership/, (route) => json(route, { title: "Not found" }, 404));
-  // The admin events list walk (page 0 returns all; the walk stops on a short page).
   await page.route(/\/api\/v1\/admin\/events(\?.*)?$/, (route) =>
     json(route, { items: EVENTS, page: 0, size: 100, totalElements: EVENTS.length, totalPages: 1 }),
   );
@@ -148,21 +128,24 @@ async function main() {
     await revealList(page);
     await settle(page);
 
-    // 01 — the list on first load (AFTER: chips, Happening-now default → only the live event).
-    await page.locator("#admin-events-view").screenshot({ path: join(OUT, "01-list-default.png") });
-    console.log("  ✓ 01-list-default.png");
+    // Click "All" so every chip is pressed and all bucket labels render, then shoot the chip row.
+    const hasAll = await page.locator("#admin-events-lifecycle-all").count();
+    if (!hasAll) throw new Error("no #admin-events-lifecycle-all — is this the chips tree?");
+    await page.locator("#admin-events-lifecycle-all").click();
+    await page.waitForTimeout(300);
+    await settle(page);
 
-    // 02 — click "All" to show every bucket (AFTER only; BEFORE has no chip row → skip).
-    const hasChips = await page.locator("#admin-events-lifecycle-all").count();
-    if (hasChips) {
-      await page.locator("#admin-events-lifecycle-all").click();
-      await page.waitForTimeout(300);
-      await settle(page);
-      await page.locator("#admin-events-view").screenshot({ path: join(OUT, "02-list-all.png") });
-      console.log("  ✓ 02-list-all.png (every lifecycle bucket shown)");
-    } else {
-      console.log("  · no #admin-events-lifecycle-all (BEFORE tree, dropdown) — skipping shot 02");
-    }
+    await page.locator("#admin-events-lifecycle-chips").screenshot({ path: join(OUT, "chip-row.png") });
+    console.log("  ✓ chip-row.png");
+    // Full view for context.
+    await page.locator("#admin-events-view").screenshot({ path: join(OUT, "list-all.png") });
+    console.log("  ✓ list-all.png");
+
+    // The literal chip labels, in order, as a machine-checkable text record.
+    const labels = await page.$$eval("#admin-events-lifecycle-chips .tm-chip", (btns) =>
+      btns.filter((b) => !b.classList.contains("tm-chip-all")).map((b) => b.textContent.trim()),
+    );
+    console.log("  chip labels:", JSON.stringify(labels));
 
     await page.close();
   } finally {
