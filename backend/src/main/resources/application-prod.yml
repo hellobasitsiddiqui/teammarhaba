@@ -22,6 +22,9 @@ app:
     instance-connection-name: ${INSTANCE_CONNECTION_NAME}
   firebase:
     project-id: ${FIREBASE_PROJECT_ID}
+    # Cloud Storage bucket the chat-media signed-URL path (TM-1126) mints PRIVATE upload/download URLs
+    # against. Defaults to the app's Firebase Storage bucket; overridable via FIREBASE_STORAGE_BUCKET.
+    storage-bucket: ${FIREBASE_STORAGE_BUCKET:teammarhaba.firebasestorage.app}
   # CORS allow-list for the deployed web app (Firebase Hosting). TM-104. Overridable via
   # APP_CORS_ALLOWED_ORIGINS (comma-separated) if a custom domain is added later.
   cors:

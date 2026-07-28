@@ -28,6 +28,16 @@ public record AppProperties(@Valid Db db, @Valid Firebase firebase) {
             @NotBlank String password,
             @NotBlank String instanceConnectionName) {}
 
-    /** Firebase project used to verify Auth ID tokens. */
-    public record Firebase(@NotBlank String projectId) {}
+    /**
+     * Firebase project used to verify Auth ID tokens, plus the Cloud Storage bucket the chat-media
+     * signed-URL path (TM-1126) mints URLs against.
+     *
+     * <p>{@code storageBucket} is <strong>optional</strong> (nullable, not {@code @NotBlank}): the
+     * bulk of the backend — auth token verification (TM-79) and push (TM-284) — needs only the
+     * project id, and dev/test/CI boot with no Storage at all. Only the chat-media endpoint requires
+     * it; when it is unset that single feature refuses cleanly (the service raises a clear error)
+     * rather than the whole app failing to start. Prod sets it from the environment
+     * ({@code app.firebase.storage-bucket}) to the real bucket (e.g. {@code teammarhaba.firebasestorage.app}).
+     */
+    public record Firebase(@NotBlank String projectId, String storageBucket) {}
 }

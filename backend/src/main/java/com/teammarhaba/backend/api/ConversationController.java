@@ -1,6 +1,7 @@
 package com.teammarhaba.backend.api;
 
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.chat.ChatMediaService;
 import com.teammarhaba.backend.chat.ConversationMembershipService;
 import com.teammarhaba.backend.chat.ConversationReadService;
 import com.teammarhaba.backend.chat.MessageAuthorService;
@@ -77,16 +78,19 @@ public class ConversationController {
     private final MessagePostService posts;
     private final MessageAuthorService authorMessages;
     private final ConversationMembershipService memberships;
+    private final ChatMediaService media;
 
     ConversationController(
             ConversationReadService conversations,
             MessagePostService posts,
             MessageAuthorService authorMessages,
-            ConversationMembershipService memberships) {
+            ConversationMembershipService memberships,
+            ChatMediaService media) {
         this.conversations = conversations;
         this.posts = posts;
         this.authorMessages = authorMessages;
         this.memberships = memberships;
+        this.media = media;
     }
 
     /** The caller's conversation list, most-recently-active first. Only {@code page}/{@code size} tune it. */
@@ -199,6 +203,22 @@ public class ConversationController {
             @PathVariable Long id,
             @PathVariable Long messageId) {
         return authorMessages.deleteOwnMessage(caller, id, messageId);
+    }
+
+    /**
+     * Mint a short-lived signed upload URL + resolve a signed download URL for a fresh PRIVATE chat-media
+     * object in the thread (TM-1126, epic TM-468 chat-media foundation). Member-gated in the service —
+     * only an active member of the thread may mint one; a non-member / kicked / muted / self-left member
+     * and an unknown thread are all a uniform {@code 403}, so ids can't be probed and only someone who
+     * can post may upload media. The object path is backend-chosen and conversation-scoped
+     * ({@code chat-media/{id}/{uuid}}), so a caller can't steer an upload into another thread's prefix.
+     * Returns the {@link ChatMediaSignedUrlResponse} pair; the client PUTs the bytes to the upload URL
+     * and reads them back via the download URL, both expiring shortly.
+     */
+    @PostMapping("/conversations/{id}/media/signed-url")
+    ChatMediaSignedUrlResponse mediaSignedUrl(
+            @AuthenticationPrincipal VerifiedUser caller, @PathVariable Long id) {
+        return media.mintSignedUrls(caller, id);
     }
 
     /** Advance the caller's read cursor for the thread; returns the fresh cursor + unread count. */
