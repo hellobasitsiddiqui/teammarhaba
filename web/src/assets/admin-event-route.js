@@ -22,6 +22,10 @@ export const ADMIN_EVENTS_ROUTE = "#/admin/events";
 export const ADMIN_EVENT_NEW_ROUTE = `${ADMIN_EVENTS_ROUTE}/new`;
 
 const EDIT_SUFFIX = "/edit";
+// The roster page suffix (TM-1115). A DISTINCT trailing segment from EDIT_SUFFIX, so
+// `#/admin/events/{id}/roster` and `#/admin/events/{id}/edit` never collide — each parser only fires on
+// its own suffix, and `parseAdminEventRosterRoute` is a separate function from `parseAdminEventFormRoute`.
+const ROSTER_SUFFIX = "/roster";
 
 /** The hash a "New event" button navigates to. */
 export function adminEventNewHash() {
@@ -31,6 +35,11 @@ export function adminEventNewHash() {
 /** The hash a row's "Edit" action navigates to; the id is percent-encoded to stay a single safe segment. */
 export function adminEventEditHash(id) {
   return `${ADMIN_EVENTS_ROUTE}/${encodeURIComponent(String(id))}${EDIT_SUFFIX}`;
+}
+
+/** The hash a row's "Roster" action navigates to (TM-1115); the id is percent-encoded like the edit hash. */
+export function adminEventRosterHash(id) {
+  return `${ADMIN_EVENTS_ROUTE}/${encodeURIComponent(String(id))}${ROSTER_SUFFIX}`;
 }
 
 /** True for the create route or any edit route — i.e. "show the full-page event form for this hash". */
@@ -57,6 +66,36 @@ export function parseAdminEventFormRoute(hash) {
         return { mode: "edit", id: decodeURIComponent(raw) };
       } catch {
         return null; // malformed percent-escape → not a valid form route
+      }
+    }
+  }
+  return null;
+}
+
+/** True for the roster route `#/admin/events/{id}/roster` (TM-1115) — "show the full-page roster for this hash". */
+export function isAdminEventRosterRoute(hash) {
+  return parseAdminEventRosterRoute(hash) !== null;
+}
+
+/**
+ * Parse a hash into the roster target it addresses, or null if it isn't a roster route (TM-1115).
+ *  - `#/admin/events/{id}/roster` → { id }   (id URL-decoded)
+ * Everything else — the create/edit form routes, the bare list, and anything malformed (empty id, nested
+ * slashes, a bad percent-escape) — returns null. Deliberately a SEPARATE parser from
+ * {@link parseAdminEventFormRoute}: the two suffixes (`/edit` vs `/roster`) are distinct, and each parser
+ * only fires on its own suffix, so `.../{id}/edit` is NEVER read as a roster route and vice-versa.
+ */
+export function parseAdminEventRosterRoute(hash) {
+  if (typeof hash !== "string") return null;
+  const prefix = `${ADMIN_EVENTS_ROUTE}/`;
+  if (hash.startsWith(prefix) && hash.endsWith(ROSTER_SUFFIX)) {
+    const raw = hash.slice(prefix.length, hash.length - ROSTER_SUFFIX.length);
+    // A non-empty, single-segment id only (guards odd hashes like `.../ /roster` or `.../a/b/roster`).
+    if (raw && !raw.includes("/")) {
+      try {
+        return { id: decodeURIComponent(raw) };
+      } catch {
+        return null; // malformed percent-escape → not a valid roster route
       }
     }
   }

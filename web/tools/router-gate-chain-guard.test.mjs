@@ -101,16 +101,17 @@ test("the onboarding and terms gates each early-return (redirect wins over every
 // --- EVERY admin route is gated via shouldBounceNonAdmin (no admin view is ungated) -----------------
 
 test("every admin route in guard() is protected by shouldBounceNonAdmin (roleResolved-aware)", () => {
-  // The twelve ADMIN-only routes: hub (TM-917), users console (TM-917, moved to #/admin/users), events
-  // console, event form, venues console, venue form, interests console, interest form (TM-779),
-  // message compose, sent-history, and the two TM-972 lift-and-shift folds — Send notification
-  // (#/admin/notifications) and Developer tools (#/admin/ops). Each must sit in an
+  // The thirteen ADMIN-only routes: hub (TM-917), users console (TM-917, moved to #/admin/users), events
+  // console, event form, event roster (TM-1115), venues console, venue form, interests console, interest
+  // form (TM-779), message compose, sent-history, and the two TM-972 lift-and-shift folds — Send
+  // notification (#/admin/notifications) and Developer tools (#/admin/ops). Each must sit in an
   // `if (<admin-route> && shouldBounceNonAdmin(...))`.
   const adminRouteConditions = [
     /route\s*===\s*ADMIN\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_USERS\s*&&\s*shouldBounceNonAdmin\(/, // TM-917: users console moved off #/admin
     /route\s*===\s*ADMIN_EVENTS\s*&&\s*shouldBounceNonAdmin\(/,
     /isAdminEventFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
+    /isAdminEventRosterRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/, // TM-1115: roster page
     /route\s*===\s*ADMIN_VENUES\s*&&\s*shouldBounceNonAdmin\(/,
     /isAdminVenueFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_INTERESTS\s*&&\s*shouldBounceNonAdmin\(/, // TM-779: interests console

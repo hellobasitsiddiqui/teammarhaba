@@ -410,6 +410,13 @@
              builds it here; router.js owns visibility + the ADMIN gate (same as the events console). -->
         <section id="admin-event-form-view" class="admin-console" aria-label="Event form" hidden></section>
 
+        <!-- Admin event roster (TM-1115): the full-page #/admin/events/{id}/roster view. The roster
+             (capacity control, force-add, 4-state attendee list with include/exclude chips) moved off
+             the inline list expando onto its own admin page. admin-events.js builds it here (via
+             enterAdminEventRoster); router.js owns visibility + the ADMIN gate (same as the events
+             console). Consumes the TM-1114 roster payload (live entries + pastEntries history). -->
+        <section id="admin-event-roster-view" class="admin-console" aria-label="Event roster" hidden></section>
+
         <!-- Admin venues console (TM-519): ADMIN-only #/admin/venues view. admin-venues.js (imported by
              router.js) builds the venue library list + create/edit/deactivate flow into this container;
              router.js owns its visibility + the ADMIN gate (same as the events console). -->

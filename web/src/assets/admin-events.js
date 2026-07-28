@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, modal, stackableTable, toast } from "./ui.js";
+import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, modal, relativeTime, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
@@ -85,7 +85,14 @@ import {
   buildCloneDraft,
   pastStartWarning,
 } from "./event-form.js";
-import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash } from "./admin-event-route.js";
+import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash, adminEventRosterHash } from "./admin-event-route.js";
+import {
+  ROSTER_FILTER_CHIPS,
+  defaultChipSelection,
+  rosterStateBadge,
+  mergeRosterRows,
+  filterRosterRows,
+} from "./roster-core.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
 import { CITY_OPTIONS, cityChoiceError } from "./profile-core.js";
 import { adminVenueNewHash } from "./admin-venues-route.js";
@@ -126,12 +133,17 @@ const state = {
   sortDir: "desc",
   page: 0,
   pageSize: 25,
-  // TM-592 roster panel: the id of the event whose inline roster/capacity panel is open (null = none),
-  // plus the last-loaded roster payload and its load/error status, so re-renders keep the panel open.
-  openRosterId: null,
-  roster: null, // the { eventId, capacity, going, waitlist, entries } payload for the open panel
+  // TM-1115 roster PAGE (was TM-592's inline expando — retired; ONE render path now). The Roster button
+  // navigates to #/admin/events/{id}/roster; the page mounts into #admin-event-roster-view. These hold
+  // the event being shown, the last-loaded roster payload (entries + pastEntries, TM-1114), its load/error
+  // status, and the include/exclude chip selection (a Set of enabled roster-state keys — waitlist on,
+  // evicted/cancelled off by default). Chip toggling filters the already-fetched set with NO refetch.
+  rosterEventId: null, // the id of the event whose roster page is currently mounted (null = none)
+  rosterEvent: null, // the resolved EventResponse for the page header / capacity default
+  roster: null, // the { eventId, capacity, going, waitlist, entries, pastEntries } payload
   rosterLoading: false,
   rosterError: null,
+  rosterChips: defaultChipSelection(), // enabled include/exclude chip state keys (client-side filter)
 };
 
 let shell = null; // { head, stats, toolbar, table, pager } persistent containers
@@ -238,12 +250,16 @@ function sortEvents(list, now) {
 
 // ---- rendering ----------------------------------------------------------------------------
 
+/** Map a badge tone (ok / off / info / …) to its `.tm-badge-*` class — the ONE place the mapping lives,
+ *  shared by the status pill (lifecycle tone) and the roster 4-state badges (TM-1115). */
+function badgeClassForTone(tone) {
+  return tone === "ok" ? "tm-badge-ok" : tone === "off" ? "tm-badge-off" : tone === "info" ? "tm-badge-info" : "tm-badge-unknown";
+}
+
 /** The derived status pill for a row — colour follows the lifecycle tone (event-form.js). */
 function statusPill(event, now) {
   const { label, tone } = eventLifecycle(event, now);
-  const cls =
-    tone === "ok" ? "tm-badge-ok" : tone === "off" ? "tm-badge-off" : tone === "info" ? "tm-badge-info" : "tm-badge-unknown";
-  return el("span", { class: `tm-badge ${cls}`, text: label });
+  return el("span", { class: `tm-badge ${badgeClassForTone(tone)}`, text: label });
 }
 
 function renderStats(now) {
@@ -344,8 +360,8 @@ function renderTable() {
     const globalIndex = start + i;
     if (past.length && globalIndex === pastStart) bodyRows.push(pastSectionRow());
     bodyRows.push(eventRow(event, now));
-    // TM-592: the inline roster/capacity panel drops in as a full-width row directly under its event.
-    if (state.openRosterId === event.id) bodyRows.push(rosterPanelRow(event));
+    // TM-1115: the inline roster expando is RETIRED — the Roster button now navigates to the roster page
+    // (#/admin/events/{id}/roster). No full-width panel row is appended here anymore (one render path).
   });
   const body = el("tbody", {}, bodyRows);
 
@@ -459,15 +475,16 @@ function rowActions(event, now = Date.now()) {
     // (TM-1061: a cancelled event is a valid clone source — re-run it as a fresh event).
     return [edit, clone];
   }
-  // Roster + capacity control (TM-592): opens an inline panel below the row with the attendee list
-  // (evict), a force-add form and a first-class capacity adjust that surfaces the over-cap warning.
+  // Roster + capacity control (TM-592, moved onto its own page TM-1115): NAVIGATES to the full-page
+  // roster (#/admin/events/{id}/roster) — the attendee list (4-state badges, evict), a force-add form and
+  // a first-class capacity adjust that surfaces the over-cap warning. The inline expando is retired.
   const roster = el(
     "button",
     {
       class: "tm-btn tm-btn-sm",
       type: "button",
       "aria-label": `Manage roster for ${event.heading}`,
-      onClick: () => toggleRoster(event),
+      onClick: () => { window.location.hash = adminEventRosterHash(event.id); },
     },
     "Roster",
   );
@@ -628,58 +645,93 @@ async function startCloneEvent(event) {
   window.location.hash = adminEventNewHash();
 }
 
-// ---- roster + capacity control (TM-592) ---------------------------------------------------
+// ---- roster PAGE (TM-1115, lifting the TM-592 controls onto #/admin/events/{id}/roster) ---
+//
+// The inline expando (openRosterId / toggleRoster / rosterPanelRow) is RETIRED — ONE render path now.
+// The list's Roster button navigates to #/admin/events/{id}/roster; the router mounts the page via
+// enterAdminEventRoster(id). The page hosts: a "← Events" back header, a summary line, the capacity
+// control, the force-add form, the 4-state include/exclude chip row, and the merged attendee list
+// (live entries + pastEntries from TM-1114, 4-state badges, evict).
+
+/** Module guard so a slow roster fetch that resolves AFTER the admin navigated away can't paint stale. */
+let rosterToken = 0;
 
 /**
- * Toggle the inline roster/capacity panel for an event. Opening loads the roster (GET .../roster);
- * clicking Roster again on the open event closes it. Only one panel is open at a time (a fresh open
- * replaces any other), keeping the table compact.
+ * Router entry (TM-1115) for the full-page roster. Renders from the list row already in memory when we
+ * have it (the common path — the admin clicked "Roster"); otherwise fetches the event by id so the route
+ * also works on a direct deep-link / refresh. Resets the chip selection to the default (waitlist on) on
+ * each fresh entry, then loads the roster payload.
  */
-async function toggleRoster(event) {
-  if (state.openRosterId === event.id) {
-    state.openRosterId = null;
-    state.roster = null;
-    state.rosterError = null;
-    renderTable();
-    return;
-  }
-  state.openRosterId = event.id;
+export async function enterAdminEventRoster(id) {
+  const view = document.getElementById("admin-event-roster-view");
+  if (!view) return;
+  const mine = ++rosterToken;
+
+  state.rosterEventId = id;
   state.roster = null;
   state.rosterError = null;
+  state.rosterChips = defaultChipSelection(); // fresh default per entry (waitlist on, evicted/cancelled off)
+
+  const cached = state.events.find((e) => String(e.id) === String(id));
+  if (cached) {
+    state.rosterEvent = cached;
+    state.rosterLoading = true;
+    renderRosterPage(view);
+    await reloadRoster(id);
+    return;
+  }
+
+  // Not in memory (deep-link / refresh straight onto the roster URL): fetch the event first so the header
+  // + capacity default render, then load the roster.
+  state.rosterEvent = null;
   state.rosterLoading = true;
-  renderTable();
-  await reloadRoster(event.id);
+  renderRosterPage(view);
+  try {
+    const event = await eventApi(`/api/v1/admin/events/${encodeURIComponent(id)}`);
+    if (mine !== rosterToken) return; // navigated away while the fetch was in flight
+    state.rosterEvent = event || null;
+  } catch {
+    if (mine !== rosterToken) return;
+    // A failed event fetch is non-fatal — the roster load below surfaces the real error; the header just
+    // falls back to a generic title.
+  }
+  if (mine !== rosterToken) return;
+  renderRosterPage(view);
+  await reloadRoster(id);
 }
 
-/** (Re)load the open event's roster into state and repaint the panel. */
+/** (Re)load the current roster page's roster payload into state and repaint the page. */
 async function reloadRoster(eventId) {
-  if (state.openRosterId !== eventId) return; // panel closed / switched while we were away
+  if (String(state.rosterEventId) !== String(eventId)) return; // navigated away / switched while we were away
+  const view = document.getElementById("admin-event-roster-view");
   state.rosterLoading = true;
   state.rosterError = null;
-  renderTable();
+  if (view) renderRosterPage(view);
   try {
-    const roster = await eventApi(`/api/v1/admin/events/${eventId}/roster`);
-    if (state.openRosterId !== eventId) return;
+    const roster = await eventApi(`/api/v1/admin/events/${encodeURIComponent(eventId)}/roster`);
+    if (String(state.rosterEventId) !== String(eventId)) return;
     state.roster = roster;
   } catch (err) {
-    if (state.openRosterId !== eventId) return;
+    if (String(state.rosterEventId) !== String(eventId)) return;
     state.rosterError = err instanceof ApiError ? err.message : "Couldn't load the roster.";
   } finally {
     state.rosterLoading = false;
-    renderTable();
+    if (view) renderRosterPage(view);
   }
 }
 
-/** The full-width table row hosting the open roster panel for `event`. */
-function rosterPanelRow(event) {
-  return el(
-    "tr",
-    { class: "tm-event-roster-row", "data-testid": "admin-event-roster-row", dataset: { eventId: String(event.id) } },
-    [el("td", { colspan: String(COLUMNS.length + 1) }, [rosterPanel(event)])],
-  );
+/** Render the whole roster page into its view: back header, then the panel body (loading/error/content). */
+function renderRosterPage(view) {
+  const event = state.rosterEvent || { id: state.rosterEventId, heading: "event", capacity: null };
+  const back = el("a", { class: "tm-btn tm-btn-sm", id: "admin-event-roster-back", href: ADMIN_EVENTS_ROUTE }, "← Events");
+  const header = el("div", { class: "tm-admin-head tm-event-form-head" }, [
+    el("h2", {}, [doodle("calendar", { class: "tm-doodle-header" }), `Roster · ${event.heading || "event"}`]),
+    back,
+  ]);
+  clear(view).append(header, rosterPanel(event));
 }
 
-/** The roster panel body: capacity control + over-cap warning, force-add form, and the attendee list. */
+/** The roster panel body: summary, capacity control + over-cap warning, force-add form, chips + list. */
 function rosterPanel(event) {
   const panel = el("div", { class: "tm-roster-panel", "data-testid": "admin-event-roster-panel" });
 
@@ -696,7 +748,7 @@ function rosterPanel(event) {
     );
     return panel;
   }
-  const roster = state.roster || { capacity: event.capacity, going: 0, waitlist: 0, entries: [] };
+  const roster = state.roster || { capacity: event.capacity, going: 0, waitlist: 0, entries: [], pastEntries: [] };
   panel.append(
     el("div", { class: "tm-roster-head" }, [
       el("strong", { text: `Roster · ${event.heading || "event"}` }),
@@ -707,9 +759,54 @@ function rosterPanel(event) {
     ]),
     capacityControl(event, roster),
     forceAddForm(event),
+    rosterFilterChipRow(),
     attendeeList(event, roster),
   );
   return panel;
+}
+
+/**
+ * The include/exclude filter chips (TM-1115) — one `aria-pressed` toggle per non-Going roster state
+ * (Waitlist / Evicted / Cancelled; Going is always shown, so it's not a chip). Toggling a chip flips its
+ * state key in `state.rosterChips` and repaints the attendee list from the ALREADY-FETCHED set — NO
+ * refetch. Defaults come from defaultChipSelection() (waitlist on, evicted/cancelled off). Built on the
+ * shared `.tm-chip` CSS; `aria-pressed="true"` lights a chip up.
+ */
+function rosterFilterChipRow() {
+  const row = el("div", {
+    class: "tm-chips tm-roster-filter-chips",
+    id: "admin-roster-filter-chips",
+    role: "group",
+    "aria-label": "Show which attendee states",
+  });
+  const rebuild = () => {
+    clear(row);
+    for (const chip of ROSTER_FILTER_CHIPS) {
+      const on = state.rosterChips.has(chip.key);
+      row.append(
+        el(
+          "button",
+          {
+            type: "button",
+            class: "tm-chip",
+            "aria-pressed": on ? "true" : "false",
+            dataset: { rosterState: chip.key },
+            onClick: () => {
+              if (state.rosterChips.has(chip.key)) state.rosterChips.delete(chip.key);
+              else state.rosterChips.add(chip.key);
+              rebuild();
+              // Repaint just the list from the already-fetched roster — no refetch (client-side filter).
+              const view = document.getElementById("admin-event-roster-view");
+              if (view) renderRosterPage(view);
+            },
+          },
+          chip.label,
+        ),
+      );
+    }
+  };
+  rebuild();
+  return row;
 }
 
 /**
@@ -787,33 +884,69 @@ function forceAddForm(event) {
   ]);
 }
 
-/** The attendee list (TM-592): GOING (with over-cap flag) then WAITLISTED, each with an Evict button. */
+/**
+ * The attendee list (TM-1115) — merges the live `entries` with the `pastEntries` history (TM-1114) into
+ * ONE list via the pure mergeRosterRows(), then filters it by the include/exclude chip selection with NO
+ * refetch (filterRosterRows). Each row shows a 4-state badge (Going / Waitlist / Evicted / Cancelled), an
+ * over-cap flag for a GOING attendee sitting over cap, and — for a LIVE row that also has a past exit
+ * (rejoined-after-evict / -cancel) — a history affordance (latest past-state + timestamp). Only a LIVE
+ * GOING / WAITLISTED row is evictable; a past (evicted/cancelled) row is history, no Evict.
+ */
 function attendeeList(event, roster) {
-  const entries = Array.isArray(roster.entries) ? roster.entries : [];
-  if (!entries.length) {
+  const merged = mergeRosterRows(roster);
+  const visible = filterRosterRows(merged, state.rosterChips);
+  if (!merged.length) {
     return el("div", { class: "tm-roster-section" }, [
+      el("label", { class: "tm-roster-label", text: "Attendees" }),
       el("p", { class: "tm-muted", text: "No attendees yet." }),
     ]);
   }
-  const rows = entries.map((entry) => {
-    const isGoing = String(entry.state).toUpperCase() === "GOING";
-    const badgeCls = isGoing ? "tm-badge-ok" : "tm-badge-info";
-    return el("li", { class: "tm-roster-attendee", dataset: { userId: String(entry.userId) } }, [
-      el("span", { class: "tm-roster-attendee-name", text: entry.displayName || `User ${entry.userId}` }),
-      el("span", { class: `tm-badge ${badgeCls}`, text: isGoing ? "Going" : "Waitlist" }),
-      entry.overCapacity
+  if (!visible.length) {
+    return el("div", { class: "tm-roster-section" }, [
+      el("label", { class: "tm-roster-label", text: "Attendees" }),
+      el("p", { class: "tm-muted", "data-testid": "admin-roster-empty-filtered", text: "No attendees match the selected states." }),
+    ]);
+  }
+  const rows = visible.map((row) => {
+    const badge = rosterStateBadge(row.state);
+    const badgeCls = badgeClassForTone(badge.tone);
+    const isLive = row.state === "GOING" || row.state === "WAITLISTED";
+    // The history affordance for a rejoined-after-evict/-cancel live row: latest past state + when (the
+    // shared relativeTime() from ui.js gives the "2 days ago" text + a full-timestamp title).
+    const histWhen = row.history ? relativeTime(row.history.at) : null;
+    const history = row.history
+      ? el("span", {
+          class: "tm-muted tm-roster-history",
+          "data-testid": "admin-roster-history",
+          title: `Previously ${rosterStateBadge(row.history.lastState).label.toLowerCase()}${row.history.byAdmin ? " by an admin" : ""} · ${histWhen.title}`,
+          text: `· previously ${rosterStateBadge(row.history.lastState).label} ${histWhen.text}`,
+        })
+      : null;
+    // A past row carries its own timestamp (when the exit was recorded).
+    const pastRel = !isLive && row.at ? relativeTime(row.at) : null;
+    const pastWhen = pastRel
+      ? el("span", { class: "tm-muted tm-roster-history", title: pastRel.title, text: pastRel.text })
+      : null;
+    return el("li", { class: "tm-roster-attendee", dataset: { userId: String(row.userId), rosterState: row.state } }, [
+      el("span", { class: "tm-roster-attendee-name", text: row.displayName || `User ${row.userId}` }),
+      el("span", { class: `tm-badge ${badgeCls}`, "data-testid": "admin-roster-badge", text: badge.label }),
+      row.overCapacity
         ? el("span", { class: "tm-badge tm-badge-off", "data-testid": "admin-roster-overcap-tag", text: "Over cap" })
         : null,
-      el(
-        "button",
-        {
-          class: "tm-btn tm-btn-sm tm-btn-danger",
-          type: "button",
-          "aria-label": `Evict ${entry.displayName || "user " + entry.userId}`,
-          onClick: () => evictAttendee(event, entry),
-        },
-        "Evict",
-      ),
+      history,
+      pastWhen,
+      isLive
+        ? el(
+            "button",
+            {
+              class: "tm-btn tm-btn-sm tm-btn-danger",
+              type: "button",
+              "aria-label": `Evict ${row.displayName || "user " + row.userId}`,
+              onClick: () => evictAttendee(event, row),
+            },
+            "Evict",
+          )
+        : null,
     ]);
   });
   return el("div", { class: "tm-roster-section" }, [
@@ -2549,5 +2682,5 @@ export function enterAdminEvents() {
 
 // Bridge for the router (which imports this) + ad-hoc use.
 if (typeof window !== "undefined") {
-  window.tmAdminEvents = { enterAdminEvents, enterAdminEventForm, loadEvents };
+  window.tmAdminEvents = { enterAdminEvents, enterAdminEventForm, enterAdminEventRoster, loadEvents };
 }
