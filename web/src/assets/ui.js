@@ -343,8 +343,16 @@ export function confirmDialog({
  * restored to the opener on close — because both share `openModalLayer` (TM-947, closing the parity
  * gap where modal() previously had none of these).
  */
-export function modal(title, content) {
-  const close = () => teardown();
+export function modal(title, content, { onClose = null } = {}) {
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    teardown();
+    // Fire once, AFTER teardown, for ANY close path (button, Esc, backdrop) so callers can resolve a
+    // "dismissed" outcome without polling the DOM (TM-1061 clone offset picker).
+    if (typeof onClose === "function") onClose();
+  };
   const closeBtn = el(
     "button",
     { class: "tm-toast-close", type: "button", "aria-label": "Close", onClick: close },

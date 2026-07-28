@@ -65,6 +65,10 @@ import {
   blankFormModel,
   isDirtyDraft,
   DIRTY_COMPARE_FIELDS,
+  CLONE_OFFSET_PRESETS,
+  shiftDraftTimes,
+  buildCloneDraft,
+  pastStartWarning,
   ageBandToMinMax,
   minMaxToAgeBand,
   deriveVenueTimezone,
@@ -1280,4 +1284,147 @@ test("blankFormModel: every compared field is blank except the in-person format 
     if (key === "format") assert.equal(blank[key], "inperson", "a cleared form defaults to In person");
     else assert.equal(blank[key], "", `${key} must be blank on a cleared create form`);
   }
+});
+
+// --- clone / duplicate an event with a time offset (TM-1061) ----------------------------------
+
+// A representative source EventResponse for the clone tests — the shape toFormModel reads. Europe/London
+// so the DST behaviour is real. startAt in JULY (BST, +1) so the wall-clock ⇄ UTC round-trip is exercised.
+const CLONE_SOURCE = Object.freeze({
+  id: 42,
+  heading: "Coffee & Code",
+  description: "Bring a laptop.",
+  locationText: "Marhaba Cafe, 12 High St",
+  city: "London",
+  timezone: "Europe/London",
+  startAt: "2026-07-10T17:00:00.000Z", // 18:00 London (BST)
+  endAt: "2026-07-10T20:00:00.000Z", // 21:00 London — a 3h event
+  visibilityStart: "2026-07-03T08:00:00.000Z", // a week before
+  visibilityEnd: "2026-07-10T16:00:00.000Z", // 1h before start
+  capacity: 20,
+  locationRevealHours: 24,
+  ageMin: 21,
+  ageMax: 40,
+  pricePence: 1000,
+  imagePath: "event-images/42",
+  openingMessage: "Welcome everyone — say hi in the chat!",
+  status: "PUBLISHED",
+});
+
+test("CLONE_OFFSET_PRESETS is exactly +7 days and +7 hours (LOCKED, TM-1061)", () => {
+  const labels = CLONE_OFFSET_PRESETS.map((p) => p.label);
+  assert.deepEqual(labels, ["+7 days", "+7 hours"], "round 1 offers ONLY these two presets (no free-form field)");
+  assert.equal(CLONE_OFFSET_PRESETS[0].ms, 7 * 24 * 3_600_000, "+7 days in ms");
+  assert.equal(CLONE_OFFSET_PRESETS[1].ms, 7 * 3_600_000, "+7 hours in ms");
+});
+
+test("shiftDraftTimes: +7 days shifts all four datetimes together, keeps the interval (TM-1061)", () => {
+  const base = toFormModel(CLONE_SOURCE);
+  const shifted = shiftDraftTimes(base, 7 * 24 * 3_600_000);
+  // Each field moves +7 calendar days at the same London wall-clock (no DST crossing in July).
+  assert.equal(shifted.startAt, "2026-07-17T18:00");
+  assert.equal(shifted.endAt, "2026-07-17T21:00");
+  assert.equal(shifted.visibilityStart, "2026-07-10T09:00"); // was 2026-07-03T09:00 (BST)
+  assert.equal(shifted.visibilityEnd, "2026-07-17T17:00");
+  // The base is not mutated.
+  assert.equal(base.startAt, "2026-07-10T18:00");
+});
+
+test("shiftDraftTimes: +7 hours lands later the same day (TM-1061)", () => {
+  const base = toFormModel(CLONE_SOURCE);
+  const shifted = shiftDraftTimes(base, 7 * 3_600_000);
+  assert.equal(shifted.startAt, "2026-07-11T01:00"); // 18:00 + 7h = 01:00 next day
+  assert.equal(shifted.endAt, "2026-07-11T04:00");
+  // Non-datetime fields are copied through untouched.
+  assert.equal(shifted.heading, "Coffee & Code");
+  assert.equal(shifted.capacity, "20");
+});
+
+test("shiftDraftTimes: a blank optional datetime STAYS blank (open-ended event, TM-1061)", () => {
+  const openEnded = { ...CLONE_SOURCE, endAt: null };
+  const base = toFormModel(openEnded);
+  assert.equal(base.endAt, "", "open-ended event has a blank endAt to begin with");
+  const shifted = shiftDraftTimes(base, 7 * 24 * 3_600_000);
+  assert.equal(shifted.endAt, "", "a blank endAt is never invented by the shift");
+  assert.equal(shifted.startAt, "2026-07-17T18:00", "the present datetimes still shift");
+});
+
+test("shiftDraftTimes: a zero / non-finite offset is a no-op (TM-1061)", () => {
+  const base = toFormModel(CLONE_SOURCE);
+  assert.deepEqual(shiftDraftTimes(base, 0), base);
+  assert.deepEqual(shiftDraftTimes(base, NaN), base);
+});
+
+test("shiftDraftTimes: uses REAL-ms arithmetic across the autumn fall-back (TM-1061)", () => {
+  // London clocks go back at 02:00 on 2026-10-25 (BST→GMT), so the week 2026-10-24 → 2026-10-31 gains an
+  // extra hour. shiftDraftTimes adds 7×24h of REAL time (the same DST-correct span the scheduling chips
+  // use), so an 18:00 BST start lands at 17:00 GMT — one wall-clock hour earlier, because the real elapsed
+  // week was 169h, not 168h. This proves the shift is real-ms (not a naive wall-clock string add, which
+  // would wrongly report 18:00 and silently drift the actual instant by an hour). The interval between the
+  // paired fields is likewise preserved on the real timeline.
+  const dstSource = { ...CLONE_SOURCE, startAt: "2026-10-24T17:00:00.000Z", endAt: "2026-10-24T20:00:00.000Z", visibilityStart: null, visibilityEnd: null };
+  const base = toFormModel(dstSource);
+  assert.equal(base.startAt, "2026-10-24T18:00", "18:00 London on 2026-10-24 (BST)");
+  assert.equal(base.endAt, "2026-10-24T21:00", "21:00 London on 2026-10-24 (BST)");
+  const shifted = shiftDraftTimes(base, 7 * 24 * 3_600_000);
+  assert.equal(shifted.startAt, "2026-10-31T17:00", "+7 real days lands at 17:00 GMT (the week gained an hour)");
+  assert.equal(shifted.endAt, "2026-10-31T20:00", "the 3h interval is preserved on the real timeline");
+});
+
+test("buildCloneDraft: copies everything, shifts the times, BLANKS the opening message (TM-1061)", () => {
+  const draft = buildCloneDraft(CLONE_SOURCE, 7 * 24 * 3_600_000);
+  // Copied verbatim (the edit-prefill model).
+  assert.equal(draft.heading, "Coffee & Code");
+  assert.equal(draft.description, "Bring a laptop.");
+  assert.equal(draft.locationText, "Marhaba Cafe, 12 High St");
+  assert.equal(draft.city, "London");
+  assert.equal(draft.timezone, "Europe/London");
+  assert.equal(draft.capacity, "20");
+  assert.equal(draft.locationRevealHours, "24");
+  assert.equal(draft.ageMin, "21");
+  assert.equal(draft.ageMax, "40");
+  assert.equal(draft.price, "10"); // £10 from 1000 pence
+  // The source image is preserved on the draft so the DOM layer can re-upload it to a NEW object.
+  assert.equal(draft.imagePath, "event-images/42");
+  // Times shifted +7 days.
+  assert.equal(draft.startAt, "2026-07-17T18:00");
+  // Opening message BLANKED (LOCKED decision) — never carry stale text.
+  assert.equal(draft.openingMessage, "", "opening message must be blank on clone");
+});
+
+test("buildCloneDraft: a CANCELLED source clones to a normal draft (no cancelled status carried) (TM-1061)", () => {
+  const cancelled = { ...CLONE_SOURCE, status: "CANCELLED" };
+  const draft = buildCloneDraft(cancelled, 0);
+  // The draft is a plain create-form model — it carries no `status` field at all, so the clone is a fresh
+  // PUBLISHED-on-create event, never a cancelled one.
+  assert.equal(draft.status, undefined);
+  assert.equal(draft.heading, "Coffee & Code");
+});
+
+test("buildCloneDraft: the produced draft passes validateEventDraft (create) (TM-1061)", () => {
+  // A cloned draft must be a VALID create draft (nothing required left blank) so the admin can Save it
+  // without fixing anything but (optionally) a past start — proves the shift + blank keep it well-formed.
+  const draft = buildCloneDraft(CLONE_SOURCE, 7 * 24 * 3_600_000);
+  const { canSave, errors } = validateEventDraft(draft, { requireForCreate: true });
+  assert.equal(canSave, true, `cloned draft should be a valid create draft; errors: ${JSON.stringify(errors)}`);
+});
+
+test("pastStartWarning: warns when the shifted start is still in the past (TM-1061)", () => {
+  // An OLD event: start on 2020-01-01. Even +7 hours leaves it deep in the past → warn.
+  const old = { ...CLONE_SOURCE, startAt: "2020-01-01T12:00:00.000Z", endAt: null, visibilityStart: null, visibilityEnd: null };
+  const draft = buildCloneDraft(old, 7 * 3_600_000);
+  const warning = pastStartWarning(draft, Date.parse("2026-07-24T00:00:00.000Z"));
+  assert.match(warning, /past/i, "a past shifted start must surface a visible warning");
+});
+
+test("pastStartWarning: no warning when the shifted start is in the future (TM-1061)", () => {
+  const draft = buildCloneDraft(CLONE_SOURCE, 7 * 24 * 3_600_000); // shifts to 2026-07-17
+  const warning = pastStartWarning(draft, Date.parse("2026-07-01T00:00:00.000Z")); // "now" is before the start
+  assert.equal(warning, "", "a future start must NOT warn");
+});
+
+test("pastStartWarning: blank/unparseable start is not this warning's concern (TM-1061)", () => {
+  assert.equal(pastStartWarning({ startAt: "", timezone: "Europe/London" }), "");
+  assert.equal(pastStartWarning({ startAt: "not-a-date", timezone: "Europe/London" }), "");
+  assert.equal(pastStartWarning({}), "");
 });

@@ -1664,6 +1664,18 @@ h3,
     margin-top: 1rem;
 }
 
+/* Clone/Duplicate offset-preset picker (TM-1061): the two LOCKED offset presets stack as full-width
+   buttons in the modal body so each is a large, obvious tap target on a phone. */
+.tm-clone-offset-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+.tm-clone-offset-choices .tm-clone-offset-btn {
+    width: 100%;
+}
+
 .tm-modal-body {
     margin-top: 0.75rem;
     /* Scroll the (possibly long) modal content — e.g. the New event form — so its submit button is
