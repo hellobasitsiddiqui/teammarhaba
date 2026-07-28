@@ -10,15 +10,21 @@
 // `nameFormatError` — rather than forking a weaker copy. An admin edit therefore can never accept a
 // value the user's own edit would reject (off-list city, out-of-band age, bad phone, numeric name).
 
-import { validateProfileField, cityChoiceError, CITY_OPTIONS, NOTIFICATION_PREFS } from "./profile-core.js";
+import { validateProfileField, cityChoiceError, CITY_OPTIONS } from "./profile-core.js";
 
 /**
- * The admin-editable profile fields and their client-side rules, mirroring the backend's
- * AdminUpdateProfileRequest bean validation + the shared UserService.applyProfileFields rules — the
- * SAME rule set the self-edit form (profile.js FIELDS) declares. Identity/role/enabled are NOT here
+ * The admin PROFILE fields, in display order, and their client-side rules — mirroring the backend's
+ * AdminUpdateProfileRequest bean validation + the shared UserService.applyProfileFields rules (the
+ * SAME rule set the self-edit form (profile.js FIELDS) declares). Identity/role/enabled are NOT here
  * (out of scope — governed by the TM-111 endpoints); themeAccent/themeSketchy/interests are also out
  * (the user's own personalisation, not admin-edited).
- * @type {ReadonlyArray<{key:string,label:string,type:string,options?:Array,min?:number,max?:number,maxLength?:number,hint?:string}>}
+ *
+ * A field marked `readOnly: true` is DISPLAY-ONLY: the admin sees its current value in the summary
+ * but gets no editable control, and it is never validated or sent in a PATCH. `notificationPref` is
+ * read-only for admins (TM-1109) — the notification preference is the user's own personal delivery
+ * choice, edited only via their own profile, so the backend refuses an admin change (422). The
+ * summary loop uses this full list; the EDITABLE subset (below) drives the form + validation + patch.
+ * @type {ReadonlyArray<{key:string,label:string,type:string,readOnly?:boolean,options?:Array,min?:number,max?:number,maxLength?:number,hint?:string}>}
  */
 export const ADMIN_PROFILE_FIELDS = Object.freeze([
   { key: "firstName", label: "First name", type: "text", maxLength: 255, hint: "Letters, spaces, hyphens and apostrophes only." },
@@ -27,14 +33,30 @@ export const ADMIN_PROFILE_FIELDS = Object.freeze([
   { key: "age", label: "Age", type: "number", min: 18, max: 99, hint: "Between 18 and 99." },
   { key: "phone", label: "Phone", type: "tel", maxLength: 32, hint: "Full number with country code, e.g. +44 20 7946 0958." },
   {
+    // TM-1109: VIEW-ONLY for admins. Shown in the read-only summary (so an admin can see the user's
+    // current choice) but NOT rendered as an editable control, never validated, never PATCHed — and
+    // the backend rejects an attempted change (422). Kept in this list so the summary still displays it.
     key: "notificationPref",
     label: "Notifications",
     type: "select",
+    readOnly: true,
     options: [["EMAIL", "Email"], ["PUSH", "Push"], ["BOTH", "Email and push"]],
   },
   { key: "timezone", label: "Time zone", type: "text", maxLength: 64, hint: "IANA name, e.g. Europe/London." },
   { key: "locale", label: "Locale", type: "text", maxLength: 35, hint: "BCP-47 tag, e.g. en-GB." },
 ]);
+
+/**
+ * The admin-EDITABLE subset of {@link ADMIN_PROFILE_FIELDS} — every field an admin may actually change,
+ * i.e. all but the `readOnly` ones (TM-1109: notificationPref is view-only). This drives the edit form
+ * (buildForm), the whole-form validation and the changed-fields PATCH, so a read-only field can never
+ * get an editable control, be validated, or be sent to the server. The display summary keeps using the
+ * full list so a read-only field is still SHOWN.
+ * @type {ReadonlyArray<{key:string,label:string,type:string,options?:Array,min?:number,max?:number,maxLength?:number,hint?:string}>}
+ */
+export const EDITABLE_ADMIN_PROFILE_FIELDS = Object.freeze(
+  ADMIN_PROFILE_FIELDS.filter((f) => !f.readOnly),
+);
 
 /**
  * Validate one admin-edit field's raw value, reusing the SAME shared validators as the self-edit
@@ -74,7 +96,9 @@ export function validateAdminField(field, raw, saved) {
  */
 export function validateAdminForm(values, saved) {
   const errors = {};
-  for (const field of ADMIN_PROFILE_FIELDS) {
+  // Only the EDITABLE fields are validated — a read-only field (notificationPref, TM-1109) has no
+  // editable control, so it must never be validated or flagged.
+  for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) {
     const err = validateAdminField(field, values[field.key], saved);
     if (err) errors[field.key] = err;
   }
@@ -99,7 +123,9 @@ export function validateAdminForm(values, saved) {
 export function buildAdminProfilePatch(values, saved) {
   const patch = {};
   const savedProfile = saved || {};
-  for (const field of ADMIN_PROFILE_FIELDS) {
+  // Only the EDITABLE fields can be sent — a read-only field (notificationPref, TM-1109) is never
+  // included in the PATCH, so an admin can never mutate it (the backend also rejects a change, 422).
+  for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) {
     const raw = values[field.key];
     if (raw == null) continue;
     const trimmed = String(raw).trim();
@@ -113,13 +139,6 @@ export function buildAdminProfilePatch(values, saved) {
       if (!Number.isInteger(n)) continue; // invalid; validation already flags it, never send garbage
       if (savedValue != null && n === Number(savedValue)) continue;
       patch.age = n;
-      continue;
-    }
-
-    if (field.key === "notificationPref") {
-      if (trimmed === "" || !NOTIFICATION_PREFS.has(trimmed)) continue;
-      if (trimmed === savedValue) continue;
-      patch.notificationPref = trimmed;
       continue;
     }
 

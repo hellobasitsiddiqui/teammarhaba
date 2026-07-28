@@ -92,6 +92,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * An admin PATCH that tries to CHANGE a view-only profile field (notificationPref, TM-1109) -> 422.
+     * The request is well-formed but the admin endpoint deliberately refuses to mutate the user's own
+     * notification preference; the user's own self-edit is unaffected.
+     */
+    @ExceptionHandler(AdminImmutableFieldException.class)
+    public ProblemDetail handleAdminImmutableField(AdminImmutableFieldException ex) {
+        return Problems.unprocessable(ex.getMessage());
+    }
+
+    /**
      * A locked-name rename by a user with event history (TM-907) -> 422 with a DISTINCT problem
      * {@code type} ({@code .../name-locked}) and stable detail, so the web renders the name fields
      * read-only rather than surfacing a raw error. The admin correction path is exempt (never throws).

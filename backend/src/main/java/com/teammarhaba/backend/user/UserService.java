@@ -14,6 +14,7 @@ import com.teammarhaba.backend.interests.InterestSelectionConfig;
 import com.teammarhaba.backend.interests.UserInterest;
 import com.teammarhaba.backend.interests.UserInterestRepository;
 import com.teammarhaba.backend.membership.SubscriptionRepository;
+import com.teammarhaba.backend.web.AdminImmutableFieldException;
 import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.NameLockedException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
@@ -311,15 +312,36 @@ public class UserService {
      *       a no-op edit (every field already at its value) writes nothing.</li>
      * </ul>
      *
-     * @param id        the target account's database id
-     * @param update    the profile fields to apply (partial: a {@code null} field is left unchanged)
-     * @param callerUid the acting admin's Firebase uid (the audit actor)
+     * <p><b>notificationPref is VIEW-ONLY for admins (TM-1109)</b> — an admin may see the target's
+     * current preference but may not change it (it is the user's own personal delivery choice, edited
+     * only via their own {@code PATCH /api/v1/me}). If {@code requestedNotificationPref} is non-null and
+     * DIFFERS from the target's stored value, this throws an {@link AdminImmutableFieldException} (422)
+     * BEFORE any field is applied — so a rejected attempt writes nothing and is not audited. A re-sent
+     * no-op (the same value) or a {@code null} (field omitted) is accepted; note {@code update} always
+     * carries a {@code null} notificationPref (stripped in {@code AdminUpdateProfileRequest}), so the
+     * shared application path can never mutate it regardless.
+     *
+     * @param id                        the target account's database id
+     * @param update                    the profile fields to apply (partial: {@code null} = unchanged;
+     *                                  its {@code notificationPref} is always {@code null})
+     * @param requestedNotificationPref the notification preference the admin PATCH carried (may be
+     *                                  {@code null}); used only to REJECT a change, never applied
+     * @param callerUid                 the acting admin's Firebase uid (the audit actor)
      * @return the updated account
      */
     @Transactional
-    public User adminUpdateProfile(long id, ProfileUpdate update, String callerUid) {
+    public User adminUpdateProfile(
+            long id, ProfileUpdate update, NotificationPref requestedNotificationPref, String callerUid) {
         User user = users.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found."));
+        // TM-1109: notificationPref is view-only for admins. Reject an attempted CHANGE up front (422)
+        // so nothing is written or audited; a re-sent no-op (same value) or an omitted field is fine.
+        // Note: the target may be found FIRST above so a missing id stays a 404 (no existence leak) even
+        // when the body also carries a pref change — the not-found signal must not be masked by this 422.
+        if (requestedNotificationPref != null && user.getNotificationPref() != requestedNotificationPref) {
+            throw new AdminImmutableFieldException(
+                    "A user's notification preference can't be changed by an admin.");
+        }
         // TM-907: the admin correction path is EXEMPT from the name lock (enforceNameLock = false) —
         // an admin must still be able to correct a locked user's name (typo / legal change). It stays
         // audited as ADMIN_USER_PROFILE_EDITED below, so the correction leaves a trail.
