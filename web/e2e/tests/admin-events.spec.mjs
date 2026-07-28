@@ -316,3 +316,92 @@ test("@admin @admin-events event price: presets + a custom amount persist and re
     await client.end();
   }
 });
+
+// TM-1101: the dirty-guard + Clear/Reset in EDIT mode — the path the create-mode capture script can't
+// cover, and exactly the edit-mode in-memory-row class of behaviour that bit TM-1076. Proves against the
+// REAL stack that, on an existing event opened for edit:
+//   1. changing a field makes the form dirty (the #event-reset button is present),
+//   2. Reset restores every field to the event's SAVED value (heading returns to its saved text, NOT blank),
+//   3. a dirty exit (back link) raises the "Discard changes?" confirm; "Keep editing" keeps the form + value,
+//   4. a PRISTINE edit-open exits SILENTLY (no dialog) straight to the list.
+// Reuses the same sign-in + hub nav + create-an-event setup as the tests above.
+test("@admin @admin-events edit-mode dirty-guard: Reset restores saved values; dirty exit confirms, pristine is silent (TM-1101)", async ({ page }) => {
+  const HEADING_RESET = `E2E Reset Guard ${Date.now()}`;
+  const now = Date.now();
+  const start = new Date(now + 30 * 864e5);
+  const visStart = new Date(now - 864e5);
+  const visEnd = new Date(now + 60 * 864e5);
+
+  // Sign in as ADMIN + open the events console (same path as the tests above).
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+  await openAdminHub(page);
+  await page.click('.admin-hub-row[href="#/admin/events"]');
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+
+  // Create a minimal event to edit.
+  await page.click("#admin-events-new");
+  await expect(page.locator("#event-form")).toBeVisible();
+  await page.fill("#event-heading", HEADING_RESET);
+  await page.fill("#event-description", "Reset-guard event for the TM-1101 e2e.");
+  await page.fill("#event-location", "Marhaba Cafe, 12 High St");
+  await page.locator("#event-more-options-toggle").click();
+  await page.locator("#event-timezone").selectOption("UTC");
+  await page.fill("#event-start", localValue(start));
+  await page.fill("#event-visibility-start", localValue(visStart));
+  await page.fill("#event-visibility-end", localValue(visEnd));
+  const createResponse = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/admin/events") && r.request().method() === "POST",
+  );
+  await page.click("#event-save");
+  const created = await (await createResponse).json();
+  expect(created.heading).toBe(HEADING_RESET);
+
+  // ── Re-open the edit form. Pristine on open: the heading is the SAVED value. ────────────────────
+  await page.goto(`/#/admin/events/${created.id}/edit`);
+  await expect(page.locator("#event-form")).toBeVisible();
+  await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET);
+  // The Clear/Reset button exists in edit mode (labelled "Reset").
+  const reset = page.locator("#event-reset");
+  await expect(reset).toBeVisible();
+
+  // ── 1+2: dirty the heading, then Reset → it returns to the SAVED value (not blank). ─────────────
+  await page.fill("#event-heading", `${HEADING_RESET} DIRTY`);
+  await expect(page.locator("#event-heading")).toHaveValue(`${HEADING_RESET} DIRTY`);
+  await reset.click();
+  // Reset is itself confirmed (it discards changes) — confirm it.
+  const resetDialog = page.locator(".tm-dialog");
+  await expect(resetDialog).toBeVisible();
+  await expect(resetDialog).toContainText("Reset your changes?");
+  await resetDialog.getByRole("button", { name: "Reset" }).click();
+  // After the re-mount the heading is back to the SAVED value — the load-bearing edit-mode assertion.
+  await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET);
+  // And the form is now pristine again: a fresh dirty-check baseline was re-snapshotted.
+
+  // ── 3: dirty again, click the back link → the "Discard changes?" confirm appears; Keep editing stays. ─
+  await page.fill("#event-heading", `${HEADING_RESET} DIRTY AGAIN`);
+  await page.locator("#admin-event-form-back").click();
+  const exitDialog = page.locator(".tm-dialog");
+  await expect(exitDialog).toBeVisible();
+  await expect(exitDialog).toContainText("Discard your changes?");
+  // "Keep editing" dismisses the dialog and STAYS on the edit form with the dirty value intact.
+  await exitDialog.getByRole("button", { name: "Keep editing" }).click();
+  await expect(page.locator(".tm-dialog")).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#/admin/events/${created.id}/edit$`));
+  await expect(page.locator("#event-heading")).toHaveValue(`${HEADING_RESET} DIRTY AGAIN`);
+
+  // ── 4: a PRISTINE edit-open exits SILENTLY — re-open fresh, click back, land on the list, no dialog. ─
+  await page.goto(`/#/admin/events/${created.id}/edit`);
+  await expect(page.locator("#event-form")).toBeVisible();
+  await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET); // saved value (the DIRTY edit was never saved)
+  await page.locator("#admin-event-form-back").click();
+  // No confirm dialog on a pristine exit; it navigates straight back to the list.
+  await expect(page).toHaveURL(/#\/admin\/events$/);
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+  await expect(page.locator(".tm-dialog")).toHaveCount(0);
+});
