@@ -221,6 +221,9 @@ const FIELDS = [
     rows: 2,
     placeholder: "A short line about you",
     hint: "A short line about you — up to 160 characters.",
+    // TM-1154: the bio is a tall free-text textarea — span the FULL width of the 2-column edit grid
+    // rather than pairing lopsidedly beside a single-line field. buildField adds .tm-form-field-wide.
+    wide: true,
   },
   {
     key: "phone",
@@ -1822,7 +1825,7 @@ function buildField(field) {
   // `phoneVerify`. No verify controls on any other field.
   const verifyNodes = field.key === "phone" ? buildPhoneVerify(id, describedBy) : [];
 
-  const wrapper = el("div", { class: "tm-form-field" }, [
+  const wrapper = el("div", { class: `tm-form-field${field.wide ? " tm-form-field-wide" : ""}` }, [
     el("label", { class: "tm-field-label", for: id, text: field.label }),
     control,
     hint,
