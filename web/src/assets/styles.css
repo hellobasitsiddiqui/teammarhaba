@@ -4434,6 +4434,17 @@ html {
     }
 }
 
+/* TM-1102: the admin consoles are DENSE — a sticky heading row above a NON-sticky stats bar + a long
+ * table — so on scroll the half-scrolled stat cards crowd/bleed at the stuck header's bottom edge, and it
+ * reads as content "leaking" behind the header (bug raised after TM-1090 made .admin-console .tm-admin-head
+ * sticky). Give the admin header a CRISP opaque edge: a hard 2px bottom line + a soft drop-shadow, BOTH
+ * painted via box-shadow (NO layout shift — the content-first geometry / profile-shell.spec stays intact),
+ * so passing content reads as clearly BEHIND the header rather than crowding it. Scoped to .admin-console
+ * (the surface with the leak); the other sticky headers (chat/home/profile/events) keep their plain edge. */
+.admin-console .tm-admin-head {
+    box-shadow: 0 2px 0 var(--border), 0 10px 12px -8px rgba(0, 0, 0, 0.18);
+}
+
 /* Heading-first (TM-908/TM-910 ACs, now route-independent): with no nav row in flow, collapse the
  * old row-clearing top margins so the screen heading shares the bell's band, not a band below it. */
 #profile-view.profile-view {
