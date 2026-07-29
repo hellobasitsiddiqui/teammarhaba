@@ -18,7 +18,7 @@ import {
 } from "./auth.js";
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 import { isWebViewEnv } from "./auth-env.js";
-import { authErrorMessage } from "./login-error.js";
+import { authErrorMessage, hasCountryCode } from "./login-error.js";
 import { attachOtpInput } from "./otp-input.js";
 import { makeSingleFlight } from "./otp-input-core.js";
 import { attachResendCooldown } from "./resend-cooldown.js";
@@ -57,6 +57,10 @@ const els = {
   google: $("google-btn"),
   // Shared.
   error: $("auth-error"),
+  // TM-1149: the SMS-path error surface, inline in the SMS fieldset next to the phone field. The
+  // SMS send/verify path renders its error HERE (not the shared #auth-error up in the email
+  // section) so the message sits adjacent to the field that caused it.
+  smsError: $("sms-error"),
   status: $("auth-status"), // TM-866: polite live region for cooldown start/expiry announcements
   signedIn: $("auth-signed-in"),
   userEmail: $("user-email"),
@@ -101,13 +105,31 @@ const smsResendCooldown = attachResendCooldown({
   codeNoun: "SMS code",
 });
 
-function showError(err) {
+// TM-1149: which error surface a message renders in. The email-code + password + Google paths use
+// the shared #auth-error banner (top, in the email section); the SMS send/verify path uses the
+// inline #sms-error next to the phone field. `context` is passed through to authErrorMessage so the
+// invalid-phone copy can be made country-code-aware (see phoneContext below).
+function writeError(targetEl, err, context) {
+  if (!targetEl) return;
   // Friendly-message resolution lives in login-error.js: coded Firebase errors map by code (with a
   // generic fallback for unmapped codes — never the raw Firebase string), backend ApiErrors keep
   // their own human message, and a falsy err clears the banner.
-  const msg = authErrorMessage(err);
-  els.error.textContent = msg;
-  els.error.hidden = !msg;
+  const msg = authErrorMessage(err, context);
+  targetEl.textContent = msg;
+  targetEl.hidden = !msg;
+}
+
+// Clear BOTH surfaces — used at the start of every action (a fresh attempt should never leave a
+// stale error from either the SMS field or the shared banner showing).
+function clearErrors() {
+  writeError(els.error, null);
+  writeError(els.smsError, null);
+}
+
+// The shared-banner path (email-code, password, Google, redirect). SMS routes via its own call to
+// writeError(els.smsError, …) inside run()'s catch so its error lands next to the phone field.
+function showError(err) {
+  writeError(els.error, err);
 }
 
 // Every interactive control, disabled together while a request is in flight. The OTP boxes are
@@ -168,13 +190,23 @@ function requestFocus(widget, stepEl) {
 // call, so a second request can never leave the door. setBusy's disabling already stops most
 // double-triggers at the DOM; this guards the programmatic/synthetic paths it can't.
 const run = makeSingleFlight(async (action) => {
-  showError(null);
+  clearErrors(); // TM-1149: clear BOTH the shared banner and the inline SMS error on a fresh attempt
   setBusy(true);
   pendingFocus = null; // a fresh action owns the focus outcome — drop anything stale
   try {
     await action();
   } catch (err) {
-    showError(err);
+    // TM-1149: an SMS send/verify error renders in the inline #sms-error next to the phone field —
+    // NOT the shared #auth-error up in the email section (the misplaced-error bug). For the
+    // invalid-phone case we also pass whether the entered number already carried a "+"/country
+    // code, so the copy points at the digits rather than a country code the user already supplied
+    // (see phoneContext()). Every other path keeps using the shared banner.
+    const isSmsPath = action === sendSms || action === verifySms;
+    if (isSmsPath) {
+      writeError(els.smsError, err, phoneContext());
+    } else {
+      showError(err);
+    }
     // A FAILED verify leaves the boxes holding the rejected code while setBusy has dropped focus
     // to <body> (and, on iOS, dismissed the keyboard). Standard OTP recovery: CLEAR the code and
     // hand focus back to box 1 so the user retypes from scratch. Clearing is also load-bearing —
@@ -285,6 +317,14 @@ els.tryAnother?.addEventListener("click", () => {
 
 let smsConfirmation = null; // ConfirmationResult from startPhoneSignIn; .confirm(code) finishes it.
 
+// TM-1149: context for the SMS-path error copy — whether the number the user typed already carries
+// a "+"/country code. Passed to authErrorMessage so an `auth/invalid-phone-number` never tells the
+// user to add a country code they already supplied (the reported bug: +44747009007 was a digit
+// short, but the old copy blamed a missing country code that was right there in the field).
+function phoneContext() {
+  return { hasCountryCode: hasCountryCode(els.phone?.value) };
+}
+
 async function sendSms() {
   const phone = els.phone.value.trim();
   smsConfirmation = await startPhoneSignIn(phone, els.recaptcha);
@@ -354,7 +394,7 @@ awaitRedirectResult().catch((err) => showError(err));
 // back to step 1 (TM-229: that boot reset raced the mobile e2e fill, submitting an empty email).
 let wasSignedIn = false;
 onAuthChanged((user) => {
-  showError(null);
+  clearErrors(); // TM-1149: clear both the shared banner and the inline SMS error on any auth change
   const signedIn = Boolean(user);
   if (signedIn && els.userEmail) {
     els.userEmail.textContent = user.email ?? user.phoneNumber ?? user.displayName ?? user.uid;

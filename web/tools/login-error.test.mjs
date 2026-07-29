@@ -9,7 +9,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { authErrorMessage, MESSAGES, GENERIC_ERROR } from "../src/assets/login-error.js";
+import {
+  authErrorMessage,
+  MESSAGES,
+  GENERIC_ERROR,
+  hasCountryCode,
+  INVALID_PHONE_WITH_COUNTRY_CODE,
+  INVALID_PHONE_WITHOUT_COUNTRY_CODE,
+} from "../src/assets/login-error.js";
 
 test("mapped Firebase codes resolve to their friendly message", () => {
   assert.equal(authErrorMessage({ code: "auth/wrong-password" }), MESSAGES["auth/wrong-password"]);
@@ -75,4 +82,53 @@ test("SMS/phone and email-code path codes resolve to their friendly message (TM-
     assert.doesNotMatch(msg, /Firebase/, `${code} must not leak the raw Firebase string`);
     assert.ok(msg.length > 0, `${code} has non-empty friendly copy`);
   }
+});
+
+// TM-1149 — Bug 1: the invalid-phone copy must not tell a user to add a country code they already
+// supplied. Reported case: on the SMS sign-in step the user entered "+44747009007" (a valid +44
+// prefix but a digit short), Firebase threw `auth/invalid-phone-number`, and the FIXED copy said
+// "include the country code (e.g. +1…)" — which is wrong twice over: the +44 country code WAS there,
+// and the example region was US on a UK-first app. Assert the copy is now context-aware.
+test("invalid-phone copy does NOT tell a user to add a country code they already supplied (TM-1149)", () => {
+  const err = { code: "auth/invalid-phone-number", message: "Firebase: Error (auth/invalid-phone-number)." };
+
+  // The exact reported input: a country code IS present (starts with "+44"), so the message must
+  // point at the DIGITS and must NOT ask the user to include a country code.
+  const withCode = authErrorMessage(err, { hasCountryCode: true });
+  assert.equal(withCode, INVALID_PHONE_WITH_COUNTRY_CODE);
+  assert.doesNotMatch(
+    withCode,
+    /country code/i,
+    "must not tell the user to add a country code that is already present",
+  );
+  assert.doesNotMatch(withCode, /Firebase/, "must not leak the raw Firebase string");
+
+  // No country code present → prompting for one is correct here.
+  const withoutCode = authErrorMessage(err, { hasCountryCode: false });
+  assert.equal(withoutCode, INVALID_PHONE_WITHOUT_COUNTRY_CODE);
+  assert.match(withoutCode, /country code/i, "when none is present, DO prompt for the country code");
+});
+
+test("the neutral (no-context) invalid-phone default is correct whether or not a code is present (TM-1149)", () => {
+  // Callers that pass no context get the MESSAGES default. It must not falsely assert a missing
+  // country code (the bug) — a neutral "check the number and country code" is correct either way —
+  // and it must use a UK-first (+44…) example, not the odd US +1… on a UK-first app.
+  const msg = authErrorMessage({ code: "auth/invalid-phone-number" });
+  assert.equal(msg, MESSAGES["auth/invalid-phone-number"]);
+  assert.doesNotMatch(
+    msg,
+    /include the country code/i,
+    "the neutral default must not assert the country code is missing",
+  );
+  assert.doesNotMatch(msg, /\+1\b/, "should not use a US +1 example on a UK-first app");
+  assert.match(msg, /\+44/, "uses a UK-first example");
+});
+
+test("hasCountryCode detects a leading + (trimmed), for the SMS-path error context (TM-1149)", () => {
+  assert.equal(hasCountryCode("+44747009007"), true);
+  assert.equal(hasCountryCode("  +447700900123 "), true, "leading/trailing whitespace is trimmed");
+  assert.equal(hasCountryCode("07700900123"), false, "a national number with no + has no country code");
+  assert.equal(hasCountryCode(""), false);
+  assert.equal(hasCountryCode(null), false);
+  assert.equal(hasCountryCode(undefined), false);
 });

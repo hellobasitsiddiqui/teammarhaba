@@ -265,6 +265,13 @@
                                 <button id="sms-send-btn" type="button">Text me a code</button>
                             </div>
                         </div>
+                        <!-- TM-1149: the SMS-path error surface. Lives INSIDE the SMS fieldset, right
+                             below the phone field/send button (and above the code step), so a phone/SMS
+                             error renders adjacent to the field that caused it — not up in the shared
+                             #auth-error banner in the email section (the misplaced-error bug). login.js
+                             routes ONLY the SMS send/verify path here; the email-code + password paths
+                             keep using #auth-error. Reuses .auth-error styling (same danger banner). -->
+                        <p id="sms-error" class="auth-error" role="alert" hidden></p>
                         <!-- TM-867: same six-box OTP widget as the email verify step (see the contract
                              notes there). First box keeps id="sms-code" — the Maestro mobile flows tap
                              it — and carries autocomplete="one-time-code" for the OS SMS suggestion. -->
