@@ -79,3 +79,24 @@ test("login.js routes the SMS send/verify path to els.smsError, others to the sh
     "phoneContext() reads whether the entered phone carries a country code",
   );
 });
+
+test("sendSms runs the too-long preflight and THROWS before the Firebase call (TM-1149)", () => {
+  // login.js can't be imported under Node, so pin the ordering textually: inside sendSms(), the
+  // smsSendPreflightError throw must appear BEFORE the startPhoneSignIn call — an over-long number
+  // is rejected locally and never reaches Firebase (the behaviour unit-tested in login-error.test).
+  const m = LOGIN.match(/async function sendSms\(\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(m, "sendSms() is defined in login.js");
+  const body = m[1];
+  // Anchor on the actual CALL syntax (with "("), not bare mentions — the comment above the code
+  // also names startPhoneSignIn, so a substring index would match the comment, not the call.
+  const preflightIdx = body.search(/smsSendPreflightError\(/);
+  const throwIdx = body.search(/throw preflightError/);
+  const firebaseIdx = body.search(/await startPhoneSignIn\(/);
+  assert.ok(preflightIdx >= 0, "sendSms calls smsSendPreflightError(...)");
+  assert.ok(throwIdx >= 0, "sendSms throws the preflight error");
+  assert.ok(firebaseIdx >= 0, "sendSms awaits startPhoneSignIn(...)");
+  assert.ok(
+    preflightIdx < throwIdx && throwIdx < firebaseIdx,
+    "the preflight throw is BEFORE the Firebase startPhoneSignIn call",
+  );
+});

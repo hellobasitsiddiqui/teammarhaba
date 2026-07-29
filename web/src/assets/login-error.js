@@ -67,6 +67,48 @@ export function hasCountryCode(phone) {
   return typeof phone === "string" && phone.trim().startsWith("+");
 }
 
+// TM-1149 (increment): the free, precise "too many digits" pre-validation for the SMS phone path.
+// E.164 caps a full international number at 15 DIGITS (country code + national, the leading "+" not
+// counted). That single ceiling is universal — no per-country length table — so we can catch an
+// obviously-too-long number LOCALLY before spending a Firebase signInWithPhoneNumber round-trip and
+// give a precise reason. The complementary per-country "too short" precision needs a length table
+// countries.js doesn't have yet and is deliberately deferred to TM-1155 — NOT attempted here.
+export const E164_MAX_DIGITS = 15;
+export const TOO_MANY_DIGITS_MESSAGE = "That number has too many digits — please check it.";
+
+/**
+ * TM-1149: is this entered/composed phone value too long to be a valid E.164 number? Strips every
+ * non-digit (so a leading "+", spaces, dashes, parens don't count) and reports whether more than
+ * {@link E164_MAX_DIGITS} digits remain. Pure + unit-tested; the SMS send handler calls it before
+ * the Firebase call to reject an over-long number for free with {@link TOO_MANY_DIGITS_MESSAGE}.
+ * A blank/nullish value is not "too long" (it's empty — a different, later validation concern).
+ * @param {string|null|undefined} phone the raw value from the phone input.
+ * @returns {boolean}
+ */
+export function isTooManyDigits(phone) {
+  if (typeof phone !== "string") return false;
+  const digitCount = (phone.match(/\d/g) ?? []).length;
+  return digitCount > E164_MAX_DIGITS;
+}
+
+/**
+ * TM-1149: the local SMS-send preflight decision — the pure seam that decides whether the send may
+ * proceed to Firebase. Returns the {@link Error} the send handler should THROW (rendering its
+ * `.message` inline in #sms-error and skipping the Firebase call), or `null` when the number passes
+ * every free local check and the handler should proceed to `signInWithPhoneNumber`.
+ *
+ * <p>Only the free, universal E.164 15-digit "too long" case is enforced here — Firebase itself
+ * still validates everything else (empty, malformed, per-country too-short) when we do call it. This
+ * is unit-tested so the "reject over-long BEFORE Firebase" contract can't silently regress; the
+ * handler in login.js is a thin wrapper that throws whatever this returns.
+ * @param {string|null|undefined} phone the raw value from the phone input.
+ * @returns {Error|null} the error to throw, or null to proceed to Firebase.
+ */
+export function smsSendPreflightError(phone) {
+  if (isTooManyDigits(phone)) return new Error(TOO_MANY_DIGITS_MESSAGE);
+  return null;
+}
+
 /**
  * Resolve any thrown auth error into a safe, human-facing message for the login screen.
  *

@@ -18,7 +18,7 @@ import {
 } from "./auth.js";
 import { requestEmailCode, verifyEmailCode } from "./api.js";
 import { isWebViewEnv } from "./auth-env.js";
-import { authErrorMessage, hasCountryCode } from "./login-error.js";
+import { authErrorMessage, hasCountryCode, smsSendPreflightError } from "./login-error.js";
 import { attachOtpInput } from "./otp-input.js";
 import { makeSingleFlight } from "./otp-input-core.js";
 import { attachResendCooldown } from "./resend-cooldown.js";
@@ -327,6 +327,13 @@ function phoneContext() {
 
 async function sendSms() {
   const phone = els.phone.value.trim();
+  // TM-1149 (increment): free, precise pre-validation. E.164 caps a number at 15 digits, so an
+  // obviously-too-long entry can be rejected LOCALLY — a clear reason next to the field — before
+  // spending a Firebase round-trip. smsSendPreflightError returns a plain (codeless) Error whose
+  // .message run()'s catch routes verbatim into #sms-error (via authErrorMessage); throwing it here
+  // means startPhoneSignIn is NEVER reached. (No per-country "too short" check — deferred to TM-1155.)
+  const preflightError = smsSendPreflightError(phone);
+  if (preflightError) throw preflightError;
   smsConfirmation = await startPhoneSignIn(phone, els.recaptcha);
   els.smsPhoneStep.hidden = true;
   els.smsCodeStep.hidden = false;
