@@ -1235,7 +1235,7 @@ test("load surfaces a retryable error state (with a Retry control) when GET /me 
 
 // ---- TM-781: phone country picker renderer wiring ---------------------------------------------
 
-test("buildField(phone): the picker sits BEFORE the input and options read '<flag> <name> +<dial>'", () => {
+test("buildField(phone): the picker sits BEFORE the input and options read '<flag> +<dial>' (compact, no name — TM-1145)", () => {
   profile.__setShell(makeShell()); // the listeners' setFieldError path needs a shell to write to
   const built = profile.buildField(field("phone"));
 
@@ -1246,11 +1246,13 @@ test("buildField(phone): the picker sits BEFORE the input and options read '<fla
   assert.equal(opts[0].getAttribute("value"), "");
   assert.equal(opts[0]._textContent, "Confirm country…");
   assert.equal(opts[0].disabled, true);
-  // Options 1+2 are the pinned pair, in the exact "<emoji flag> <Country name> +<dial>" format.
+  // TM-1145: Options 1+2 are the pinned pair, in the compact "<emoji flag> +<dial>" format — flag +
+  // dial code only, NO country name (the intl-tel-input closed-selector standard; frees the width the
+  // long name ate on narrow phones).
   assert.equal(opts[1].getAttribute("value"), "GB");
-  assert.equal(opts[1]._textContent, "🇬🇧 United Kingdom +44");
+  assert.equal(opts[1]._textContent, "🇬🇧 +44");
   assert.equal(opts[2].getAttribute("value"), "AE");
-  assert.equal(opts[2]._textContent, "🇦🇪 United Arab Emirates +971");
+  assert.equal(opts[2]._textContent, "🇦🇪 +971");
   assert.equal(opts.length, countries.COUNTRIES.length + 1, "every country is offered (plus the placeholder)");
 
   // The picker renders BEFORE the national input inside the field row (the product rule).

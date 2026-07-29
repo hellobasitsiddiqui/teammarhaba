@@ -1115,8 +1115,8 @@ const FIELD_ICONS = {
   name: () => fieldIcon(["M12 4.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8", "M5.5 20a6.5 6.5 0 0 1 13 0"]),
   location: () => fieldIcon(["M12 21s6.5-5.5 6.5-10.5a6.5 6.5 0 0 0-13 0C5.5 15.5 12 21 12 21z", "M12 12.5a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4"]),
   age: () => fieldIcon(["M3.5 6.5q0-1.5 2-1.5h13q2 0 2 1.5v13q0 1.5-2 1.5h-13q-2 0-2-1.5z", "M3.5 9.5h17", "M8 3v3.5M16 3v3.5"]),
-  // A handset for the mandatory phone field (TM-880), same line-art style as its siblings.
-  phone: () => fieldIcon(["M5.5 4h3l1.6 4-2 1.6a12.5 12.5 0 0 0 6.3 6.3l1.6-2 4 1.6v3q0 1.5-1.6 1.5A16.4 16.4 0 0 1 4 5.6Q4 4 5.5 4z"]),
+  // TM-1145: the phone field has NO leading icon — its input box already packs the country picker + the
+  // national number, and a leading handset icon crowded them. The uppercase "PHONE" label is enough.
 };
 
 function buildField(field) {
@@ -1177,7 +1177,9 @@ function buildField(field) {
       },
       [
         el("option", { value: "", text: "Confirm country…", disabled: true, hidden: true }),
-        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} ${c.name} +${c.dial}` })),
+        // TM-1145: industry-standard compact option — flag + dial code only, NO country name (matches
+        // intl-tel-input's closed selector). Frees the width the long name ate + keeps the picker tidy.
+        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} +${c.dial}` })),
       ],
     );
     country.value = "GB"; // concrete default pre-load; prefillPhone applies the real selection
@@ -1200,7 +1202,9 @@ function buildField(field) {
   // country picker between the icon and the national input (the tm-phone-row flex pairing, TM-880).
   const icon = FIELD_ICONS[field.field]?.();
   const inputRow = country
-    ? el("div", { class: "tm-field-input tm-phone-row" }, [icon, country, input])
+    // TM-1145: the phone row has NO leading icon (it crowded the picker + number) — just the compact
+    // flag+dial-code country picker and the national number.
+    ? el("div", { class: "tm-field-input tm-phone-row" }, [country, input])
     : el("div", { class: "tm-field-input" }, [icon, input]);
 
   // TM-930: the phone field grows a verify-and-link step — a "Send code" button, a gate-local

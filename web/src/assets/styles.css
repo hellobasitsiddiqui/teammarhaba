@@ -2251,20 +2251,6 @@ h3,
     min-width: 0;
 }
 
-/* TM-1145: the phone field's input box uniquely holds THREE controls (leading icon + country picker +
-   national number), so the 18px leading icon plus its gap/padding crowd the picker and number entry,
-   tightest on narrow phones. Tighten JUST the phone row — a smaller (15px) icon and slimmer gap/padding
-   hand the reclaimed width to the picker + number. Scoped via :has(.tm-phone-country) so ordinary
-   single-input fields (name/location/age) keep their comfortable 18px icon. */
-#onboarding-view .tm-field-input:has(.tm-phone-country) {
-    padding-left: 0.5rem;
-    gap: 0.4rem;
-}
-#onboarding-view .tm-field-input:has(.tm-phone-country) .tm-field-icon {
-    width: 15px;
-    height: 15px;
-}
-
 /* Reflect an invalid field on the wrapper (JS toggles .tm-field-invalid on the inner input). */
 #onboarding-view .tm-field-input:has(.tm-field-invalid) {
     border-color: var(--danger);
