@@ -2034,6 +2034,13 @@ h3,
     }
 }
 
+/* TM-1154: a field flagged `wide` (the Short bio textarea) spans the FULL grid width instead of pairing
+   lopsidedly beside a single-line field. `1 / -1` = first-to-last column, so it's correct at any column
+   count (a no-op in the single-column mobile grid, which already fills the row). */
+.tm-form-field-wide {
+    grid-column: 1 / -1;
+}
+
 .tm-form-field {
     display: flex;
     flex-direction: column;
