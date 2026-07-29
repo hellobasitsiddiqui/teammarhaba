@@ -314,7 +314,7 @@ app:
     email-code:
       length: ${EMAIL_CODE_LENGTH:6}            # digits in the one-time code (matches the SMS UX)
       ttl: ${EMAIL_CODE_TTL:10m}                # how long an issued code stays valid (short by design)
-      send-cooldown: ${EMAIL_CODE_SEND_COOLDOWN:60s}  # min gap between requests for one address (rate-limit + Resend)
+      send-cooldown: ${EMAIL_CODE_SEND_COOLDOWN:30s}  # min gap between requests for one address (rate-limit + Resend). 30s matches the client Resend countdown (TM-1147) + industry norm; the per-IP limit is the flood defence.
       max-verify-attempts: ${EMAIL_CODE_MAX_VERIFY_ATTEMPTS:5}  # wrong guesses before the code is burned
       # Bounded in-memory state + per-IP limit (TM-247): cap memory under a flood of distinct addresses
       # / source IPs, and throttle varied-address floods the per-address cooldown can't catch.

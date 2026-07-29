@@ -201,7 +201,7 @@ const run = makeSingleFlight(async (action) => {
 
 let pendingEmail = null; // the address a code was sent to, used by verify + resend.
 
-function showCodeStep(email) {
+function showCodeStep(email, cooldownSec) {
   pendingEmail = email;
   if (els.sentTo) els.sentTo.textContent = email;
   els.emailStep.hidden = true;
@@ -211,7 +211,9 @@ function showCodeStep(email) {
   requestFocus(emailOtp, els.codeStep);
   // TM-866: the code step always appears on the heels of an ACCEPTED send, so the Resend it
   // reveals starts held — the countdown label explains the wait instead of a surprise 429.
-  emailResendCooldown?.start();
+  // TM-1147: seed the window from the server's advertised send-cooldown (Retry-After) so it can't
+  // re-enable before the server will accept another send; null falls back to the client default.
+  emailResendCooldown?.start(cooldownSec);
 }
 
 function showEmailStep() {
@@ -227,16 +229,16 @@ function showEmailStep() {
 
 async function sendEmailCode() {
   const email = els.email.value.trim();
-  await requestEmailCode(email);
-  showCodeStep(email); // also starts the resend cooldown (TM-866) — only reached on success
+  const cooldownSec = await requestEmailCode(email); // server's send-cooldown (Retry-After), TM-1147
+  showCodeStep(email, cooldownSec); // also starts the resend cooldown (TM-866) — only reached on success
 }
 
 // TM-866: resend is its own named action (was an inline arrow) so success can start the cooldown.
 // A failed resend throws on the first line: no cooldown, the 429/network error surfaces via run()'s
 // shared catch exactly as before, and the user can retry immediately.
 async function resendEmailCode() {
-  await requestEmailCode(pendingEmail);
-  emailResendCooldown?.start();
+  const cooldownSec = await requestEmailCode(pendingEmail); // server's send-cooldown (Retry-After), TM-1147
+  emailResendCooldown?.start(cooldownSec);
   // Review fix on TM-866: an accepted resend mirrors the initial send's recovery. Empty the boxes
   // (retyping over a stale full set would auto-submit a mixed old/new code on the first keystroke)
   // and queue focus back to box 1 — setBusy's sweep dropped focus to <body> when it disabled the

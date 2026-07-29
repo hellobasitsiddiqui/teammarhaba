@@ -135,17 +135,28 @@ export function attachResendCooldown({
      * Begin the window — call ONLY after a send the backend accepted. Usually invoked inside
      * run()'s busy window (every control already disabled); the disabled + countdown label set
      * here then survives setBusy(false)'s re-enable sweep via syncDisabled().
+     *
+     * @param {number} [overrideSec] a server-advertised window (TM-1147: the `Retry-After` the
+     *   `/request` 204 carries) to use INSTEAD of the attach-time default, so the countdown can never
+     *   re-enable before the server will accept another send. Ignored when a window is already
+     *   running (no-double-start) and when non-positive/absent (falls back to the default).
      */
-    start() {
-      const next = coreStart(state, Date.now());
+    start(overrideSec) {
+      const secs = Number.isFinite(overrideSec) && overrideSec > 0 ? overrideSec : durationSec;
+      const now = Date.now();
+      const active = state.endsAt != null && now < state.endsAt;
+      // Seed the (possibly server-advertised) window before starting — but only from an inactive
+      // state, so a start mid-window stays the core's no-op rather than resetting the live countdown.
+      if (!active) state = create(secs);
+      const next = coreStart(state, now);
       if (next === state) return; // already counting (core's no-double-start) — keep the first window
       state = next;
       stopTimer(); // belt-and-braces: never two intervals, whatever a future caller does
-      onTick(); // paint "Resend in 0:30" + disabled NOW, not a second from now
+      onTick(); // paint "Resend in 0:NN" + disabled NOW, not a second from now
       button.disabled = true;
       reserveWidth(); // freeze the row geometry for the whole window (see doc comment above)
       timerId = setInterval(onTick, 1000);
-      announce?.(`You can request a new ${codeNoun} in ${durationSec} seconds.`);
+      announce?.(`You can request a new ${codeNoun} in ${secs} seconds.`);
     },
 
     /** Cancel + restore, silently — the step-left / sign-out / sign-in path. Idempotent. */
