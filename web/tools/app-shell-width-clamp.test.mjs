@@ -168,6 +168,16 @@ test("bell-anchoring headers are sticky + reserve the 44px clearance — Chat, H
   }
 });
 
+test("the admin sticky header has a crisp opaque edge so scrolled content reads BEHIND it (TM-1102)", () => {
+  // TM-1102: on the dense admin consoles the half-scrolled stats bar crowded/bled at the stuck header's
+  // bottom. The fix gives `.admin-console .tm-admin-head` a box-shadow (a hard 2px bottom line + a soft
+  // drop-shadow) — painted, so NO layout shift — that separates it crisply from the passing content.
+  const bodies = [...NO_COMMENTS.matchAll(/\.admin-console\s+\.tm-admin-head\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  const shadow = bodies.find((b) => /box-shadow:/.test(b));
+  assert.ok(shadow, ".admin-console .tm-admin-head must set a box-shadow (the crisp edge) — TM-1102");
+  assert.match(shadow, /box-shadow:[^;]*\b2px\b[^;]*/, "the crisp edge must include a hard bottom line (…0 2px 0 …) — TM-1102");
+});
+
 // ── TM-1090: the bell is pinned to the top-right corner of the APP COLUMN/PANEL — it rides the SAME
 //    --app-max band as .app (so its right edge == the column's right edge) and widens WITH the admin panel,
 //    instead of floating at the narrow band edge (RC1) or flying out to the far viewport edge. ──
