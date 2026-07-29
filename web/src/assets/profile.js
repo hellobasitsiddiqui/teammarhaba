@@ -1767,7 +1767,9 @@ function buildField(field) {
       },
       [
         el("option", { value: "", text: "Confirm country…", disabled: true, hidden: true }),
-        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} ${c.name} +${c.dial}` })),
+        // TM-1145: compact flag + dial code only, NO country name (intl-tel-input's closed-selector
+        // standard) — frees the width the name ate and keeps the phone row tidy.
+        ...COUNTRIES.map((c) => el("option", { value: c.iso2, text: `${flagOf(c.iso2)} +${c.dial}` })),
       ],
     );
     // A concrete default so the picker is never empty pre-load; fillPhoneField applies the real
