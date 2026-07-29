@@ -53,6 +53,9 @@ import {
   accountContact,
   // TM-1134: the pure "resolve the stored nationality iso2 → flag + country name" model the hub paints.
   nationalityDisplay,
+  // TM-1139: the pure "resolve the stored short bio → present?/trimmed text" model the hub + public
+  // preview paint (hidden when unset — bio is optional, no forced placeholder).
+  bioDisplay,
   // TM-1105: the pure "Circle User ID" model — the numeric users.id from /me, plus its copy value and
   // the muted "Not available yet" fallback so the line is never a silently-blank row.
   circleUserId,
@@ -140,6 +143,9 @@ import { isProfileDirty, BEFOREUNLOAD_PROMPT } from "./profile-guard-core.js";
 // validation (openapi.json) so we fail fast in the browser AND match what the server will accept.
 // Keeping a single declarative list keeps the form, the read-back, and the patch builder in sync.
 const TEXT_MAX = 255;
+// TM-1139: the short-bio length cap, mirroring the backend @Size(max = 160) on UpdateMeRequest so the
+// live counter + client validation agree byte-for-byte with what the server will accept.
+const BIO_MAX = 160;
 // firstName/lastName/city are name-like (TM-771): validateProfileField requires at least one letter
 // and rejects digits, so a purely numeric "name" can no longer save. The hint mirrors the age/phone
 // fields' pattern of telling the user the rule up front.
@@ -200,6 +206,21 @@ const FIELDS = [
     label: "Nationality",
     type: "select",
     options: [["", "Choose a country…"], ...COUNTRIES.map((c) => [c.iso2, `${flagOf(c.iso2)} ${c.name}`])],
+  },
+  {
+    // TM-1139: the short bio — a real, saved free-text field (it shipped as a disabled "Soon" stub,
+    // TM-684). A multi-line <textarea> (not <input>) capped at 160 chars, with a live "N/160" character
+    // counter (see buildField). Free text: no name-like pattern (a bio can contain anything) — the only
+    // rule is the length cap, mirrored server-side by @Size(max = 160) on UpdateMeRequest. Optional like
+    // the other partial-PATCH fields: fillForm shows the stored bio (or blank), collectPatch omits an
+    // untouched blank (no change). PUBLIC — shown on the hub AND the public preview (unlike gender).
+    key: "bio",
+    label: "Short bio",
+    type: "textarea",
+    maxLength: BIO_MAX,
+    rows: 2,
+    placeholder: "A short line about you",
+    hint: "A short line about you — up to 160 characters.",
   },
   {
     key: "phone",
@@ -768,8 +789,12 @@ function fillForm(profile) {
     } else if (field.type === "select") {
       input.value = NOTIFICATION_PREFS.has(value) ? value : "EMAIL";
     } else {
+      // Plain text/number/textarea fields — including the TM-1139 bio, which just takes the stored value.
       input.value = value == null ? "" : String(value);
     }
+    // TM-1139: re-stamp the bio character counter after the value is set (no-op for every other field),
+    // so "N/160" is correct on the initial load, a Reset, and the post-save repaint — not just on edit.
+    entry.paintCounter?.();
   }
   // TM-907: switch the name fields to read-only PRE-EMPTIVELY when the account is name-locked, so the
   // user sees the lock rather than saving-then-hitting the backend 422. Runs AFTER the value fill above
@@ -994,6 +1019,15 @@ function paintHub(profile) {
     const nat = nationalityDisplay(profile);
     hub.nationality.textContent = nat.display;
     hub.nationality.hidden = !nat.hasNationality;
+  }
+  // Bio (TM-1139): the user's short intro line, from the stored free-text bio. Optional, so the whole
+  // line is HIDDEN when unset (no forced placeholder) and shown as the plain text when set. Rendered via
+  // textContent (never innerHTML) so a bio can contain anything and can't inject markup. Guarded for
+  // older shells built before this element existed.
+  if (hub.bio) {
+    const bio = bioDisplay(profile);
+    hub.bio.textContent = bio.display;
+    hub.bio.hidden = !bio.hasBio;
   }
   // TM-846: the identity avatar is a real avatar SURFACE — the photo when the Firebase user has one
   // (photoURL, the single source of truth — read live, same as the avatar control), else the initial
@@ -1276,6 +1310,18 @@ function collectPatch() {
       // reject for a grandfathered (13–120 era) account. Only an actual edit is sent.
       if (raw !== "" && !(state.profile?.[field.key] != null && Number(raw) === Number(state.profile[field.key]))) {
         patch[field.key] = Number(raw);
+      }
+    } else if (field.key === "bio") {
+      // TM-1139: the bio is CLEARABLE, unlike the other optional text fields. A non-blank value is sent
+      // as-is. A blank value is sent as "" (which the backend maps to null) ONLY when the account
+      // actually HAD a bio — that's a real clear the user should be able to make. When there was no
+      // stored bio, a blank field is omitted (no change), so opening the form and saving an unrelated
+      // field never writes an empty bio. Mirrors the backend's "" → null clear behind the no-op guard.
+      const hadBio = String(state.profile?.bio ?? "").trim() !== "";
+      if (raw !== "") {
+        patch.bio = raw;
+      } else if (hadBio) {
+        patch.bio = ""; // an explicit clear of a previously-set bio
       }
     } else if (raw !== "") {
       // Omit blank optional text fields rather than sending "" — a blank phone would otherwise
@@ -1634,7 +1680,10 @@ function buildField(field) {
   const id = `profile-${field.key}`;
   const errorId = `${id}-error`;
   const hintId = field.hint ? `${id}-hint` : null;
-  const describedBy = [hintId, errorId].filter(Boolean).join(" ");
+  // TM-1139: a length-capped textarea (the bio) also gets a live character counter; name it in
+  // aria-describedby so AT hears "N of 160" as part of the field description.
+  const counterId = field.type === "textarea" && field.maxLength != null ? `${id}-counter` : null;
+  const describedBy = [hintId, counterId, errorId].filter(Boolean).join(" ");
 
   let input;
   if (field.type === "select") {
@@ -1643,6 +1692,20 @@ function buildField(field) {
       { id, class: "tm-input", name: field.key, "aria-describedby": describedBy },
       field.options.map(([value, label]) => el("option", { value, text: label })),
     );
+  } else if (field.type === "textarea") {
+    // TM-1139: the short bio is a multi-line <textarea> (not <input>). The .tm-textarea class gives it
+    // the .tm-input look plus vertical resize (styles.css). maxLength caps it at the same 160 the backend
+    // enforces; a describedby also names the live character counter (built below) so a screen reader
+    // hears "N of 160" alongside the field.
+    input = el("textarea", {
+      id,
+      class: "tm-input tm-textarea",
+      name: field.key,
+      rows: field.rows || 2,
+      maxLength: field.maxLength,
+      placeholder: field.placeholder,
+      "aria-describedby": describedBy,
+    });
   } else {
     input = el("input", {
       id,
@@ -1658,6 +1721,18 @@ function buildField(field) {
       "aria-describedby": describedBy,
     });
   }
+  // TM-1139: the bio field's live character counter — "N/160", built only for a length-capped textarea.
+  // It reads the input's current length and repaints on every keystroke (via the input listener below),
+  // and starts filled by fillForm's initial repaint. paintCharCounter is the single update point so the
+  // count can't drift between the initial fill and later edits.
+  const counter = counterId
+    ? el("p", { id: counterId, class: "tm-muted tm-char-counter", "aria-live": "polite" })
+    : null;
+  const paintCharCounter = () => {
+    if (counter) counter.textContent = `${(input.value ?? "").length}/${field.maxLength}`;
+  };
+  if (counter) paintCharCounter();
+
   // Live-clear an inline error as soon as the user starts correcting the field.
   input.addEventListener("input", () => {
     // TM-982: editing the phone un-verifies it (the proof was for the OLD digits, so the user must
@@ -1666,6 +1741,8 @@ function buildField(field) {
     // When locked/readOnly no input event fires, so this runs only while the field is editable.
     if (field.key === "phone" && (phoneVerify.verified || phoneVerifyInFlight())) unverifyPhone();
     setFieldError(field.key, validateField(field, input.value));
+    // TM-1139: keep the character counter in step with every edit of the bio.
+    paintCharCounter();
     // Re-evaluate the "changed number needs verify" affordance after every phone edit.
     if (field.key === "phone") refreshPhoneVerifyAffordance();
   });
@@ -1747,13 +1824,17 @@ function buildField(field) {
     el("label", { class: "tm-field-label", for: id, text: field.label }),
     control,
     hint,
+    // TM-1139: the live character counter sits below the hint (only present for the bio textarea).
+    counter,
     error,
     ...verifyNodes,
   ]);
   // `country` is only present for the phone field (TM-781) — undefined elsewhere.
   // `hint` is the allowed-characters hint <p> (null for fields without one); TM-968 hides/shows it
   // per the name-lock state, so it's kept on the entry rather than re-found by DOM id.
-  return { wrapper, input, error, country, hint };
+  // TM-1139: `paintCounter` re-stamps the bio character counter (null for every other field), called by
+  // fillForm after it sets the stored value so "N/160" is right on load, Reset and the post-save repaint.
+  return { wrapper, input, error, country, hint, paintCounter: counter ? paintCharCounter : null };
 }
 
 /**
@@ -2242,7 +2323,14 @@ function buildShell(view) {
     const built = buildField(field);
     // `country` is the phone field's TM-781 picker (undefined for every other field) — kept in the
     // shell so validateField/collectPatch/fillPhoneField can read the selected iso2.
-    fields.set(field.key, { input: built.input, error: built.error, country: built.country, hint: built.hint });
+    // `paintCounter` (TM-1139) re-stamps the bio character counter; null for every non-textarea field.
+    fields.set(field.key, {
+      input: built.input,
+      error: built.error,
+      country: built.country,
+      hint: built.hint,
+      paintCounter: built.paintCounter,
+    });
     return built.wrapper;
   });
 
@@ -2303,6 +2391,9 @@ function buildShell(view) {
   // whole line is HIDDEN when the account has no nationality set — it's optional, so an unset value
   // shows nothing (unlike the always-present contact lines below), never a placeholder prompt.
   const hubNationality = el("div", { class: "tm-pf-sub tm-pf-nationality", text: "", hidden: true });
+  // TM-1139: the short-bio line on the hub identity area — plain text, hidden when unset (optional).
+  // Painted by paintHub via bioDisplay; textContent-only (no innerHTML) so a bio can't inject markup.
+  const hubBio = el("p", { class: "tm-pf-bio", text: "", hidden: true });
   // ── Account contact (TM-783) ── the email + phone this account is registered with, painted by
   // paintHub() from the same /me payload. Email is the account identity; phone shows the number or a
   // "No phone number added" prompt so the line is never silently blank.
@@ -2342,7 +2433,7 @@ function buildShell(view) {
   ]);
   const idHeader = el("section", { class: "tm-pf-id", "aria-label": "You" }, [
     hubAvatar,
-    el("div", {}, [hubName, hubMeta, hubNationality, hubContact]),
+    el("div", {}, [hubName, hubMeta, hubNationality, hubBio, hubContact]),
   ]);
 
   // ── Profile strength (paper-profile) ── the restyled completeness prompt. Painted by paintHub().
@@ -2508,7 +2599,7 @@ function buildShell(view) {
     // shows whichever the live photoURL calls for) — replacing the old single `initial` glyph node.
     // TM-913: the strength ring — `ring` is the progressbar container (aria lives here), `ringArc` the
     // fill <circle> paintHub() dash-offsets to the percent, `barPct` the centred percent label.
-    hub: { name: hubName, meta: hubMeta, nationality: hubNationality, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, userId: hubUserId, userIdCopy: hubUserIdCopy, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
+    hub: { name: hubName, meta: hubMeta, nationality: hubNationality, bio: hubBio, glyph: hubGlyph, photo: hubPhoto, email: hubEmail, phone: hubPhone, userId: hubUserId, userIdCopy: hubUserIdCopy, ring, ringArc: bar, barPct, barNudge, barInterestsCta },
     // The membership row's sub text (TM-643) — repainted from GET /me/membership by paintMembership().
     membership: { sub: membershipSub },
     // The Interests card body (TM-778) — repainted by paintInterests() from MeResponse.interests.
@@ -2553,6 +2644,9 @@ function buildPublicShell(view) {
   const avatar = el("span", { class: "tm-pf-avatar tm-pf-avatar-lg", "aria-hidden": "true", text: "🙂" });
   const name = el("h2", { class: "tm-pf-pub-name", text: "Your profile" });
   const meta = el("div", { class: "tm-pf-sub tm-pf-pub-meta", text: "" });
+  // TM-1139: the short bio on the public preview — bio is PUBLIC (the user's intro), so "how others see
+  // you" shows it. Plain text, hidden when unset; painted by fillPublic via bioDisplay. textContent-only.
+  const bio = el("p", { class: "tm-pf-bio tm-pf-pub-bio", text: "", hidden: true });
 
   // Interests (TM-778): "how others see you" — a READ-ONLY view of the caller's saved interests (from
   // MeResponse.interests), no add/remove here (editing lives on the hub card). Painted by fillPublic().
@@ -2583,6 +2677,8 @@ function buildPublicShell(view) {
         avatar,
         name,
         meta,
+        // TM-1139: the bio reads directly under the name/city, above the interests chips.
+        bio,
         chips,
         inCommon,
         message,
@@ -2591,7 +2687,7 @@ function buildPublicShell(view) {
     ]),
   );
 
-  publicShell = { avatar, name, meta, status, chips };
+  publicShell = { avatar, name, meta, bio, status, chips };
 }
 
 function fillPublic(profile) {
@@ -2612,6 +2708,12 @@ function fillPublic(profile) {
   publicShell.name.textContent = pub.short;
   publicShell.meta.textContent = pub.metaLine || "Add your city to your profile";
   publicShell.avatar.textContent = pub.initial;
+  // TM-1139: the public bio line — shown as plain text when set, hidden when unset (optional, no prompt).
+  if (publicShell.bio) {
+    const b = bioDisplay(profile);
+    publicShell.bio.textContent = b.display;
+    publicShell.bio.hidden = !b.hasBio;
+  }
 }
 
 async function loadPublic() {

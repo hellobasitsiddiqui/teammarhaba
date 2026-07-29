@@ -17,6 +17,7 @@ import {
   identitySummary,
   accountContact,
   nationalityDisplay,
+  bioDisplay,
   circleUserId,
   profileStrength,
   strengthRingGeometry,
@@ -138,6 +139,33 @@ test("nationalityDisplay reports no nationality for a null/blank/unknown code (l
   // A missing field and a null /me object are both safe.
   assert.equal(nationalityDisplay({}).hasNationality, false);
   assert.equal(nationalityDisplay(null).hasNationality, false);
+});
+
+// ---- bioDisplay (TM-1139) ---------------------------------------------------------------------
+
+test("bioDisplay returns the stored bio text and marks it present", () => {
+  const b = bioDisplay(me({ bio: "Coffee, code and long walks." }));
+  assert.equal(b.bio, "Coffee, code and long walks.");
+  assert.equal(b.hasBio, true);
+  assert.equal(b.display, "Coffee, code and long walks.", "the display line is the bio text");
+});
+
+test("bioDisplay trims surrounding whitespace off the stored bio", () => {
+  const b = bioDisplay(me({ bio: "   Hello there   " }));
+  assert.equal(b.bio, "Hello there");
+  assert.equal(b.display, "Hello there");
+  assert.equal(b.hasBio, true);
+});
+
+test("bioDisplay reports no bio for a null/blank bio (line hidden)", () => {
+  for (const val of [null, undefined, "", "   ", "\n\t "]) {
+    const b = bioDisplay(me({ bio: val }));
+    assert.equal(b.hasBio, false, `${JSON.stringify(val)} → no bio`);
+    assert.equal(b.display, "", `${JSON.stringify(val)} → empty display (renderer hides the line)`);
+  }
+  // A missing field and a null /me object are both safe.
+  assert.equal(bioDisplay({}).hasBio, false);
+  assert.equal(bioDisplay(null).hasBio, false);
 });
 
 // ---- circleUserId (TM-1105) -------------------------------------------------------------------

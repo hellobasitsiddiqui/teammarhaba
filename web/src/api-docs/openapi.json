@@ -1738,6 +1738,9 @@
           "ageVerified" : {
             "type" : "boolean"
           },
+          "bio" : {
+            "type" : "string"
+          },
           "circleUserId" : {
             "format" : "int64",
             "type" : "integer"
@@ -1979,6 +1982,11 @@
             "maximum" : 99,
             "minimum" : 18,
             "type" : "integer"
+          },
+          "bio" : {
+            "maxLength" : 160,
+            "minLength" : 0,
+            "type" : "string"
           },
           "gender" : {
             "enum" : [ "FEMALE", "MALE", "PREFER_NOT_TO_SAY" ],
@@ -2914,6 +2922,11 @@
           "age" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "bio" : {
+            "maxLength" : 160,
+            "minLength" : 0,
+            "type" : "string"
           },
           "city" : {
             "maxLength" : 255,

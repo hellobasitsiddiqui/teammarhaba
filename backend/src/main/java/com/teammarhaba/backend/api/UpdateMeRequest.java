@@ -53,6 +53,11 @@ import java.util.List;
  *       set, behind the unchanged-value guard — a NEW code must be recognised, but the caller's
  *       already-saved code (or {@code ""}) re-sends as a no-op, so no existing profile is invalidated.
  *       Optional partial-PATCH: {@code null}/omitted leaves it unchanged, {@code ""} clears it.</li>
+ *   <li>{@code bio} — a short free-text intro (TM-1139), capped at 160 chars by {@code @Size(max = 160)}.
+ *       Unlike the name/city fields there is <em>no</em> {@code NAME_LIKE} pattern — a bio can contain
+ *       anything (the web renders it as inert {@code textContent}, so it is XSS-safe with only the length
+ *       cap). Optional partial-PATCH: {@code null}/omitted leaves it unchanged, {@code ""} clears it to
+ *       {@code null} (applied behind the {@code Objects.equals} no-op guard in the service).</li>
  *   <li>{@code notificationPref} — the {@link NotificationPref} enum; an unknown value is rejected
  *       by Jackson at deserialization time (uniform {@code 400}).
  *   <li>{@code timezone} (IANA id) and {@code locale} (BCP-47 tag) — best-effort validated in
@@ -73,6 +78,8 @@ import java.util.List;
  *                         unchanged, {@code ""} clears). A NEW value must be a recognised country
  *                         code (validated in the service like {@code city}); an unchanged saved code
  *                         re-sends as a no-op
+ * @param bio              self-reported short bio (TM-1139), free text ≤160 chars; optional
+ *                         partial-PATCH ({@code null}/omitted leaves it unchanged, {@code ""} clears)
  * @param phone            E.164-shaped phone: {@code +} then 7–15 digits, separators allowed
  *                         between digits (e.g. {@code +44 20 7946 0958}); {@code ""} clears
  * @param notificationPref delivery preference (EMAIL/PUSH/BOTH)
@@ -114,6 +121,10 @@ public record UpdateMeRequest(
         // city, TM-877), so an unchanged saved code re-sends as a no-op and only a NEW value must be a
         // recognised code.
         @Pattern(regexp = NATIONALITY_PATTERN, message = NATIONALITY_MESSAGE) String nationality,
+        // TM-1139: a short free-text bio. Length-capped only (no NAME_LIKE pattern — a bio can contain
+        // anything); the web renders it as inert textContent, so the length cap is the whole boundary
+        // rule. Optional partial-PATCH — null/omitted leaves it unchanged, "" clears it in the service.
+        @Size(max = 160, message = "must be 160 characters or fewer") String bio,
         // Regex anatomy (TM-781): "^$|" keeps the empty-string clear alternative; then a MANDATORY
         // "+", a first digit, and 6–14 further digits each optionally preceded by separator chars —
         // i.e. 7–15 digits total with separators only BETWEEN digits (never leading or trailing).

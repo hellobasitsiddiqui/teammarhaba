@@ -408,4 +408,104 @@ class MeProfilePatchValidationIntegrationTest extends AbstractIntegrationTest {
         assertThat(users.findByFirebaseUid("uid-nat-keep").orElseThrow().getNationality())
                 .isEqualTo("PK");
     }
+
+    // ------------------------------------------------------------------
+    // TM-1139 — bio (short free-text intro): the PATCH /me + GET /me
+    // contract, mirroring the nationality/city partial-PATCH clear rules
+    // (but free text — only a 160-char length cap, no known-value check).
+    // ------------------------------------------------------------------
+
+    @Test
+    void patchMeAcceptsABioAndMeResponseCarriesIt() throws Exception {
+        // A bio round-trips through PATCH, is echoed on the mutation response, is persisted on the row,
+        // and — the key contract — MeResponse carries `bio` on a fresh GET /me read (not just the echo).
+        var who = caller("uid-bio-ok", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"Coffee, code and long walks.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("Coffee, code and long walks."));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("Coffee, code and long walks."));
+        assertThat(users.findByFirebaseUid("uid-bio-ok").orElseThrow().getBio())
+                .isEqualTo("Coffee, code and long walks.");
+    }
+
+    @Test
+    void patchMeAcceptsABioExactlyAtThe160CharCap() throws Exception {
+        // The boundary @Size(max = 160) accepts a value AT the cap; a 160-char bio persists.
+        var who = caller("uid-bio-cap", "x@example.com");
+        String atCap = "a".repeat(160);
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"" + atCap + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value(atCap));
+        assertThat(users.findByFirebaseUid("uid-bio-cap").orElseThrow().getBio())
+                .isEqualTo(atCap);
+    }
+
+    @Test
+    void patchMeRejectsABioOver160CharsWith400() throws Exception {
+        // 161 chars exceeds @Size(max = 160) — a uniform 400 at the boundary, before persistence.
+        String tooLong = "a".repeat(161);
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-bio-long", "x@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"" + tooLong + "\"}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-bio-long")
+                .ifPresent(u -> assertThat(u.getBio()).isNull());
+    }
+
+    @Test
+    void patchMeAcceptsABlankBioWhichClearsToNull() throws Exception {
+        // Blank is allowed (the optional-field contract). Set a bio, then send "" to clear it: the stored
+        // value goes back to null (unset), not the empty string — so a cleared bio reads exactly like a
+        // legacy never-written row (mirroring the nationality "" → null clear).
+        var who = caller("uid-bio-clear", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"Loves hiking.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("Loves hiking."));
+
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").doesNotExist());
+
+        assertThat(users.findByFirebaseUid("uid-bio-clear").orElseThrow().getBio())
+                .isNull();
+    }
+
+    @Test
+    void patchOmittingBioLeavesAPreviouslySetOneUnchanged() throws Exception {
+        // Partial-PATCH (like nationality/gender/city): a PATCH that omits bio must leave a set value alone.
+        var who = caller("uid-bio-keep", "x@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"bio\":\"Always up for a plan.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("Always up for a plan."));
+
+        // Edit only the display name — bio must survive untouched.
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"Sara\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("Always up for a plan."));
+        assertThat(users.findByFirebaseUid("uid-bio-keep").orElseThrow().getBio())
+                .isEqualTo("Always up for a plan.");
+    }
 }

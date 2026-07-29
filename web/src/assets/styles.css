@@ -2095,6 +2095,14 @@ h3,
     font-size: 0.78rem;
 }
 
+/* TM-1139: the live "N/160" character counter under the short-bio textarea (profile edit form +
+   onboarding gate). Small, muted, right-aligned so it reads as a subtle count, not a field label. */
+.tm-char-counter {
+    margin: 0.1rem 0 0;
+    font-size: 0.72rem;
+    text-align: right;
+}
+
 /* TM-907 name-lock: a name field frozen because the account has event history. Reads as clearly
    inert — muted fill, no caret, not-allowed cursor — but the lock is ALSO conveyed non-visually
    (readonly + aria-readonly on the input, and the visible .tm-namelock-note below the fields), so
@@ -2307,7 +2315,10 @@ h3,
     vertical-align: middle;
 }
 
-/* Disabled short-bio stub field (TM-684): greyed + inert. */
+/* TM-684 → TM-1139: the short bio is now a REAL functional field, so the greyed/inert
+   .tm-form-field-disabled treatment is no longer applied to it. The rule is retained as the generic
+   "disabled onboarding field" look for any FUTURE stub (e.g. the still-disabled avatar upload uses its
+   own .tm-avatar-* styling, so nothing consumes this today). */
 #onboarding-view .tm-form-field-disabled {
     opacity: 0.6;
 }
@@ -6860,6 +6871,20 @@ button.tm-c-reaction {
     margin-top: 0.15rem;
     color: var(--muted);
     font-size: var(--fs-2);
+}
+
+/* TM-1139: the short-bio line under the identity meta (profile hub) and on the public preview. Reads as
+   the user's own words — slightly larger/softer than the muted meta, wrapping naturally, hidden when
+   unset (the `hidden` attribute the renderer toggles). */
+.tm-pf-bio {
+    margin: 0.35rem 0 0;
+    font-size: var(--fs-2);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.tm-pf-pub-bio {
+    margin-top: var(--space-2);
 }
 
 /* Account contact (TM-783) — the email + phone the account is registered with, under the name/meta. */

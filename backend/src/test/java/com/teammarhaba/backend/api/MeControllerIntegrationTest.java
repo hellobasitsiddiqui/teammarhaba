@@ -769,6 +769,64 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void onboardingGatePersistsAnOptionalBioWhenSupplied() throws Exception {
+        // TM-1139: the gate captures the OPTIONAL short bio. A supplied bio is persisted, echoed on the
+        // response, and read back on a fresh GET /me. On clean main (no bio field) this body's bio is
+        // silently dropped, so the assertion is fail-before/pass-after.
+        var who = caller("uid-gate-bio", "gatebio@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Bio Person\",\"location\":\"London\",\"age\":30,"
+                                + "\"phone\":\"+447700901520\",\"gender\":\"FEMALE\","
+                                + "\"bio\":\"New here — say hi!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.bio").value("New here — say hi!"));
+
+        mockMvc.perform(get("/api/v1/me").with(who))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bio").value("New here — say hi!"));
+        assertThat(users.findByFirebaseUid("uid-gate-bio").orElseThrow().getBio())
+                .isEqualTo("New here — say hi!");
+    }
+
+    @Test
+    void onboardingGateStillCompletesWithoutABio() throws Exception {
+        // TM-1139: bio is OPTIONAL at the gate (unlike gender/phone). A body with NO bio still completes
+        // onboarding, and the stored bio stays null — the gate never writes a blank one.
+        var who = caller("uid-gate-nobio", "gatenobio@example.com");
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"No Bio\",\"location\":\"London\",\"age\":30,"
+                                + "\"phone\":\"+447700901521\",\"gender\":\"MALE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onboardingCompleted").value(true))
+                .andExpect(jsonPath("$.bio").doesNotExist());
+        assertThat(users.findByFirebaseUid("uid-gate-nobio").orElseThrow().getBio())
+                .isNull();
+    }
+
+    @Test
+    void onboardingGateRejectsABioOver160CharsWith400() throws Exception {
+        // TM-1139: the optional bio still carries the @Size(max = 160) cap — a 161-char bio 400s at the
+        // boundary and nothing half-applies (the account stays not-onboarding-complete).
+        var who = caller("uid-gate-biolong", "gatebiolong@example.com");
+        String tooLong = "a".repeat(161);
+        mockMvc.perform(post("/api/v1/me/onboarding")
+                        .with(who)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Long Bio\",\"location\":\"London\",\"age\":30,"
+                                + "\"phone\":\"+447700901522\",\"gender\":\"MALE\","
+                                + "\"bio\":\"" + tooLong + "\"}"))
+                .andExpect(status().isBadRequest());
+
+        users.findByFirebaseUid("uid-gate-biolong")
+                .ifPresent(u -> assertThat(u.isOnboardingCompleted()).isFalse());
+    }
+
+    @Test
     void onboardingGateRejectsUnknownGenderValueWith400() throws Exception {
         // TM-955: Gender is a closed enum — an unknown bucket is rejected by Jackson at
         // deserialization time (uniform 400), so it can never reach persistence.

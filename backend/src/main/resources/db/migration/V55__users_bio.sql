@@ -1,0 +1,15 @@
+-- V55__users_bio — add the self-reported user short-bio column (TM-1139)
+--
+-- TM-1139 turns the "Short bio" field — which shipped as a DISABLED visual stub (TM-684: "A short line
+-- about you", a "Soon" tag) — into a real, saved profile field, full-stack. This migration lands the DB
+-- half: a single NULLABLE VARCHAR(160) column on users, mirroring the nullable free-profile columns
+-- (city, V5; gender, V50; nationality, V53). Free text — no code/enum shape — so it is stored as-is; the
+-- 160-char cap is the product-chosen "short bio" length and is matched by the @Size(max = 160) boundary
+-- rule on the write DTOs (OnboardingRequest/UpdateMeRequest).
+--
+-- NULLABLE is load-bearing: NULL = unset, the state of every legacy / pre-existing row (created before
+-- this field existed) AND any account provisioned just-in-time. The bio is OPTIONAL at every write path
+-- (unlike gender, which onboarding requires): a user may leave it blank, an existing row is left
+-- untouched (never backfilled to a guessed value), and clearing a bio ('') stores NULL again (so a
+-- cleared bio reads exactly like a never-written one).
+ALTER TABLE users ADD COLUMN bio VARCHAR(160);

@@ -35,6 +35,11 @@ import java.util.List;
  *                             {@code GB}), or {@code null} = unknown (legacy / never chose). A real
  *                             demographic attribute like {@code city}/{@code gender} — persisted and
  *                             shown on the profile hub. Editable via {@code PATCH /me}
+ * @param bio                  self-reported short bio (TM-1139) — the user's own one-line intro, or
+ *                             {@code null} = unset (legacy / never wrote one). Free text, ≤160 chars. A
+ *                             real profile field like {@code nationality} — persisted and shown. PUBLIC
+ *                             (unlike the private {@code gender}): it is the user's public intro, shown
+ *                             on the profile hub AND the public profile. Editable via {@code PATCH /me}
  * @param phone                phone number (may be {@code null})
  * @param notificationPref     delivery preference — new accounts default to {@code BOTH} (email + push, TM-427)
  * @param timezone             IANA timezone id (may be {@code null})
@@ -98,6 +103,7 @@ public record MeResponse(
         Integer age,
         Gender gender,
         String nationality,
+        String bio,
         String phone,
         NotificationPref notificationPref,
         String timezone,

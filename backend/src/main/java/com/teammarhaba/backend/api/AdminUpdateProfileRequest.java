@@ -66,7 +66,7 @@ public record AdminUpdateProfileRequest(
 
     /**
      * Map onto the service-layer {@link ProfileUpdate} value object. The self-only fields
-     * ({@code displayName}, {@code gender}, {@code nationality}, {@code notificationPref},
+     * ({@code displayName}, {@code gender}, {@code nationality}, {@code bio}, {@code notificationPref},
      * {@code themeAccent}, {@code themeSketchy}, {@code interests}) are passed as {@code null} so the shared
      * {@code applyProfileFields} leaves them untouched — an admin edit only ever writes the profile
      * subset above.
@@ -86,6 +86,7 @@ public record AdminUpdateProfileRequest(
                 age,
                 null, // gender (TM-955) — the user's own choice (like interests), not admin-editable
                 null, // nationality (TM-1134) — the user's own choice, not admin-editable
+                null, // bio (TM-1139) — the user's own intro, not admin-editable
                 phone,
                 null, // notificationPref (TM-1109) — VIEW-ONLY for admins; never written via this path
                 timezone,

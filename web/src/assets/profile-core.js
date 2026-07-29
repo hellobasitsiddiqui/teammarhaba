@@ -138,6 +138,26 @@ export function nationalityDisplay(me) {
 }
 
 /**
+ * The short bio shown on the Profile hub identity area AND the public profile (TM-1139), resolved from
+ * the stored free-text bio on the `/me` payload. Pure — trims the raw value so the renderer stays a thin
+ * painter and this is unit-testable with no DOM. An unset/blank bio yields `hasBio: false` and an empty
+ * `display`, so the renderer can hide the line entirely (bio is optional — no forced placeholder, unlike
+ * the always-present contact lines). The text is rendered by the caller via `el()` `textContent`
+ * (XSS-safe), so no escaping happens here — this only decides presence + the trimmed value.
+ *
+ * <p>Bio is PUBLIC (unlike the private gender): it is the user's own intro, so it appears on the public
+ * profile preview too.
+ *
+ * @param {object|null|undefined} me a `/me`-shaped object carrying `bio` (a string)
+ * @returns {{ bio: string, hasBio: boolean, display: string }}
+ *   `bio`/`display` = the trimmed bio (or ""); `hasBio` = whether a non-blank bio is present.
+ */
+export function bioDisplay(me) {
+  const bio = String((me || {}).bio ?? "").trim();
+  return { bio, hasBio: bio !== "", display: bio };
+}
+
+/**
  * The "Circle User ID" line shown on the Profile hub next to the phone (TM-1105): the account's numeric
  * `users.id` database primary key, surfaced from `/me` as `circleUserId`. It is the SAME stable id the
  * admin surfaces use (the app is branded Circle, TM-668), so a user can read it off their own profile and

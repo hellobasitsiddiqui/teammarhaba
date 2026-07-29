@@ -50,10 +50,10 @@ class UserProfileUpdateLifecycleIntegrationTest extends AbstractIntegrationTest 
 
     /** A partial update that touches only {@code displayName} — the rest null = leave unchanged. */
     private static ProfileUpdate displayNameUpdate(String displayName) {
-        // 14 fields: displayName, firstName, lastName, city, age, gender, nationality (TM-1134), phone,
-        // notificationPref, timezone, locale, themeAccent, themeSketchy, interests.
+        // 15 fields: displayName, firstName, lastName, city, age, gender, nationality (TM-1134),
+        // bio (TM-1139), phone, notificationPref, timezone, locale, themeAccent, themeSketchy, interests.
         return new ProfileUpdate(
-                displayName, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                displayName, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     // ---- patchMeOnSoftDeletedReactivatesOrRefuses --------------------------------------------------

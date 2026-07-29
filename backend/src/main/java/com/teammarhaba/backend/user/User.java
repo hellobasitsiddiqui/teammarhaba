@@ -96,6 +96,20 @@ public class User {
     @Column(name = "nationality")
     private String nationality;
 
+    /**
+     * Self-reported short bio (TM-1139) — the user's own one-line intro ("A short line about you"). A
+     * real, user-editable profile field like {@code city}/{@code gender}/{@code nationality} — persisted
+     * and shown, not the disabled visual stub it shipped as (TM-684). Nullable — {@code null} = unset,
+     * the state of every legacy / pre-existing row and any account provisioned just-in-time. Free text
+     * (no {@code NAME_LIKE} pattern — a bio can contain anything), capped at 160 chars: the
+     * {@code V55__users_bio} migration owns the (nullable) {@code VARCHAR(160)} column and the
+     * {@code @Size(max = 160)} boundary rule on the write DTOs matches it. OPTIONAL at every write path —
+     * never required at the onboarding gate (unlike gender). PUBLIC — unlike the private {@code gender},
+     * a bio is the user's public intro, so it is shown on the public profile too.
+     */
+    @Column(name = "bio")
+    private String bio;
+
     @Column(name = "phone")
     private String phone;
 
@@ -267,6 +281,18 @@ public class User {
 
     public void setNationality(String nationality) {
         this.nationality = nationality;
+    }
+
+    /**
+     * Self-reported short bio (TM-1139); {@code null} = unset (legacy / never wrote one). Free text
+     * capped at 160 chars at the write path; {@code ""} clears it back to {@code null}.
+     */
+    public String getBio() {
+        return bio;
+    }
+
+    public void setBio(String bio) {
+        this.bio = bio;
     }
 
     public String getPhone() {
