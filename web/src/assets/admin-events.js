@@ -36,6 +36,8 @@ import {
   OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
+  BOOKING_CUTOFF_HOURS_MIN,
+  BOOKING_CUTOFF_HOURS_MAX,
   AGE_MIN_BOUND,
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
@@ -53,6 +55,8 @@ import {
   overCapacityState,
   overCapacityWarning,
   revealSummary,
+  bookingCutoffSummary,
+  effectiveBookingCutoffHours,
   formatEventWhen,
   isPastEvent,
   partitionEventsByPast,
@@ -1042,6 +1046,12 @@ const FORM_FIELDS = [
   { key: "visibilityEnd", id: "event-visibility-end", label: "Visible until", type: "datetime-local", required: true, row: "visibility" },
   { key: "capacity", id: "event-capacity", label: "Capacity (optional)", type: "number", min: 1, row: "limits", hint: "Blank = unlimited." },
   { key: "locationRevealHours", id: "event-reveal-hours", label: "Location reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
+  // Booking cutoff (TM-413, exposed by TM-1157): the "stop accepting RSVPs N hours before start" override.
+  // Lives under "More options" (spliced out of the main body below, like the timezone field) — it's a
+  // rarely-changed inherit-by-default control. Blank = inherit; 0 = accept up to start. The placeholder +
+  // helper text are FILLED with the event's resolved effective value after prefill (the booking-cutoff
+  // block in buildEventForm) so the admin sees exactly what applies if they leave it blank.
+  { key: "bookingCutoffHours", id: "event-booking-cutoff-hours", label: "Stop accepting RSVPs (hours before start, optional)", type: "number", min: BOOKING_CUTOFF_HOURS_MIN, max: BOOKING_CUTOFF_HOURS_MAX, hint: "Hours before the start that RSVPs, waitlist joins and claims stop. 0 = accept right up to the start. Blank = city / app default." },
   // Age band (TM-1065): the two number inputs are no longer laid out two-up. They stay in FORM_FIELDS
   // (so readDraft / validateEventDraft / server-error routing still key off them) but are RE-HOMED inside
   // the age-band control (buildAgeBandControl), revealed only when the "Custom" band chip is chosen. The
@@ -1090,6 +1100,9 @@ function buildField(field, fields) {
       min: field.min,
       max: field.max,
       step: field.step,
+      // A static placeholder from the field spec (the booking-cutoff field's effective-value placeholder is
+      // set dynamically after prefill; this covers any future field that wants a fixed one).
+      placeholder: field.placeholder,
       // A stepped number (the price £ amount, TM-1076) accepts decimals → "decimal" keypad; a whole-number
       // field keeps the "numeric" keypad.
       inputmode: field.type === "number" ? (field.step ? "decimal" : "numeric") : null,
@@ -2008,6 +2021,32 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // never silently overwritten on save — the profile.js fillCitySelect / cityChoiceError idiom.
   fillCitySelect(fields.get("city").input, model.city);
 
+  // Booking cutoff (TM-1157): show the EFFECTIVE inherited value (the resolved override → city → app
+  // default, or the app default of 1h on create) as the field's PLACEHOLDER + in the helper text, so an
+  // admin who leaves the override BLANK sees exactly what will apply. The input itself stays blank when the
+  // event inherits (toFormModel gave "" for a null override) — the placeholder is what renders in that
+  // case. Reads the resolved value off the event on edit; falls back to the app default on create.
+  {
+    const cutoffField = fields.get("bookingCutoffHours");
+    if (cutoffField) {
+      const effective = effectiveBookingCutoffHours(event || {});
+      cutoffField.input.setAttribute("placeholder", String(effective));
+      // Resolve the hint node from the field's own wrapper (NOT document.getElementById) — the form is
+      // still an in-memory tree at prefill time, not yet mounted, so a document lookup would miss.
+      const hint = cutoffField.input.closest(".tm-form-field")?.querySelector(".tm-field-hint");
+      if (hint) {
+        const unit = effective === 1 ? "hour" : "hours";
+        const applies =
+          effective === 0
+            ? "accepted right up to the start"
+            : `stopped ${effective} ${unit} before the start`;
+        hint.textContent =
+          `Hours before the start that RSVPs, waitlist joins and claims stop. 0 = accept right up to the start.`
+          + ` Blank = the city / app default (currently RSVPs ${applies}).`;
+      }
+    }
+  }
+
   // Age band (TM-1065): on CREATE the default band is 18-99 (attendees are 18-99, TM-884) — seed the two
   // age inputs so the whole adult range is pre-filled and untouched. 18-99 is a non-preset band, so the
   // control opens on Custom showing 18/99 (see buildAgeBandControl → minMaxToAgeBand). On EDIT the prefill
@@ -2218,16 +2257,23 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // prefilled + "Use mine"); only its home in the layout moves. Reuse the TM-398 `.tm-event-calendar`
   // disclosure styling (styles.css) so the toggle reads consistently with the events UI. The submit
   // error-paint force-opens this (via `moreOptions`) so a hidden required-timezone error is never
-  // invisible. Only the timezone lives here; capacity/reveal/age stay in the main body.
+  // invisible. Capacity/reveal/age stay in the main body; the timezone and the booking-cutoff override
+  // (TM-1157) — both inherit-by-default / rarely-changed controls — live here.
   const timezoneNode = byKey.get("timezone");
   const tzIdx = layout.indexOf(timezoneNode);
   if (tzIdx >= 0) layout.splice(tzIdx, 1);
+  // Booking cutoff (TM-1157): pull its field OUT of the main body into the More-options disclosure, next
+  // to the timezone — it MIRRORS the timezone/reveal three-tier "blank = inherit" idiom and belongs with
+  // the other override controls rather than in the main limits row.
+  const bookingCutoffNode = byKey.get("bookingCutoffHours");
+  const cutoffIdx = bookingCutoffNode ? layout.indexOf(bookingCutoffNode) : -1;
+  if (cutoffIdx >= 0) layout.splice(cutoffIdx, 1);
   moreOptions = el(
     "details",
     { class: "tm-event-calendar tm-event-more-options", id: "event-more-options" },
     [
       el("summary", { class: "tm-event-calendar-toggle", id: "event-more-options-toggle" }, "More options"),
-      el("div", { class: "tm-event-more-options-body" }, [timezoneNode]),
+      el("div", { class: "tm-event-more-options-body" }, [timezoneNode, bookingCutoffNode].filter(Boolean)),
     ],
   );
   // Render it near the bottom of the main fields (after the last body field, before the image + actions).
@@ -2331,11 +2377,15 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   baselineDraft = readDraft();
 
   const revealSummaryText = event ? revealSummary(event) : "";
-  // The full-page shell (TM-426): the form + the reveal-timing note, mounted into #admin-event-form-view
-  // by enterAdminEventForm(). No modal() — the page scrolls, so nothing is clipped on a short viewport.
+  // Booking-cutoff note (TM-1157): mirrors the reveal note — a plain-English one-liner of when RSVPs stop
+  // for THIS event and where that value came from (its own override vs the city/app default).
+  const bookingCutoffText = event ? bookingCutoffSummary(event) : "";
+  // The full-page shell (TM-426): the form + the reveal-timing + booking-cutoff notes, mounted into
+  // #admin-event-form-view by enterAdminEventForm(). No modal() — the page scrolls, nothing is clipped.
   const node = el("div", { class: "tm-event-form-page" }, [
     form,
     revealSummaryText ? el("p", { class: "tm-muted tm-event-reveal-note", text: revealSummaryText }) : null,
+    bookingCutoffText ? el("p", { class: "tm-muted tm-event-booking-cutoff-note", text: bookingCutoffText }) : null,
   ]);
 
   form.addEventListener("submit", async (e) => {

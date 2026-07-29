@@ -22,6 +22,9 @@ import {
   OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
+  BOOKING_CUTOFF_HOURS_MIN,
+  BOOKING_CUTOFF_HOURS_MAX,
+  BOOKING_CUTOFF_DEFAULT_HOURS,
   AGE_MIN_BOUND,
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
@@ -38,6 +41,8 @@ import {
   capacityLabel,
   attendanceCounts,
   revealSummary,
+  bookingCutoffSummary,
+  effectiveBookingCutoffHours,
   formatEventWhen,
   isPastEvent,
   partitionEventsByPast,
@@ -284,6 +289,28 @@ test("location-reveal hours are bounded 1..8760 when set", () => {
   assert.match(validateEventDraft(validDraft({ locationRevealHours: "9000" })).errors.locationRevealHours, /between 1 and 8760/);
 });
 
+// --- booking cutoff (stop-accepting-RSVPs) validation (TM-413 exposed by TM-1157) -------------
+
+test("booking cutoff: blank is valid (inherit); 0 is valid (accept up to start) (TM-1157)", () => {
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "" })).canSave, true);
+  // 0 is a REAL value here (unlike location-reveal which is @Min(1)) — must NOT error.
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "0" })).canSave, true);
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "0" })).errors.bookingCutoffHours, undefined);
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "48" })).canSave, true);
+});
+
+test("booking cutoff: rejects a negative, an over-max, and a non-integer (TM-1157)", () => {
+  assert.match(validateEventDraft(validDraft({ bookingCutoffHours: "-1" })).errors.bookingCutoffHours, /between 0 and 8760/);
+  assert.match(validateEventDraft(validDraft({ bookingCutoffHours: "9000" })).errors.bookingCutoffHours, /between 0 and 8760/);
+  assert.match(validateEventDraft(validDraft({ bookingCutoffHours: "2.5" })).errors.bookingCutoffHours, /whole number/i);
+});
+
+test("booking-cutoff bounds mirror the backend @Min(0)/@Max(8760) (TM-413/TM-1157)", () => {
+  assert.equal(BOOKING_CUTOFF_HOURS_MIN, 0);
+  assert.equal(BOOKING_CUTOFF_HOURS_MAX, 8760);
+  assert.equal(BOOKING_CUTOFF_DEFAULT_HOURS, 1);
+});
+
 test("age band: both blank = all ages; min ≤ max enforced when both set (TM-415)", () => {
   assert.equal(validateEventDraft(validDraft({ ageMin: "", ageMax: "" })).canSave, true);
   // One side only is allowed (an open-ended band).
@@ -337,6 +364,56 @@ test("buildEventPayload carries the venueId reference and omits it when unset (T
   assert.equal(withVenue.venueId, 7); // sent as an integer id
   const noVenue = buildEventPayload(validDraft({ venueId: "" }));
   assert.equal("venueId" in noVenue, false); // a one-off location omits it (back-compat)
+});
+
+test("buildEventPayload sends bookingCutoffHours override, OMITS when blank (null=inherit), keeps 0 (TM-1157)", () => {
+  // An explicit override is sent verbatim.
+  assert.equal(buildEventPayload(validDraft({ bookingCutoffHours: "48" })).bookingCutoffHours, 48);
+  // Blank = inherit → OMITTED entirely (so it's null/absent on the wire, NOT 0).
+  const blank = buildEventPayload(validDraft({ bookingCutoffHours: "" }));
+  assert.equal("bookingCutoffHours" in blank, false);
+  // 0 is a REAL value (accept right up to start) — sent verbatim, never confused with blank/inherit.
+  const zero = buildEventPayload(validDraft({ bookingCutoffHours: "0" }));
+  assert.equal(zero.bookingCutoffHours, 0);
+  assert.equal("bookingCutoffHours" in zero, true);
+});
+
+test("toFormModel prefills the RAW bookingCutoffHours override, null-safe (inherit → BLANK, not 0) (TM-1157)", () => {
+  // An event with an explicit override → the raw value as a string.
+  assert.equal(toFormModel({ bookingCutoffHours: 48 }).bookingCutoffHours, "48");
+  // An explicit 0 override round-trips as "0" (not blank).
+  assert.equal(toFormModel({ bookingCutoffHours: 0 }).bookingCutoffHours, "0");
+  // An INHERITING event (override null) shows BLANK — NOT 0, and NOT the effective 1 — even when the
+  // response carries a resolved effective value. This is the null-safe prefill AC.
+  assert.equal(toFormModel({ bookingCutoffHours: null, effectiveBookingCutoffHours: 1 }).bookingCutoffHours, "");
+  assert.equal(toFormModel({ effectiveBookingCutoffHours: 24 }).bookingCutoffHours, ""); // absent override
+  assert.equal(toFormModel({}).bookingCutoffHours, "");
+});
+
+test("effectiveBookingCutoffHours resolves the placeholder value, defaulting to the app default (TM-1157)", () => {
+  assert.equal(effectiveBookingCutoffHours({ effectiveBookingCutoffHours: 24 }), 24);
+  assert.equal(effectiveBookingCutoffHours({ effectiveBookingCutoffHours: 0 }), 0); // 0 is a real effective value
+  // No resolved value (create / legacy response) → the app default (1).
+  assert.equal(effectiveBookingCutoffHours({}), BOOKING_CUTOFF_DEFAULT_HOURS);
+  assert.equal(effectiveBookingCutoffHours(), BOOKING_CUTOFF_DEFAULT_HOURS);
+  // A garbage / negative value never leaks through as the placeholder → falls back to the default.
+  assert.equal(effectiveBookingCutoffHours({ effectiveBookingCutoffHours: -5 }), BOOKING_CUTOFF_DEFAULT_HOURS);
+});
+
+test("bookingCutoffSummary reports the effective window + its source, 0 reads as 'up to the start' (TM-1157)", () => {
+  assert.match(
+    bookingCutoffSummary({ effectiveBookingCutoffHours: 24, bookingCutoffHours: null }),
+    /RSVPs stop 24 hours before the start.*city \/ app default/,
+  );
+  assert.match(
+    bookingCutoffSummary({ effectiveBookingCutoffHours: 1, bookingCutoffHours: 1 }),
+    /RSVPs stop 1 hour before the start.*this event's override/,
+  );
+  assert.match(
+    bookingCutoffSummary({ effectiveBookingCutoffHours: 0, bookingCutoffHours: 0 }),
+    /right up to the start.*this event's override/,
+  );
+  assert.equal(bookingCutoffSummary({}), ""); // no resolved value → no summary
 });
 
 // --- clearedOptionalFields: the silent-no-op guard on edit (TM-734) ---------------------------
