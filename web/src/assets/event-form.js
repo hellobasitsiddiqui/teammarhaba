@@ -50,6 +50,21 @@ export const CAPACITY_MIN = 1;
 export const REVEAL_HOURS_MIN = 1;
 export const REVEAL_HOURS_MAX = 8760;
 /**
+ * Booking-cutoff bounds — mirror Create/UpdateEventRequest.bookingCutoffHours @Min(0) @Max(8760) (TM-413,
+ * exposed on the form by TM-1157). Unlike the reveal window the MINIMUM is 0: `0` = accept RSVPs right up
+ * to the start (no cutoff). Blank = inherit (override → per-city → app default). RSVP/waitlist-join/claim
+ * is refused once `now >= startAt − cutoffHours`.
+ */
+export const BOOKING_CUTOFF_HOURS_MIN = 0;
+export const BOOKING_CUTOFF_HOURS_MAX = 8760;
+/**
+ * The app-default booking cutoff (TM-413): 1 hour before the start. Shown as the placeholder/helper on the
+ * form field so an admin who leaves the override BLANK sees what will actually apply. Only the fallback for
+ * an EventResponse that carries no resolved `effectiveBookingCutoffHours` yet (create, or a legacy
+ * response); a real event always shows its own resolved effective value.
+ */
+export const BOOKING_CUTOFF_DEFAULT_HOURS = 1;
+/**
  * Age-band bounds (TM-415). The API field isn't live yet (TM-415 is not Done), so these mirror the
  * app's existing age model (profile age is 13..120, TM-162): a band outside that can never match a
  * real attendee. The load-bearing rule is age_min ≤ age_max; the bounds just fail fast. If TM-415
@@ -741,6 +756,14 @@ export function validateEventDraft(draft = {}, { requireForCreate = true } = {})
     errors.locationRevealHours = `Must be between ${REVEAL_HOURS_MIN} and ${REVEAL_HOURS_MAX} hours.`;
   }
 
+  // Booking cutoff: optional, integer within [0, 8760] when present (mirrors @Min(0)/@Max, TM-413 exposed
+  // by TM-1157). Blank = inherit; 0 = accept RSVPs right up to the start (a valid value, unlike reveal).
+  const cutoff = parseIntOrNull(draft.bookingCutoffHours);
+  if (Number.isNaN(cutoff)) errors.bookingCutoffHours = "Enter a whole number of hours.";
+  else if (cutoff !== null && (cutoff < BOOKING_CUTOFF_HOURS_MIN || cutoff > BOOKING_CUTOFF_HOURS_MAX)) {
+    errors.bookingCutoffHours = `Must be between ${BOOKING_CUTOFF_HOURS_MIN} and ${BOOKING_CUTOFF_HOURS_MAX} hours.`;
+  }
+
   // Price (TM-1076): a £ amount → integer pence, @Min(0). Free carries "0"; the presets seed a valid
   // amount; only a Custom hand-typed value can be invalid. poundsToPence returns NaN for a negative or
   // non-numeric amount (a blank Custom is treated as "0"/Free by buildEventPayload, so blank ≠ error).
@@ -838,6 +861,10 @@ export function buildEventPayload(draft = {}) {
   putInstant("visibilityEnd");
   putInt("capacity");
   putInt("locationRevealHours");
+  // Booking cutoff (TM-413, exposed by TM-1157): the per-event RSVP-stop override in hours. Blank →
+  // parseIntOrNull returns null → putInt OMITS it, so an untouched/blanked cutoff means "inherit" on the
+  // wire (NOT `0`). An explicit `0` IS a real value (accept up to start) and is sent verbatim by putInt.
+  putInt("bookingCutoffHours");
   // Forward-compatible age band (TM-415) — ignored by the server until that ticket persists them.
   putInt("ageMin");
   putInt("ageMax");
@@ -872,6 +899,7 @@ export const CLEARABLE_OPTIONAL_FIELDS = [
   "visibilityEnd",
   "capacity",
   "locationRevealHours",
+  "bookingCutoffHours",
   "ageMin",
   "ageMax",
 ];
@@ -924,6 +952,11 @@ export function toFormModel(event = {}) {
     visibilityEnd: utcIsoToZoned(event.visibilityEnd, tz),
     capacity: event.capacity == null ? "" : String(event.capacity),
     locationRevealHours: event.locationRevealHours == null ? "" : String(event.locationRevealHours),
+    // Booking cutoff (TM-413, exposed by TM-1157): prefill the RAW per-event OVERRIDE (`bookingCutoffHours`),
+    // NOT the resolved `effectiveBookingCutoffHours`. An INHERITING event (override == null) must show BLANK
+    // — not `0` and not the effective 1 — so re-saving an untouched form keeps it inheriting. `0` is a real
+    // override (accept up to start) and comes back as "0". The effective value drives the placeholder only.
+    bookingCutoffHours: event.bookingCutoffHours == null ? "" : String(event.bookingCutoffHours),
     ageMin: event.ageMin == null ? "" : String(event.ageMin),
     ageMax: event.ageMax == null ? "" : String(event.ageMax),
     // Price (TM-1076): the saved `pricePence` rendered back into the form's £ amount (0 → "0" = Free). The
@@ -1075,6 +1108,7 @@ export const DIRTY_COMPARE_FIELDS = Object.freeze([
   "visibilityEnd",
   "capacity",
   "locationRevealHours",
+  "bookingCutoffHours",
   "ageMin",
   "ageMax",
   "price",
@@ -1359,6 +1393,39 @@ export function revealSummary(event = {}) {
   if (!Number.isFinite(hours)) return "";
   const source = event.locationRevealHours == null ? "the city / app default" : "this event's override";
   return `Exact location is revealed ${hours} ${hours === 1 ? "hour" : "hours"} before the start (from ${source}).`;
+}
+
+/**
+ * The EFFECTIVE booking-cutoff hours to show as the form field's placeholder/helper (TM-1157) — what
+ * actually applies when the per-event override is left BLANK. Prefers the EventResponse's resolved
+ * `effectiveBookingCutoffHours` (server = override → per-city → app default), falling back to
+ * {@link BOOKING_CUTOFF_DEFAULT_HOURS} (1) on create or when the response doesn't carry a resolved value.
+ * Read defensively so a bad/absent value can never render `NaN` in the placeholder. Pure.
+ *
+ * @param {object} [event] an EventResponse (omit/empty on create).
+ * @returns {number} the effective cutoff hours (≥ 0), defaulting to the app default (1).
+ */
+export function effectiveBookingCutoffHours(event = {}) {
+  const hours = Number(event && event.effectiveBookingCutoffHours);
+  return Number.isFinite(hours) && hours >= 0 ? hours : BOOKING_CUTOFF_DEFAULT_HOURS;
+}
+
+/**
+ * A one-line summary of when this event stops accepting RSVPs (TM-413, exposed by TM-1157), read off the
+ * EventResponse's resolved cutoff fields: `effectiveBookingCutoffHours` (what actually applies after the
+ * override → city → app-default resolution) and whether `bookingCutoffHours` (the per-event override) is
+ * set. Says where the effective value came from so the admin understands a blank override still has an
+ * effect. `0` reads as "right up to the start". Returns "" when the response carries no resolved value.
+ *
+ * @param {object} event an EventResponse.
+ * @returns {string}
+ */
+export function bookingCutoffSummary(event = {}) {
+  const hours = Number(event.effectiveBookingCutoffHours);
+  if (!Number.isFinite(hours)) return "";
+  const source = event.bookingCutoffHours == null ? "the city / app default" : "this event's override";
+  if (hours === 0) return `RSVPs are accepted right up to the start (from ${source}).`;
+  return `RSVPs stop ${hours} ${hours === 1 ? "hour" : "hours"} before the start (from ${source}).`;
 }
 
 /**

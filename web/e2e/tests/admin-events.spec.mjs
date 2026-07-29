@@ -317,6 +317,75 @@ test("@admin @admin-events event price: presets + a custom amount persist and re
   }
 });
 
+// TM-1157: the booking-cutoff (stop-accepting-RSVPs) override persists on create and re-opens on edit.
+// The field lives under "More options" (next to the timezone). Set an explicit cutoff on create → assert
+// it's on the POST wire + on the created EventResponse → re-open the edit form → assert the input carries
+// the SAVED raw override (null-safe prefill: an inheriting event would show blank, but this one has an
+// explicit value). FAIL-BEFORE on main: #event-booking-cutoff-hours does not exist, so the first fill()
+// times out. Reuses the same sign-in + hub nav as the tests above.
+test("@admin @admin-events booking cutoff: an explicit override persists on create and re-opens on edit (TM-1157)", async ({ page }) => {
+  const HEADING_CUTOFF = `E2E Booking Cutoff ${Date.now()}`;
+  const now = Date.now();
+  const start = new Date(now + 30 * 864e5);
+  const visStart = new Date(now - 864e5);
+  const visEnd = new Date(now + 60 * 864e5);
+
+  // Sign in as ADMIN + open the events console (same path as the tests above).
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+  await openAdminHub(page);
+  await page.click('.admin-hub-row[href="#/admin/events"]');
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+
+  // New event — fill the minimum required fields. Open "More options" for the timezone AND the new
+  // booking-cutoff override (both live there).
+  await page.click("#admin-events-new");
+  await expect(page.locator("#event-form")).toBeVisible();
+  await page.fill("#event-heading", HEADING_CUTOFF);
+  await page.fill("#event-description", "Booking-cutoff event for the TM-1157 e2e.");
+  await page.fill("#event-location", "Marhaba Cafe, 12 High St");
+  await page.locator("#event-more-options-toggle").click();
+  await page.locator("#event-timezone").selectOption("UTC");
+  await page.fill("#event-start", localValue(start));
+  await page.fill("#event-visibility-start", localValue(visStart));
+  await page.fill("#event-visibility-end", localValue(visEnd));
+  // The placeholder shows the effective inherited default (1h) BEFORE any value is entered.
+  await expect(page.locator("#event-booking-cutoff-hours")).toHaveAttribute("placeholder", "1");
+  // Set an explicit 6-hour cutoff override.
+  await page.fill("#event-booking-cutoff-hours", "6");
+  const createResponse = page.waitForResponse(
+    (r) => r.url().includes("/api/v1/admin/events") && r.request().method() === "POST",
+  );
+  await page.click("#event-save");
+  const createResp = await createResponse;
+  expect(createResp.request().postDataJSON().bookingCutoffHours).toBe(6); // explicit override on the wire
+  const created = await createResp.json();
+  expect(created.bookingCutoffHours).toBe(6); // raw override persisted
+  expect(created.effectiveBookingCutoffHours).toBe(6); // resolves to the override
+
+  // Re-open the edit form → the SAVED raw override prefills the field (null-safe: an explicit value shows).
+  await page.goto(`/#/admin/events/${created.id}/edit`);
+  await expect(page.locator("#event-form")).toBeVisible();
+  await page.locator("#event-more-options-toggle").click();
+  await expect(page.locator("#event-booking-cutoff-hours")).toHaveValue("6");
+
+  // DB check: the persisted row carries the 6-hour override (not null/inherit).
+  const client = new pg.Client(dbConfig);
+  await client.connect();
+  try {
+    const { rows } = await client.query("SELECT booking_cutoff_hours FROM events WHERE heading = $1", [HEADING_CUTOFF]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].booking_cutoff_hours).toBe(6);
+  } finally {
+    await client.end();
+  }
+});
+
 // TM-1101: the dirty-guard + Clear/Reset in EDIT mode — the path the create-mode capture script can't
 // cover, and exactly the edit-mode in-memory-row class of behaviour that bit TM-1076. Proves against the
 // REAL stack that, on an existing event opened for edit:
