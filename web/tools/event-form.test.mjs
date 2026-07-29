@@ -22,6 +22,8 @@ import {
   OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
+  BOOKING_CUTOFF_HOURS_MIN,
+  BOOKING_CUTOFF_HOURS_MAX,
   AGE_MIN_BOUND,
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
@@ -55,6 +57,7 @@ import {
   visibleFromChips,
   visibleUntilChips,
   revealHourChips,
+  cutoffHourChips,
   shiftZonedLocal,
   AGE_DEFAULT_MIN,
   AGE_DEFAULT_MAX,
@@ -92,6 +95,8 @@ test("field caps mirror the backend DTOs", () => {
   assert.equal(CAPACITY_MIN, 1);
   assert.equal(REVEAL_HOURS_MIN, 1);
   assert.equal(REVEAL_HOURS_MAX, 8760);
+  assert.equal(BOOKING_CUTOFF_HOURS_MIN, 0); // 0 = RSVPs open until start (unlike reveal's min of 1)
+  assert.equal(BOOKING_CUTOFF_HOURS_MAX, 8760);
 });
 
 test("the Coffee & X chips are the configured suggestion list", () => {
@@ -284,6 +289,14 @@ test("location-reveal hours are bounded 1..8760 when set", () => {
   assert.match(validateEventDraft(validDraft({ locationRevealHours: "9000" })).errors.locationRevealHours, /between 1 and 8760/);
 });
 
+test("booking-cutoff hours are bounded 0..8760 when set (0 is valid — open until start, TM-413)", () => {
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "" })).canSave, true); // blank = inherit
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "0" })).canSave, true); // 0 allowed (vs reveal)
+  assert.equal(validateEventDraft(validDraft({ bookingCutoffHours: "24" })).canSave, true);
+  assert.match(validateEventDraft(validDraft({ bookingCutoffHours: "-1" })).errors.bookingCutoffHours, /between 0 and 8760/);
+  assert.match(validateEventDraft(validDraft({ bookingCutoffHours: "9000" })).errors.bookingCutoffHours, /between 0 and 8760/);
+});
+
 test("age band: both blank = all ages; min ≤ max enforced when both set (TM-415)", () => {
   assert.equal(validateEventDraft(validDraft({ ageMin: "", ageMax: "" })).canSave, true);
   // One side only is allowed (an open-ended band).
@@ -312,6 +325,14 @@ test("buildEventPayload converts instants to UTC and includes the required field
   assert.equal(body.visibilityEnd, "2026-07-10T17:00:00.000Z");
   assert.equal(body.capacity, 20);
   assert.equal(body.locationRevealHours, 24);
+});
+
+test("buildEventPayload sends bookingCutoffHours when set (incl. 0), omits when blank (TM-413)", () => {
+  assert.equal(buildEventPayload(validDraft({ bookingCutoffHours: "24" })).bookingCutoffHours, 24);
+  // 0 is a real value (open until start) and must be SENT, not treated as blank.
+  assert.equal(buildEventPayload(validDraft({ bookingCutoffHours: "0" })).bookingCutoffHours, 0);
+  // Blank = inherit → omitted (never an empty string / 0 on the wire).
+  assert.equal("bookingCutoffHours" in buildEventPayload(validDraft({ bookingCutoffHours: "" })), false);
 });
 
 test("buildEventPayload omits blank optionals (no empty strings on the wire)", () => {
@@ -408,16 +429,25 @@ test("toFormModel ∘ buildEventPayload round-trips an EventResponse's instants"
     visibilityEnd: "2026-07-10T17:00:00.000Z",
     capacity: 12,
     locationRevealHours: 24,
+    bookingCutoffHours: 3,
   };
   const model = toFormModel(event);
   assert.equal(model.startAt, "2026-07-10T18:00"); // rendered back into BST local
   assert.equal(model.mapUrl, ""); // null → ""
   assert.equal(model.capacity, "12");
+  assert.equal(model.bookingCutoffHours, "3"); // raw override prefilled (TM-413)
   const body = buildEventPayload(model);
   assert.equal(body.startAt, event.startAt);
   assert.equal(body.endAt, event.endAt);
   assert.equal(body.visibilityStart, event.visibilityStart);
   assert.equal(body.capacity, 12);
+  assert.equal(body.bookingCutoffHours, 3); // round-trips back to the wire
+});
+
+test("toFormModel: an inherited event (no bookingCutoffHours) prefills blank so save keeps inheriting (TM-413)", () => {
+  assert.equal(toFormModel({ bookingCutoffHours: null }).bookingCutoffHours, "");
+  assert.equal(toFormModel({}).bookingCutoffHours, "");
+  assert.equal(toFormModel({ bookingCutoffHours: 0 }).bookingCutoffHours, "0"); // an explicit 0 override survives
 });
 
 test("an open-ended event (null endAt) prefills blank and stays editable (TM-429)", () => {
@@ -976,6 +1006,21 @@ test("revealHourChips: 1h / 24h, both within the API bounds (TM-1064)", () => {
     const { errors } = validateEventDraft(validDraft({ locationRevealHours: c.value }));
     assert.equal(errors.locationRevealHours, undefined);
     assert.ok(Number(c.value) >= REVEAL_HOURS_MIN && Number(c.value) <= REVEAL_HOURS_MAX);
+  }
+});
+
+test("cutoffHourChips: At start / 1h / 3h / 24h, all valid within the API bounds (TM-413)", () => {
+  const chips = cutoffHourChips();
+  assert.deepEqual(chips, [
+    { label: "At start", value: "0" },
+    { label: "1h", value: "1" },
+    { label: "3h", value: "3" },
+    { label: "24h", value: "24" },
+  ]);
+  for (const c of chips) {
+    const { errors } = validateEventDraft(validDraft({ bookingCutoffHours: c.value }));
+    assert.equal(errors.bookingCutoffHours, undefined);
+    assert.ok(Number(c.value) >= BOOKING_CUTOFF_HOURS_MIN && Number(c.value) <= BOOKING_CUTOFF_HOURS_MAX);
   }
 });
 

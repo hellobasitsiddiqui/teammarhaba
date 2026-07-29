@@ -50,6 +50,13 @@ export const CAPACITY_MIN = 1;
 export const REVEAL_HOURS_MIN = 1;
 export const REVEAL_HOURS_MAX = 8760;
 /**
+ * Booking-cutoff bounds — mirror CreateEventRequest.bookingCutoffHours @Min(0) @Max(8760) (TM-413).
+ * The MIN is 0 (not 1 like reveal): 0h means RSVPs stay open right up to the start instant (walk-ins),
+ * whereas the reveal window is at least an hour. Blank = inherit the venue/city/app default (1h).
+ */
+export const BOOKING_CUTOFF_HOURS_MIN = 0;
+export const BOOKING_CUTOFF_HOURS_MAX = 8760;
+/**
  * Age-band bounds (TM-415). The API field isn't live yet (TM-415 is not Done), so these mirror the
  * app's existing age model (profile age is 13..120, TM-162): a band outside that can never match a
  * real attendee. The load-bearing rule is age_min ≤ age_max; the bounds just fail fast. If TM-415
@@ -658,6 +665,21 @@ export function revealHourChips() {
   ];
 }
 
+/**
+ * Booking-cutoff-hours preset chips: **At start (0h) / 1h / 3h / 24h** — the common windows for when
+ * RSVPs stop, as raw hour numbers. "At start" (0) keeps RSVPs open until the event begins; the rest
+ * close that many hours before. All within [BOOKING_CUTOFF_HOURS_MIN, BOOKING_CUTOFF_HOURS_MAX] (TM-413).
+ * @returns {{label: string, value: string}[]}
+ */
+export function cutoffHourChips() {
+  return [
+    { label: "At start", value: "0" },
+    { label: "1h", value: "1" },
+    { label: "3h", value: "3" },
+    { label: "24h", value: "24" },
+  ];
+}
+
 // --- validation (mirrors the API's Bean Validation + cross-field rules) ------------------------
 
 /**
@@ -739,6 +761,14 @@ export function validateEventDraft(draft = {}, { requireForCreate = true } = {})
   if (Number.isNaN(reveal)) errors.locationRevealHours = "Enter a whole number of hours.";
   else if (reveal !== null && (reveal < REVEAL_HOURS_MIN || reveal > REVEAL_HOURS_MAX)) {
     errors.locationRevealHours = `Must be between ${REVEAL_HOURS_MIN} and ${REVEAL_HOURS_MAX} hours.`;
+  }
+
+  // Booking-cutoff hours: optional, integer within [0, 8760] when present (mirrors @Min(0)/@Max, TM-413).
+  // 0 is valid (RSVPs open until start); blank = inherit the venue/city/app default.
+  const cutoff = parseIntOrNull(draft.bookingCutoffHours);
+  if (Number.isNaN(cutoff)) errors.bookingCutoffHours = "Enter a whole number of hours.";
+  else if (cutoff !== null && (cutoff < BOOKING_CUTOFF_HOURS_MIN || cutoff > BOOKING_CUTOFF_HOURS_MAX)) {
+    errors.bookingCutoffHours = `Must be between ${BOOKING_CUTOFF_HOURS_MIN} and ${BOOKING_CUTOFF_HOURS_MAX} hours.`;
   }
 
   // Price (TM-1076): a £ amount → integer pence, @Min(0). Free carries "0"; the presets seed a valid
@@ -838,6 +868,10 @@ export function buildEventPayload(draft = {}) {
   putInstant("visibilityEnd");
   putInt("capacity");
   putInt("locationRevealHours");
+  // Booking-cutoff hours (TM-413): optional per-event override of when RSVPs close; blank = omitted
+  // (inherit the venue/city/app default). 0 is a real value (open until start), and putInt sends it
+  // because parseIntOrNull("0") is the number 0 — only a blank string is omitted.
+  putInt("bookingCutoffHours");
   // Forward-compatible age band (TM-415) — ignored by the server until that ticket persists them.
   putInt("ageMin");
   putInt("ageMax");
@@ -872,6 +906,7 @@ export const CLEARABLE_OPTIONAL_FIELDS = [
   "visibilityEnd",
   "capacity",
   "locationRevealHours",
+  "bookingCutoffHours",
   "ageMin",
   "ageMax",
 ];
@@ -924,6 +959,9 @@ export function toFormModel(event = {}) {
     visibilityEnd: utcIsoToZoned(event.visibilityEnd, tz),
     capacity: event.capacity == null ? "" : String(event.capacity),
     locationRevealHours: event.locationRevealHours == null ? "" : String(event.locationRevealHours),
+    // Prefill from the RAW per-event override (bookingCutoffHours), NOT the resolved
+    // effectiveBookingCutoffHours — an inherited event shows blank so a save keeps inheriting (TM-413).
+    bookingCutoffHours: event.bookingCutoffHours == null ? "" : String(event.bookingCutoffHours),
     ageMin: event.ageMin == null ? "" : String(event.ageMin),
     ageMax: event.ageMax == null ? "" : String(event.ageMax),
     // Price (TM-1076): the saved `pricePence` rendered back into the form's £ amount (0 → "0" = Free). The
@@ -1075,6 +1113,7 @@ export const DIRTY_COMPARE_FIELDS = Object.freeze([
   "visibilityEnd",
   "capacity",
   "locationRevealHours",
+  "bookingCutoffHours",
   "ageMin",
   "ageMax",
   "price",

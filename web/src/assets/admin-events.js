@@ -36,6 +36,8 @@ import {
   OPENING_MESSAGE_MAX,
   REVEAL_HOURS_MIN,
   REVEAL_HOURS_MAX,
+  BOOKING_CUTOFF_HOURS_MIN,
+  BOOKING_CUTOFF_HOURS_MAX,
   AGE_MIN_BOUND,
   AGE_MAX_BOUND,
   CATEGORY_CHIPS,
@@ -65,6 +67,7 @@ import {
   visibleFromChips,
   visibleUntilChips,
   revealHourChips,
+  cutoffHourChips,
   AGE_DEFAULT_MIN,
   AGE_DEFAULT_MAX,
   AGE_BAND_CUSTOM,
@@ -1042,6 +1045,7 @@ const FORM_FIELDS = [
   { key: "visibilityEnd", id: "event-visibility-end", label: "Visible until", type: "datetime-local", required: true, row: "visibility" },
   { key: "capacity", id: "event-capacity", label: "Capacity (optional)", type: "number", min: 1, row: "limits", hint: "Blank = unlimited." },
   { key: "locationRevealHours", id: "event-reveal-hours", label: "Location reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
+  { key: "bookingCutoffHours", id: "event-cutoff-hours", label: "Booking cutoff hours (optional)", type: "number", min: BOOKING_CUTOFF_HOURS_MIN, max: BOOKING_CUTOFF_HOURS_MAX, row: "limits", hint: "Hours before the start that RSVPs stop. 0 = open until start. Blank = venue / city / app default (1h)." },
   // Age band (TM-1065): the two number inputs are no longer laid out two-up. They stay in FORM_FIELDS
   // (so readDraft / validateEventDraft / server-error routing still key off them) but are RE-HOMED inside
   // the age-band control (buildAgeBandControl), revealed only when the "Custom" band chip is chosen. The
@@ -2170,6 +2174,7 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   mountChipsFor("visibilityStart", (tz) => visibleFromChips(startInput.value, tz));
   mountChipsFor("visibilityEnd", (tz) => visibleUntilChips(startInput.value, tz));
   mountChipsFor("locationRevealHours", () => revealHourChips());
+  mountChipsFor("bookingCutoffHours", () => cutoffHourChips());
   // Start or timezone changing by hand shifts the offset/relative chips — recompute them all (the reveal
   // chips are constant, but rebuilding every row is cheap and keeps a single code path). The clone
   // past-start warning (TM-1061) reads Start + timezone too, so refresh it on the same edits.
