@@ -129,6 +129,7 @@ public class MeController {
                 r.age(),
                 r.gender(),
                 r.nationality(),
+                r.bio(),
                 r.phone(),
                 r.notificationPref(),
                 r.timezone(),
@@ -175,7 +176,13 @@ public class MeController {
     MeResponse onboarding(
             @AuthenticationPrincipal VerifiedUser caller, @RequestBody @Valid OnboardingRequest request) {
         return toResponse(userService.completeProfileOnboarding(
-                caller, request.name(), request.location(), request.age(), request.phone(), request.gender()));
+                caller,
+                request.name(),
+                request.location(),
+                request.age(),
+                request.phone(),
+                request.gender(),
+                request.bio()));
     }
 
     /**
@@ -213,6 +220,7 @@ public class MeController {
                 user.getAge(),
                 user.getGender(),
                 user.getNationality(),
+                user.getBio(),
                 user.getPhone(),
                 user.getNotificationPref(),
                 user.getTimezone(),

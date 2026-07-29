@@ -605,6 +605,13 @@ function prefill(profile) {
     }
     entry.input.value = value == null ? "" : String(value);
   }
+  // TM-1139: the optional bio lives outside the required FIELDS map — fill it (and its counter) back
+  // from a returning, half-onboarded user's saved bio so they don't lose it. The counter repaints via
+  // the textarea's own input handling is edit-only, so re-stamp it here after the programmatic set.
+  if (shell.bio) {
+    shell.bio.value = profile?.bio == null ? "" : String(profile.bio);
+    shell.bio.dispatchEvent(new Event("input"));
+  }
 }
 
 /**
@@ -690,7 +697,7 @@ function prefillPhone(entry, profile) {
 }
 
 /** Build the request body: trimmed name/location, age coerced to a number, phone composed to E.164,
- *  and the required gender bucket (TM-955). */
+ *  the required gender bucket (TM-955), and the OPTIONAL short bio (TM-1139). */
 function collectBody() {
   const get = (k) => (shell.fields.get(k).input.value ?? "").trim();
   // TM-880: storage is E.164, composed from the picker + national input — same as the edit form's
@@ -698,7 +705,12 @@ function collectBody() {
   const phoneEntry = shell.fields.get("phone");
   const phone = composeE164(phoneEntry.country ? phoneEntry.country.value : "", get("phone"));
   // TM-955: gender is the chosen enum NAME (validateAll already rejected a blank/unknown value).
-  return { name: get("name"), location: get("location"), age: Number(get("age")), phone, gender: get("gender") };
+  const body = { name: get("name"), location: get("location"), age: Number(get("age")), phone, gender: get("gender") };
+  // TM-1139: the OPTIONAL bio — included only when the user typed one, so the gate still submits with an
+  // empty bio (a blank bio is simply omitted from the payload, never sent as "").
+  const bio = (shell.bio?.value ?? "").trim();
+  if (bio !== "") body.bio = bio;
+  return body;
 }
 
 async function load() {
@@ -1351,9 +1363,11 @@ function setPhoneRecoveryVisible(visible) {
   if (phoneVerify.recoveryEl) phoneVerify.recoveryEl.hidden = !visible;
 }
 
-// TM-684: avatar upload + bio ship disabled; wire to onboarding payload
-// Both are DISABLED visual stubs only — NOT in the FIELDS array, NOT validated, NOT read by
-// collectBody(); they never touch the onboarding request. Rendered purely to match the mockup.
+// TM-684 / TM-1139: the AVATAR is still a disabled visual stub (wire-up deferred); the BIO is now a
+// REAL, functional field (TM-1139). The avatar stub is NOT in the FIELDS array and never touches the
+// onboarding request. The bio textarea is kept OUT of the required-fields FIELDS array too (every FIELDS
+// entry is treated as REQUIRED by validateAll) — it is OPTIONAL, so it's built separately here and read
+// by collectBody() only when non-blank, so the gate still submits with an empty bio.
 function buildAvatarStub() {
   const cam = svg(
     "svg",
@@ -1373,16 +1387,42 @@ function buildAvatarStub() {
   ]);
 }
 
-function buildBioStub() {
-  // A disabled short-bio field stub — matches the field styling but is inert (disabled, no name).
-  const ta = el("textarea", {
-    class: "tm-input tm-textarea", rows: 2, disabled: true, "aria-disabled": "true",
+// TM-1139: the length cap for the onboarding bio — mirrors the backend @Size(max = 160) on
+// OnboardingRequest.bio and the profile edit form's BIO_MAX, so the counter + client cap agree with the
+// server.
+const BIO_MAX = 160;
+
+/**
+ * Build the REAL short-bio field for the onboarding gate (TM-1139 — was a disabled "Soon" stub, TM-684).
+ * A functional multi-line <textarea> with a live "N/160" character counter, capped at 160. OPTIONAL: it
+ * is deliberately NOT part of the required-fields FIELDS array (that array is all-required), so an empty
+ * bio never blocks the gate. Returns `{ wrapper, textarea }` — the textarea handle is stashed on the
+ * shell so collectBody() can read its value. Built with the el() kit; the value is sent as inert text.
+ */
+function buildBioField() {
+  const id = "onboarding-bio";
+  const counterId = `${id}-counter`;
+  const textarea = el("textarea", {
+    id,
+    class: "tm-input tm-textarea",
+    name: "bio",
+    rows: 2,
+    maxLength: BIO_MAX,
     placeholder: "A short line about you",
+    "aria-describedby": counterId,
   });
-  return el("div", { class: "tm-form-field tm-form-field-disabled" }, [
-    el("label", { class: "tm-field-label", text: "Short bio" }, [el("span", { class: "tm-soon-tag", text: "Soon" })]),
-    ta,
+  const counter = el("p", { id: counterId, class: "tm-muted tm-char-counter", "aria-live": "polite" });
+  const paintCounter = () => {
+    counter.textContent = `${textarea.value.length}/${BIO_MAX}`;
+  };
+  paintCounter();
+  textarea.addEventListener("input", paintCounter);
+  const wrapper = el("div", { class: "tm-form-field" }, [
+    el("label", { class: "tm-field-label", for: id, text: "Short bio" }),
+    textarea,
+    counter,
   ]);
+  return { wrapper, textarea };
 }
 
 function buildShell(view) {
@@ -1410,9 +1450,14 @@ function buildShell(view) {
     ),
   ]);
 
+  // TM-1139: the bio is now a REAL functional field — build it here and keep its textarea handle so
+  // collectBody() can read the typed value. It sits right after the name field, exactly where the
+  // disabled stub used to render, so the layout is unchanged.
+  const bioField = buildBioField();
+
   const form = el("form", { class: "tm-onboarding-form", id: "onboarding-form", novalidate: true, onSubmit: submit }, [
     buildAvatarStub(),
-    el("div", { class: "tm-form-grid" }, fieldNodes.length ? [fieldNodes[0], buildBioStub(), ...fieldNodes.slice(1)] : fieldNodes),
+    el("div", { class: "tm-form-grid" }, fieldNodes.length ? [fieldNodes[0], bioField.wrapper, ...fieldNodes.slice(1)] : fieldNodes),
     el("div", { class: "tm-form-actions" }, [submitBtn]),
   ]);
 
@@ -1435,7 +1480,9 @@ function buildShell(view) {
     ]),
   );
 
-  shell = { form, fields, submit: submitBtn };
+  // TM-1139: `bio` is the optional short-bio textarea (outside the required `fields` map); collectBody
+  // reads it, prefill fills it back from a returning user's saved bio.
+  shell = { form, fields, submit: submitBtn, bio: bioField.textarea };
 }
 
 // ---- mount ----------------------------------------------------------------------------------

@@ -479,6 +479,20 @@ public class UserService {
                 user.setNationality(stored);
             }
         }
+        // Bio (TM-1139): a short free-text intro, editable here. Partial-update like the rest — null/omitted
+        // leaves the stored value unchanged. Free text (no NAME_LIKE pattern — a bio can contain anything);
+        // the @Size(max = 160) at the boundary already rejected an over-long value, so the only work here is
+        // the clear-to-null + no-op guard. Trim, then map a blank ("") to null so a cleared bio reads exactly
+        // like a legacy never-written row (mirroring the nationality "" → null clear). Behind Objects.equals
+        // so an unchanged re-send is a no-op, and only a genuine change is written + audited.
+        if (update.bio() != null) {
+            String trimmed = update.bio().trim();
+            String stored = trimmed.isEmpty() ? null : trimmed;
+            if (!Objects.equals(user.getBio(), stored)) {
+                changes.add(change("bio", user.getBio(), stored));
+                user.setBio(stored);
+            }
+        }
         if (update.phone() != null && phoneChanged(user.getPhone(), update.phone())) {
             changes.add(change("phone", user.getPhone(), update.phone()));
             user.setPhone(update.phone());
@@ -737,10 +751,20 @@ public class UserService {
      * runs when BOTH parts are still unset: an explicit first/last name (edited via
      * {@code PATCH /me}) is a user's own correction and must never be overwritten by this heuristic
      * on a re-submit.
+     *
+     * <p>TM-1139: {@code bio} is captured here too but is OPTIONAL — a blank/absent bio still completes
+     * the gate (unlike the required name/location/age/phone/gender), and it is written only when the
+     * user actually typed one, so the gate never persists an empty bio.
      */
     @Transactional
     public User completeProfileOnboarding(
-            VerifiedUser caller, String name, String location, Integer age, String phone, Gender gender) {
+            VerifiedUser caller,
+            String name,
+            String location,
+            Integer age,
+            String phone,
+            Gender gender,
+            String bio) {
         User user = provision(caller);
 
         String fullName = requireText(name, "name");
@@ -781,6 +805,14 @@ public class UserService {
         // here. Always (re)written from the request (like the other gate fields), so a re-submit
         // overwrites with the latest choice.
         user.setGender(gender);
+        // TM-1139: bio is OPTIONAL at the gate — persist it only when the user actually typed one. A
+        // blank/absent bio leaves the stored value alone (null for a fresh account), so the gate stays
+        // submittable with an empty bio and never writes a blank one. Length (≤160) is already enforced
+        // at the boundary (@Size on OnboardingRequest).
+        boolean wroteBio = bio != null && !bio.isBlank();
+        if (wroteBio) {
+            user.setBio(bio.trim());
+        }
         user.setPhone(requireText(phone, "phone")); // E.164 shape already enforced at the boundary
         // TM-931: when enforcement is on, the Firebase-verified phone wins over the client-supplied
         // one just set above — read it and mirror it onto users.phone (refusing if it can't be
@@ -792,19 +824,20 @@ public class UserService {
         user.setAgeVerified(true); // an age is always on record here (required field) — self-attested
 
         // The gate is a profile fill plus an onboarding completion; record both for a complete trail
-        // (the fields list names first/last name only when the TM-883 seed actually wrote them).
+        // (the fields list names first/last name only when the TM-883 seed actually wrote them, and bio
+        // only when the optional TM-1139 field was actually supplied).
+        String fields = seedNames
+                ? "displayName,firstName,lastName,city,age,gender,phone"
+                : "displayName,city,age,gender,phone";
+        if (wroteBio) {
+            fields = fields + ",bio";
+        }
         audit.record(
                 caller.uid(),
                 AuditAction.PROFILE_UPDATED,
                 TARGET_USER,
                 caller.uid(),
-                Map.of(
-                        "fields",
-                        seedNames
-                                ? "displayName,firstName,lastName,city,age,gender,phone"
-                                : "displayName,city,age,gender,phone",
-                        "via",
-                        "onboarding"));
+                Map.of("fields", fields, "via", "onboarding"));
         if (!wasComplete) {
             audit.record(
                     caller.uid(),

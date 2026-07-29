@@ -192,8 +192,9 @@ function loadProfileModule(deps) {
     // TM-1124: the language/currency preference pickers (locale-currency-settings.js) — a placeholder
     // section built into the Appearance panel. Import-safe (el() kit only, no api.js), injected below.
     // TM-1134: nationalityDisplay (profile-core.js) — the pure nationality-line model paintHub now names.
+    // TM-1139: bioDisplay (profile-core.js) — the pure short-bio-line model paintHub + fillPublic now name.
     "  buildLocaleCurrencySettings,\n" +
-    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, nationalityDisplay, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
+    "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, nationalityDisplay, bioDisplay, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
     // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
     "  GENDER_OPTIONS, GENDER_VALUES,\n" +
@@ -358,6 +359,9 @@ const deps = {
   // TM-1134: the REAL pure nationality-display model, so paintHub's hub-nationality line renders the
   // shipped "<flag> <Country>" (and its hidden-when-unset behaviour) under Node.
   nationalityDisplay: core.nationalityDisplay,
+  // TM-1139: the REAL pure short-bio-display model, so paintHub's + fillPublic's bio line render the
+  // shipped trimmed text (and its hidden-when-unset behaviour) under Node.
+  bioDisplay: core.bioDisplay,
   // TM-1105: the REAL pure Circle User ID model, so paintHub's id render + copy-value wiring run the
   // shipped decision under Node (not a stub).
   circleUserId: core.circleUserId,
@@ -491,6 +495,9 @@ function makeShell(values = {}) {
     // TM-1134: the hub nationality line paintHub sets textContent + hidden on (guarded, so a pre-TM-1134
     // paintHub that ignores it is fine).
     nationality: wireClassList(fakeEl("div")),
+    // TM-1139: the hub short-bio line paintHub sets textContent + hidden on (guarded, so a pre-TM-1139
+    // paintHub that ignores it is fine).
+    bio: wireClassList(fakeEl("p")),
     // `initial` is the pre-TM-846 single identity glyph node; kept alongside the TM-846 glyph/photo
     // pair so this harness drives BOTH sides of that change (the fail-before proof evals main's
     // paintHub, which still writes hub.initial) — the extra node is inert for whichever side ignores it.
@@ -800,6 +807,115 @@ test("paintHub renders the nationality line as '<flag> <Country>' and HIDES it w
     assert.equal(shell.hub.nationality.textContent, "", "an unset nationality clears the line");
     assert.equal(shell.hub.nationality.hidden, true, "the nationality line is hidden when unset");
   });
+});
+
+// ---- bio (TM-1139) ----------------------------------------------------------------------------
+
+test("the bio field is a length-capped TEXTAREA with a live 160 char counter (TM-1139)", () => {
+  // Fail-before/pass-after: on clean main the "Short bio" is a DISABLED stub outside the edit form's
+  // FIELDS; with TM-1139 the edit form carries a REAL bio <textarea> capped at 160 (no name-like pattern).
+  const bio = field("bio");
+  assert.ok(bio, "the edit form now has a bio field");
+  assert.equal(bio.type, "textarea", "bio is a multi-line textarea, not a plain input or select");
+  assert.equal(bio.maxLength, 160, "the bio is capped at 160 characters (matching the backend @Size)");
+  assert.ok(!bio.pattern, "bio is free text — no name-like pattern (a bio can contain anything)");
+});
+
+test("validateProfileField flags a bio over 160 chars and passes one at the cap (TM-1139)", () => {
+  const bio = field("bio");
+  assert.equal(profile.validateField(bio, "a".repeat(160)), "", "exactly 160 is accepted");
+  assert.match(
+    profile.validateField(bio, "a".repeat(161)),
+    /160 characters or fewer/,
+    "over 160 is rejected with the length message",
+  );
+  assert.equal(profile.validateField(bio, ""), "", "an empty bio is always allowed (optional field)");
+});
+
+test("fillForm shows the stored bio and its character counter; a null bio shows blank (TM-1139)", async () => {
+  await withFakeDocumentAsync(async () => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => null;
+    getMembershipImpl = async () => ({});
+
+    // A stored bio is filled into the textarea on load.
+    getMeImpl = async () => ({ firstName: "Ada", bio: "Coffee and code." });
+    await profile.load();
+    assert.equal(shell.fields.get("bio").input.value, "Coffee and code.", "the stored bio is filled in");
+
+    // A legacy account with NO bio (null) shows an empty field.
+    profile.fillForm({ firstName: "Ada", bio: null });
+    assert.equal(shell.fields.get("bio").input.value, "", "a null bio shows an empty field, no placeholder text");
+  });
+});
+
+test("collectPatch sends a typed bio; OMITS blank when never set; SENDS '' to clear a set bio (TM-1139)", () => {
+  // A typed bio is sent as-is…
+  let shell = makeShell({ firstName: "Ada", bio: "Loves hiking." });
+  profile.__setShell(shell);
+  profile.__getState().profile = {}; // no stored bio yet — this is a NEW bio
+  assert.equal(profile.collectPatch().bio, "Loves hiking.", "a typed bio is sent");
+
+  // …a blank field on an account that never had a bio is OMITTED (no change — never writes an empty bio).
+  shell = makeShell({ firstName: "Ada", bio: "" });
+  profile.__setShell(shell);
+  profile.__getState().profile = { firstName: "Ada" }; // no stored bio
+  assert.ok(!("bio" in profile.collectPatch()), "a blank bio with no stored value is omitted (no change)");
+
+  // …but clearing a PREVIOUSLY-SET bio sends "" so the backend maps it to null (a real clear).
+  shell = makeShell({ firstName: "Ada", bio: "" });
+  profile.__setShell(shell);
+  profile.__getState().profile = { firstName: "Ada", bio: "Old bio" }; // had a bio, now blank
+  assert.equal(profile.collectPatch().bio, "", "clearing a set bio sends '' (backend clears to null)");
+});
+
+test("paintHub renders the bio line as plain text and HIDES it when unset (TM-1139)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ photoURL: null });
+
+    // A set bio paints the trimmed text on the hub line (and reveals it).
+    profile.paintHub({ firstName: "Ada", city: "London", age: 30, bio: "Coffee and code." });
+    assert.equal(shell.hub.bio.textContent, "Coffee and code.", "the hub shows the bio text");
+    assert.equal(shell.hub.bio.hidden, false, "the bio line is shown when set");
+
+    // No bio → the whole line is hidden (optional field, no forced placeholder).
+    profile.paintHub({ firstName: "Ada", city: "London", age: 30, bio: null });
+    assert.equal(shell.hub.bio.textContent, "", "an unset bio clears the line");
+    assert.equal(shell.hub.bio.hidden, true, "the bio line is hidden when unset");
+  });
+});
+
+test("paintHub paints a backend bio as inert TEXT (textContent), never parsed HTML (TM-1139)", () => {
+  withFakeDocument(() => {
+    const shell = makeShell();
+    profile.__setShell(shell);
+    currentUserImpl = () => ({ photoURL: null });
+    // A bio can contain anything — an angle-bracket "tag" must land as literal text, not markup.
+    const evil = "<img src=x onerror=alert(1)>";
+    profile.paintHub({ firstName: "Ada", city: "London", age: 30, bio: evil });
+    assert.equal(shell.hub.bio.textContent, evil, "the bio is set via textContent verbatim (XSS-safe)");
+  });
+});
+
+// ---- public-profile bio wiring (TM-1139, source-level pin) ------------------------------------
+// The public preview (#/profile/public) is not eval-harnessed here (it mounts its own DOM-heavy shell),
+// so its bio wiring is pinned at the source level: fillPublic must resolve the bio via the pure
+// bioDisplay model and toggle the publicShell.bio node's text + hidden — bio is PUBLIC, so "how others
+// see you" shows it. The pure render decision itself is covered by the bioDisplay tests in profile-core.
+
+test("fillPublic wires the public-preview bio line through bioDisplay (TM-1139)", () => {
+  // strip line comments so doc mentions can't false-positive the pin
+  const src = readFileSync(join(HERE, "../src/assets/profile.js"), "utf8").replace(/\/\/.*$/gm, "");
+  assert.match(src, /publicShell\.bio\b/, "fillPublic/buildPublicShell must reference a publicShell.bio node");
+  assert.match(src, /bioDisplay\(profile\)/, "fillPublic must resolve the bio via the pure bioDisplay model");
+  assert.match(
+    src,
+    /publicShell\.bio\.hidden\s*=\s*!/,
+    "fillPublic must HIDE the public bio line when the bio is unset (optional field)",
+  );
 });
 
 // ---- identitySummaryDoesNotRenderNameAsHtml ---------------------------------------------------

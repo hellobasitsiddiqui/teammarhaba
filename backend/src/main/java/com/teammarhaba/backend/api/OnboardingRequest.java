@@ -48,6 +48,10 @@ import jakarta.validation.constraints.Size;
  *       unbypassable without a gender, the same way phone is: onboarding cannot be marked complete
  *       via this endpoint without one. The stored column is nullable (legacy rows = {@code null} =
  *       unknown), but every NEW gate submission carries a chosen value.
+ *   <li>{@code bio} — OPTIONAL (TM-1139: a short intro, not a gate requirement — unlike gender/phone).
+ *       No {@code @NotNull}: a missing/blank bio still completes onboarding. When present it is capped at
+ *       160 chars ({@code @Size(max = 160)}) and free text (no {@code NAME_LIKE} pattern). Persisted only
+ *       when non-blank, so the gate stays submittable with an empty bio and never writes a blank one.
  * </ul>
  *
  * @param name     the public display name; required, 1–255 chars, name-like (TM-771/TM-898)
@@ -56,6 +60,8 @@ import jakarta.validation.constraints.Size;
  * @param age      age in years; required, 18–99
  * @param phone    E.164 phone number; required (e.g. {@code +447700900123})
  * @param gender   self-reported gender bucket; required (TM-955): FEMALE / MALE / PREFER_NOT_TO_SAY
+ * @param bio      self-reported short bio; OPTIONAL (TM-1139), free text ≤160 chars, persisted only
+ *                 when non-blank ({@code null}/blank still completes the gate)
  */
 public record OnboardingRequest(
         @NotNull
@@ -73,4 +79,7 @@ public record OnboardingRequest(
                         regexp = "^\\+[0-9](?:[ ()./-]*[0-9]){6,14}$",
                         message = "must be a valid phone number")
                 String phone,
-        @NotNull Gender gender) {}
+        @NotNull Gender gender,
+        // TM-1139: an OPTIONAL short bio captured at the gate. No @NotNull — a blank/absent bio still
+        // completes onboarding; only the ≤160-char length cap applies when one is supplied.
+        @Size(max = 160, message = "must be 160 characters or fewer") String bio) {}

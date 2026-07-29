@@ -25,6 +25,9 @@ public record ProfileUpdate(
         // TM-1134: self-reported nationality as an ISO-3166 alpha-2 code (or "" to leave blank). A
         // partial-PATCH field like the rest — null/omitted leaves the stored value unchanged.
         String nationality,
+        // TM-1139: self-reported short bio (free text, ≤160 chars). A partial-PATCH field like the rest
+        // — null/omitted leaves the stored value unchanged; "" clears it back to null.
+        String bio,
         String phone,
         NotificationPref notificationPref,
         String timezone,
