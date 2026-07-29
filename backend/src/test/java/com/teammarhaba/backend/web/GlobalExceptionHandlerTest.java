@@ -64,6 +64,12 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private com.teammarhaba.backend.auth.EmailCodeRateLimiter emailCodeRateLimiter;
 
+    // EmailCodeController (TM-1147) now injects EmailCodeProperties to advertise the send-cooldown as a
+    // Retry-After header — a @ConfigurationProperties bean the @WebMvcTest slice doesn't bootstrap, so
+    // supply it or the web slice can't construct the controller (same as TermsProperties above).
+    @MockitoBean
+    private com.teammarhaba.backend.auth.EmailCodeProperties emailCodeProperties;
+
     @MockitoBean
     private EmailVerificationService emailVerificationService;
 

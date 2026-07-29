@@ -22,7 +22,10 @@ import org.springframework.validation.annotation.Validated;
  *   <li>{@code length} — number of digits in the one-time code (default 6, matching the SMS UX).</li>
  *   <li>{@code ttl} — how long an issued code stays valid; short by design (default 10 minutes).</li>
  *   <li>{@code sendCooldown} — minimum gap between code requests for the same address; rate-limits
- *       {@code request} + powers a meaningful "Resend" (default 60s, matching the TM-165 cooldown).</li>
+ *       {@code request} + powers the "Resend" (default 30s, matching the client Resend countdown —
+ *       TM-1147; the per-IP limit is the flood defence). The {@code /request} endpoint advertises this
+ *       window in a {@code Retry-After} header so the client drives its countdown off the server value
+ *       rather than a hard-coded one that could drift.</li>
  *   <li>{@code maxVerifyAttempts} — wrong guesses allowed against one outstanding code before it is
  *       burned, to stop brute-forcing a short numeric code (default 5).</li>
  *   <li>{@code maxOutstanding} — hard cap on how many addresses can have in-memory auth state at once
@@ -59,7 +62,7 @@ public record EmailCodeProperties(
             length = 6;
         }
         ttl = requirePositive(ttl, Duration.ofMinutes(10), "app.auth.email-code.ttl");
-        sendCooldown = requirePositive(sendCooldown, Duration.ofSeconds(60), "app.auth.email-code.send-cooldown");
+        sendCooldown = requirePositive(sendCooldown, Duration.ofSeconds(30), "app.auth.email-code.send-cooldown");
         if (maxVerifyAttempts == 0) {
             maxVerifyAttempts = 5;
         }

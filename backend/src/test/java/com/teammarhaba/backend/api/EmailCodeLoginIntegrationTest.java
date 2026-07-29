@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -72,6 +73,18 @@ class EmailCodeLoginIntegrationTest extends AbstractIntegrationTest {
         when(record.getUid()).thenReturn(uid);
         when(firebaseAuth.getUserByEmail(email)).thenReturn(record);
         when(firebaseAuth.createCustomToken(uid)).thenReturn(token);
+    }
+
+    @Test
+    void requestAdvertisesSendCooldownViaRetryAfterHeader() throws Exception {
+        // TM-1147: the 204 carries the server send-cooldown (30s default) in a Retry-After header so the
+        // client seeds its "Resend in 0:NN" countdown off the server rather than a hard-coded value that
+        // could drift past what the server will accept (the bug: client 30s vs server 60s).
+        mockMvc.perform(post("/api/v1/auth/email-code/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"retry-after@example.com\"}"))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string("Retry-After", "30"));
     }
 
     @Test

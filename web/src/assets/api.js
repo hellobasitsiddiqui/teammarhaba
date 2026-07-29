@@ -169,8 +169,13 @@ export async function getActiveAlerts() {
  * you sign in), so it bypasses {@link apiFetch} (whose 401 handling/redirect doesn't apply here).
  * Resolves on success (204). On a 429 the send cooldown is active — surfaced as an {@link ApiError}
  * so the UI can show a "please wait before resending" message; any other non-2xx also throws.
+ *
+ * On success the server advertises its send-cooldown in a `Retry-After` header (whole seconds, TM-1147);
+ * this returns that number so the caller can drive the "Resend in 0:NN" countdown off the server's
+ * value instead of a hard-coded one that could drift. Returns `null` if the header is absent/unparseable
+ * (older server) — the caller then falls back to its default.
  * @param {string} email the address to send the code to.
- * @returns {Promise<void>}
+ * @returns {Promise<number|null>} the server's cooldown in whole seconds, or null if not advertised.
  * @throws {ApiError}
  */
 export async function requestEmailCode(email) {
@@ -180,6 +185,8 @@ export async function requestEmailCode(email) {
     body: JSON.stringify({ email }),
   });
   if (!response.ok) throw await toApiError(response, "Could not send a code. Please try again.");
+  const retryAfter = Number.parseInt(response.headers.get("Retry-After") ?? "", 10);
+  return Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
 }
 
 /**

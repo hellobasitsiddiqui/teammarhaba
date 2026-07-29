@@ -1,10 +1,13 @@
 package com.teammarhaba.backend.api;
 
 import com.google.firebase.auth.FirebaseAuthException;
+import com.teammarhaba.backend.auth.EmailCodeProperties;
 import com.teammarhaba.backend.auth.EmailCodeRateLimiter;
 import com.teammarhaba.backend.auth.EmailCodeService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,10 +40,13 @@ public class EmailCodeController {
 
     private final EmailCodeService emailCodeService;
     private final EmailCodeRateLimiter rateLimiter;
+    private final EmailCodeProperties props;
 
-    EmailCodeController(EmailCodeService emailCodeService, EmailCodeRateLimiter rateLimiter) {
+    EmailCodeController(
+            EmailCodeService emailCodeService, EmailCodeRateLimiter rateLimiter, EmailCodeProperties props) {
         this.emailCodeService = emailCodeService;
         this.rateLimiter = rateLimiter;
+        this.props = props;
     }
 
     /**
@@ -55,9 +61,17 @@ public class EmailCodeController {
      */
     @PostMapping("/request")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    void request(@RequestBody @Valid EmailCodeRequest body, HttpServletRequest httpRequest) {
+    void request(
+            @RequestBody @Valid EmailCodeRequest body,
+            HttpServletRequest httpRequest,
+            HttpServletResponse httpResponse) {
         rateLimiter.checkAndRecord(httpRequest);
         emailCodeService.request(body.email());
+        // Advertise the send-cooldown (TM-1147): the client seeds its "Resend in 0:NN" countdown off
+        // this header rather than a hard-coded value, so the button can never re-enable before the
+        // server will accept another request. A whole-seconds Retry-After (RFC 7231) — the same header
+        // the too-soon 429 carries — so success and reject speak the one language.
+        httpResponse.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(props.sendCooldown().toSeconds()));
     }
 
     /**
