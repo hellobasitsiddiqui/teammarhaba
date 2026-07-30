@@ -62,10 +62,16 @@ ground truth. Prefer handing Basit `cr <lane>` over a raw UUID.
    assignee, not just the status flip. **Never leave a sprint ticket unassigned, and never let it
    carry an app/bot actor** (the Atlassian connector's own identity) as assignee — every ticket has
    a human owner on the board.
-3. **In Review requires evidence attached to the ticket**: before/after screenshots at 390px for
-   any UI change (before = live prod, after = branch build; static-serve + DOM-reveal staging
-   needs no backend). PR + green e2e alone is NOT enough. Non-visual changes: state the exemption
-   rationale on the ticket instead.
+3. **⛔ HARD GATE — a ticket may NOT move to In Review unless ONE of these is ON THE TICKET, no
+   exceptions:** **(a)** before/after screenshots at 390px, **OR** **(b)** a comment stating *why*
+   screenshots aren't required (e.g. "non-visual — backend validation only", or "human waived them —
+   <reason>"). If neither is present, you are NOT allowed to transition the ticket to In Review —
+   full stop. **"Ignore/skip screenshots", "no screenshots", or "evidence to follow" are NOT valid
+   grounds to skip the gate** — if a human tells you to skip shots, that becomes the (b) reason you
+   record on the ticket; you still write the comment. Default to (a): if the change is visible in the
+   app, attach the shots — a human saying "no screenshots" is a request to justify their absence in
+   writing, not to leave the ticket bare. Before/after = before live prod, after = branch build
+   (static-serve + DOM-reveal staging needs no backend). PR + green e2e alone is NOT enough.
    **Attach the PNGs to the Jira issue itself — a PR-embedded image or a repo path is NOT "on the
    ticket"** (a private-repo `raw.githubusercontent` URL does not render in Jira). The Atlassian MCP
    connector has **no attach-file tool**, but the `~/.config/teammarhaba/jira.env` REST token DOES
