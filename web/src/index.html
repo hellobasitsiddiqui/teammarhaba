@@ -576,7 +576,11 @@
                  byline lines below so it never disturbs them; the row stacks on narrow widths
                  (see .app-store-badges in styles.css). The Android WebView inherits this footer
                  automatically (same index.html) — handy as an in-app pointer to share the app. -->
-            <div id="app-store-badges" class="app-store-badges" aria-label="Get the app">
+            <!-- Starts hidden (TM-1177): the store badges show only on the Help page + the signed-out
+                 login screen. footer.js's updateFooter() (router-driven) reveals them there and hides
+                 them on every other screen — so there's no flash of the badges on a signed-in boot.
+                 The Android-WebView hide (app-badges.js, TM-330) is a separate, orthogonal gate. -->
+            <div id="app-store-badges" class="app-store-badges" aria-label="Get the app" hidden>
                 <span class="app-store-badges-label">Get the app</span>
                 <div class="app-store-badges-row">
                     <!-- Android — links to the real /download page (hosted-APK landing, TM-246). -->
@@ -612,7 +616,11 @@
                     </button>
                 </div>
             </div>
-            <span id="build-info" class="build-info" aria-label="Build version"></span>
+            <!-- Starts hidden (TM-1177): the build/version stamp shows only on the Help page + the
+                 signed-out login screen. build-info.js still fills its textContent at boot; footer.js's
+                 updateFooter() (router-driven) reveals it on those two screens and hides it everywhere
+                 else — so there's no flash of the stamp on a signed-in boot. -->
+            <span id="build-info" class="build-info" aria-label="Build version" hidden></span>
             <!-- Public status page link (TM-182): a quiet pointer to the standalone /status
                  outage/uptime page, sitting next to the TM-142 build stamp. Its own footer line so it
                  never disturbs the build/privacy/byline lines; a plain link (no auth, static page).
