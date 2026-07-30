@@ -34,15 +34,26 @@ test.describe("@admin-hub admin layer + role-conditional tab (TM-917/TM-918)", (
     // Tapping Admin opens the hub at #/admin.
     await adminTab.click();
     await expect(page.locator("#admin-hub-view")).toBeVisible();
+    // TM-1176: `#admin-hub-view` is unhidden by the router on the route match ALONE (render()), but its
+    // rows are mounted only AFTER the async role resolution flips isAdmin true (enterAdminHub). On a slow
+    // cold-boot the view is visible-but-empty for that window, so asserting the count off toBeVisible()
+    // alone races the mount and flakes. Wait on the mount's stable readiness hook (data-ready, stamped
+    // once every row is in the DOM) and on the first row painting BEFORE asserting the exact count — so
+    // the count assertion runs against a settled hub, not a snapshot mid-mount.
+    await expect(page.locator("#admin-hub-view[data-ready]")).toBeVisible();
     const rows = page.locator("#admin-hub-view .admin-hub-row");
-    // TM-972: the hub is now SEVEN verb-led folds, flat + in order. "Send notification" (push broadcast)
-    // and "Developer tools" (the ops panel) were LIFTED out of the users console into their own folds.
-    await expect(rows).toHaveCount(7);
+    await expect(rows.first()).toBeVisible();
+    // TM-972/TM-1166: the hub is now EIGHT verb-led folds, flat + in order. "Send notification" (push
+    // broadcast) and "Developer tools" (the ops panel) were LIFTED out of the users console into their
+    // own folds (TM-972); "Manage cities" (the city catalogue console) was added between interests and
+    // messages (TM-1166). Contract mirrors ADMIN_HUB_ROWS in admin-hub-route.js (unit-tested there).
+    await expect(rows).toHaveCount(8);
     await expect(rows).toHaveText([
       /Manage users/,
       /Manage events/,
       /Manage venues/,
       /Manage interests/,
+      /Manage cities/,
       /Send a message/,
       /Send notification/,
       /Developer tools/,

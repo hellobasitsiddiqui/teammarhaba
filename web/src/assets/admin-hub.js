@@ -33,6 +33,15 @@ export function enterAdminHub() {
           el("span", { class: "admin-hub-row-chevron", text: "›", "aria-hidden": "true" }),
         ]))),
   );
+  // Ready hook (TM-1176). The rows above are appended synchronously here, but this mount only runs
+  // AFTER the async role resolution flips `isAdmin` true (router.js) — and by then `render()` has
+  // already unhidden `#admin-hub-view` on the route match ALONE (independent of isAdmin/the mount).
+  // So on a slow cold-boot the view is VISIBLE with zero rows for the window between unhide and mount,
+  // which is the admin-hub e2e race: `#admin-hub-view` toBeVisible() passes, then the row-count is
+  // asserted before the rows paint. Stamp a stable `data-ready` on the view once the rows are attached
+  // so tests (and any observer) wait on the actual mount, not the mere unhide. Set LAST, so it's only
+  // present when every row is in the DOM; the count under it is deterministic (ADMIN_HUB_ROWS is static).
+  view.setAttribute("data-ready", "");
 }
 
 // Bridge for the router (which imports this) + ad-hoc use, mirroring window.tmAdmin in admin.js.
