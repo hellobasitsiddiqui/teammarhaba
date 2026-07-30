@@ -328,5 +328,14 @@ public enum AuditAction {
      * An admin restored a retired catalogue city via {@code POST /api/v1/admin/cities/{id}/restore}
      * (TM-1089). Idempotent mirror of {@link #CITY_RETIRED}.
      */
-    CITY_RESTORED
+    CITY_RESTORED,
+
+    /**
+     * An admin created a recurring event series via the admin API (TM-791, recurring events v1). One
+     * row per series carrying the new series id as the target and the template heading, frequency and
+     * the number of occurrences materialised in the first batch in its metadata. The generated
+     * occurrences are individual {@link #EVENT_CREATED} events in their own right — this row records
+     * the series-level create, mirroring how {@link #EVENT_CREATED} records a one-off.
+     */
+    SERIES_CREATED
 }

@@ -3,6 +3,9 @@ package com.teammarhaba.backend.event;
 import com.teammarhaba.backend.audit.AuditAction;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.event.recurrence.RecurrenceEngine;
+import com.teammarhaba.backend.event.recurrence.RecurrenceFrequency;
+import com.teammarhaba.backend.event.recurrence.RecurrenceRule;
 import com.teammarhaba.backend.membership.CheckoutService;
 import com.teammarhaba.backend.user.User;
 import com.teammarhaba.backend.user.UserService;
@@ -10,7 +13,10 @@ import com.teammarhaba.backend.web.BadRequestException;
 import com.teammarhaba.backend.web.ConflictException;
 import com.teammarhaba.backend.web.ResourceNotFoundException;
 import jakarta.persistence.EntityManager;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -59,6 +65,9 @@ public class EventAdminService {
     /** Audit {@code target_type} for event rows (mirrors {@code UserService.TARGET_USER}). */
     static final String TARGET_EVENT = "Event";
 
+    /** Audit {@code target_type} for recurring-series rows (TM-791). */
+    static final String TARGET_SERIES = "EventSeries";
+
     /** 409 copy when an admin tries to edit an event that has already ended (TM-518). */
     static final String EVENT_ENDED_EDIT = "This event has already ended and can no longer be edited.";
 
@@ -66,6 +75,7 @@ public class EventAdminService {
     static final String EVENT_ENDED_CANCEL = "This event has already ended and can no longer be cancelled.";
 
     private final EventRepository events;
+    private final EventSeriesRepository seriesRepo;
     private final EventAttendanceRepository attendance;
     private final VenueRepository venues;
     private final UserService users;
@@ -75,8 +85,16 @@ public class EventAdminService {
     private final EventPhasePolicy phase;
     private final CheckoutService checkout;
 
+    /**
+     * The pure occurrence-date engine (TM-790). It is a stateless, DB-free value-processor (the
+     * policy-class style), so it is instantiated directly rather than injected — the same way the
+     * recurrence unit tests construct it.
+     */
+    private final RecurrenceEngine recurrence = new RecurrenceEngine();
+
     public EventAdminService(
             EventRepository events,
+            EventSeriesRepository seriesRepo,
             EventAttendanceRepository attendance,
             VenueRepository venues,
             UserService users,
@@ -86,6 +104,7 @@ public class EventAdminService {
             EventPhasePolicy phase,
             CheckoutService checkout) {
         this.events = events;
+        this.seriesRepo = seriesRepo;
         this.attendance = attendance;
         this.venues = venues;
         this.users = users;
@@ -232,6 +251,161 @@ public class EventAdminService {
         lifecycle.publishEvent(
                 new EventLifecycleEvent(saved.getId(), saved.getHeading(), EventLifecycleEvent.Kind.CREATED));
         return saved;
+    }
+
+    /**
+     * Create a recurring {@link EventSeries} and materialise its first in-horizon batch of real
+     * {@link Event} occurrences (TM-791, recurring events v1). Wires the series model (TM-789) to the
+     * occurrence engine (TM-790): it persists the series template + cadence, expands the rule with the
+     * {@link RecurrenceEngine} (which already caps the batch at ≤ 90 days / ≤ 12 occurrences), and
+     * creates one normal PUBLISHED {@code Event} per computed start instant through the very same
+     * {@link #create create} path — so every occurrence is an ordinary event with RSVP, capacity,
+     * chat, reminders and windows working unchanged. Each occurrence carries its {@code series_id} and
+     * a zero-based {@code occurrence_index}; {@code series_detached} stays {@code false}.
+     *
+     * <p>The whole thing runs in ONE transaction: the series row and every occurrence commit or roll
+     * back together, so a series can never be left half-materialised.
+     *
+     * <p><b>Per-occurrence window derivation.</b> The one-off {@code create} takes an admin-chosen
+     * {@code endAt} + visibility window as absolute instants. A series can't reuse absolute instants
+     * across occurrences, so the {@link SeriesDraft}'s first-occurrence window is turned into offsets
+     * from {@link SeriesDraft#firstStartAt} and re-applied to each occurrence's own start — every
+     * occurrence keeps the first one's duration and its visibility lead/lag relative to start. The
+     * offsets are computed once (from the anchor) and never depend on the generated instant, so DST is
+     * whatever the engine already resolved for each start.
+     *
+     * <p><b>Scope (v1).</b> No roll-forward scheduler (TM-792), no edit/cancel-scope (TM-793), no REST
+     * endpoint (TM-795), no clone / monthly / multi-weekday — this is only the service method and its
+     * generation logic, exercised directly by an integration test.
+     *
+     * @return the persisted, refreshed {@link EventSeries} (its generated occurrences are queryable by
+     *     {@code series_id})
+     */
+    @Transactional
+    public EventSeries createSeries(VerifiedUser caller, SeriesDraft draft) {
+        Instant now = Instant.now();
+        User creator = users.provision(caller);
+        ZoneId zone = ZoneId.of(draft.timezone());
+
+        // 1) Persist the series (ACTIVE) from the template + cadence.
+        EventSeries s = new EventSeries(
+                draft.frequency(),
+                draft.interval(),
+                draft.timezone(),
+                draft.firstStartAt(),
+                draft.heading(),
+                draft.description(),
+                draft.locationText(),
+                creator.getId(),
+                now);
+        s.setByWeekday(draft.byWeekday() != null ? draft.byWeekday().getValue() : null);
+        s.setUntilDate(draft.untilDate());
+        s.setOccurrenceCount(draft.afterN());
+        s.setTemplateCity(draft.city());
+        s.setTemplateVenueId(draft.venueId());
+        s.setTemplateCapacity(draft.capacity());
+        s.setTemplateImagePath(draft.imagePath());
+        s.setTemplateLocationRevealHours(draft.locationRevealHours());
+        s.setTemplateBookingCutoffHours(draft.bookingCutoffHours());
+        s.setTemplateCancellationWindowHours(draft.cancellationWindowHours());
+        if (draft.pricePence() != null) {
+            s.setTemplatePricePence(draft.pricePence());
+        }
+        if (draft.premium() != null) {
+            s.setTemplatePremium(draft.premium());
+        }
+        // Persist the series first so it has an id to stamp onto each occurrence's series_id below.
+        // All of this is in one transaction, so the series + its occurrences still commit atomically.
+        EventSeries savedSeries = seriesRepo.saveAndFlush(s);
+
+        // 2) Build the recurrence rule and expand the first in-horizon batch. The anchor is the first
+        // start resolved in the series zone; the engine caps the batch (≤ 90d / ≤ 12) and honours the
+        // end condition. `fromInstant` is the instant just before the anchor so occurrence #0 (the
+        // anchor itself) is included — the engine returns occurrences strictly after `fromInstant`.
+        RecurrenceRule rule = toRule(draft, zone);
+        ZonedDateTime anchor = draft.firstStartAt().atZone(zone);
+        Instant fromInstant = draft.firstStartAt().minusNanos(1);
+        List<Instant> starts = recurrence.nextOccurrences(rule, anchor, fromInstant);
+
+        // 3) Materialise a real Event per computed start, deriving each occurrence's window from the
+        // first-occurrence offsets, and create it through the shared one-off path so RSVP/capacity/
+        // chat/reminders/windows all hang off a normal row.
+        Duration endOffset = offset(draft.firstStartAt(), draft.firstEndAt());
+        Duration visStartOffset = offset(draft.firstStartAt(), draft.firstVisibilityStart());
+        Duration visEndOffset = offset(draft.firstStartAt(), draft.firstVisibilityEnd());
+
+        int occurrenceIndex = 0;
+        for (Instant startAt : starts) {
+            EventDraft occurrenceDraft = new EventDraft(
+                    draft.heading(),
+                    draft.description(),
+                    draft.locationText(),
+                    null, // mapUrl — not part of the v1 series template
+                    null, // onlineUrl — not part of the v1 series template
+                    draft.city(),
+                    draft.venueId(),
+                    draft.timezone(),
+                    startAt,
+                    endOffset == null ? null : startAt.plus(endOffset),
+                    startAt.plus(visStartOffset),
+                    startAt.plus(visEndOffset),
+                    draft.capacity(),
+                    draft.imagePath(),
+                    draft.locationRevealHours(),
+                    draft.bookingCutoffHours(),
+                    draft.cancellationWindowHours(),
+                    null, // ageMin — not part of the v1 series template
+                    null, // ageMax — not part of the v1 series template
+                    draft.pricePence(),
+                    draft.premium(),
+                    null); // openingMessage — not part of the v1 series template
+            Event occurrence = create(caller, occurrenceDraft);
+            occurrence.setSeriesId(savedSeries.getId());
+            occurrence.setOccurrenceIndex(occurrenceIndex);
+            occurrence.setSeriesDetached(false);
+            // The occurrence is a managed entity from create()'s saveAndFlush; the series-link setters
+            // are dirty-checked and flush with the transaction — but flush now so series_id/index are
+            // written under this tx (and any DB constraint surfaces here, not at commit).
+            events.saveAndFlush(occurrence);
+            occurrenceIndex++;
+        }
+
+        // Stamp how far the horizon has been generated: the last occurrence's start, or the anchor when
+        // the batch was empty (a fully past window). The roll-forward scan (TM-792) resumes from here.
+        savedSeries.setHorizonGeneratedUntil(
+                starts.isEmpty() ? draft.firstStartAt() : starts.get(starts.size() - 1));
+        savedSeries.touch(now);
+        savedSeries = seriesRepo.saveAndFlush(savedSeries);
+        // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the returned
+        // series carries the real timestamp instead of null (mirrors create()).
+        entityManager.refresh(savedSeries);
+
+        audit.record(
+                caller.uid(),
+                AuditAction.SERIES_CREATED,
+                TARGET_SERIES,
+                String.valueOf(savedSeries.getId()),
+                Map.of(
+                        "heading", savedSeries.getTemplateHeading(),
+                        "frequency", savedSeries.getFrequency().name(),
+                        "occurrences", starts.size()));
+        return savedSeries;
+    }
+
+    /** Build the pure {@link RecurrenceRule} from the series draft + resolved zone (v1: DAILY/WEEKLY). */
+    private static RecurrenceRule toRule(SeriesDraft draft, ZoneId zone) {
+        RecurrenceFrequency frequency =
+                switch (draft.frequency()) {
+                    case DAILY -> RecurrenceFrequency.DAILY;
+                    case WEEKLY -> RecurrenceFrequency.WEEKLY;
+                };
+        return new RecurrenceRule(
+                frequency, draft.interval(), draft.byWeekday(), draft.untilDate(), draft.afterN(), zone, null);
+    }
+
+    /** Offset from {@code from} to {@code to}, or {@code null} when {@code to} is absent (open-ended). */
+    private static Duration offset(Instant from, Instant to) {
+        return to == null ? null : Duration.between(from, to);
     }
 
     /**

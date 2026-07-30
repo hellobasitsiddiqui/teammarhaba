@@ -45,6 +45,7 @@ class EventAdminPricingGuardTest {
     @BeforeEach
     void setUp() {
         events = mock(EventRepository.class);
+        EventSeriesRepository seriesRepo = mock(EventSeriesRepository.class);
         EventAttendanceRepository attendance = mock(EventAttendanceRepository.class);
         VenueRepository venues = mock(VenueRepository.class);
         users = mock(UserService.class);
@@ -54,7 +55,7 @@ class EventAdminPricingGuardTest {
         EventPhasePolicy phase = mock(EventPhasePolicy.class);
         CheckoutService checkout = mock(CheckoutService.class);
         service = new EventAdminService(
-                events, attendance, venues, users, audit, lifecycle, entityManager, phase, checkout);
+                events, seriesRepo, attendance, venues, users, audit, lifecycle, entityManager, phase, checkout);
 
         User creator = mock(User.class);
         when(creator.getId()).thenReturn(7L);
