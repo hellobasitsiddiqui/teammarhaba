@@ -49,12 +49,15 @@ function firstInitial(s) {
  * The identity block shown at the top of the Profile hub (paper-profile: avatar + name + "City · age").
  *
  * @param {object|null|undefined} me a `/me`-shaped object
+ * @param {ReadonlyArray<string>} [offered] the offered city names used for the meta-line junk guard
+ *   (TM-1023) — defaults to the hard {@link CITY_FALLBACK}. Pass the resolved catalogue names
+ *   (TM-1165) so an admin-added city still renders in the meta line rather than being dropped as junk.
  * @returns {{ full: string, short: string, initial: string, metaLine: string,
  *   city: string, age: (number|null) }}
  *   `full` = best full name; `short` = "First L." (wireframe style) when both parts exist, else `full`;
  *   `initial` = avatar glyph (a letter, or "🙂" when nothing is known); `metaLine` = "City · age".
  */
-export function identitySummary(me) {
+export function identitySummary(me, offered = CITY_FALLBACK) {
   const m = me || {};
   const first = (m.firstName || "").trim();
   const last = (m.lastName || "").trim();
@@ -64,13 +67,15 @@ export function identitySummary(me) {
   const short = first && last ? `${first} ${last[0].toUpperCase()}.` : full;
   const city = (m.city || "").trim();
   const age = Number.isFinite(m.age) && m.age > 0 ? m.age : null;
-  // TM-1023: the meta line must never echo a junk/off-list city. The app's city dropdown (TM-877)
-  // only ever stores a CITY_OPTIONS value, so an off-list stored value ("Location", the literal
+  // TM-1023/TM-1165: the meta line must never echo a junk/off-list city. The app's city dropdown only
+  // ever stores an OFFERED (catalogue) value, so an off-list stored value ("Location", the literal
   // header we saw live) is garbage — treat it as no city so the empty-state prompt ("Add your city
   // and age", rendered by profile.js when metaLine is "") shows instead of surfacing the junk. A
-  // valid on-list city still renders exactly as before. `city` above is left as the raw stored value
-  // so other consumers are unchanged; only the meta line is guarded.
-  const metaCity = CITY_OPTIONS.includes(city) ? city : "";
+  // value on the offered list still renders exactly as before. The offered list is passed in (the
+  // resolved catalogue names, TM-1165) so an admin-added city is NOT dropped as junk; it defaults to
+  // the hard fallback so existing callers/tests keep the pre-cutover behaviour. `city` above is left
+  // as the raw stored value so other consumers are unchanged; only the meta line is guarded.
+  const metaCity = offered.includes(city) ? city : "";
   const metaLine = [metaCity, age != null ? String(age) : ""].filter(Boolean).join(" · ");
   return {
     full,
@@ -471,12 +476,50 @@ export function phonePartsError(iso2, national) {
 // ---- City dropdown (TM-877) ---------------------------------------------------------------------
 
 /**
- * The interim allowed city list (TM-877): the profile city is now picked from a fixed dropdown
- * rather than typed free-text. Deliberately tiny — the cities the user base actually lives in —
- * and superseded by the admin-managed location list (TM-878). Each entry must have a
- * `cityCountryHint` mapping (countries.js) so the phone picker's soft default keeps resolving.
+ * The HARD FALLBACK city list (TM-877 seed, retained by TM-1165). The picker is now driven by the
+ * ADMIN-MANAGED catalogue (GET /api/v1/cities/catalogue → {@link cityOptionsFrom}); this fixed list
+ * is only used when that fetch fails or returns nothing, so the field never breaks offline. These
+ * four are exactly the seeded catalogue cities (V54), and each has a `cityCountryHint` mapping
+ * (countries.js) so the phone picker's soft default keeps resolving. Do NOT add new cities here —
+ * add them in the admin city console; the catalogue is the source of truth now.
+ *
+ * <p>Kept exported under the historical name {@code CITY_OPTIONS} so its many importers keep working,
+ * but it is a FALLBACK, not the offered list — read the offered list from {@code city-catalogue.js}
+ * (`offeredCityNames()`), which resolves the catalogue and falls back to this.
  */
 export const CITY_OPTIONS = Object.freeze(["London", "Milton Keynes", "Sharjah", "Karachi"]);
+
+/**
+ * Alias of {@link CITY_OPTIONS} that names its role after the TM-1165 cutover: the hard fallback used
+ * only when the catalogue fetch fails/returns empty. New code should prefer this name.
+ */
+export const CITY_FALLBACK = CITY_OPTIONS;
+
+/**
+ * Pure mapping (TM-1165): the offered city NAMES from a fetched catalogue payload, falling back to the
+ * fixed {@link CITY_FALLBACK} when the payload is missing/not-an-array/empty — so the picker never
+ * breaks offline. Each catalogue row is the lean public shape `{name, country, iconEmoji, geoLat,
+ * geoLng}` (see PublicCityResponse); we take `name`, trimmed, skipping blank/duplicate names while
+ * preserving the server's order (weight-first then alphabetical). If NO usable name survives, the
+ * fallback is returned. Kept pure (no fetch) so it is trivially unit-tested; the fetch/caching lives
+ * in `city-catalogue.js`.
+ *
+ * @param {Array<{name?: string}>|null|undefined} catalogue the fetched catalogue rows.
+ * @param {ReadonlyArray<string>} [fallback] the offline fallback (defaults to {@link CITY_FALLBACK}).
+ * @returns {string[]} the offered city names, or the fallback.
+ */
+export function cityOptionsFrom(catalogue, fallback = CITY_FALLBACK) {
+  if (!Array.isArray(catalogue)) return [...fallback];
+  const names = [];
+  const seen = new Set();
+  for (const row of catalogue) {
+    const name = String(row?.name ?? "").trim();
+    if (name === "" || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names.length > 0 ? names : [...fallback];
+}
 
 /**
  * The gender buckets (TM-955), shared by the profile edit form (profile.js) AND the onboarding gate
@@ -510,21 +553,28 @@ export function genderChoiceError(value) {
 }
 
 /**
- * Validate a city dropdown choice (TM-877). Returns an error message, or "" when acceptable.
+ * Validate a city dropdown choice (TM-877; catalogue-driven since TM-1165). Returns an error message,
+ * or "" when acceptable.
  *
- * Blank is allowed (blank = leave unchanged, the TM-188 semantics). A value from CITY_OPTIONS is
+ * Blank is allowed (blank = leave unchanged, the TM-188 semantics). A value from the OFFERED list is
  * allowed. Crucially, the caller's ALREADY-SAVED city is also allowed even when it's off-list
  * (e.g. "Dubai" saved before the list existed) — the renderer keeps it selectable as an extra
  * option, so an existing profile is never invalidated or silently overwritten on save.
  *
+ * <p>The offered list is now passed in (the resolved active catalogue names — {@link cityOptionsFrom}
+ * → `city-catalogue.js`), so an admin-added city is accepted with no code change. It defaults to the
+ * hard {@link CITY_FALLBACK} so a caller with no catalogue (or a unit test) keeps the old behaviour.
+ * The server is the real gate — this is a client-side courtesy check.
+ *
  * @param {string|null|undefined} value the selected city.
  * @param {string|null|undefined} savedCity the caller's currently-saved city (off-list allowance).
+ * @param {ReadonlyArray<string>} [offered] the offered city names (defaults to {@link CITY_FALLBACK}).
  * @returns {string} an error message, or "".
  */
-export function cityChoiceError(value, savedCity) {
+export function cityChoiceError(value, savedCity, offered = CITY_FALLBACK) {
   const v = String(value ?? "").trim();
   if (v === "") return "";
-  if (CITY_OPTIONS.includes(v)) return "";
+  if (offered.includes(v)) return "";
   if (v === String(savedCity ?? "").trim()) return "";
   return "Choose a city from the list.";
 }

@@ -64,8 +64,10 @@ import {
   publicSummary,
   validateProfileField,
   NOTIFICATION_PREFS,
-  // TM-877: the city dropdown's allowed list + its validator (which also allows the caller's
-  // already-saved off-list city, so an existing "Dubai" profile is never invalidated).
+  // TM-877/TM-1165: the city dropdown's hard-fallback list + its validator (which also allows the
+  // caller's already-saved off-list city, so an existing "Dubai" profile is never invalidated). The
+  // OFFERED list is now the admin-managed catalogue (offeredCityNames, below); CITY_OPTIONS is only
+  // the offline fallback.
   CITY_OPTIONS,
   cityChoiceError,
   // TM-955: the shared gender buckets (mirror the backend Gender enum) + the membership set used by
@@ -119,6 +121,9 @@ import { COUNTRIES, flagOf, countryByIso2 } from "./countries.js";
 // gate below (phoneNeedsVerify) is a no-op — a CHANGED number saves without an OTP, and since the
 // Send-code affordance keys off the same rule, no verify UI sprouts either. ON = TM-982, unchanged.
 import { verifiedPhoneRequired } from "./verified-phone-flag.js";
+// TM-1165: the offered city names come from the admin-managed catalogue (fetched + cached), with the
+// hard CITY_OPTIONS fallback when the fetch fails/returns empty — the picker + validation cutover.
+import { offeredCityNames, loadCityCatalogue } from "./city-catalogue.js";
 // Pure Interests-card logic (TM-778) — chip view-model + the min/max config normaliser, unit-tested in
 // web/tools/interests-core.test.mjs. TM-1095 retired the in-place picker overlay (the hub chip now routes
 // to the dedicated #/profile/interests screen), so catalogueGroups/toggleInterest/selectionError moved to
@@ -167,7 +172,10 @@ const FIELDS = [
     key: "city",
     label: "City",
     type: "select",
-    options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])],
+    // TM-1165: a FUNCTION so the options are resolved at build/paint time from the offered catalogue
+    // (offeredCityNames() — the fetched list, or the CITY_OPTIONS fallback offline). Priming happens on
+    // load(); a full-form repaint after the fetch resolves re-runs this and shows any admin-added city.
+    options: () => [["", "Choose a city…"], ...offeredCityNames().map((c) => [c, c])],
   },
   {
     key: "age",
@@ -700,9 +708,10 @@ function validateField(field, raw) {
     return phonePartsError(country ? country.value : "", raw);
   }
   if (field.key === "city") {
-    // TM-877: the city must come from the allowed dropdown list — except the caller's own saved
-    // off-list city (kept selectable by fillForm), which must stay valid so it's never overwritten.
-    return cityChoiceError(raw, state.profile?.city);
+    // TM-877/TM-1165: the city must be an OFFERED (active catalogue) city — except the caller's own
+    // saved off-list city (kept selectable by fillForm), which must stay valid so it's never
+    // overwritten. offeredCityNames() is the resolved catalogue (fallback while unfetched/offline).
+    return cityChoiceError(raw, state.profile?.city, offeredCityNames());
   }
   if (field.key === "age") {
     // TM-884 grandfather: an existing account whose SAVED age is now out of band (e.g. a 15-year-old
@@ -940,7 +949,10 @@ function fillPhoneField(entry, value, profile) {
  */
 function fillCitySelect(select, value) {
   const saved = value == null ? "" : String(value).trim();
-  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+  // TM-1165: "off-list" is now relative to the OFFERED catalogue names (offeredCityNames), not the
+  // hardcoded list — so an admin-added city already present as a real option is not double-injected,
+  // while a genuinely off-catalogue saved value ("Dubai") still gets its preserved extra option.
+  if (saved !== "" && !offeredCityNames().includes(saved) && select.getAttribute("data-offlist") !== saved) {
     select.append(el("option", { value: saved, text: saved }));
     select.setAttribute("data-offlist", saved);
   }
@@ -1012,7 +1024,9 @@ function paintHub(profile) {
   // Real /me data is landing — drop the loading skeleton so the concrete identity + strength paint
   // in (TM-663). Until this runs the hub shows a skeleton, never a misleading "0% / Your profile".
   shell?.root?.classList.remove("tm-pf-loading");
-  const id = identitySummary(profile);
+  // TM-1165: pass the offered catalogue names so the meta-line junk guard (TM-1023) keeps an
+  // admin-added city rather than dropping it as off-list junk (falls back to the hard list offline).
+  const id = identitySummary(profile, offeredCityNames());
   hub.name.textContent = id.short;
   hub.meta.textContent = id.metaLine || "Add your city and age";
   // Nationality (TM-1134): a real demographic line next to "City · age", from the stored ISO code.
@@ -1391,7 +1405,15 @@ async function load() {
     // the max must be known BEFORE that single paint (a later repaint would be suppressed same-day and
     // hide the just-shown CTA). loadInterestsMeta is best-effort (swallows its own errors), so a config
     // failure just leaves the default bounds; getMe's own failure still lands in the catch below.
-    const [profile] = await Promise.all([getMe(), loadInterestsMeta({ repaint: false })]);
+    // TM-1165: also prime the city catalogue (offered picker list) in parallel so the FIRST fillForm
+    // builds the city dropdown from the admin-managed catalogue. loadCityCatalogue never rejects (it
+    // resolves to the CITY_OPTIONS fallback on failure), so a catalogue outage just leaves the field
+    // on the fallback list — the picker never breaks.
+    const [profile] = await Promise.all([
+      getMe(),
+      loadInterestsMeta({ repaint: false }),
+      loadCityCatalogue(),
+    ]);
     state.profile = profile;
     state.loaded = true;
     fillForm(profile);
@@ -1690,10 +1712,14 @@ function buildField(field) {
 
   let input;
   if (field.type === "select") {
+    // TM-1165: a field's `options` may be a function (resolved at build time) so a dynamic set — the
+    // city dropdown, driven by the fetched catalogue via offeredCityNames() — reflects the latest
+    // offered list on each (re)paint. Static arrays (gender/nationality/notification) are unchanged.
+    const options = typeof field.options === "function" ? field.options() : field.options;
     input = el(
       "select",
       { id, class: "tm-input", name: field.key, "aria-describedby": describedBy },
-      field.options.map(([value, label]) => el("option", { value, text: label })),
+      options.map(([value, label]) => el("option", { value, text: label })),
     );
   } else if (field.type === "textarea") {
     // TM-1139: the short bio is a multi-line <textarea> (not <input>). The .tm-textarea class gives it

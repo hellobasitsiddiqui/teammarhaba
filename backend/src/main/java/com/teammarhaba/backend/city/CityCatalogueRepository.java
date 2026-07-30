@@ -38,6 +38,18 @@ public interface CityCatalogueRepository extends JpaRepository<CityCatalogue, Lo
     List<CityCatalogue> findByActiveTrueAndNameIn(Collection<String> names);
 
     /**
+     * Whether an ACTIVE (offered + not tombstoned) city with EXACTLY this name exists (TM-1165). The
+     * single-name probe the profile / onboarding city validation uses to accept a picked city: an
+     * admin-added active city passes, a retired/tombstoned/unknown one is rejected — with NO code
+     * deploy, since the accepted set is read live from the catalogue. Honours the entity's
+     * {@code @SQLRestriction} and additionally filters {@code active = true}, so it accepts exactly the
+     * set {@link #findByActiveTrueOrderBySortWeightDescNameAsc()} offers the picker (a user can never
+     * be rejected for a city the picker showed them). The match is case-sensitive/exact — the caller
+     * trims before probing, mirroring the retired {@code ALLOWED_CITIES.contains(city)} behaviour.
+     */
+    boolean existsByActiveTrueAndName(String name);
+
+    /**
      * Admin listing (TM-1089): the FULL catalogue including retired (tombstoned) rows — native, so the
      * entity's {@code @SQLRestriction} is bypassed. Optional filters: {@code q} (case-insensitive
      * substring match on {@code name} OR {@code country}), and {@code active} (tri-state: {@code null} =

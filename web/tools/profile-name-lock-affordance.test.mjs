@@ -136,6 +136,8 @@ function loadProfileModule(deps) {
     "  buildSecuritySettings, buildAppearanceSettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
+    // TM-1165: the catalogue-driven city dropdown resolver profile.js now imports (city-catalogue.js).
+    "  offeredCityNames, loadCityCatalogue,\n" +
     "  GENDER_OPTIONS, GENDER_VALUES,\n" +
     "  profileSectionsStateKey, resolveSectionState, toggleSectionState,\n" +
     "  splitE164, composeE164, canonicalE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
@@ -216,6 +218,9 @@ const deps = {
   NOTIFICATION_PREFS: core.NOTIFICATION_PREFS,
   CITY_OPTIONS: core.CITY_OPTIONS,
   cityChoiceError: core.cityChoiceError,
+  // TM-1165: catalogue-driven city dropdown — fallback names + resolved-promise no-op under Node.
+  offeredCityNames: () => [...core.CITY_OPTIONS],
+  loadCityCatalogue: () => Promise.resolve([...core.CITY_OPTIONS]),
   // TM-955 gender buckets + TM-879 collapsible-sections model — REAL pure cores (import-safe), so the
   // module loads with the exact shipped data the (untested-here) gender field + section render use.
   GENDER_OPTIONS: core.GENDER_OPTIONS,
