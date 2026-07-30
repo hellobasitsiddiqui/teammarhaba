@@ -38,11 +38,16 @@ class UserListIntegrationTest extends AbstractIntegrationTest {
         // users with no ON DELETE action, so a leftover venue created by a prior test blocks the
         // user wipe (TM-719). Clear venues before users too; events.venue_id is ON DELETE SET NULL
         // so order relative to events doesn't matter.
+        // Event series (TM-789/V56) likewise FK-reference users — event_series.created_by is NOT NULL
+        // REFERENCES users with no ON DELETE action, so a leftover series from a prior test blocks the
+        // user wipe. Clear event_series before users too; events.series_id is ON DELETE SET NULL so
+        // order relative to events doesn't matter (events are wiped just above regardless).
         jdbc.update("DELETE FROM message");
         jdbc.update("DELETE FROM conversation_member");
         jdbc.update("DELETE FROM conversation");
         jdbc.update("DELETE FROM event_attendance");
         jdbc.update("DELETE FROM events");
+        jdbc.update("DELETE FROM event_series");
         jdbc.update("DELETE FROM venues");
         jdbc.update("DELETE FROM users");
         // Five active accounts: ada, bea, cyd, dan, eve.
