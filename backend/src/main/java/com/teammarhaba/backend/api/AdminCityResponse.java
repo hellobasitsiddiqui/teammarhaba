@@ -14,15 +14,16 @@ import java.time.Instant;
  * @param name       display name
  * @param country    the country
  * @param iconEmoji  default icon glyph, or {@code null} if none
- * @param geoLat     latitude, or {@code null} if unset
- * @param geoLng     longitude, or {@code null} if unset
- * @param imagePath  big empty-state image storage path, or {@code null} if none
- * @param sortWeight ordering weight (higher sorts first)
- * @param active     whether the city is offered to users (retire sets false)
- * @param createdAt  DB-authoritative creation instant
- * @param updatedAt  last mutation instant
- * @param deletedAt  tombstone instant ({@code null} = not retired)
- * @param retired    {@code true} once retired (derived from {@code deletedAt})
+ * @param geoLat        latitude, or {@code null} if unset
+ * @param geoLng        longitude, or {@code null} if unset
+ * @param imagePath     big empty-state image storage path, or {@code null} if none
+ * @param iconImagePath uploaded icon-image storage path (TM-1166), or {@code null} if none
+ * @param sortWeight    ordering weight (higher sorts first)
+ * @param active        whether the city is offered to users (retire sets false)
+ * @param createdAt     DB-authoritative creation instant
+ * @param updatedAt     last mutation instant
+ * @param deletedAt     tombstone instant ({@code null} = not retired)
+ * @param retired       {@code true} once retired (derived from {@code deletedAt})
  */
 public record AdminCityResponse(
         Long id,
@@ -32,6 +33,7 @@ public record AdminCityResponse(
         Double geoLat,
         Double geoLng,
         String imagePath,
+        String iconImagePath,
         int sortWeight,
         boolean active,
         Instant createdAt,
@@ -49,6 +51,7 @@ public record AdminCityResponse(
                 c.getGeoLat(),
                 c.getGeoLng(),
                 c.getImagePath(),
+                c.getIconImagePath(),
                 c.getSortWeight(),
                 c.isActive(),
                 c.getCreatedAt(),

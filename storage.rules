@@ -93,6 +93,36 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
     }
 
+    match /city-images/{cityId} {
+      // City images (TM-1166) ride the same pattern as event/venue images: publicly readable (the Home
+      // empty-state renders a city's big image, and the download URL carries an unguessable token),
+      // admin-only write, image content-type under 5 MB.
+      allow read: if true;
+
+      allow create, update: if request.auth != null
+                            && request.auth.token.role == 'ADMIN'
+                            && request.resource.size < 5 * 1024 * 1024
+                            && isPublicRasterImage();
+
+      // Admins may delete a city image (re-upload cleanup / city retired).
+      allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
+    }
+
+    match /city-icon-images/{cityId} {
+      // City ICON images (TM-1166) — the small glyph shown beside a city name, the twin of the big
+      // empty-state city-images path. Same envelope: publicly readable display asset, admin-only write,
+      // raster image under 5 MB.
+      allow read: if true;
+
+      allow create, update: if request.auth != null
+                            && request.auth.token.role == 'ADMIN'
+                            && request.resource.size < 5 * 1024 * 1024
+                            && isPublicRasterImage();
+
+      // Admins may delete a city icon image (re-upload cleanup / city retired).
+      allow delete: if request.auth != null && request.auth.token.role == 'ADMIN';
+    }
+
     // Chat media — images and voice notes attached to a conversation (TM-1127, epic TM-468).
     //
     // UNLIKE avatars/event/venue images (which are world-readable display assets), a chat attachment

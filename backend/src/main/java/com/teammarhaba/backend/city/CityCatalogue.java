@@ -79,6 +79,15 @@ public class CityCatalogue {
     @Column(name = "image_path")
     private String imagePath;
 
+    /**
+     * Storage path of the uploaded ICON image (e.g. {@code "city-icon-images/7"}), served via
+     * {@code downloadUrlForPath}, or {@code null} if none (TM-1166). The twin of {@link #imagePath} but
+     * for the small name-beside glyph: an admin can upload an icon image here INSTEAD of, or as well as,
+     * setting {@link #iconEmoji} — the emoji stays as an optional fallback glyph. NULLABLE by design.
+     */
+    @Column(name = "icon_image_path")
+    private String iconImagePath;
+
     /** Ordering weight — higher sorts first (the listing is {@code ORDER BY sort_weight DESC, name}). */
     @Column(name = "sort_weight", nullable = false)
     private int sortWeight;
@@ -174,6 +183,16 @@ public class CityCatalogue {
     /** Set/clear the big empty-state image path (admin edit). Does not bump {@code updatedAt}. */
     public void setImagePath(String imagePath) {
         this.imagePath = imagePath;
+    }
+
+    /** The uploaded icon-image path shown beside the city name, or {@code null} if none (TM-1166). */
+    public String getIconImagePath() {
+        return iconImagePath;
+    }
+
+    /** Set/clear the uploaded icon-image path (admin edit). Does not bump {@code updatedAt}. */
+    public void setIconImagePath(String iconImagePath) {
+        this.iconImagePath = iconImagePath;
     }
 
     public int getSortWeight() {

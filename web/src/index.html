@@ -443,6 +443,16 @@
              create/edit form. admin-interests.js builds it here; router.js owns visibility + the ADMIN gate. -->
         <section id="admin-interest-form-view" class="admin-console" aria-label="Interest form" hidden></section>
 
+        <!-- Admin cities console (TM-1166): ADMIN-only #/admin/cities view. admin-cities.js (imported by
+             router.js) builds the catalogue list (incl. retired) + create/edit/reorder/retire/restore flow
+             with icon-image + empty-state-image uploads; router.js owns its visibility + the ADMIN gate
+             (same as the venues console). -->
+        <section id="admin-cities-view" class="admin-console" aria-label="Admin cities console" hidden></section>
+
+        <!-- Admin city form (TM-1166): the full-page #/admin/cities/new + #/admin/cities/{id}/edit create/
+             edit form. admin-cities.js builds it here; router.js owns visibility + the ADMIN gate. -->
+        <section id="admin-city-form-view" class="admin-console" aria-label="City form" hidden></section>
+
         <!-- Admin message compose (TM-443): the full-page #/admin/messages/new compose form (audience
              picker + title/body/deep-link + confirm). admin-messages.js (imported by router.js) builds
              it here; router.js owns visibility + the ADMIN gate (same as the events form). Opens as its

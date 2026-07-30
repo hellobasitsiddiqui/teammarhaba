@@ -70,6 +70,9 @@
           "iconEmoji" : {
             "type" : "string"
           },
+          "iconImagePath" : {
+            "type" : "string"
+          },
           "id" : {
             "format" : "int64",
             "type" : "integer"
@@ -937,6 +940,11 @@
           },
           "iconEmoji" : {
             "maxLength" : 16,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "iconImagePath" : {
+            "maxLength" : 500,
             "minLength" : 0,
             "type" : "string"
           },
@@ -2436,6 +2444,9 @@
           "iconEmoji" : {
             "type" : "string"
           },
+          "iconImagePath" : {
+            "type" : "string"
+          },
           "name" : {
             "type" : "string"
           }
@@ -2751,6 +2762,11 @@
           },
           "iconEmoji" : {
             "maxLength" : 16,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "iconImagePath" : {
+            "maxLength" : 500,
             "minLength" : 0,
             "type" : "string"
           },

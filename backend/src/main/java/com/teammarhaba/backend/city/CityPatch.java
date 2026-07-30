@@ -13,10 +13,11 @@ package com.teammarhaba.backend.city;
  * @param name       new name, or {@code null} to leave unchanged
  * @param country    new country, or {@code null} to leave unchanged
  * @param iconEmoji  new icon glyph ({@code ""} clears it), or {@code null} to leave unchanged
- * @param geoLat     new latitude, or {@code null} to leave unchanged
- * @param geoLng     new longitude, or {@code null} to leave unchanged
- * @param imagePath  new image path ({@code ""} clears it), or {@code null} to leave unchanged
- * @param sortWeight new sort weight, or {@code null} to leave unchanged
+ * @param geoLat        new latitude, or {@code null} to leave unchanged
+ * @param geoLng        new longitude, or {@code null} to leave unchanged
+ * @param imagePath     new image path ({@code ""} clears it), or {@code null} to leave unchanged
+ * @param iconImagePath new icon-image path ({@code ""} clears it, TM-1166), or {@code null} to leave unchanged
+ * @param sortWeight    new sort weight, or {@code null} to leave unchanged
  */
 public record CityPatch(
         String name,
@@ -25,6 +26,7 @@ public record CityPatch(
         Double geoLat,
         Double geoLng,
         String imagePath,
+        String iconImagePath,
         Integer sortWeight) {
 
     /** {@code true} when the patch carries no field at all — a no-op edit (no touch, no audit). */
@@ -35,6 +37,7 @@ public record CityPatch(
                 && geoLat == null
                 && geoLng == null
                 && imagePath == null
+                && iconImagePath == null
                 && sortWeight == null;
     }
 }
