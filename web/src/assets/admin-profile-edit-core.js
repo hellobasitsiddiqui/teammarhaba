@@ -10,7 +10,7 @@
 // `nameFormatError` — rather than forking a weaker copy. An admin edit therefore can never accept a
 // value the user's own edit would reject (off-list city, out-of-band age, bad phone, numeric name).
 
-import { validateProfileField, cityChoiceError, CITY_OPTIONS } from "./profile-core.js";
+import { validateProfileField, cityChoiceError, CITY_OPTIONS, CITY_FALLBACK } from "./profile-core.js";
 
 /**
  * The admin PROFILE fields, in display order, and their client-side rules — mirroring the backend's
@@ -63,9 +63,12 @@ export const EDITABLE_ADMIN_PROFILE_FIELDS = Object.freeze(
  * (TM-172). Returns an error message, or "" when acceptable. Empty is always allowed (blank = leave
  * unchanged, matching the backend's partial-PATCH semantics).
  *
- * - `city` → cityChoiceError against the allow-list, PLUS the target's already-saved off-list city is
+ * - `city` → cityChoiceError against the OFFERED list, PLUS the target's already-saved off-list city is
  *   preserved (kept selectable), exactly like the self-edit — so editing another field never
- *   invalidates a legacy off-list city.
+ *   invalidates a legacy off-list city. The offered names are PASSED IN (TM-1174: the admin renderer
+ *   supplies the admin-managed catalogue via offeredCityNames()); they default to {@link CITY_FALLBACK}
+ *   so existing callers/tests keep the pre-catalogue behaviour and this module stays api.js-free
+ *   (node-testable) — it must NOT import city-catalogue.js.
  * - `age` → the target's UNCHANGED saved age passes even if out-of-band (grandfathered, TM-884),
  *   mirroring the self-edit; a NEW value must be in 18–99 (via validateProfileField).
  * - everything else → validateProfileField (names get the name-like rule, phone the E.164 stored-shape
@@ -74,11 +77,12 @@ export const EDITABLE_ADMIN_PROFILE_FIELDS = Object.freeze(
  * @param {{key:string,type?:string,min?:number,max?:number,maxLength?:number}} field
  * @param {string} raw the raw input value.
  * @param {object|null|undefined} saved the target user's currently-saved profile (off-list-city + grandfathered-age allowance).
+ * @param {ReadonlyArray<string>} [offeredNames] the offered city names to validate against (defaults to {@link CITY_FALLBACK}).
  * @returns {string} an error message, or "".
  */
-export function validateAdminField(field, raw, saved) {
+export function validateAdminField(field, raw, saved, offeredNames = CITY_FALLBACK) {
   if (field.key === "city") {
-    return cityChoiceError(raw, saved ? saved.city : null);
+    return cityChoiceError(raw, saved ? saved.city : null, offeredNames);
   }
   if (field.key === "age") {
     const v = String(raw ?? "").trim();
@@ -92,14 +96,15 @@ export function validateAdminField(field, raw, saved) {
  * carrying only the fields that failed — an empty object means the form is valid.
  * @param {Record<string,string>} values raw form values keyed by field key.
  * @param {object|null|undefined} saved the target's saved profile (off-list-city + grandfathered-age allowance).
+ * @param {ReadonlyArray<string>} [offeredNames] the offered city names to validate against (defaults to {@link CITY_FALLBACK}, TM-1174).
  * @returns {Record<string,string>} field key → error message, for failing fields only.
  */
-export function validateAdminForm(values, saved) {
+export function validateAdminForm(values, saved, offeredNames = CITY_FALLBACK) {
   const errors = {};
   // Only the EDITABLE fields are validated — a read-only field (notificationPref, TM-1109) has no
   // editable control, so it must never be validated or flagged.
   for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) {
-    const err = validateAdminField(field, values[field.key], saved);
+    const err = validateAdminField(field, values[field.key], saved, offeredNames);
     if (err) errors[field.key] = err;
   }
   return errors;

@@ -68,6 +68,47 @@ test("validateAdminField keeps a target's already-saved OFF-LIST city valid (TM-
   assert.equal(validateAdminField(field("city"), "Dubai", { city: "Dubai" }), "");
 });
 
+test("validateAdminField ACCEPTS a city in the passed-in offeredNames but NOT in CITY_FALLBACK (TM-1174)", () => {
+  // "Marhabaville" is an admin-added catalogue city — absent from the hardcoded fallback four. Before
+  // TM-1174 validateAdminField took no offered list and hardcoded the fallback, so this REJECTED
+  // (fail-before). With the offeredNames param it passes when supplied the admin-managed catalogue.
+  const catalogue = ["London", "Milton Keynes", "Sharjah", "Karachi", "Marhabaville"];
+  assert.equal(validateAdminField(field("city"), "Marhabaville", {}, catalogue), "");
+  // A city NOT in the offered list is still rejected (the client-side courtesy check still bites).
+  assert.notEqual(validateAdminField(field("city"), "Atlantis", {}, catalogue), "");
+  // …but the target's already-saved off-list city stays valid even against the fresh catalogue.
+  assert.equal(validateAdminField(field("city"), "Dubai", { city: "Dubai" }, catalogue), "");
+});
+
+test("validateAdminField city defaults to CITY_FALLBACK when no offeredNames is passed (TM-1174)", () => {
+  // Existing callers/tests that pass no offered list keep the pre-catalogue behaviour: the fallback
+  // four validate, an off-fallback catalogue-only city rejects (there's no list to say it's offered).
+  assert.equal(validateAdminField(field("city"), "London", {}), ""); // fallback city → ok
+  assert.notEqual(validateAdminField(field("city"), "Marhabaville", {}), ""); // no offered list → rejected
+});
+
+test("validateAdminForm ACCEPTS a catalogue-only city via the offeredNames arg (TM-1174)", () => {
+  const catalogue = ["London", "Marhabaville"];
+  // Fails-before: without the offeredNames param the whole-form validator hardcoded the fallback, so a
+  // catalogue-only city surfaced as a `city` error. With the arg the form is valid.
+  const good = validateAdminForm(
+    { firstName: "Aisha", lastName: "Khan", city: "Marhabaville", age: "30", phone: "+442079460958", timezone: "Europe/London", locale: "en-GB" },
+    {},
+    catalogue,
+  );
+  assert.deepEqual(good, {});
+  // And a city off BOTH the catalogue and the saved value still fails.
+  const bad = validateAdminForm({ firstName: "Aisha", city: "Atlantis" }, {}, catalogue);
+  assert.ok(bad.city);
+});
+
+test("validateAdminForm city defaults to CITY_FALLBACK when no offeredNames is passed (TM-1174)", () => {
+  // The default keeps existing call sites (and the tests above) working: fallback city passes, an
+  // off-fallback city fails when no offered list is supplied.
+  assert.deepEqual(validateAdminForm({ firstName: "Aisha", city: "London" }, {}), {});
+  assert.ok(validateAdminForm({ firstName: "Aisha", city: "Marhabaville" }, {}).city);
+});
+
 test("validateAdminField rejects an out-of-band age but passes a grandfathered UNCHANGED age (TM-884)", () => {
   assert.notEqual(validateAdminField(field("age"), "15", {}), ""); // new value below floor → error
   assert.notEqual(validateAdminField(field("age"), "120", {}), ""); // new value above ceiling → error

@@ -33,6 +33,12 @@ import { roleLabel } from "./admin-role-label-core.js";
 // TM-172: the admin user-detail PROFILE edit — pure field descriptors + validators + patch builder,
 // reusing the SAME shared self-edit validation (profile-core.js) so the admin edit can't drift looser.
 import { ADMIN_PROFILE_FIELDS, EDITABLE_ADMIN_PROFILE_FIELDS, validateAdminField, validateAdminForm, buildAdminProfilePatch } from "./admin-profile-edit-core.js";
+// TM-1174: the admin profile-edit City dropdown reads the ADMIN-MANAGED catalogue (offeredCityNames),
+// not the hardcoded CITY_OPTIONS baked into ADMIN_PROFILE_FIELDS. loadCityCatalogue primes it once when
+// the user-detail modal opens; the field's static options stay as the offline fallback for first paint.
+// cityOptionRows builds the option rows (blank + offered + off-list saved) shared with the events form.
+import { loadCityCatalogue, offeredCityNames } from "./city-catalogue.js";
+import { cityOptionRows } from "./admin-city-select-core.js";
 import {
   // TM-372: the display-identity fallback chain (displayName → email → masked auth phone →
   // uid-prefix → "User #id"), so phone-only accounts never render as blank, unfindable rows.
@@ -384,10 +390,14 @@ function profileSection(user) {
       if (field.type === "select") {
         // Keep an already-saved OFF-LIST city selectable (TM-877 allowance) so editing another field
         // never silently drops it — mirrors the self-edit's fillForm injected-option behaviour.
-        const options = field.options.map(([value, label]) => [value, label]);
-        if (field.key === "city" && current.city && !options.some(([v]) => v === current.city)) {
-          options.push([current.city, current.city]);
-        }
+        // TM-1174: the CITY dropdown reads the admin-managed catalogue (offeredCityNames() — the fetched
+        // list, or the CITY_OPTIONS fallback while unfetched/offline), not the field's static options.
+        // cityOptionRows returns [blank, ...offered, off-list-saved]; a repaint after loadCityCatalogue
+        // resolves (below) swaps in an admin-added city. Non-city selects keep their static field options.
+        const options =
+          field.key === "city"
+            ? cityOptionRows(offeredCityNames(), current.city)
+            : field.options.map(([value, label]) => [value, label]);
         input = el(
           "select",
           { id: fieldId, class: "tm-input", "aria-describedby": describedBy },
@@ -408,8 +418,9 @@ function profileSection(user) {
       }
       const error = el("p", { id: errorId, class: "tm-field-error", role: "alert", hidden: true });
       // Live per-field validation on input, exactly like the self-edit form, using the SHARED rules.
-      input.addEventListener("input", () => setControlError(field.key, validateAdminField(field, input.value, current)));
-      input.addEventListener("change", () => setControlError(field.key, validateAdminField(field, input.value, current)));
+      // TM-1174: pass the admin-managed catalogue names so a city is validated against the OFFERED list.
+      input.addEventListener("input", () => setControlError(field.key, validateAdminField(field, input.value, current, offeredCityNames())));
+      input.addEventListener("change", () => setControlError(field.key, validateAdminField(field, input.value, current, offeredCityNames())));
       controls.set(field.key, { input, error });
       // Reuse the SHARED self-edit markup (.tm-form-field / .tm-field-label / .tm-field-hint /
       // .tm-field-error) so the admin form inherits the exact same column stack + spacing + the
@@ -463,7 +474,8 @@ function profileSection(user) {
     for (const [key, c] of controls) values[key] = c.input.value;
 
     // Validate the whole form with the SHARED rules before sending (fail fast in the browser).
-    const errors = validateAdminForm(values, current);
+    // TM-1174: validate the city against the admin-managed catalogue (offeredCityNames()).
+    const errors = validateAdminForm(values, current, offeredCityNames());
     for (const field of EDITABLE_ADMIN_PROFILE_FIELDS) setControlError(field.key, errors[field.key] || "");
     if (Object.keys(errors).length > 0) {
       toast("Fix the highlighted fields.", { type: "error" });
@@ -496,6 +508,18 @@ function profileSection(user) {
   editBtn.addEventListener("click", () => showForm(true));
 
   renderSummary();
+
+  // TM-1174: prime the admin-managed city catalogue when the detail modal opens so the City dropdown
+  // offers the latest admin-managed list (an admin-added city, with NO code deploy). Every fresh
+  // buildForm() (on Edit-profile click) re-reads offeredCityNames(), so if the fetch resolves before
+  // the admin opens the form the catalogue is already in place. If the form is ALREADY open when the
+  // fetch resolves, rebuild it in place so the new city appears without re-opening. loadCityCatalogue
+  // never rejects (resolves to the fallback on failure/empty), so a catalogue outage leaves the field
+  // on the fallback list — the picker never breaks. Cached, so this shares the one page-load fetch.
+  loadCityCatalogue().then(() => {
+    if (!form.hidden) buildForm();
+  });
+
   return [
     el("h3", { class: "tm-detail-h", text: "Profile" }),
     summary,
