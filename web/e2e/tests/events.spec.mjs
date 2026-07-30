@@ -82,7 +82,7 @@ async function browseToEvent(page, id) {
   await expect(page.locator("#events-view")).toBeVisible();
   // Content-first Events chrome (TM-909): the tab heads with the viewer's city (seeded "London"), and the
   // walking-skeleton brand block (wordmark/tagline/#status) is retired above it — the twin of Home (TM-908).
-  await expect(page.locator(".tm-event-head h2")).toContainText("London");
+  await expect(page.locator("#app-topbar-headline")).toContainText("London"); // TM-1175: the pinned top bar is the Events header ("Events · London")
   await expect(page.locator("main.app > h1")).toBeHidden();
   await expect(page.locator('[data-testid="events-list"]')).toBeVisible();
   const card = page.locator(`[data-testid="event-card"][data-event-id="${id}"]`);
@@ -368,7 +368,7 @@ test("@events content-first tab is scoped to the viewer's city, with a browse-ot
   await expect(page.locator("#events-view")).toBeVisible();
 
   // Content-first chrome: the heading is the viewer's city; the brand block is retired above it.
-  await expect(page.locator(".tm-event-head h2")).toContainText("London");
+  await expect(page.locator("#app-topbar-headline")).toContainText("London"); // TM-1175: the pinned top bar is the Events header ("Events · London")
   await expect(page.locator("main.app > h1")).toBeHidden();
   await shot("london-scope");
 
@@ -383,7 +383,7 @@ test("@events content-first tab is scoped to the viewer's city, with a browse-ot
   await expect(sharjahBtn).toBeVisible();
   await sharjahBtn.click();
 
-  await expect(page.locator(".tm-event-head h2")).toContainText("Sharjah");
+  await expect(page.locator("#app-topbar-headline")).toContainText("Sharjah"); // TM-1175: top bar header follows the browsed city
   await expect(sharjahCard).toBeVisible();
   await shot("sharjah-switched");
 });

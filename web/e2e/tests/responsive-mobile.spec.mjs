@@ -178,7 +178,7 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     // /api/v1/me/conversations — rows depend on backend seeding, so we assert the container not a row).
     await page.locator("#tab-chat").click();
     await expect(page.locator("#chat-view")).toBeVisible();
-    await expect(page.locator("#chat-view")).toContainText("Chats");
+    await expect(page.locator("#app-topbar-headline")).toContainText("Your event chats"); // TM-1175: the Chat tab title lives in the top bar now
     await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
     await expect(page.locator("#tab-chat")).toHaveAttribute("aria-current", "page");
 
@@ -227,7 +227,7 @@ test.describe("@responsive bottom tab bar (TM-434)", () => {
     // Back returns to the unified conversation list.
     await page.locator(".tm-chat-back").click();
     await expect(page.locator('[data-testid="chat-list"]')).toBeVisible();
-    await expect(page.locator("#chat-view")).toContainText("Chats");
+    await expect(page.locator("#app-topbar-headline")).toContainText("Your event chats"); // TM-1175: the Chat tab title lives in the top bar now
     await expectNoHorizontalPageScroll(page);
   });
 

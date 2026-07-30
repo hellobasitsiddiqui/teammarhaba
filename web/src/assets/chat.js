@@ -181,10 +181,9 @@ export function enterChat(threadId) {
 
 /* ─────────────────────────────── Shared chrome / states ───────────────────────────────────────── */
 
-/** The list top bar: just the "Chats" title (a top-level tab, no back button). */
-function listHeader() {
-  return el("header", { class: "tm-chat-head" }, [el("h2", { class: "tm-chat-title", text: "Chats" })]);
-}
+// TM-1175: the Chats list no longer paints its own "Chats" title — the pinned app top bar (#app-topbar)
+// is the header now and shows "Your event chats" on this tab. The thread view keeps its own back + name
+// header (threadHeader) since that's per-conversation, not the tab title.
 
 /**
  * The thread top bar: back to the list + the conversation title + a type sub-line, and — on the loaded
@@ -407,7 +406,7 @@ async function renderList(view) {
   const mine = ++renderToken;
   stopThreadPoll(); // leaving any open thread → stop its near-live poll
   thread.id = null;
-  clear(view).append(listHeader(), stateBlock("Loading your chats…", { testid: "chat-loading", muted: true }));
+  clear(view).append(stateBlock("Loading your chats…", { testid: "chat-loading", muted: true }));
 
   let data;
   try {
@@ -415,7 +414,6 @@ async function renderList(view) {
   } catch (err) {
     if (mine !== renderToken) return;
     clear(view).append(
-      listHeader(),
       stateBlock("Couldn't load your chats. Please try again.", {
         testid: "chat-error",
         onRetry: () => renderList(view),
@@ -435,7 +433,7 @@ function paintList(view) {
   const list = el("div", { class: "tm-chat-list", "data-testid": "chat-list" });
   if (state.rows.length === 0) list.append(emptyList());
   else for (const row of state.rows) list.append(listRow(row));
-  clear(view).append(listHeader(), list);
+  clear(view).append(list);
 }
 
 /** The "no conversations yet" empty state for the list. */

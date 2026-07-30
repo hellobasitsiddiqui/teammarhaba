@@ -21,6 +21,7 @@ import { platformFor } from "./push-env.js";
 import { downloadUrlForPath } from "./storage.js";
 import * as core from "./events-core.js";
 import * as cal from "./calendar-core.js";
+import { setTopbarEventsCity } from "./topbar-headline.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -352,9 +353,11 @@ function paintList(view) {
   // The active chip might no longer be offered (data changed / city switched under it) → fall back to All.
   if (!filters.some((f) => f.key === state.filter)) state.filter = "all";
 
-  // The tab heading is the viewer's city (TM-909) — no literal "Events" title, no brand block above it
-  // (retired via shell-brand-core / corner-bell-core route opt-in).
-  clear(view).append(headerBar(cityModel.heading));
+  // TM-1175 (option A): the pinned top bar is now the Events header — it shows "Events · <browsed city>".
+  // So the browse surface no longer paints its own city heading (that duplicated the bar); instead it
+  // pushes the browsed city up to the bar, so switching cities updates the header. `""` when no city.
+  setTopbarEventsCity(cityModel.hasCity ? cityModel.city : "");
+  clear(view);
 
   // The core decides which of the three list states this is (see events-core `browseListModel`), over
   // the city-scoped subset.
