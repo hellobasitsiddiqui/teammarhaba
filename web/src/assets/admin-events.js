@@ -99,6 +99,12 @@ import {
 } from "./roster-core.js";
 import { venueSummaryLabel } from "./admin-venues-core.js";
 import { CITY_OPTIONS, cityChoiceError } from "./profile-core.js";
+// TM-1174: the City dropdown reads the ADMIN-MANAGED catalogue (offeredCityNames), not the hardcoded
+// CITY_OPTIONS. loadCityCatalogue primes it once on form mount; the static CITY_OPTIONS options on the
+// city FORM_FIELDS entry stay as the offline FALLBACK so the first paint is never empty. cityOptionRows
+// / isOffListCity are the pure option-row + off-list helpers (unit-tested in admin-city-select-core.test.mjs).
+import { loadCityCatalogue, offeredCityNames } from "./city-catalogue.js";
+import { cityOptionRows, isOffListCity } from "./admin-city-select-core.js";
 import { adminVenueNewHash } from "./admin-venues-route.js";
 import { clampPage } from "./admin-paging-core.js";
 import { statsCards } from "./admin-stats-core.js";
@@ -1152,11 +1158,14 @@ function buildField(field, fields) {
 }
 
 /**
- * Select a saved city in the TM-1063 City dropdown. A value on CITY_OPTIONS (or "") selects directly;
- * a saved OFF-LIST city (e.g. "Dubai" set before the list existed, or a venue's off-list city) gets its
- * own extra option injected so it stays VISIBLE and SELECTABLE — an existing event is preserved, never
- * silently overwritten on save (the profile.js fillCitySelect idiom). `data-offlist` stops re-fills from
- * stacking duplicate options for the same value.
+ * Select a saved city in the TM-1063 City dropdown. A value on the OFFERED list (or "") selects
+ * directly; a saved OFF-LIST city (e.g. "Dubai" set before the list existed, or a venue's off-list
+ * city) gets its own extra option injected so it stays VISIBLE and SELECTABLE — an existing event is
+ * preserved, never silently overwritten on save (the profile.js fillCitySelect idiom). `data-offlist`
+ * stops re-fills from stacking duplicate options for the same value.
+ *
+ * TM-1174: "off-list" is now relative to the admin-managed catalogue (offeredCityNames() — the fetched
+ * list, or the CITY_OPTIONS fallback while unfetched/offline), not the hardcoded CITY_OPTIONS.
  *
  * @param {HTMLSelectElement} select the city <select>.
  * @param {*} value the saved city value.
@@ -1164,11 +1173,32 @@ function buildField(field, fields) {
 function fillCitySelect(select, value) {
   if (!select) return;
   const saved = value == null ? "" : String(value).trim();
-  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+  if (isOffListCity(saved, offeredCityNames()) && select.getAttribute("data-offlist") !== saved) {
     select.append(el("option", { value: saved, text: saved }));
     select.setAttribute("data-offlist", saved);
   }
   select.value = saved;
+}
+
+/**
+ * Repopulate the city <select> from the admin-managed catalogue (TM-1174) — called once the primed
+ * loadCityCatalogue() resolves so an admin-added city appears without a code deploy. Rebuilds the
+ * options from offeredCityNames(), PRESERVES the current selection (an off-list saved city stays
+ * selectable via cityOptionRows), and clears the stale `data-offlist` marker before re-filling so
+ * fillCitySelect re-injects the off-list option against the fresh list. No-op if the offered list
+ * still matches (nothing to add) — but re-filling is cheap and idempotent.
+ *
+ * @param {HTMLSelectElement} select the city <select>.
+ */
+function repopulateCitySelect(select) {
+  if (!select) return;
+  const current = select.value;
+  const rows = cityOptionRows(offeredCityNames(), current);
+  clear(select).append(...rows.map(([value, label]) => el("option", { value, text: label })));
+  // The off-list marker was set against the OLD list; drop it so fillCitySelect re-evaluates the saved
+  // value against the freshly-offered names (a value that just became on-list no longer needs injecting).
+  select.removeAttribute("data-offlist");
+  fillCitySelect(select, current);
 }
 
 /**
@@ -2016,10 +2046,18 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     const v = model[f.key];
     if (v != null && v !== "") fields.get(f.key).input.value = v;
   }
-  // City (TM-1063): a dropdown of CITY_OPTIONS. A saved OFF-LIST city (e.g. "Dubai" set before the list
+  // City (TM-1063): a dropdown of cities. A saved OFF-LIST city (e.g. "Dubai" set before the list
   // existed, or a venue's off-list city) stays selectable via an injected option so an existing event is
-  // never silently overwritten on save — the profile.js fillCitySelect / cityChoiceError idiom.
+  // never silently overwritten on save — the profile.js fillCitySelect / cityChoiceError idiom. The
+  // options seeded by buildField are the CITY_OPTIONS fallback (never empty on first paint); the priming
+  // below swaps in the admin-managed catalogue once it resolves.
   fillCitySelect(fields.get("city").input, model.city);
+  // TM-1174: prime the admin-managed city catalogue and repopulate the #event-city options from
+  // offeredCityNames() once it resolves, so an admin-added city becomes selectable with NO code deploy.
+  // loadCityCatalogue never rejects (it resolves to the fallback on failure/empty), so a catalogue
+  // outage just leaves the field on the fallback list — the picker never breaks. The current selection
+  // (incl. an off-list saved city) is preserved across the repaint.
+  loadCityCatalogue().then(() => repopulateCitySelect(fields.get("city").input));
 
   // Booking cutoff (TM-1157): show the EFFECTIVE inherited value (the resolved override → city → app
   // default, or the app default of 1h on create) as the field's PLACEHOLDER + in the helper text, so an
