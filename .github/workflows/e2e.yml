@@ -24,8 +24,70 @@ permissions:
   contents: read
 
 jobs:
+  # TM-1178 — tier the e2e by change surface (part A): on a MANUALLY-DISPATCHED branch run, skip the
+  # (slow) browser suite entirely when the branch touches no web/ files. A backend/infra/android/docs
+  # -only branch can't be exercised by Playwright at all, so running it is ~18 min of wasted signal
+  # (wave-admin-events-3's backend chain burned ~4 full runs for zero browser-relevant reds). The
+  # NIGHTLY cron (and any non-dispatch trigger) always runs the FULL suite — it's the coverage
+  # backstop, so scoping the per-branch dispatch is safe. Fail SAFE: on any diff uncertainty we RUN
+  # e2e rather than skip a real web change (mirrors ci.yml's "Detect non-docs changes" filter).
+  changes:
+    name: Detect web-surface changes (TM-1178)
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # full history so we can diff the dispatched branch against main
+
+      - name: Determine whether any web/ file changed
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          # Only a manual branch dispatch is scoped. The nightly cron (and anything else) always runs
+          # the full matrix — it is the daily backstop that guarantees complete coverage.
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "Event=$EVENT (not a branch dispatch) → run the FULL e2e (nightly/backstop)."
+            echo "web=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags origin main 2>/dev/null || true
+          RANGE="origin/main...HEAD"
+          echo "diff range: $RANGE"
+          if ! FILES="$(git diff --name-only $RANGE 2>/dev/null)"; then
+            echo "diff failed → run FULL e2e (fail-safe)."; echo "web=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Changed files vs main:"; printf '%s\n' "$FILES"
+          if [ -z "$FILES" ]; then
+            echo "No files vs main → run FULL e2e (fail-safe)."; echo "web=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # "Web surface" = anything under web/ — the app code (web/src), the e2e specs+config
+          # (web/e2e), and public assets (web/public). Everything else (backend/, infra/, android/,
+          # .github/, docs, *.md, root config) is invisible to the browser suite.
+          WEB="$(printf '%s\n' "$FILES" | grep -E '^web/' || true)"
+          if [ -n "$WEB" ]; then
+            echo "Web-surface change → RUN e2e. Triggering files:"; printf '%s\n' "$WEB"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "e2e: **running** — web-surface change detected." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No web/ change (backend/infra/docs only) → SKIP the browser e2e (TM-1178)."
+            echo "web=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### e2e skipped (TM-1178)"
+              echo "This branch changes no \`web/\` files, so the Playwright suite can't exercise it."
+              echo "The backend suite (ci.yml) covers it; the nightly full run is the coverage backstop."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   e2e:
     name: Browser walkthrough (Playwright)
+    needs: changes
+    # TM-1178: run only when the changes guard says a web-surface file changed (always true on the
+    # nightly cron). A skipped e2e still leaves the run green — a no-web-diff dispatch passes fast.
+    if: ${{ needs.changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
 
     services:
