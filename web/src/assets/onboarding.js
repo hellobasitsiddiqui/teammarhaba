@@ -24,6 +24,9 @@ import {
 } from "./api.js";
 import { clear, el, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
+// TM-684: the onboarding avatar is now a REAL (optional) uploader — the shared control reuses the same
+// storage.uploadAvatar → photoURL → announceAvatarChanged path as the profile avatar.
+import { buildAvatarUploader } from "./avatar-upload.js";
 import {
   POPULAR_LABEL,
   groupCatalogue,
@@ -1367,29 +1370,13 @@ function setPhoneRecoveryVisible(visible) {
   if (phoneVerify.recoveryEl) phoneVerify.recoveryEl.hidden = !visible;
 }
 
-// TM-684 / TM-1139: the AVATAR is still a disabled visual stub (wire-up deferred); the BIO is now a
-// REAL, functional field (TM-1139). The avatar stub is NOT in the FIELDS array and never touches the
-// onboarding request. The bio textarea is kept OUT of the required-fields FIELDS array too (every FIELDS
-// entry is treated as REQUIRED by validateAll) — it is OPTIONAL, so it's built separately here and read
-// by collectBody() only when non-blank, so the gate still submits with an empty bio.
-function buildAvatarStub() {
-  const cam = svg(
-    "svg",
-    { class: "tm-avatar-cam", viewBox: "0 0 24 24", width: 34, height: 34, fill: "none",
-      stroke: "currentColor", "stroke-width": 1.9, "stroke-linecap": "round", "stroke-linejoin": "round",
-      "aria-hidden": "true", focusable: "false" },
-    [
-      svg("path", { d: "M4 8.5h3l1.4-2h7.2L20 8.5h.5A1.5 1.5 0 0 1 22 10v8a1.5 1.5 0 0 1-1.5 1.5H3.5A1.5 1.5 0 0 1 2 18v-8A1.5 1.5 0 0 1 3.5 8.5" }),
-      svg("circle", { cx: 12, cy: 13.6, r: 3.5 }),
-    ],
-  );
-  const ring = el("div", { class: "tm-avatar-stub", "aria-hidden": "true" }, [cam]);
-  return el("div", { class: "tm-avatar-uploader" }, [
-    ring,
-    el("span", { class: "tm-avatar-uploader-label", text: "Add a photo" }),
-    el("span", { class: "tm-soon-tag", text: "Soon" }),
-  ]);
-}
+// TM-684 / TM-1139: BOTH the avatar and the bio are now REAL, OPTIONAL fields (they shipped as disabled
+// "Soon" stubs). The avatar uploader is the shared buildAvatarUploader() (avatar-upload.js) — a real,
+// optional photo upload that never touches the onboarding request (it persists via Firebase photoURL,
+// the single source of truth, exactly like the profile control). The bio textarea is likewise kept OUT
+// of the required-fields FIELDS array (every FIELDS entry is treated as REQUIRED by validateAll) — it is
+// OPTIONAL, built separately and read by collectBody() only when non-blank, so the gate still submits
+// with no photo and an empty bio.
 
 // TM-1139: the length cap for the onboarding bio — mirrors the backend @Size(max = 160) on
 // OnboardingRequest.bio and the profile edit form's BIO_MAX, so the counter + client cap agree with the
@@ -1459,8 +1446,12 @@ function buildShell(view) {
   // disabled stub used to render, so the layout is unchanged.
   const bioField = buildBioField();
 
+  // TM-684: the avatar is now a REAL, OPTIONAL uploader (was a disabled "Soon" stub). It sits at the top
+  // of the card exactly where the stub did; a picked photo persists via photoURL and repaints on upload.
+  const avatarField = buildAvatarUploader({ idPrefix: "onboarding-avatar" });
+
   const form = el("form", { class: "tm-onboarding-form", id: "onboarding-form", novalidate: true, onSubmit: submit }, [
-    buildAvatarStub(),
+    avatarField.wrapper,
     el("div", { class: "tm-form-grid" }, fieldNodes.length ? [fieldNodes[0], bioField.wrapper, ...fieldNodes.slice(1)] : fieldNodes),
     el("div", { class: "tm-form-actions" }, [submitBtn]),
   ]);

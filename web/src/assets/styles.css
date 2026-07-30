@@ -2289,6 +2289,8 @@ h3,
     gap: 0.5rem;
 }
 
+/* TM-684: the avatar circle is now a REAL, clickable file picker (was a disabled dashed "Soon" stub).
+   Empty = dashed accent circle + camera glyph; a chosen photo fills it (see .tm-avatar-has-photo). */
 #onboarding-view .tm-avatar-stub {
     display: grid;
     place-items: center;
@@ -2298,7 +2300,29 @@ h3,
     border: 2.5px dashed var(--fg-line-strong);
     background: var(--accent-light);
     color: var(--muted);
-    opacity: 0.75;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+#onboarding-view .tm-avatar-stub:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* A chosen photo fills the circle — swap the dashed placeholder for a solid framed look. */
+#onboarding-view .tm-avatar-stub.tm-avatar-has-photo {
+    border-style: solid;
+    border-color: var(--border);
+    background: var(--surface);
+    cursor: pointer;
+}
+
+/* The uploaded image covers the whole circle (object-fit via the shared .tm-avatar-img rule). */
+#onboarding-view .tm-avatar-stub .tm-avatar-img {
+    position: absolute;
+    inset: 0;
 }
 
 #onboarding-view .tm-avatar-uploader-label {
@@ -2306,20 +2330,23 @@ h3,
     color: var(--muted);
 }
 
-/* Shared "Soon" tag for the disabled TM-684 stubs. */
-#onboarding-view .tm-soon-tag {
-    display: inline-block;
-    margin-left: 0.4rem;
-    padding: 0.05rem 0.45rem;
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
-    background: var(--surface-2);
-    border: var(--border-width) solid var(--fg-line);
-    border-radius: var(--radius-pill);
-    vertical-align: middle;
+/* The file input is visually hidden but stays in the a11y tree + keyboard-focusable; the circular label
+   (for=) is the visible trigger. Focusing the input rings the circle so keyboard users see the target. */
+#onboarding-view .tm-avatar-file-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#onboarding-view .tm-avatar-file-hidden:focus-visible + .tm-avatar-stub {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 /* TM-684 → TM-1139: the short bio is now a REAL functional field, so the greyed/inert
