@@ -91,6 +91,34 @@ public class Event {
     private Long venueId;
 
     /**
+     * The recurring {@link EventSeries} this event was generated from (TM-789), held as a plain FK id
+     * (not a JPA association) to stay decoupled from the series aggregate's {@code @SQLRestriction} —
+     * the same convention as {@link #venueId} / {@link #createdBy}. {@code null} = a one-off event
+     * created directly (the common case, and every legacy event). When set, this event is one
+     * occurrence of the series; {@link #occurrenceIndex} orders it within the series.
+     */
+    @Column(name = "series_id")
+    private Long seriesId;
+
+    /**
+     * Zero-based position of this occurrence within its {@link #seriesId series} (TM-789); {@code null}
+     * for a one-off event. The engine (TM-790) stamps it as it materialises occurrences, so occurrence
+     * 0 is the first, 1 the next, and so on.
+     */
+    @Column(name = "occurrence_index")
+    private Integer occurrenceIndex;
+
+    /**
+     * Whether this occurrence has been <em>detached</em> from its series (TM-789): once an admin edits a
+     * single occurrence away from the series template (a 3b capability), it stops tracking series-level
+     * template edits. Default {@code false} — a plain series occurrence still following the template.
+     * Meaningless (and {@code false}) for a one-off event. The column is present in v1 for 3b's
+     * edit-scope work; v1 never flips it.
+     */
+    @Column(name = "series_detached", nullable = false)
+    private boolean seriesDetached = false;
+
+    /**
      * Per-event override of the location-reveal window, in whole hours before {@code startAt}
      * (TM-408). {@code null} = inherit — {@link LocationRevealPolicy} then falls back to the
      * per-city default and finally the app default (24h).
@@ -328,6 +356,33 @@ public class Event {
 
     public void setVenueId(Long venueId) {
         this.venueId = venueId;
+    }
+
+    /** The recurring series this event was generated from (TM-789), or {@code null} for a one-off. */
+    public Long getSeriesId() {
+        return seriesId;
+    }
+
+    public void setSeriesId(Long seriesId) {
+        this.seriesId = seriesId;
+    }
+
+    /** Zero-based position within the series (TM-789), or {@code null} for a one-off event. */
+    public Integer getOccurrenceIndex() {
+        return occurrenceIndex;
+    }
+
+    public void setOccurrenceIndex(Integer occurrenceIndex) {
+        this.occurrenceIndex = occurrenceIndex;
+    }
+
+    /** {@code true} once this occurrence has been detached from its series template (3b); default {@code false}. */
+    public boolean isSeriesDetached() {
+        return seriesDetached;
+    }
+
+    public void setSeriesDetached(boolean seriesDetached) {
+        this.seriesDetached = seriesDetached;
     }
 
     public Integer getLocationRevealHours() {
