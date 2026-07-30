@@ -409,7 +409,10 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
 
         // (a) A brand-new catalogue city an old hardcoded list could NEVER have known about.
         CityCatalogue added = cityAdmin.create(
-                admin, new CityDraft("Marhabaville", "Testland", null, null, null, null, 5));
+                admin,
+                // CityDraft args: name, country, iconEmoji, geoLat, geoLng, imagePath, iconImagePath, sortWeight.
+                // iconImagePath (7th) was added by TM-1166; keep this in step with the record (TM-1173).
+                new CityDraft("Marhabaville", "Testland", null, null, null, null, null, 5));
 
         // Before the cutover this was an off-list 400; now it validates because the catalogue offers it.
         var picker = caller("uid-city-1165", "picker1165@example.com");
