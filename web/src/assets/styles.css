@@ -3216,6 +3216,82 @@ h3,
     cursor: pointer;
 }
 
+/* Repeat / recurrence picker (TM-796) — the create-only "Repeat" toggle + its revealed picker. The
+   toggle is a checkbox styled as a labelled switch row; the reveal body holds the frequency chips,
+   the every-N interval, the weekday select (Weekly), and the end-condition radios. Reuses the shared
+   .tm-form-field / .tm-input / .tm-chip primitives; these rules only add the recurrence-specific layout. */
+.tm-repeat-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px; /* tap-target floor (TM-229) */
+    cursor: pointer;
+}
+.tm-repeat-switch .tm-field-label {
+    margin: 0;
+    cursor: pointer;
+}
+.tm-repeat-toggle {
+    flex: none;
+    width: 1.15rem;
+    height: 1.15rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.tm-repeat-body {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: var(--border-width) solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+.tm-repeat-body[hidden] {
+    display: none;
+}
+.tm-repeat-weekday-field[hidden] {
+    display: none;
+}
+.tm-repeat-interval-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.tm-repeat-interval-row .tm-input {
+    max-width: 6rem;
+}
+.tm-repeat-interval-unit {
+    color: var(--text-muted);
+}
+.tm-repeat-end-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.tm-repeat-end-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    min-height: 44px; /* tap-target floor (TM-229) */
+    cursor: pointer;
+    font-weight: 600;
+}
+.tm-repeat-end-option .tm-input {
+    max-width: 12rem;
+}
+.tm-repeat-end-radio {
+    flex: none;
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.tm-repeat-after-unit {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
 /* Map URL live preview (TM-1063) — a small advisory card / note under the Map URL field. Never blocks
    Save; sits inside the "links" field row so it hides with the field in Online mode. */
 .tm-map-preview {
