@@ -19,6 +19,11 @@
 export const LOGIN_ROUTE = "#/login";
 export const HOME_ROUTE = "#/home";
 export const PROFILE_ROUTE = "#/profile";
+// The Help hub route (TM-1092: #/help is a real tab). The app-download store badges + the build/version
+// stamp are scoped to Help (and the signed-out login screen) only — see appMarketing below. Kept as the
+// bare hash string (no router.js import — this stays a pure module); the unit test pins the exact value
+// against router.js's HELP so a drift is caught.
+export const HELP_ROUTE = "#/help";
 
 // A route counts as "on Profile" for the byline if it's the Profile hub OR a Profile sub-route
 // (e.g. #/profile/public), mirroring router.js's isProfileRoute() — the byline sits at the bottom of
@@ -40,18 +45,37 @@ function isProfileRoute(route) {
  *   • byline        — "A product of 10xAI": login + Profile + the bottom of Home only. Everywhere
  *     else (Events, Chat, Admin, Notifications, …) it's suppressed so it isn't repeated on every
  *     screen.
+ *   • storeBadges   — the "Get the app" app-download store badges (Android + iOS-coming-soon): the
+ *     Help page (#/help) + the signed-out login screen ONLY (TM-1177). They point a NEW user at
+ *     downloading the native app, so they belong on the pre-auth login screen and the Help page —
+ *     not repeated on Home / Events / Chat / Profile / every Admin screen. (The Android-WebView hide
+ *     of the badges — app-badges.js, TM-330 — is a SEPARATE, orthogonal gate and still applies: in
+ *     the native shell the badges stay hidden regardless of route.)
+ *   • versionStamp  — the build/version stamp (the web-bundle SHA + backend /version): SAME rule as
+ *     the store badges (Help page + signed-out login only, TM-1177). It's a diagnostic/marketing
+ *     chrome line, not per-screen furniture, so it's hidden on every signed-in non-Help screen.
+ *
+ * `storeBadges` and `versionStamp` share ONE rule (Help OR logged-out) — the single `appMarketing`
+ * boolean below — but are returned under self-documenting names so each caller reads what it toggles.
  *
  * @param {{signedIn?: boolean, route?: string}} state
- * @returns {{serviceStatus: boolean, phonePrivacy: boolean, byline: boolean}}
+ * @returns {{serviceStatus: boolean, phonePrivacy: boolean, byline: boolean,
+ *            storeBadges: boolean, versionStamp: boolean}}
  */
 export function footerVisibility({ signedIn, route } = {}) {
   const loggedOut = !signedIn;
+  // The app-download badges + build/version stamp share one rule: the Help page OR the signed-out
+  // login screen (TM-1177). One flag, two self-documenting names, so there's a single source of truth.
+  const appMarketing = loggedOut || route === HELP_ROUTE;
   return {
     // Service-status + phone-privacy are pre-auth: shown only while signed OUT (the login screen).
     serviceStatus: loggedOut,
     phonePrivacy: loggedOut,
     // The byline shows on login (signed-out) OR — when signed in — on Home or Profile only.
     byline: loggedOut || (Boolean(signedIn) && (route === HOME_ROUTE || isProfileRoute(route))),
+    // App-download badges + build/version stamp: Help page (#/help) + signed-out login ONLY (TM-1177).
+    storeBadges: appMarketing,
+    versionStamp: appMarketing,
   };
 }
 
