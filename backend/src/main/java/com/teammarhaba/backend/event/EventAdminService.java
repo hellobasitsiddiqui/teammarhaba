@@ -392,6 +392,17 @@ public class EventAdminService {
         return savedSeries;
     }
 
+    /**
+     * The generated occurrences of a series, in occurrence order (TM-795) — the concrete {@link Event}
+     * rows {@link #createSeries} materialised, zero-based {@code occurrence_index} ascending. Backs the
+     * create-series API response so the admin console can render what it just created. Soft-deleted
+     * occurrences are excluded by the entity's {@code @SQLRestriction}.
+     */
+    @Transactional(readOnly = true)
+    public List<Event> occurrencesOf(long seriesId) {
+        return events.findBySeriesIdOrderByOccurrenceIndexAsc(seriesId);
+    }
+
     /** Build the pure {@link RecurrenceRule} from the series draft + resolved zone (v1: DAILY/WEEKLY). */
     private static RecurrenceRule toRule(SeriesDraft draft, ZoneId zone) {
         RecurrenceFrequency frequency =

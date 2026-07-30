@@ -1114,6 +1114,180 @@
         "required" : [ "category", "label" ],
         "type" : "object"
       },
+      "CreateSeriesRequest" : {
+        "properties" : {
+          "afterN" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "bookingCutoffHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "byWeekday" : {
+            "enum" : [ "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" ],
+            "type" : "string"
+          },
+          "cancellationWindowHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "capacity" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "city" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 5000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "firstEndAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "firstStartAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "firstVisibilityEnd" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "firstVisibilityStart" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "frequency" : {
+            "enum" : [ "DAILY", "WEEKLY" ],
+            "type" : "string"
+          },
+          "heading" : {
+            "maxLength" : 120,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "imagePath" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "pattern" : "event-images/[A-Za-z0-9._-]+",
+            "type" : "string"
+          },
+          "interval" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "locationRevealHours" : {
+            "format" : "int32",
+            "maximum" : 8760,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "locationText" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "premium" : {
+            "type" : "boolean"
+          },
+          "pricePence" : {
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "timezone" : {
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "untilDate" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "venueId" : {
+            "format" : "int64",
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "description", "firstStartAt", "firstVisibilityEnd", "firstVisibilityStart", "frequency", "heading", "locationText", "timezone" ],
+        "type" : "object"
+      },
+      "CreateSeriesResponse" : {
+        "properties" : {
+          "byWeekday" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "createdBy" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "firstStartAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "frequency" : {
+            "type" : "string"
+          },
+          "heading" : {
+            "type" : "string"
+          },
+          "horizonGeneratedUntil" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "interval" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "occurrenceBatchSize" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "occurrenceCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "occurrences" : {
+            "items" : {
+              "$ref" : "#/components/schemas/EventResponse"
+            },
+            "type" : "array"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "untilDate" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "CreateVenueRequest" : {
         "properties" : {
           "accessibility" : {
@@ -3674,6 +3848,34 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "tags" : [ "event-admin-controller" ]
+      }
+    },
+    "/api/v1/admin/events/series" : {
+      "post" : {
+        "operationId" : "createSeries",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateSeriesRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreateSeriesResponse"
                 }
               }
             },

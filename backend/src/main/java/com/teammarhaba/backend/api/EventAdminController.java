@@ -10,6 +10,7 @@ import com.teammarhaba.backend.event.EventAdminService;
 import com.teammarhaba.backend.event.EventAdminService.EventCounts;
 import com.teammarhaba.backend.event.EventPhasePolicy;
 import com.teammarhaba.backend.event.EventRosterAdminService;
+import com.teammarhaba.backend.event.EventSeries;
 import com.teammarhaba.backend.event.LocationRevealPolicy;
 import jakarta.validation.Valid;
 import java.time.Instant;
@@ -126,6 +127,35 @@ public class EventAdminController {
             @RequestBody @Valid CreateEventRequest request, @AuthenticationPrincipal VerifiedUser caller) {
         Event created = adminService.create(caller, request.toDraft());
         return EventResponse.from(created, reveal, cutoff, cancellation, phase.isFinished(created, Instant.now()));
+    }
+
+    /**
+     * Create a recurring event series (TM-795, recurring events v1): persists the series template +
+     * cadence and materialises its first in-horizon batch of concrete PUBLISHED {@link Event}
+     * occurrences via {@link EventAdminService#createSeries}, returning {@code 201} with the series
+     * summary + the generated occurrences. Every occurrence is an ordinary event (RSVP, capacity, chat,
+     * reminders, windows all work unchanged). ADMIN-gated like the rest of the controller; bad input
+     * (two/zero end conditions, interval &lt; 1, a monthly frequency, non-IANA timezone, a past start,
+     * a bad first-occurrence window, or a WEEKLY weekday that doesn't match the anchor) is a 400 at the
+     * request edge (RFC-7807), before the service runs.
+     *
+     * <p><b>Scope (v1).</b> This is the series-CREATE endpoint only — edit-scope / cancel-scope / clone
+     * are deferred (TM-793/TM-794, wave-3b).
+     */
+    @PostMapping("/series")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CreateSeriesResponse createSeries(
+            @RequestBody @Valid CreateSeriesRequest request, @AuthenticationPrincipal VerifiedUser caller) {
+        EventSeries series = adminService.createSeries(caller, request.toDraft());
+        // "now" is fixed once so every occurrence's `past` flag is decided against the same instant,
+        // mirroring the list endpoint. The generated occurrences are all in the future, but this keeps
+        // the projection consistent with the rest of the controller.
+        Instant now = Instant.now();
+        List<EventResponse> occurrences = adminService.occurrencesOf(series.getId()).stream()
+                .map(event -> EventResponse.from(
+                        event, reveal, cutoff, cancellation, phase.isFinished(event, now)))
+                .toList();
+        return CreateSeriesResponse.from(series, occurrences);
     }
 
     @PatchMapping("/{id}")

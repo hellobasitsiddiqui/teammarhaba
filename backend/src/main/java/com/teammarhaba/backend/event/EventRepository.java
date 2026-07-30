@@ -183,4 +183,12 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             @Param("now") Instant now,
             @Param("openEndedStartFloor") Instant openEndedStartFloor,
             Pageable pageable);
+
+    /**
+     * The generated occurrences of a recurring series (TM-795), in occurrence order (zero-based
+     * {@code occurrence_index} ascending). Backs the create-series API response, which lists the
+     * concrete {@link Event} rows {@link EventAdminService#createSeries} materialised. Soft-deleted
+     * occurrences are excluded by the entity's {@code @SQLRestriction}, exactly like every other query.
+     */
+    List<Event> findBySeriesIdOrderByOccurrenceIndexAsc(Long seriesId);
 }
