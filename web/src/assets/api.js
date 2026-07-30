@@ -286,6 +286,29 @@ export async function getInterestCatalogue() {
 }
 
 /**
+ * GET /api/v1/cities/catalogue — the active city catalogue for the profile/onboarding picker
+ * (TM-1089 read path, TM-1165 cutover). Any signed-in user may read it (the endpoint inherits the
+ * default-authenticated chain; it is NOT the admin-only `/api/v1/admin/cities`). Returns the
+ * CURRENTLY OFFERED cities only (active + not retired), already ordered weight-first then
+ * alphabetically — the exact set the server-side city validation accepts, so the picker can never
+ * offer a city the save would reject. Each row is the lean public shape
+ * `{name, country, iconEmoji, geoLat, geoLng}` (no internal id/timestamps). A 401 will already have
+ * refreshed/redirected via {@link apiFetch}.
+ *
+ * @returns {Promise<Array<{name: string, country: string, iconEmoji: (string|null), geoLat: (number|null), geoLng: (number|null)}>>}
+ * @throws {Error} on a non-2xx response.
+ */
+export async function getCityCatalogue() {
+  const response = await apiFetch("/api/v1/cities/catalogue", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`GET /api/v1/cities/catalogue failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
  * GET /api/v1/interests/config — the interests min/max-selection bounds (TM-776). Any signed-in user
  * may read it (default-authenticated chain, NOT the admin-only config endpoint). DB-backed, so it
  * reflects an admin's runtime change. Returns `{ minSelections, maxSelections }` (seeded 1 / 3). A 401
@@ -1581,6 +1604,7 @@ if (typeof window !== "undefined") {
     updateMe,
     getInterestCatalogue,
     getInterestConfig,
+    getCityCatalogue,
     submitOnboarding,
     completeOnboarding,
     acceptTerms,

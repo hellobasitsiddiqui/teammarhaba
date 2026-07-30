@@ -18,6 +18,9 @@ import com.google.firebase.auth.UserMetadata;
 import com.google.firebase.auth.UserRecord;
 import com.teammarhaba.backend.AbstractIntegrationTest;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.city.CityAdminService;
+import com.teammarhaba.backend.city.CityCatalogue;
+import com.teammarhaba.backend.city.CityDraft;
 import com.teammarhaba.backend.user.Gender;
 import com.teammarhaba.backend.user.Role;
 import com.teammarhaba.backend.user.User;
@@ -62,6 +65,10 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
     /** The real admin disable/suspend path (flips {@code enabled=false} + audits) — TM-741/TM-742. */
     @Autowired
     private UserAdminService userAdmin;
+
+    /** The real admin city-catalogue write path — used to prove the picker/validation cutover (TM-1165). */
+    @Autowired
+    private CityAdminService cityAdmin;
 
     private static RequestPostProcessor caller(String uid, String email) {
         return authentication(new UsernamePasswordAuthenticationToken(new VerifiedUser(uid, email), null, List.of()));
@@ -390,6 +397,45 @@ class MeControllerIntegrationTest extends AbstractIntegrationTest {
                             .content("{\"city\":\"" + city + "\"}"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.city").value(city));
+        }
+    }
+
+    @Test
+    void cityValidationReadsTheLiveCatalogueAdminAddedCityValidatesRetiredOneIsRejected() throws Exception {
+        // TM-1165: the profile city validation now reads the ACTIVE city catalogue live instead of a
+        // hardcoded list, so an admin-added city is selectable + valid with NO code deploy — and a
+        // retired one drops out of the accepted set. This is the whole point of retiring ALLOWED_CITIES.
+        var admin = new VerifiedUser("uid-city-admin-1165", "cityadmin@example.com");
+
+        // (a) A brand-new catalogue city an old hardcoded list could NEVER have known about.
+        CityCatalogue added = cityAdmin.create(
+                admin, new CityDraft("Marhabaville", "Testland", null, null, null, null, 5));
+
+        // Before the cutover this was an off-list 400; now it validates because the catalogue offers it.
+        var picker = caller("uid-city-1165", "picker1165@example.com");
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(picker)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Marhabaville\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.city").value("Marhabaville"));
+
+        // (b) Retire that city — it leaves the active catalogue, so a NEW pick of it is now refused.
+        cityAdmin.retire(admin, added.getId());
+        mockMvc.perform(patch("/api/v1/me")
+                        .with(caller("uid-city-1165-retired", "retired1165@example.com"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"city\":\"Marhabaville\"}"))
+                .andExpect(status().isBadRequest());
+
+        // (c) The four seeded catalogue cities keep validating throughout (must-not-break).
+        for (String seeded : new String[] {"London", "Milton Keynes", "Sharjah", "Karachi"}) {
+            mockMvc.perform(patch("/api/v1/me")
+                            .with(picker)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"city\":\"" + seeded + "\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.city").value(seeded));
         }
     }
 

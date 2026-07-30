@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedPhoneService;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.city.CityCatalogueRepository;
 import com.teammarhaba.backend.config.PhoneVerificationProperties;
 import com.teammarhaba.backend.interests.InterestCatalogueRepository;
 import com.teammarhaba.backend.interests.InterestSelectionConfig;
@@ -33,6 +34,7 @@ class UserProvisionCausePreservationTest {
     @Mock private SubscriptionRepository subscriptions;
     @Mock private UserInterestRepository userInterests;
     @Mock private InterestCatalogueRepository catalogue;
+    @Mock private CityCatalogueRepository cityCatalogue;
     @Mock private InterestSelectionConfig interestBounds;
     @Mock private VerifiedPhoneService verifiedPhoneService;
     @Mock private NameLockPredicate nameLock;
@@ -45,6 +47,7 @@ class UserProvisionCausePreservationTest {
                 subscriptions,
                 userInterests,
                 catalogue,
+                cityCatalogue,
                 interestBounds,
                 new PhoneVerificationProperties(false),
                 verifiedPhoneService,

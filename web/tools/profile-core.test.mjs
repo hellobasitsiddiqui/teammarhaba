@@ -36,6 +36,10 @@ import {
   GENDER_OPTIONS,
   GENDER_VALUES,
   genderChoiceError,
+  CITY_OPTIONS,
+  CITY_FALLBACK,
+  cityOptionsFrom,
+  cityChoiceError,
   PROFILE_SECTIONS,
   profileSectionsStateKey,
   resolveSectionState,
@@ -271,6 +275,68 @@ test("identitySummary drops an off-list junk city from the meta line (TM-1023)",
   // A valid on-list city still renders exactly as today (with and without an age).
   assert.equal(identitySummary({ firstName: "A", city: "London", age: 30 }).metaLine, "London · 30");
   assert.equal(identitySummary({ firstName: "A", city: "London" }).metaLine, "London");
+});
+
+// TM-1165: the junk guard uses the OFFERED catalogue names (passed in), not just the hardcoded
+// fallback — so an ADMIN-ADDED city ("Marhabaville") renders in the meta line instead of being
+// dropped as junk, while a genuine junk value ("Location") is still dropped. Default (no offered
+// arg) keeps the pre-cutover fallback behaviour.
+test("identitySummary keeps an admin-added offered city in the meta line, still drops junk (TM-1165)", () => {
+  const offered = ["London", "Marhabaville"];
+  // fail-before: with the OLD hardcoded set "Marhabaville" would have been dropped; passing the
+  // offered list keeps it.
+  assert.equal(identitySummary({ firstName: "A", city: "Marhabaville", age: 20 }, offered).metaLine, "Marhabaville · 20");
+  // A value NOT in the offered list is still dropped as junk.
+  assert.equal(identitySummary({ firstName: "A", city: "Location", age: 20 }, offered).metaLine, "20");
+  // Default (no offered arg) → the hard fallback → an admin-added city not in the fallback is dropped.
+  assert.equal(identitySummary({ firstName: "A", city: "Marhabaville", age: 20 }).metaLine, "20");
+});
+
+// ---- cityOptionsFrom (TM-1165 pure mapping) ---------------------------------------------------
+
+test("cityOptionsFrom maps catalogue rows to trimmed unique names, preserving order (TM-1165)", () => {
+  const rows = [
+    { name: "London", country: "United Kingdom" },
+    { name: " Marhabaville ", country: "Testland" }, // trimmed
+    { name: "London", country: "dup" }, // duplicate dropped
+    { name: "", country: "blank" }, // blank skipped
+    { country: "no-name" }, // missing name skipped
+  ];
+  assert.deepEqual(cityOptionsFrom(rows), ["London", "Marhabaville"]);
+});
+
+test("cityOptionsFrom falls back to CITY_FALLBACK when the payload is missing/empty/unusable (TM-1165)", () => {
+  // The field must never break offline: a null/non-array/empty payload (or one with no usable name)
+  // yields the four hard-fallback cities so the picker still works.
+  assert.deepEqual(cityOptionsFrom(null), [...CITY_FALLBACK]);
+  assert.deepEqual(cityOptionsFrom(undefined), [...CITY_FALLBACK]);
+  assert.deepEqual(cityOptionsFrom("nope"), [...CITY_FALLBACK]);
+  assert.deepEqual(cityOptionsFrom([]), [...CITY_FALLBACK]);
+  assert.deepEqual(cityOptionsFrom([{ name: "" }, { country: "x" }]), [...CITY_FALLBACK]);
+  // CITY_FALLBACK is exactly the four seeded cities (and aliases the historical CITY_OPTIONS export).
+  assert.deepEqual([...CITY_FALLBACK], ["London", "Milton Keynes", "Sharjah", "Karachi"]);
+  assert.equal(CITY_FALLBACK, CITY_OPTIONS);
+  // An explicit fallback is honoured too.
+  assert.deepEqual(cityOptionsFrom([], ["Solo"]), ["Solo"]);
+});
+
+// ---- cityChoiceError (TM-877/TM-1165) ---------------------------------------------------------
+
+test("cityChoiceError accepts a value from the OFFERED list (admin-added city), rejects off-list (TM-1165)", () => {
+  const offered = ["London", "Marhabaville"];
+  assert.equal(cityChoiceError("Marhabaville", null, offered), "", "an offered (admin-added) city passes");
+  assert.equal(cityChoiceError("London", null, offered), "");
+  assert.match(cityChoiceError("Nowhere", null, offered), /list/i, "an off-list city is rejected");
+});
+
+test("cityChoiceError allows blank and the caller's own saved off-list city; defaults to the fallback (TM-877)", () => {
+  assert.equal(cityChoiceError("", null, ["London"]), "", "blank = leave unchanged");
+  // The caller's ALREADY-SAVED off-list city ("Dubai") stays valid so it's never overwritten.
+  assert.equal(cityChoiceError("Dubai", "Dubai", ["London"]), "");
+  // No offered arg → the hard fallback (the four seeded cities) is used.
+  assert.equal(cityChoiceError("London"), "");
+  assert.equal(cityChoiceError("Sharjah"), "");
+  assert.match(cityChoiceError("Bristol"), /list/i, "off the fallback list, not the caller's saved value → rejected");
 });
 
 // TM-883: the identity header (and public preview) for a NAMED account — a /me carrying

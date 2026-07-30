@@ -196,6 +196,12 @@ function loadProfileModule(deps) {
     "  buildLocaleCurrencySettings,\n" +
     "  PROFILE_PUBLIC_ROUTE, profileMode, identitySummary, accountContact, nationalityDisplay, bioDisplay, circleUserId, profileStrength, strengthRingGeometry, publicSummary,\n" +
     "  validateProfileField, NOTIFICATION_PREFS, CITY_OPTIONS, cityChoiceError,\n" +
+    // TM-1165: the offered-city resolver (city-catalogue.js) profile.js now imports for the
+    // catalogue-driven city dropdown. offeredCityNames() is injected below to return the four fallback
+    // names so every pre-cutover city test keeps its old behaviour; loadCityCatalogue is a no-op
+    // resolved promise. (The deps-kit rule from the blackboard: EVERY new profile.js import must be
+    // added here or the eval'd copy throws when hit.)
+    "  offeredCityNames, loadCityCatalogue,\n" +
     // TM-955: the shared gender buckets + membership set the edit form's FIELDS + fillForm now name.
     "  GENDER_OPTIONS, GENDER_VALUES,\n" +
     "  splitE164, composeE164, canonicalE164, defaultCountryFor, phonePartsError, PHONE_PICK_COUNTRY_MESSAGE,\n" +
@@ -378,6 +384,11 @@ const deps = {
   // select options / off-list preservation tests prove the shipped rules.
   CITY_OPTIONS: core.CITY_OPTIONS,
   cityChoiceError: core.cityChoiceError,
+  // TM-1165: the catalogue-driven city dropdown. offeredCityNames() returns the four fallback names so
+  // every pre-cutover city test (options render, off-list preservation, junk-guard) keeps its exact
+  // old behaviour under Node; loadCityCatalogue is a resolved-promise no-op (load() awaits it).
+  offeredCityNames: () => [...core.CITY_OPTIONS],
+  loadCityCatalogue: () => Promise.resolve([...core.CITY_OPTIONS]),
   // TM-955: the REAL shared gender buckets + membership set, so the FIELDS gender <select> and
   // fillForm's stored-value selection run the shipped data under Node.
   GENDER_OPTIONS: core.GENDER_OPTIONS,
@@ -622,13 +633,17 @@ test("validateField: first and last name reject purely numeric input (TM-771)", 
 
 // ---- TM-877: city dropdown ---------------------------------------------------------------------
 
-test("the city field is a SELECT of the four allowed cities behind a blank placeholder (TM-877)", () => {
+test("the city field is a SELECT of the offered cities behind a blank placeholder (TM-877/TM-1165)", () => {
   const city = field("city");
   assert.equal(city.type, "select", "city is a dropdown, not free text");
+  // TM-1165: options are now a FUNCTION resolved at build/paint time from the offered catalogue
+  // (offeredCityNames() — injected here to the four fallback names), not a static array. So the
+  // dropdown lists exactly the offered set (the four fallback cities under this harness).
+  assert.equal(typeof city.options, "function", "options resolve at build time (catalogue-driven)");
   assert.deepEqual(
-    city.options.map(([value]) => value),
+    city.options().map(([value]) => value),
     ["", "London", "Milton Keynes", "Sharjah", "Karachi"],
-    "a no-choice placeholder plus exactly the interim allowed list (admin-managed list is TM-878)",
+    "a no-choice placeholder plus the offered cities (fallback list under the Node harness)",
   );
 });
 

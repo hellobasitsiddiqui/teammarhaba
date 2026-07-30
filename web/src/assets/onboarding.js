@@ -50,7 +50,6 @@ import {
   canonicalE164,
   defaultCountryFor,
   phonePartsError,
-  CITY_OPTIONS,
   cityChoiceError,
   nameFormatError,
   // TM-955: the shared gender buckets + the required-choice validator, so the gate and the profile
@@ -59,6 +58,10 @@ import {
   genderChoiceError,
 } from "./profile-core.js";
 import { COUNTRIES, flagOf } from "./countries.js";
+// TM-1165: the offered city names come from the admin-managed catalogue (fetched + cached), with the
+// CITY_OPTIONS fallback offline — so the gate's Location dropdown lists the same catalogue as the
+// profile edit form, and an admin-added city is selectable + valid with no code deploy.
+import { offeredCityNames, loadCityCatalogue } from "./city-catalogue.js";
 // TM-930: the gate phone becomes a Firebase phone VERIFY-AND-LINK step. The user proves ownership of
 // the number (OTP) and the credential is linked to their signed-in Firebase account, so one verified
 // number maps to exactly one account (strict 1:1 comes free from Firebase). Reuses the TM-867 six-box
@@ -111,7 +114,10 @@ const FIELDS = [
     meKey: "city",
     label: "Location",
     type: "select",
-    options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])],
+    // TM-1165: a FUNCTION so the options resolve at build/repopulate time from the offered catalogue
+    // (offeredCityNames() — the fetched list, or the CITY_OPTIONS fallback offline). load() primes the
+    // catalogue then repopulates this select so an admin-added city is selectable with no code deploy.
+    options: () => [["", "Choose a city…"], ...offeredCityNames().map((c) => [c, c])],
     hint: "Pick the city closest to you.",
   },
   {
@@ -532,10 +538,11 @@ function validateField(field, raw) {
     return "";
   }
   if (field.field === "location") {
-    // TM-898: the gate mirrors the profile form's TM-877 dropdown rule — the choice must come from
-    // the allowed list, with the caller's already-saved (possibly off-list) city still allowed;
-    // that saved value is exactly the extra option prefill's fillCitySelect injects.
-    return cityChoiceError(value, state.me?.city);
+    // TM-898/TM-1165: the gate mirrors the profile form's dropdown rule — the choice must be an
+    // OFFERED (active catalogue) city, with the caller's already-saved (possibly off-list) city still
+    // allowed; that saved value is exactly the extra option prefill's fillCitySelect injects.
+    // offeredCityNames() is the resolved catalogue (fallback while unfetched/offline).
+    return cityChoiceError(value, state.me?.city, offeredCityNames());
   }
   if (field.maxLength != null && value.length > field.maxLength) {
     return `Must be ${field.maxLength} characters or fewer.`;
@@ -632,7 +639,9 @@ function prefill(profile) {
  */
 function fillCitySelect(select, value) {
   const saved = value == null ? "" : String(value).trim();
-  if (saved !== "" && !CITY_OPTIONS.includes(saved) && select.getAttribute("data-offlist") !== saved) {
+  // TM-1165: "off-list" is relative to the OFFERED catalogue names (offeredCityNames), not the
+  // hardcoded list — so an admin-added city already present as a real option is not double-injected.
+  if (saved !== "" && !offeredCityNames().includes(saved) && select.getAttribute("data-offlist") !== saved) {
     select.append(el("option", { value: saved, text: saved }));
     select.setAttribute("data-offlist", saved);
   }
@@ -718,6 +727,11 @@ function collectBody() {
 
 async function load() {
   state.loading = true;
+  // TM-1165: prime the offered city catalogue in parallel with /me so the Location dropdown lists the
+  // admin-managed set. loadCityCatalogue never rejects (fallback on failure); once it settles we
+  // repopulate the (already-built) Location <select> with the resolved options. Best-effort — a
+  // catalogue outage just leaves the fallback list.
+  const catalogueReady = loadCityCatalogue();
   // Best-effort pre-fill: a failure here is non-fatal (the user just starts from blank).
   try {
     const profile = await getMe();
@@ -728,6 +742,35 @@ async function load() {
   } finally {
     state.loading = false;
     state.loaded = true;
+  }
+  await catalogueReady;
+  repopulateLocationOptions();
+}
+
+/**
+ * Repopulate the (already-built) Location <select> from the resolved offered catalogue (TM-1165), then
+ * re-select the caller's saved city. buildShell built the select from the fallback list before the
+ * catalogue fetch settled; this swaps in the real options once it has, so an admin-added city becomes
+ * selectable without a code deploy. Idempotent — clears the options (and the stale `data-offlist`
+ * marker) before rebuilding, so a re-entry never stacks duplicates. No-op if the field isn't mounted.
+ */
+function repopulateLocationOptions() {
+  const entry = shell?.fields.get("location");
+  const select = entry?.input;
+  if (!select) return;
+  const previous = select.value; // preserve any explicit choice the user already made
+  select.replaceChildren(
+    ...[["", "Choose a city…"], ...offeredCityNames().map((c) => [c, c])].map(([value, label]) =>
+      el("option", { value, text: label }),
+    ),
+  );
+  select.removeAttribute("data-offlist");
+  // Prefer the user's in-progress selection; otherwise re-select the saved city (with off-list
+  // injection) exactly as prefill did.
+  if (previous && previous !== "") {
+    fillCitySelect(select, previous);
+  } else {
+    fillCitySelect(select, state.me?.city);
   }
 }
 
@@ -1130,12 +1173,15 @@ function buildField(field) {
 
   let input;
   if (field.type === "select") {
-    // TM-898: the location dropdown — the same select machinery as the profile form's city field
-    // (profile.js buildField), so the two surfaces offer the identical TM-877 allowed list.
+    // TM-898/TM-1165: the location dropdown — the same select machinery as the profile form's city
+    // field (profile.js buildField), so the two surfaces offer the identical OFFERED catalogue list. A
+    // function `options` is resolved here (the city dropdown, driven by offeredCityNames()); static
+    // arrays are unchanged.
+    const options = typeof field.options === "function" ? field.options() : field.options;
     input = el(
       "select",
       { id, class: "tm-input", name: field.field, required: true, "aria-describedby": describedBy },
-      field.options.map(([value, label]) => el("option", { value, text: label })),
+      options.map(([value, label]) => el("option", { value, text: label })),
     );
   } else {
     input = el("input", {

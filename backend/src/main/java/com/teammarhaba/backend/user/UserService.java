@@ -5,6 +5,7 @@ import com.teammarhaba.backend.audit.AuditService;
 import com.teammarhaba.backend.auth.VerifiedPhoneService;
 import com.teammarhaba.backend.auth.VerifiedPhoneUnavailableException;
 import com.teammarhaba.backend.auth.VerifiedUser;
+import com.teammarhaba.backend.city.CityCatalogueRepository;
 import com.teammarhaba.backend.common.PageRequests;
 import com.teammarhaba.backend.common.PageResponse;
 import com.teammarhaba.backend.config.PhoneVerificationProperties;
@@ -64,17 +65,6 @@ public class UserService {
     private static final Sort DEFAULT_SORT = Sort.by(Sort.Direction.ASC, "id");
 
     /**
-     * The interim allowed city list (TM-877) — the profile city is picked from a fixed dropdown.
-     * Mirrors {@code CITY_OPTIONS} in {@code web/src/assets/profile-core.js}; the admin-managed
-     * version of this list is TM-878. A NEW city value must come from this set, but a caller
-     * re-sending their ALREADY-SAVED off-list city is accepted (see {@link #updateProfile} and —
-     * since TM-898 — the onboarding gate {@link #completeProfileOnboarding}, which enforces the
-     * same rule), so profiles saved before the list existed (e.g. "Dubai") are preserved, never
-     * invalidated.
-     */
-    private static final Set<String> ALLOWED_CITIES = Set.of("London", "Milton Keynes", "Sharjah", "Karachi");
-
-    /**
      * The set of accepted nationality codes (TM-1134): every ISO-3166 alpha-2 country code the JDK
      * knows ({@link Locale#getISOCountries()}), PLUS the extras the web country picker
      * ({@code web/src/assets/countries.js}) offers that the JDK's list omits — currently {@code XK}
@@ -129,6 +119,7 @@ public class UserService {
     private final SubscriptionRepository subscriptions;
     private final UserInterestRepository userInterests;
     private final InterestCatalogueRepository catalogue;
+    private final CityCatalogueRepository cityCatalogue;
     private final InterestSelectionConfig interestBounds;
     private final PhoneVerificationProperties phoneVerification;
     private final VerifiedPhoneService verifiedPhoneService;
@@ -141,6 +132,7 @@ public class UserService {
             SubscriptionRepository subscriptions,
             UserInterestRepository userInterests,
             InterestCatalogueRepository catalogue,
+            CityCatalogueRepository cityCatalogue,
             InterestSelectionConfig interestBounds,
             PhoneVerificationProperties phoneVerification,
             VerifiedPhoneService verifiedPhoneService,
@@ -151,10 +143,23 @@ public class UserService {
         this.subscriptions = subscriptions;
         this.userInterests = userInterests;
         this.catalogue = catalogue;
+        this.cityCatalogue = cityCatalogue;
         this.interestBounds = interestBounds;
         this.phoneVerification = phoneVerification;
         this.verifiedPhoneService = verifiedPhoneService;
         this.nameLock = nameLock;
+    }
+
+    /**
+     * Whether {@code city} is a currently-offered catalogue city (TM-1165) — the live replacement for
+     * the retired hardcoded {@code ALLOWED_CITIES.contains(city)} probe. Reads the ACTIVE city
+     * catalogue by exact name ({@link CityCatalogueRepository#existsByActiveTrueAndName}), so an
+     * admin-added city validates and a retired/unknown one is rejected with NO code deploy. The caller
+     * trims {@code city} first (mirroring the old set-membership behaviour: case-sensitive, exact); an
+     * empty string is never passed here (the clear/unchanged cases short-circuit before this call).
+     */
+    private boolean isOfferedCity(String city) {
+        return cityCatalogue.existsByActiveTrueAndName(city);
     }
 
     /**
@@ -426,11 +431,11 @@ public class UserService {
             // trimmed for the same reason (a padded "  London  " is the list value "London").
             String city = update.city().trim();
             if (!Objects.equals(trimmedOrNull(user.getCity()), city)) {
-                // TM-877: a NEW city must come from the allowed dropdown list. Reached only when the
-                // value actually differs from the stored one, so re-sending an already-saved
-                // off-list city ("Dubai") is a no-op above and stays preserved; "" keeps its clear
-                // semantics.
-                if (!city.isEmpty() && !ALLOWED_CITIES.contains(city)) {
+                // TM-877/TM-1165: a NEW city must be a currently-offered catalogue city (read live —
+                // an admin-added city validates with no deploy). Reached only when the value actually
+                // differs from the stored one, so re-sending an already-saved off-list city ("Dubai")
+                // is a no-op above and stays preserved; "" keeps its clear semantics.
+                if (!city.isEmpty() && !isOfferedCity(city)) {
                     throw new BadRequestException("Choose a city from the list");
                 }
                 changes.add(change("city", user.getCity(), city));
@@ -789,13 +794,14 @@ public class UserService {
             user.setLastName(parts.length > 1 ? parts[1] : null);
         }
         String city = requireText(location, "location");
-        // TM-898: the gate enforces the TM-877 allowed-city list exactly as updateProfile does,
+        // TM-898/TM-1165: the gate enforces the active city catalogue exactly as updateProfile does,
         // INCLUDING the saved-value allowance — an account whose stored city is off-list (saved
         // before the list existed) may pass back through the gate re-submitting that same value
-        // (the gate dropdown keeps it selectable), but any NEW off-list value is refused. The
-        // stored side is trimmed for the comparison (TM-900) so a legacy padded value still matches
-        // its trimmed re-submission.
-        if (!Objects.equals(trimmedOrNull(user.getCity()), city) && !ALLOWED_CITIES.contains(city)) {
+        // (the gate dropdown keeps it selectable), but any NEW off-catalogue value is refused. The
+        // catalogue is read live (an admin-added city validates with no deploy). The stored side is
+        // trimmed for the comparison (TM-900) so a legacy padded value still matches its trimmed
+        // re-submission.
+        if (!Objects.equals(trimmedOrNull(user.getCity()), city) && !isOfferedCity(city)) {
             throw new BadRequestException("Choose a city from the list");
         }
         user.setCity(city);
