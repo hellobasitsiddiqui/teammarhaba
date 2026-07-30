@@ -191,9 +191,15 @@ is written.
 - **Never trust a workflow's self-report.** After every build workflow: verify the PR/branch really
   exists, read the diff, and read CI conclusion from `gh run view --json conclusion` — watcher exit
   codes lie, and a "green"/"PR created" claim can be fabricated.
-- **Branch e2e green is the merge gate** (e2e is off the PR gate — dispatch `e2e.yml --ref
-  <branch>` yourself). An e2e red on your OWN new spec is often a real bug caught, not flake — the
-  wave-login-1 red exposed a genuine mixed-code auto-submit defect. Diagnose before re-running.
+- **Branch e2e green is the merge gate — for web changes** (e2e is off the PR gate — dispatch
+  `e2e.yml --ref <branch>` yourself). **TM-1178 SKIP:** skip the dispatch when your branch touches
+  **no `web/` files** — a backend-only, infra-only, android-only or docs-only change can't be
+  exercised by the browser suite at all, so the backend suite (ci.yml) is its full gate. Report it
+  as such on the ticket. If **any** file under `web/` (app code, e2e specs, or public assets)
+  changed, dispatch e2e. (Belt-and-braces: `e2e.yml` now self-skips a no-`web/`-diff dispatch fast
+  and passes green — but don't rely on that to launch pointless runs; just skip it.) An e2e red on
+  your OWN new spec is often a real bug caught, not flake — the wave-login-1 red exposed a genuine
+  mixed-code auto-submit defect. Diagnose before re-running.
   **`gh pr checks` covers ONLY the PR gate — a "CI green" that never dispatched `e2e.yml` on the
   fixed head is NOT green.** (wave-profile-2: both the TM-910 and TM-930 fix phases added an e2e
   spec, reported "CI green" from `gh pr checks` alone, and their OWN new specs were red in the
