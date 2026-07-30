@@ -138,6 +138,7 @@ import { updateFooter } from "./footer.js";
 // that own their full-page header (Profile + the first-run gates) — the pure rule lives in
 // shell-brand-core.js (unit-tested); this is its DOM bridge.
 import { updateShellBrand } from "./shell-brand.js";
+import { updateTopbarHeadline } from "./topbar-headline.js";
 // Corner-bell chrome (TM-910 → TM-1043): the bell is now standalone fixed chrome (#app-topbar),
 // statically corner-pinned by CSS on every route — the old .app-nav row is gone, so the bridge is a
 // deliberate no-op. The seam is KEPT (router-driven like the shell-brand block above) so any future
@@ -709,6 +710,11 @@ function render() {
   // Driven from here so the bell shares router's single source of truth — this also gives the
   // "refresh on route change" AC for free, since render() runs on every hashchange + auth change.
   updateNotificationBell({ signedIn, gated });
+
+  // App top-bar headline (TM-1175): the per-screen header title on the LEFT of the pinned top bar,
+  // beside the bell. Route-driven from here (shares router's single source of truth + the free
+  // refresh on every hashchange + auth change) so it always names the screen the tab bar is lighting.
+  updateTopbarHeadline({ signedIn, gated, route, isAdmin });
 
   // Footer login/marketing fragments (TM-666): scope the Service-status link + phone-privacy note to
   // the logged-out login screen, and the "A product of 10xAI" byline to login / Home / Profile only —

@@ -195,7 +195,8 @@ test("the corner bell rides the app-column band + widens with the admin panel (T
     ".app-topbar must size to the .app clamp band — width: min(100%, var(--app-max)) (TM-1090)",
   );
   assert.match(body, /margin-inline:\s*auto/, ".app-topbar must centre the band (margin-inline: auto) so it tracks .app (TM-1090)");
-  assert.match(body, /justify-content:\s*flex-end/, ".app-topbar must push the bell to the band's right edge — the panel corner (TM-1090)");
+  // TM-1175: the bar is now the app header — per-screen headline (left) + bell (right) via space-between.
+  assert.match(body, /justify-content:\s*space-between/, ".app-topbar must lay out headline (left) + bell (right) — space-between (TM-1175)");
   // RC1: the admin --app-max widen must ALSO reach #app-topbar, or the bell strands at the narrow band edge
   // (mid-panel) while the admin column is ~72rem. Find the widen rule; assert its selector includes the bell.
   const widen = NO_COMMENTS.match(/([^{}]*)\{\s*--app-max:\s*min\(\s*72rem[^}]*\}/);
@@ -204,6 +205,27 @@ test("the corner bell rides the app-column band + widens with the admin panel (T
     /#app-topbar/.test(widen[1]),
     "the admin --app-max widen must also target #app-topbar so the bell tracks the wide admin panel (RC1, TM-1090)",
   );
+});
+
+test("the top bar becomes an OPAQUE app header once the headline is present (TM-1175)", () => {
+  // Signed-in: the headline is shown → the bar gets an opaque page-bg + a crisp edge, so content
+  // scrolls behind it. Signed-out/gated: headline hidden → the base rule stays transparent.
+  const opaque = NO_COMMENTS.match(
+    /\.app-topbar:has\(\s*>\s*#app-topbar-headline:not\(\[hidden\]\)\s*\)\s*\{([^}]*)\}/,
+  );
+  assert.ok(opaque, ".app-topbar must gain an opaque header state via :has(#app-topbar-headline:not([hidden])) (TM-1175)");
+  assert.match(opaque[1], /background:\s*var\(--page-bg\)/, "the opaque header must paint --page-bg (TM-1175)");
+
+  // The headline itself must truncate with an ellipsis rather than wrap / shove the bell off-band.
+  const headline = NO_COMMENTS.match(/\.app-topbar-headline\s*\{([^}]*)\}/);
+  assert.ok(headline, ".app-topbar-headline rule must exist (TM-1175)");
+  assert.match(headline[1], /text-overflow:\s*ellipsis/, ".app-topbar-headline must ellipsis-truncate (TM-1175)");
+  assert.match(headline[1], /font-family:\s*var\(--font-display\)/, ".app-topbar-headline uses the display face (TM-1175)");
+
+  // The app content must clear the taller bar (padding-top on the signed-in .app).
+  const clear = NO_COMMENTS.match(/body\.tm-has-tabbar\s+\.app\s*\{([^}]*)\}/);
+  assert.ok(clear, "body.tm-has-tabbar .app rule must exist");
+  assert.match(clear[1], /padding-top:\s*calc\(/, "signed-in .app must add padding-top to clear the fixed top bar (TM-1175)");
 });
 
 // ── TM-1073: soft shade page background, white content cards. The page ground (--page-bg on the phone
