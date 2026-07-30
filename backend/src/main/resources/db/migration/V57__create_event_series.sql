@@ -1,8 +1,8 @@
--- V56__create_event_series — recurring event series data model (TM-789 / recurring events v1, wave-admin-events-3)
+-- V57__create_event_series — recurring event series data model (TM-789 / recurring events v1, wave-admin-events-3)
 --
 -- A recurring *series* is the template + cadence an admin defines once, from which concrete `events`
 -- occurrences are generated. THIS SLICE IS DATA-MODEL ONLY: no API, no UI, no recurrence engine (that
--- is TM-790). It creates the series table; V57 adds the events → series reference columns. Flyway owns
+-- is TM-790). It creates the series table; V58 adds the events → series reference columns. Flyway owns
 -- this DDL; Hibernate runs validate-only, so the EventSeries entity must match exactly.
 --
 -- v1 THIN CUT — DAILY + WEEKLY only. The model is kept extensible for wave-3b: `rrule_raw`,

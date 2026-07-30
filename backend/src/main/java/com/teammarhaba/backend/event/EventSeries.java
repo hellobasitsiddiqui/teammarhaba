@@ -19,7 +19,7 @@ import org.hibernate.annotations.SQLRestriction;
  * <em>data model only</em>: no API, no UI, and no recurrence engine (that is TM-790). It owns the
  * series row, the events → series reference, and the repository.
  *
- * <p>Schema is owned by Flyway ({@code V56__create_event_series}); Hibernate runs validate-only, so
+ * <p>Schema is owned by Flyway ({@code V57__create_event_series}); Hibernate runs validate-only, so
  * this mapping must match the table exactly. It follows the same aggregate conventions as
  * {@link Event} / {@link Venue}: DB-authoritative {@code created_at}, app-managed {@code updated_at},
  * the house soft-delete ({@code deleted_at} + {@code @SQLRestriction}), and a {@code @Version}

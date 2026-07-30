@@ -19,7 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * (Testcontainers), and the {@code events → event_series} reference (TM-789, recurring events v1).
  *
  * <p>The context booting at all proves Hibernate {@code validate} agrees with the
- * {@code V56__create_event_series} / {@code V57__events_series_reference} migrations. The tests then
+ * {@code V57__create_event_series} / {@code V58__events_series_reference} migrations. The tests then
  * cover: the recurrence + template round-trip, the house soft-delete via {@code @SQLRestriction}, the
  * admin-only {@link EventSeriesRepository#findByIdIncludingDeleted} exception that returns a
  * soft-deleted series, and {@code Event.seriesId}/{@code occurrenceIndex}/{@code seriesDetached}

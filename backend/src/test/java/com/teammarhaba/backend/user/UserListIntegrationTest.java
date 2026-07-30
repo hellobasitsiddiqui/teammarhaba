@@ -38,7 +38,7 @@ class UserListIntegrationTest extends AbstractIntegrationTest {
         // users with no ON DELETE action, so a leftover venue created by a prior test blocks the
         // user wipe (TM-719). Clear venues before users too; events.venue_id is ON DELETE SET NULL
         // so order relative to events doesn't matter.
-        // Event series (TM-789/V56) likewise FK-reference users — event_series.created_by is NOT NULL
+        // Event series (TM-789/V57) likewise FK-reference users — event_series.created_by is NOT NULL
         // REFERENCES users with no ON DELETE action, so a leftover series from a prior test blocks the
         // user wipe. Clear event_series before users too; events.series_id is ON DELETE SET NULL so
         // order relative to events doesn't matter (events are wiped just above regardless).
