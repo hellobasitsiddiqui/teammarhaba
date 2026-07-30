@@ -90,6 +90,7 @@ public class CityAdminService {
         city.setGeoLat(draft.geoLat());
         city.setGeoLng(draft.geoLng());
         city.setImagePath(normaliseText(draft.imagePath()));
+        city.setIconImagePath(normaliseText(draft.iconImagePath()));
 
         CityCatalogue saved = catalogue.saveAndFlush(city);
         // created_at is DB-authoritative (DEFAULT now(), insertable = false): re-read it so the 201 body
@@ -140,6 +141,13 @@ public class CityAdminService {
             if (!Objects.equals(next, city.getImagePath())) {
                 city.setImagePath(next);
                 changed.add("imagePath");
+            }
+        }
+        if (patch.iconImagePath() != null) {
+            String next = normaliseText(patch.iconImagePath());
+            if (!Objects.equals(next, city.getIconImagePath())) {
+                city.setIconImagePath(next);
+                changed.add("iconImagePath");
             }
         }
         if (patch.geoLat() != null && !Objects.equals(patch.geoLat(), city.getGeoLat())) {

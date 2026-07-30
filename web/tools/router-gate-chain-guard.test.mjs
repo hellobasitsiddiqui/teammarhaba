@@ -116,6 +116,8 @@ test("every admin route in guard() is protected by shouldBounceNonAdmin (roleRes
     /isAdminVenueFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_INTERESTS\s*&&\s*shouldBounceNonAdmin\(/, // TM-779: interests console
     /isAdminInterestFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/, // TM-779: interest form
+    /route\s*===\s*ADMIN_CITIES\s*&&\s*shouldBounceNonAdmin\(/, // TM-1166: cities console
+    /isAdminCityFormRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/, // TM-1166: city form
     /isAdminMessageComposeRoute\(route\)\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_MESSAGES\s*&&\s*shouldBounceNonAdmin\(/,
     /route\s*===\s*ADMIN_NOTIFICATIONS\s*&&\s*shouldBounceNonAdmin\(/, // TM-972: Send notification fold
@@ -172,6 +174,17 @@ test("the two TM-972 lifted folds (#/admin/notifications, #/admin/ops) are in th
     ROUTER_SRC,
     /const PROTECTED = new Set\(\[[^\]]*\bADMIN_OPS\b[^\]]*\]\)/,
     "ADMIN_OPS must be in the PROTECTED set so a signed-out #/admin/ops deep-link is remembered + bounced to login",
+  );
+});
+
+test("the TM-1166 admin cities console (#/admin/cities) is in the PROTECTED set (auth-gate regression)", () => {
+  // Same regression class as the TM-972 folds above: the cities console needs BOTH its
+  // shouldBounceNonAdmin gate AND a PROTECTED entry, else a SIGNED-OUT #/admin/cities deep-link skips the
+  // auth gate and hits "Admins only." + go(HOME) instead of remember-then-#/login.
+  assert.match(
+    ROUTER_SRC,
+    /const PROTECTED = new Set\(\[[^\]]*\bADMIN_CITIES\b[^\]]*\]\)/,
+    "ADMIN_CITIES must be in the PROTECTED set so a signed-out #/admin/cities deep-link is remembered + bounced to login",
   );
 });
 

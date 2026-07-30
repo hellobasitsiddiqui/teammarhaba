@@ -266,6 +266,68 @@ class CityAdminControllerIntegrationTest extends AbstractIntegrationTest {
         assertThat(auditActionsFor(id)).contains(AuditAction.CITY_UPDATED);
     }
 
+    /**
+     * TM-1166: the uploaded icon-image path round-trips through create → response → PATCH (set, then
+     * change, then clear via ""), and the public picker read surfaces it. Both the big empty-state
+     * imagePath and the small iconImagePath ride the same store-only path; this asserts the NEW field
+     * specifically. Fails before TM-1166 (no column / no DTO field → the JSON path is always absent).
+     */
+    @Test
+    void iconImagePathRoundTripsThroughCreatePatchAndPublicRead() throws Exception {
+        // Create with both an icon image and the big empty-state image.
+        String created = mockMvc.perform(post("/api/v1/admin/cities")
+                        .with(admin("city-admin-iconimg"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "name": "%s", "country": "%s",
+                                  "iconImagePath": "city-icon-images/1", "imagePath": "city-images/1" }
+                                """
+                                .formatted(NAME_PREFIX + "IconImg", TEST_COUNTRY)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.iconImagePath").value("city-icon-images/1"))
+                .andExpect(jsonPath("$.imagePath").value("city-images/1"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long id = JsonPath.parse(created).<Number>read("$.id").longValue();
+        assertThat(catalogue.findById(id).orElseThrow().getIconImagePath()).isEqualTo("city-icon-images/1");
+
+        // PATCH the icon image to a new path (leaving the big image untouched: null = leave unchanged).
+        mockMvc.perform(patch("/api/v1/admin/cities/{id}", id)
+                        .with(admin("city-admin-iconimg"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"iconImagePath\":\"city-icon-images/1-v2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.iconImagePath").value("city-icon-images/1-v2"))
+                .andExpect(jsonPath("$.imagePath").value("city-images/1")); // untouched
+        assertThat(auditActionsFor(id)).contains(AuditAction.CITY_UPDATED);
+
+        // Clear the icon image with "" (normalised to null); the big image is left unchanged.
+        mockMvc.perform(patch("/api/v1/admin/cities/{id}", id)
+                        .with(admin("city-admin-iconimg"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"iconImagePath\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.iconImagePath").doesNotExist()); // cleared → null, omitted
+        assertThat(catalogue.findById(id).orElseThrow().getIconImagePath()).isNull();
+
+        // Re-set the icon image so the public read has something to surface, then activate is already true.
+        mockMvc.perform(patch("/api/v1/admin/cities/{id}", id)
+                        .with(admin("city-admin-iconimg"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"iconImagePath\":\"city-icon-images/1-final\"}"))
+                .andExpect(status().isOk());
+
+        // The public picker read exposes iconImagePath (a non-secret display glyph, TM-1166) but never
+        // the big empty-state imagePath.
+        mockMvc.perform(get("/api/v1/cities/catalogue").with(regularUser("city-public-reader")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.name == '" + NAME_PREFIX + "IconImg')].iconImagePath")
+                        .value("city-icon-images/1-final"))
+                .andExpect(jsonPath("$[?(@.name == '" + NAME_PREFIX + "IconImg')].imagePath")
+                        .doesNotExist());
+    }
+
     @Test
     void noOpPatchIsSilent() throws Exception {
         CityCatalogue seeded = seed("Noop", 0);

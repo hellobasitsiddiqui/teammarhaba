@@ -21,10 +21,11 @@ import jakarta.validation.constraints.Size;
  * @param name       new name (≤ 120), or {@code null} to leave unchanged (present-but-blank rejected)
  * @param country    new country (≤ 80), or {@code null} to leave unchanged (present-but-blank rejected)
  * @param iconEmoji  new icon glyph (≤ 16; {@code ""} clears it), or {@code null} to leave unchanged
- * @param geoLat     new latitude {@code [-90, 90]}, or {@code null} to leave unchanged
- * @param geoLng     new longitude {@code [-180, 180]}, or {@code null} to leave unchanged
- * @param imagePath  new image path (≤ 500; {@code ""} clears it), or {@code null} to leave unchanged
- * @param sortWeight new sort weight {@code [0, 1000]}, or {@code null} to leave unchanged
+ * @param geoLat        new latitude {@code [-90, 90]}, or {@code null} to leave unchanged
+ * @param geoLng        new longitude {@code [-180, 180]}, or {@code null} to leave unchanged
+ * @param imagePath     new image path (≤ 500; {@code ""} clears it), or {@code null} to leave unchanged
+ * @param iconImagePath new icon-image path (≤ 500; {@code ""} clears it, TM-1166), or {@code null} to leave unchanged
+ * @param sortWeight    new sort weight {@code [0, 1000]}, or {@code null} to leave unchanged
  */
 public record UpdateCityRequest(
         @Size(max = 120) String name,
@@ -33,6 +34,7 @@ public record UpdateCityRequest(
         @DecimalMin("-90.0") @DecimalMax("90.0") Double geoLat,
         @DecimalMin("-180.0") @DecimalMax("180.0") Double geoLng,
         @Size(max = 500) String imagePath,
+        @Size(max = 500) String iconImagePath,
         @Min(0) @Max(1000) Integer sortWeight) {
 
     @JsonIgnore
@@ -49,6 +51,6 @@ public record UpdateCityRequest(
 
     /** Map onto the domain-side command object ({@code city} package stays free of api DTOs). */
     CityPatch toPatch() {
-        return new CityPatch(name, country, iconEmoji, geoLat, geoLng, imagePath, sortWeight);
+        return new CityPatch(name, country, iconEmoji, geoLat, geoLng, imagePath, iconImagePath, sortWeight);
     }
 }

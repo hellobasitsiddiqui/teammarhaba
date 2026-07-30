@@ -25,10 +25,10 @@ test("the two lifted routes have their own stable #/admin* hashes (TM-972)", () 
   assert.equal(ADMIN_OPS_ROUTE, "#/admin/ops");
 });
 
-test("the hub lists the seven verb-led folds in order, each with a stable #/admin* route (TM-972)", () => {
+test("the hub lists the verb-led folds in order, each with a stable #/admin* route (TM-972; +cities TM-1166)", () => {
   assert.deepEqual(
     ADMIN_HUB_ROWS.map((r) => r.id),
-    ["users", "events", "venues", "interests", "messages", "notifications", "ops"],
+    ["users", "events", "venues", "interests", "cities", "messages", "notifications", "ops"],
   );
   assert.deepEqual(
     ADMIN_HUB_ROWS.map((r) => r.route),
@@ -37,6 +37,7 @@ test("the hub lists the seven verb-led folds in order, each with a stable #/admi
       "#/admin/events",
       "#/admin/venues",
       "#/admin/interests",
+      "#/admin/cities",
       "#/admin/messages",
       "#/admin/notifications",
       "#/admin/ops",
@@ -49,6 +50,7 @@ test("the hub lists the seven verb-led folds in order, each with a stable #/admi
       "Manage events",
       "Manage venues",
       "Manage interests",
+      "Manage cities",
       "Send a message",
       "Send notification",
       "Developer tools",

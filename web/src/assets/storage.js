@@ -358,3 +358,101 @@ function mapVenueImageUploadError(err) {
   }
   return new Error("Could not upload the venue photo. Please try again.");
 }
+
+// City images (TM-1166) ride the SAME house Storage pattern as event/venue images: bytes go to
+// `city-images/{cityId}` (the big empty-state image) and `city-icon-images/{cityId}` (the small
+// name-beside icon), both admin-only per storage.rules, and only the OBJECT PATH is persisted on the
+// city row via the admin API (`PATCH /api/v1/admin/cities/{id}` imagePath / iconImagePath). The path
+// is stored (not a rotating download URL); the admin form keeps the returned URL only for its own
+// preview. Each city carries TWO independent uploads, so this exposes two upload helpers over one
+// shared internal uploader.
+
+/** City-image size cap — mirrors storage.rules (`< 5 MB`), same as event/venue images. */
+export const MAX_CITY_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** A user-facing validation message for a city image the rules would reject, or "" if acceptable. */
+export function validateCityImageFile(file) {
+  if (!file) return "Choose an image to upload.";
+  if (!file.type || !file.type.startsWith("image/")) return "That file isn't an image.";
+  if (isDisallowedImageType(file.type)) return "SVG images aren't supported. Use a PNG or JPEG.";
+  if (file.size > MAX_CITY_IMAGE_BYTES) return "Image must be 5 MB or smaller.";
+  return "";
+}
+
+/**
+ * Shared uploader for both city image kinds — uploads to `{prefix}/{cityId}` and returns the stored
+ * object PATH (for the imagePath / iconImagePath PATCH) plus the download URL (for the form preview).
+ * Admin-only at the rules layer; a re-upload overwrites the same per-city path (no orphan objects).
+ * @param {string} prefix the Storage folder (`city-images` or `city-icon-images`).
+ * @param {number|string} cityId the persisted city id (the path segment). MUST exist.
+ * @param {File} file the image the admin picked.
+ * @param {(fraction: number) => void} [onProgress]
+ * @returns {Promise<{path: string, url: string}>}
+ */
+async function uploadCityImageTo(prefix, cityId, file, onProgress) {
+  const message = validateCityImageFile(file);
+  if (message) throw new Error(message);
+  if (cityId == null || String(cityId).trim() === "") {
+    throw new Error("Save the city before adding an image.");
+  }
+
+  const store = getStorageOrNull();
+  if (!store) throw new Error("City image uploads aren't available right now.");
+
+  const path = `${prefix}/${cityId}`;
+  const objectRef = ref(store, path);
+  const task = uploadBytesResumable(objectRef, file, { contentType: file.type });
+
+  await new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snapshot) => {
+        if (typeof onProgress === "function" && snapshot.totalBytes > 0) {
+          onProgress(snapshot.bytesTransferred / snapshot.totalBytes);
+        }
+      },
+      (err) => reject(mapCityImageUploadError(err)),
+      resolve,
+    );
+  });
+
+  const url = await getDownloadURL(objectRef);
+  return { path, url };
+}
+
+/**
+ * Upload the BIG empty-state city image to `city-images/{cityId}` and return its object PATH (for the
+ * imagePath PATCH) plus the download URL (for the form preview). See {@link uploadCityImageTo}.
+ * @param {number|string} cityId the persisted city id. MUST exist (create first, then upload).
+ * @param {File} file the image the admin picked.
+ * @param {(fraction: number) => void} [onProgress]
+ * @returns {Promise<{path: string, url: string}>}
+ */
+export function uploadCityImage(cityId, file, onProgress) {
+  return uploadCityImageTo("city-images", cityId, file, onProgress);
+}
+
+/**
+ * Upload the small ICON city image to `city-icon-images/{cityId}` and return its object PATH (for the
+ * iconImagePath PATCH) plus the download URL (for the form preview). See {@link uploadCityImageTo}.
+ * @param {number|string} cityId the persisted city id. MUST exist (create first, then upload).
+ * @param {File} file the image the admin picked.
+ * @param {(fraction: number) => void} [onProgress]
+ * @returns {Promise<{path: string, url: string}>}
+ */
+export function uploadCityIconImage(cityId, file, onProgress) {
+  return uploadCityImageTo("city-icon-images", cityId, file, onProgress);
+}
+
+/** Map a Firebase Storage upload error to a concise, user-friendly Error (city-image wording). */
+function mapCityImageUploadError(err) {
+  const code = err?.code || "";
+  if (code === "storage/unauthorized") {
+    return new Error("You're not allowed to upload that — admins only, and it must be an image under 5 MB.");
+  }
+  if (code === "storage/canceled") return new Error("Upload cancelled.");
+  if (code === "storage/retry-limit-exceeded" || code === "storage/quota-exceeded") {
+    return new Error("Upload failed — please try again.");
+  }
+  return new Error("Could not upload the city image. Please try again.");
+}

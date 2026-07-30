@@ -20,10 +20,11 @@ import jakarta.validation.constraints.Size;
  * @param name       display name, e.g. "London" (required, ≤ 120)
  * @param country    the country, e.g. "United Kingdom" (required, ≤ 80)
  * @param iconEmoji  default icon glyph (≤ 16 chars — a generous cap covering flag/ZWJ sequences), or omit
- * @param geoLat     latitude in decimal degrees {@code [-90, 90]}, or omit
- * @param geoLng     longitude in decimal degrees {@code [-180, 180]}, or omit
- * @param imagePath  storage path of the big empty-state image (≤ 500), or omit
- * @param sortWeight ordering weight {@code [0, 1000]}, or omit for the default (0)
+ * @param geoLat        latitude in decimal degrees {@code [-90, 90]}, or omit
+ * @param geoLng        longitude in decimal degrees {@code [-180, 180]}, or omit
+ * @param imagePath     storage path of the big empty-state image (≤ 500), or omit
+ * @param iconImagePath storage path of the uploaded icon image (≤ 500, TM-1166), or omit
+ * @param sortWeight    ordering weight {@code [0, 1000]}, or omit for the default (0)
  */
 public record CreateCityRequest(
         @NotBlank @Size(max = 120) String name,
@@ -32,10 +33,11 @@ public record CreateCityRequest(
         @DecimalMin("-90.0") @DecimalMax("90.0") Double geoLat,
         @DecimalMin("-180.0") @DecimalMax("180.0") Double geoLng,
         @Size(max = 500) String imagePath,
+        @Size(max = 500) String iconImagePath,
         @Min(0) @Max(1000) Integer sortWeight) {
 
     /** Map onto the domain-side command object ({@code city} package stays free of api DTOs). */
     CityDraft toDraft() {
-        return new CityDraft(name, country, iconEmoji, geoLat, geoLng, imagePath, sortWeight);
+        return new CityDraft(name, country, iconEmoji, geoLat, geoLng, imagePath, iconImagePath, sortWeight);
     }
 }

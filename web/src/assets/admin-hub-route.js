@@ -55,6 +55,7 @@ export const ADMIN_HUB_ROWS = Object.freeze([
   { id: "events", label: "Manage events", route: "#/admin/events", desc: "Create, edit and cancel events" },
   { id: "venues", label: "Manage venues", route: "#/admin/venues", desc: "The venue catalogue" },
   { id: "interests", label: "Manage interests", route: "#/admin/interests", desc: "The interest catalogue + limits" },
+  { id: "cities", label: "Manage cities", route: "#/admin/cities", desc: "The city catalogue + icon/empty-state images" },
   { id: "messages", label: "Send a message", route: "#/admin/messages", desc: "In-app messages + sent history" },
   { id: "notifications", label: "Send notification", route: ADMIN_NOTIFICATIONS_ROUTE, desc: "Push a broadcast to a chosen audience" },
   { id: "ops", label: "Developer tools", route: ADMIN_OPS_ROUTE, desc: "Health, diagnostics and consoles" },
