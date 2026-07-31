@@ -84,6 +84,16 @@ import {
   penceToPriceChip,
   penceToPounds,
   poundsToPence,
+  SERIES_FREQ_DAILY,
+  SERIES_FREQ_WEEKLY,
+  SERIES_FREQUENCIES,
+  SERIES_WEEKDAYS,
+  SERIES_END_UNTIL,
+  SERIES_END_AFTER,
+  SERIES_INTERVAL_MIN,
+  weekdayOfLocal,
+  validateSeriesDraft,
+  buildSeriesPayload,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -1504,4 +1514,129 @@ test("pastStartWarning: blank/unparseable start is not this warning's concern (T
   assert.equal(pastStartWarning({ startAt: "", timezone: "Europe/London" }), "");
   assert.equal(pastStartWarning({ startAt: "not-a-date", timezone: "Europe/London" }), "");
   assert.equal(pastStartWarning({}), "");
+});
+
+// --- recurrence: the Repeat picker → CreateSeriesRequest (TM-796) ------------------------------
+//
+// These mirror the series API's edge validation (CreateSeriesRequest, TM-795) so the admin gets inline
+// recurrence errors BEFORE the POST: exactly-one-end, interval ≥ 1, WEEKLY needs a weekday that matches
+// the start's weekday, DAILY forbids a weekday; and buildSeriesPayload emits the exact wire shape
+// (frequency/interval/[byWeekday]/(untilDate XOR afterN)/timezone/first*-anchor + template).
+
+// A valid RECURRING draft (a Weekly-every-1, until, on the start's weekday). 2026-07-10 is a FRIDAY.
+function seriesDraft(over = {}) {
+  return {
+    ...validDraft(),
+    startAt: "2026-07-10T18:00", // a Friday
+    endAt: "2026-07-10T20:00",
+    frequency: SERIES_FREQ_WEEKLY,
+    interval: "1",
+    byWeekday: "FRIDAY",
+    endMode: SERIES_END_UNTIL,
+    untilDate: "2026-09-10",
+    afterN: "",
+    ...over,
+  };
+}
+
+test("SERIES_FREQUENCIES + SERIES_WEEKDAYS are the frozen v1 sources (DAILY/WEEKLY, Mon-first) (TM-796)", () => {
+  assert.deepEqual(SERIES_FREQUENCIES.map(([v]) => v), [SERIES_FREQ_DAILY, SERIES_FREQ_WEEKLY]);
+  assert.equal(SERIES_FREQ_DAILY, "DAILY");
+  assert.equal(SERIES_FREQ_WEEKLY, "WEEKLY");
+  assert.deepEqual(SERIES_WEEKDAYS.map((d) => d.value), ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]);
+  assert.equal(SERIES_INTERVAL_MIN, 1);
+  // Frozen so no consumer mutates the single source.
+  assert.throws(() => SERIES_FREQUENCIES.push(["MONTHLY", "Monthly"]), TypeError);
+  assert.throws(() => SERIES_WEEKDAYS.push({ value: "X", label: "X" }), TypeError);
+});
+
+test("weekdayOfLocal maps a datetime-local value to its ISO weekday name (TM-796)", () => {
+  assert.equal(weekdayOfLocal("2026-07-10T18:00"), "FRIDAY"); // 2026-07-10 is a Friday
+  assert.equal(weekdayOfLocal("2026-07-13T09:00"), "MONDAY");
+  assert.equal(weekdayOfLocal("2026-07-12T00:00"), "SUNDAY");
+  assert.equal(weekdayOfLocal(""), "");
+  assert.equal(weekdayOfLocal("nope"), "");
+});
+
+test("validateSeriesDraft: a well-formed weekly (and daily) draft can save (TM-796)", () => {
+  assert.equal(validateSeriesDraft(seriesDraft()).canSave, true);
+  assert.deepEqual(validateSeriesDraft(seriesDraft()).errors, {});
+  // Daily-every-2, afterN=6 (no weekday).
+  const daily = validateSeriesDraft(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "", interval: "2", endMode: SERIES_END_AFTER, untilDate: "", afterN: "6" }));
+  assert.equal(daily.canSave, true);
+  assert.deepEqual(daily.errors, {});
+});
+
+test("validateSeriesDraft: interval must be an integer ≥ 1 (mirrors @Min(1)) (TM-796)", () => {
+  assert.match(validateSeriesDraft(seriesDraft({ interval: "0" })).errors.interval, /1 or more/);
+  assert.match(validateSeriesDraft(seriesDraft({ interval: "" })).errors.interval, /1 or more/);
+  assert.match(validateSeriesDraft(seriesDraft({ interval: "2.5" })).errors.interval, /whole number/i);
+  assert.match(validateSeriesDraft(seriesDraft({ interval: "-1" })).errors.interval, /1 or more/);
+});
+
+test("validateSeriesDraft: EXACTLY ONE end condition — neither / both are errors (TM-796)", () => {
+  // Neither: endMode isn't set → endMode error.
+  assert.match(validateSeriesDraft(seriesDraft({ endMode: "" })).errors.endMode, /how the series ends/i);
+  // Until chosen but blank date → untilDate error.
+  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_UNTIL, untilDate: "" })).errors.untilDate, /end date/i);
+  // After chosen but blank / zero → afterN error.
+  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "" })).errors.afterN, /1 or more/i);
+  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "0" })).errors.afterN, /1 or more/i);
+  // A valid After (with the stray untilDate ignored because endMode=after) still saves — only the active
+  // mode supplies the end, so buildSeriesPayload can never emit both.
+  assert.equal(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, afterN: "8" })).canSave, true);
+});
+
+test("validateSeriesDraft: WEEKLY requires a weekday that MATCHES the start's weekday (TM-796)", () => {
+  // Blank weekday on WEEKLY.
+  assert.match(validateSeriesDraft(seriesDraft({ byWeekday: "" })).errors.byWeekday, /pick a weekday/i);
+  // A weekday that doesn't match the Friday start.
+  assert.match(validateSeriesDraft(seriesDraft({ byWeekday: "MONDAY" })).errors.byWeekday, /match the start/i);
+  // The matching weekday is fine.
+  assert.equal(validateSeriesDraft(seriesDraft({ byWeekday: "FRIDAY" })).canSave, true);
+});
+
+test("validateSeriesDraft: DAILY must NOT carry a weekday (parity with the API edge) (TM-796)", () => {
+  const bad = validateSeriesDraft(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "MONDAY", endMode: SERIES_END_AFTER, untilDate: "", afterN: "4" }));
+  assert.match(bad.errors.byWeekday, /only applies to a weekly/i);
+});
+
+test("buildSeriesPayload emits the CreateSeriesRequest wire shape: rule + first* anchor + template (TM-796)", () => {
+  const body = buildSeriesPayload(seriesDraft());
+  // Recurrence rule.
+  assert.equal(body.frequency, "WEEKLY");
+  assert.equal(body.interval, 1);
+  assert.equal(body.byWeekday, "FRIDAY"); // uppercase DayOfWeek name (the API wire format)
+  // End condition — EXACTLY the chosen one; the other is ABSENT.
+  assert.equal(body.untilDate, "2026-09-10");
+  assert.equal("afterN" in body, false);
+  // First-occurrence anchor — the event's instants re-keyed onto first* (BST → -1h).
+  assert.equal(body.firstStartAt, "2026-07-10T17:00:00.000Z");
+  assert.equal(body.firstEndAt, "2026-07-10T19:00:00.000Z");
+  assert.equal(body.firstVisibilityStart, "2026-07-01T08:00:00.000Z");
+  assert.equal(body.firstVisibilityEnd, "2026-07-10T17:00:00.000Z");
+  assert.equal(body.timezone, "Europe/London");
+  // Template snapshot — the same fields a single create carries; NOT the raw startAt/visibility* keys.
+  assert.equal(body.heading, "Coffee & Code");
+  assert.equal(body.description, "Bring a laptop and a mug.");
+  assert.equal(body.locationText, "Marhaba Cafe, 12 High St");
+  assert.equal(body.capacity, 20);
+  assert.equal(body.locationRevealHours, 24);
+  // The event's own instant keys must NOT leak onto the series body (only the first* anchor names).
+  for (const k of ["startAt", "endAt", "visibilityStart", "visibilityEnd"]) assert.equal(k in body, false, `${k} must not be on the series body`);
+});
+
+test("buildSeriesPayload — DAILY omits byWeekday and can carry afterN instead of untilDate (TM-796)", () => {
+  const body = buildSeriesPayload(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "", interval: "3", endMode: SERIES_END_AFTER, untilDate: "", afterN: "5" }));
+  assert.equal(body.frequency, "DAILY");
+  assert.equal(body.interval, 3);
+  assert.equal("byWeekday" in body, false); // DAILY carries no weekday
+  assert.equal(body.afterN, 5);
+  assert.equal("untilDate" in body, false); // the OTHER end condition is absent
+});
+
+test("buildSeriesPayload — an open-ended first occurrence (blank end) omits firstEndAt (TM-796)", () => {
+  const body = buildSeriesPayload(seriesDraft({ endAt: "" }));
+  assert.equal("firstEndAt" in body, false);
+  assert.ok("firstStartAt" in body);
 });

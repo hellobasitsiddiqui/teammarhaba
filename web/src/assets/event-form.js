@@ -1456,3 +1456,220 @@ export function formatEventWhen(iso, timeZone) {
     return "—";
   }
 }
+
+// --- recurrence: the "Repeat" picker → CreateSeriesRequest (TM-796, recurring events v1 TRIM) ------
+//
+// The pure half of the create-form's Repeat control (admin-events.js is the DOM half). When Repeat is ON
+// the form becomes a RECURRING SERIES: the normal event fields become the template, the first occurrence's
+// startAt/endAt/visibility become the series ANCHOR (firstStartAt/firstEndAt/firstVisibilityStart/
+// firstVisibilityEnd), and a small recurrence rule (frequency + interval + weekday + end condition) rides
+// alongside. On submit we POST a `CreateSeriesRequest` (backend/…/api/CreateSeriesRequest.java, TM-795) to
+// POST /api/v1/admin/events/series instead of the single-create POST.
+//
+// v1 THIN CUT (matches the backend engine + DTO exactly):
+//   - frequency ∈ {DAILY, WEEKLY} ONLY — no MONTHLY (the enum has just these two; an unknown cadence is a
+//     clean 400). WEEKLY pins to a SINGLE weekday (no multi-weekday).
+//   - interval ≥ 1 (@Min(1)).
+//   - end = EXACTLY ONE of untilDate (a local calendar date "YYYY-MM-DD") or afterN (an integer ≥ 1) —
+//     both or neither is a 400 (RecurrenceRule's invariant).
+//   - byWeekday required for WEEKLY, omitted for DAILY, and (WEEKLY) must equal the weekday firstStartAt
+//     falls on in the chosen timezone — else the engine refuses to realign and the API 400s.
+//   - firstStartAt must be in the future; the first-occurrence window must bracket the start.
+//
+// buildSeriesPayload + validateSeriesDraft mirror those edges so the admin gets INLINE errors before the
+// request is sent (the API re-checks authoritatively). Kept pure (of the DOM) so `node --test` asserts them.
+
+/** The two recurrence frequencies v1 supports (TM-796) — the backend SeriesFrequency enum's whole set. */
+export const SERIES_FREQ_DAILY = "DAILY";
+export const SERIES_FREQ_WEEKLY = "WEEKLY";
+
+/** The recurrence frequencies offered by the Repeat picker, `[value, label]`, in display order. */
+export const SERIES_FREQUENCIES = Object.freeze([
+  Object.freeze([SERIES_FREQ_DAILY, "Daily"]),
+  Object.freeze([SERIES_FREQ_WEEKLY, "Weekly"]),
+]);
+
+/** The two end-condition modes the picker offers (exactly one is active). */
+export const SERIES_END_UNTIL = "until";
+export const SERIES_END_AFTER = "after";
+
+/**
+ * The ISO weekdays (Monday-first), each `{ value, label }` where `value` is the UPPERCASE `DayOfWeek`
+ * name the API binds (`"MONDAY"`…`"SUNDAY"`, TM-795 wire format) and `label` is the display copy. The
+ * weekday <select> the WEEKLY picker shows is built from this; `weekdayOfLocal` maps a start date onto
+ * the matching `value` so the field defaults to the start's own weekday. Frozen — the single source.
+ */
+export const SERIES_WEEKDAYS = Object.freeze([
+  Object.freeze({ value: "MONDAY", label: "Monday" }),
+  Object.freeze({ value: "TUESDAY", label: "Tuesday" }),
+  Object.freeze({ value: "WEDNESDAY", label: "Wednesday" }),
+  Object.freeze({ value: "THURSDAY", label: "Thursday" }),
+  Object.freeze({ value: "FRIDAY", label: "Friday" }),
+  Object.freeze({ value: "SATURDAY", label: "Saturday" }),
+  Object.freeze({ value: "SUNDAY", label: "Sunday" }),
+]);
+
+/** The set of valid `DayOfWeek` wire values, for fast membership checks. */
+const SERIES_WEEKDAY_VALUES = new Set(SERIES_WEEKDAYS.map((d) => d.value));
+
+/** Default recurrence interval — every 1 day/week (@Min(1)). */
+export const SERIES_INTERVAL_MIN = 1;
+
+/**
+ * The UPPERCASE `DayOfWeek` name a `<input type="datetime-local">` wall-clock value falls on (TM-796) —
+ * used to DEFAULT the WEEKLY picker's weekday to the chosen start date's own weekday, and to cross-check
+ * that a hand-picked weekday still matches the start (the API's `isByWeekdayMatchingFirstStart` edge).
+ * The value is a bare calendar date in the event's own zone ("YYYY-MM-DDThh:mm" holds that date directly),
+ * so the weekday is a pure Gregorian calendar fact — computed via a UTC `Date` to avoid the host zone
+ * shifting the day. Returns "" for a blank/unparseable value. Pure — no DOM.
+ *
+ * @param {string} localValue the startAt field's "YYYY-MM-DDTHH:mm" value (in the event's timezone).
+ * @returns {string} a `SERIES_WEEKDAYS` value ("MONDAY"…"SUNDAY"), or "" when the date is absent/bad.
+ */
+export function weekdayOfLocal(localValue) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}/.exec(cleanText(localValue));
+  if (!m) return "";
+  const [, y, mo, d] = m;
+  const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+  if (Number.isNaN(date.getTime())) return "";
+  // getUTCDay(): 0 = Sunday … 6 = Saturday. Map onto the Monday-first SERIES_WEEKDAYS order.
+  const MON_FIRST = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  return MON_FIRST[date.getUTCDay()] || "";
+}
+
+/** The local calendar DATE ("YYYY-MM-DD") of a datetime-local value, or "" — the untilDate wire shape. */
+function localDateOf(localValue) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}/.exec(cleanText(localValue));
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : "";
+}
+
+/**
+ * Validate a RECURRING create draft against the SAME edges the series API enforces (CreateSeriesRequest,
+ * TM-795) so the admin gets inline recurrence errors before the POST. This layers the recurrence rule on
+ * top of the ordinary event validation: call {@link validateEventDraft} for the template/anchor fields
+ * (heading/description/location/timezone/instants/window ordering/…) AND this for the recurrence knobs.
+ * Returns a per-field error map (keyed by the recurrence field ids: `frequency`, `interval`, `byWeekday`,
+ * `endMode`, `untilDate`, `afterN`) plus `canSave` (no recurrence field in error). The rules mirror the
+ * DTO's `@AssertTrue`/`@Min` cross-field checks:
+ *   - interval an integer ≥ 1;
+ *   - EXACTLY ONE end condition — the active `endMode` supplies untilDate XOR afterN, and that value must
+ *     be present + valid (a future-ish date / an integer ≥ 1);
+ *   - WEEKLY requires a byWeekday that MATCHES the start's weekday (DAILY forbids one — the DOM only shows
+ *     the weekday field for WEEKLY, but we still reject a stray DAILY weekday for parity).
+ * The instant/future-start/window checks stay in {@link validateEventDraft}; this only owns the rule.
+ *
+ * @param {object} draft the raw recurrence + start values (all strings): `frequency`, `interval`,
+ *   `byWeekday`, `endMode` ("until"|"after"), `untilDate`, `afterN`, and `startAt` (to cross-check weekday).
+ * @returns {{errors: Record<string,string>, canSave: boolean}}
+ */
+export function validateSeriesDraft(draft = {}) {
+  const errors = {};
+  const frequency = cleanText(draft.frequency).toUpperCase();
+
+  // Frequency — DAILY or WEEKLY only.
+  if (frequency !== SERIES_FREQ_DAILY && frequency !== SERIES_FREQ_WEEKLY) {
+    errors.frequency = "Choose Daily or Weekly.";
+  }
+
+  // Interval — integer ≥ 1.
+  const interval = parseIntOrNull(draft.interval);
+  if (Number.isNaN(interval)) errors.interval = "Enter a whole number.";
+  else if (interval === null || interval < SERIES_INTERVAL_MIN) errors.interval = `Must be ${SERIES_INTERVAL_MIN} or more.`;
+
+  // Weekday — required for WEEKLY, must match the start's weekday; forbidden for DAILY.
+  const weekday = cleanText(draft.byWeekday).toUpperCase();
+  if (frequency === SERIES_FREQ_WEEKLY) {
+    if (weekday === "") {
+      errors.byWeekday = "Pick a weekday.";
+    } else if (!SERIES_WEEKDAY_VALUES.has(weekday)) {
+      errors.byWeekday = "Pick a valid weekday.";
+    } else {
+      const startWeekday = weekdayOfLocal(draft.startAt);
+      if (startWeekday !== "" && startWeekday !== weekday) {
+        errors.byWeekday = "The weekday must match the start date's day.";
+      }
+    }
+  } else if (frequency === SERIES_FREQ_DAILY && weekday !== "") {
+    // The DOM hides the weekday for Daily, but reject a stray value for parity with the API edge.
+    errors.byWeekday = "A weekday only applies to a weekly series.";
+  }
+
+  // End condition — EXACTLY ONE of untilDate / afterN, chosen by endMode, present + valid.
+  const endMode = cleanText(draft.endMode);
+  if (endMode === SERIES_END_UNTIL) {
+    const until = localDateOf(draft.untilDate) || cleanText(draft.untilDate);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) errors.untilDate = "Pick an end date.";
+  } else if (endMode === SERIES_END_AFTER) {
+    const afterN = parseIntOrNull(draft.afterN);
+    if (Number.isNaN(afterN)) errors.afterN = "Enter a whole number.";
+    else if (afterN === null || afterN < 1) errors.afterN = "Must be 1 or more occurrences.";
+  } else {
+    errors.endMode = "Choose how the series ends.";
+  }
+
+  return { errors, canSave: Object.keys(errors).length === 0 };
+}
+
+/**
+ * Turn a validated RECURRING draft into the `CreateSeriesRequest` body (TM-795) the series API accepts —
+ * the recurrence rule + the first-occurrence anchor + the template snapshot, all in ONE object. It REUSES
+ * {@link buildEventPayload} for the template + instant fields (so the template stays 1:1 with the single-
+ * create body — heading/description/location/timezone/capacity/reveal/cutoff/age/price/venue and the UTC
+ * instants), then RE-KEYS the four instant fields onto the DTO's `first*` anchor names and appends the
+ * recurrence rule. The end condition is EXACTLY ONE of untilDate / afterN (per `endMode`); the other is
+ * omitted. `byWeekday` is sent (uppercase `DayOfWeek` name) only for WEEKLY. Pure — no DOM, no fetch.
+ *
+ * Wire shape (CreateSeriesRequest):
+ *   frequency, interval, [byWeekday], (untilDate XOR afterN), timezone,
+ *   firstStartAt, [firstEndAt], firstVisibilityStart, firstVisibilityEnd,
+ *   + the template fields (heading, description, locationText, city?, venueId?, capacity?, imagePath?,
+ *     locationRevealHours?, bookingCutoffHours?, cancellationWindowHours?, pricePence?, premium?).
+ *
+ * @param {object} draft the raw form values (template + start/window + recurrence knobs).
+ * @returns {object} the CreateSeriesRequest body.
+ */
+export function buildSeriesPayload(draft = {}) {
+  // The template + instants come from the ordinary event payload, so the template is identical to a single
+  // create. We then move the event's absolute instants onto the series anchor's `first*` field names.
+  const base = buildEventPayload(draft);
+  const body = {};
+
+  // Recurrence rule.
+  const frequency = cleanText(draft.frequency).toUpperCase();
+  body.frequency = frequency === SERIES_FREQ_WEEKLY ? SERIES_FREQ_WEEKLY : SERIES_FREQ_DAILY;
+  const interval = parseIntOrNull(draft.interval);
+  body.interval = typeof interval === "number" && interval >= SERIES_INTERVAL_MIN ? interval : SERIES_INTERVAL_MIN;
+  if (body.frequency === SERIES_FREQ_WEEKLY) {
+    const weekday = cleanText(draft.byWeekday).toUpperCase();
+    if (SERIES_WEEKDAY_VALUES.has(weekday)) body.byWeekday = weekday;
+  }
+  // End condition — EXACTLY ONE (the other is deliberately absent, the DTO's XOR invariant).
+  const endMode = cleanText(draft.endMode);
+  if (endMode === SERIES_END_AFTER) {
+    const afterN = parseIntOrNull(draft.afterN);
+    if (typeof afterN === "number" && afterN >= 1) body.afterN = afterN;
+  } else {
+    const until = localDateOf(draft.untilDate) || cleanText(draft.untilDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(until)) body.untilDate = until;
+  }
+
+  // Timezone (verbatim from the base payload).
+  if (base.timezone != null) body.timezone = base.timezone;
+
+  // First-occurrence anchor — the event's own instants re-keyed onto the DTO's `first*` names.
+  if (base.startAt != null) body.firstStartAt = base.startAt;
+  if (base.endAt != null) body.firstEndAt = base.endAt;
+  if (base.visibilityStart != null) body.firstVisibilityStart = base.visibilityStart;
+  if (base.visibilityEnd != null) body.firstVisibilityEnd = base.visibilityEnd;
+
+  // Template snapshot — every non-instant, non-timezone field the base payload carried (heading,
+  // description, locationText, city, venueId, capacity, locationRevealHours, bookingCutoffHours, ageMin/
+  // ageMax [forward-compat], pricePence, onlineUrl/mapUrl…). Copied through so the template stays 1:1 with
+  // a single create; the series API ignores any field it doesn't read (Spring default), so this is safe.
+  const ANCHOR_KEYS = new Set(["timezone", "startAt", "endAt", "visibilityStart", "visibilityEnd"]);
+  for (const [key, value] of Object.entries(base)) {
+    if (!ANCHOR_KEYS.has(key)) body[key] = value;
+  }
+
+  return body;
+}

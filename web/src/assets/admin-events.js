@@ -88,6 +88,16 @@ import {
   CLONE_OFFSET_PRESETS,
   buildCloneDraft,
   pastStartWarning,
+  SERIES_FREQ_DAILY,
+  SERIES_FREQ_WEEKLY,
+  SERIES_FREQUENCIES,
+  SERIES_WEEKDAYS,
+  SERIES_END_UNTIL,
+  SERIES_END_AFTER,
+  SERIES_INTERVAL_MIN,
+  weekdayOfLocal,
+  validateSeriesDraft,
+  buildSeriesPayload,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash, adminEventRosterHash } from "./admin-event-route.js";
 import {
@@ -1525,6 +1535,214 @@ function buildFormatSelector(initial, onChange) {
 }
 
 /**
+ * The "Repeat" recurrence control (TM-796, recurring events v1) — CREATE-only. A toggle turns the single
+ * event into a recurring SERIES: OFF = today's single-create path (unchanged); ON reveals the recurrence
+ * picker — Daily/Weekly frequency, an "every N" interval, a weekday selector (Weekly only, defaulting to
+ * the chosen start date's own weekday), and an end condition (Until a date OR After N occurrences, exactly
+ * one). It owns NO backend field of its own — on submit the caller reads {@link readRecurrence} for the
+ * recurrence draft, validates it with `validateSeriesDraft`, and POSTs a `CreateSeriesRequest` built by
+ * `buildSeriesPayload` to `.../events/series` instead of the single-create POST.
+ *
+ * Styling mirrors the More-options fields (chips/selects/number inputs), consistent with the rest of the
+ * form. Errors from `validateSeriesDraft` paint next to their field via {@link paintErrors}.
+ *
+ * @param {() => void} onToggle called when Repeat flips (the caller re-runs the save gate / relabels Save).
+ * @param {() => void} onChange called on any recurrence field change (the caller re-validates).
+ * @returns {{
+ *   node: HTMLElement,
+ *   isEnabled: () => boolean,
+ *   readRecurrence: () => object,
+ *   paintErrors: (errors: Record<string,string>) => void,
+ *   syncWeekdayDefault: (startLocal: string) => void,
+ * }}
+ */
+function buildRecurrenceControl(onToggle, onChange) {
+  // The ON/OFF toggle. A plain checkbox styled as a switch — accessible, and its checked state is the
+  // single source of "is this a series?". Its id is stable so the e2e / capture can target it.
+  const toggle = el("input", {
+    id: "event-repeat-toggle",
+    class: "tm-repeat-toggle",
+    type: "checkbox",
+    role: "switch",
+    "aria-describedby": "event-repeat-hint",
+  });
+
+  // Frequency chips (Daily / Weekly) — the buildPresetChips primitive, mirroring the age/price controls.
+  let frequency = SERIES_FREQ_DAILY;
+  const freqChips = el("div", { class: "tm-chips-slot", id: "event-repeat-frequency" });
+  const freqError = el("p", { id: "event-repeat-frequency-error", class: "tm-field-error", role: "alert", hidden: true });
+
+  // Every-N interval.
+  const intervalInput = el("input", {
+    id: "event-repeat-interval",
+    class: "tm-input",
+    type: "number",
+    min: SERIES_INTERVAL_MIN,
+    inputmode: "numeric",
+    value: String(SERIES_INTERVAL_MIN),
+    "aria-describedby": "event-repeat-interval-error",
+  });
+  const intervalError = el("p", { id: "event-repeat-interval-error", class: "tm-field-error", role: "alert", hidden: true });
+  // The "day(s)/week(s)" unit label after the interval — reflects the current frequency.
+  const intervalUnit = el("span", { class: "tm-repeat-interval-unit", id: "event-repeat-interval-unit", text: "day(s)" });
+
+  // Weekday selector (Weekly only) — a plain <select> of the ISO weekdays.
+  const weekdaySelect = el(
+    "select",
+    { id: "event-repeat-weekday", class: "tm-input", "aria-describedby": "event-repeat-weekday-error" },
+    SERIES_WEEKDAYS.map((d) => el("option", { value: d.value, text: d.label })),
+  );
+  const weekdayError = el("p", { id: "event-repeat-weekday-error", class: "tm-field-error", role: "alert", hidden: true });
+  const weekdayField = el("div", { class: "tm-form-field tm-repeat-weekday-field", dataset: { field: "byWeekday" } }, [
+    el("label", { class: "tm-field-label", for: "event-repeat-weekday", text: "On weekday" }),
+    weekdaySelect,
+    weekdayError,
+  ]);
+  // Whether the admin has hand-picked a weekday — once they do, a later start-date change won't clobber it
+  // (the field DEFAULTS to the start's weekday only while untouched, mirroring the TM-1066 tz-derive rule).
+  let weekdayUserPicked = false;
+  weekdaySelect.addEventListener("change", () => { weekdayUserPicked = true; onChange(); });
+
+  // End condition — exactly one of "Until <date>" / "After <N> occurrences", chosen by two radios.
+  let endMode = SERIES_END_UNTIL;
+  const untilInput = el("input", {
+    id: "event-repeat-until",
+    class: "tm-input",
+    type: "date",
+    "aria-describedby": "event-repeat-end-error",
+  });
+  const afterInput = el("input", {
+    id: "event-repeat-after",
+    class: "tm-input",
+    type: "number",
+    min: 1,
+    inputmode: "numeric",
+    placeholder: "e.g. 8",
+    "aria-describedby": "event-repeat-end-error",
+  });
+  const endError = el("p", { id: "event-repeat-end-error", class: "tm-field-error", role: "alert", hidden: true });
+
+  const endRadio = (value, label, control) => {
+    const radio = el("input", {
+      class: "tm-repeat-end-radio",
+      type: "radio",
+      name: "event-repeat-end",
+      id: `event-repeat-end-${value}`,
+      value,
+      checked: value === endMode,
+      onChange: () => { endMode = value; applyEndView(); onChange(); },
+    });
+    return { radio, node: el("label", { class: "tm-repeat-end-option", for: `event-repeat-end-${value}` }, [radio, el("span", { text: label }), control]) };
+  };
+  const untilOpt = endRadio(SERIES_END_UNTIL, "Until", untilInput);
+  const afterOpt = endRadio(SERIES_END_AFTER, "After", afterInput);
+  const afterUnit = el("span", { class: "tm-repeat-after-unit", text: "occurrences" });
+  afterOpt.node.append(afterUnit);
+  const applyEndView = () => {
+    untilOpt.radio.checked = endMode === SERIES_END_UNTIL;
+    afterOpt.radio.checked = endMode === SERIES_END_AFTER;
+    // Disable the inactive control so a stray value in it can't be read (only the active one supplies the
+    // end condition; buildSeriesPayload reads by endMode anyway, but this keeps the UI honest).
+    untilInput.disabled = endMode !== SERIES_END_UNTIL;
+    afterInput.disabled = endMode !== SERIES_END_AFTER;
+  };
+
+  // The frequency-dependent view: the weekday field shows for Weekly only; the interval unit tracks it.
+  const applyFrequencyView = () => {
+    const weekly = frequency === SERIES_FREQ_WEEKLY;
+    weekdayField.hidden = !weekly;
+    intervalUnit.textContent = weekly ? "week(s)" : "day(s)";
+  };
+  const paintFreqChips = () => {
+    for (const btn of freqChips.querySelectorAll(".tm-chip")) {
+      const on = btn.dataset.chip === frequency;
+      btn.classList.toggle("tm-chip-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+  freqChips.append(
+    buildPresetChips(
+      SERIES_FREQUENCIES.map(([value, label]) => ({ value, label })),
+      (value) => {
+        frequency = value === SERIES_FREQ_WEEKLY ? SERIES_FREQ_WEEKLY : SERIES_FREQ_DAILY;
+        paintFreqChips();
+        applyFrequencyView();
+        onChange();
+      },
+      { ariaLabel: "Repeat frequency" },
+    ),
+  );
+  paintFreqChips();
+
+  intervalInput.addEventListener("input", onChange);
+  untilInput.addEventListener("input", onChange);
+  afterInput.addEventListener("input", onChange);
+
+  // The reveal region — everything below the toggle, shown only when Repeat is ON.
+  const reveal = el("div", { class: "tm-repeat-body", id: "event-repeat-body", hidden: true }, [
+    el("div", { class: "tm-form-field", dataset: { field: "frequency" } }, [
+      el("span", { class: "tm-field-label", text: "Frequency" }),
+      freqChips,
+      freqError,
+    ]),
+    el("div", { class: "tm-form-field", dataset: { field: "interval" } }, [
+      el("label", { class: "tm-field-label", for: "event-repeat-interval", text: "Repeat every" }),
+      el("div", { class: "tm-repeat-interval-row" }, [intervalInput, intervalUnit]),
+      intervalError,
+    ]),
+    weekdayField,
+    el("div", { class: "tm-form-field", dataset: { field: "end" } }, [
+      el("span", { class: "tm-field-label", id: "event-repeat-end-label", text: "Ends" }),
+      el("div", { class: "tm-repeat-end-choices", role: "radiogroup", "aria-labelledby": "event-repeat-end-label" }, [untilOpt.node, afterOpt.node]),
+      endError,
+    ]),
+  ]);
+
+  const applyToggleView = () => { reveal.hidden = !toggle.checked; };
+  toggle.addEventListener("change", () => { applyToggleView(); onToggle(); });
+
+  applyFrequencyView();
+  applyEndView();
+
+  const node = el("div", { class: "tm-form-field tm-repeat", id: "event-repeat", dataset: { field: "repeat" } }, [
+    el("label", { class: "tm-repeat-switch", for: "event-repeat-toggle" }, [
+      toggle,
+      el("span", { class: "tm-field-label", text: "Repeat" }),
+    ]),
+    el("p", { class: "tm-muted tm-field-hint", id: "event-repeat-hint", text: "Turn on to create a repeating series from this event. The details above become the template; the times become the first occurrence." }),
+    reveal,
+  ]);
+
+  return {
+    node,
+    isEnabled: () => toggle.checked,
+    readRecurrence: () => ({
+      frequency,
+      interval: intervalInput.value,
+      byWeekday: frequency === SERIES_FREQ_WEEKLY ? weekdaySelect.value : "",
+      endMode,
+      untilDate: untilInput.value,
+      afterN: afterInput.value,
+    }),
+    paintErrors: (errors = {}) => {
+      const set = (node, msg) => { node.textContent = msg || ""; node.hidden = !msg; };
+      set(freqError, errors.frequency);
+      set(intervalError, errors.interval);
+      set(weekdayError, errors.byWeekday);
+      // Both the end-mode and per-branch (until/after) errors surface on the one end error node.
+      set(endError, errors.endMode || errors.untilDate || errors.afterN);
+    },
+    // Default the weekday to the chosen start date's own weekday, UNLESS the admin has hand-picked one
+    // (TM-796: "defaults to the weekday of the chosen start date"). Called on start-date change.
+    syncWeekdayDefault: (startLocal) => {
+      if (weekdayUserPicked) return;
+      const wd = weekdayOfLocal(startLocal);
+      if (wd) weekdaySelect.value = wd;
+    },
+  };
+}
+
+/**
  * The Map URL live preview (TM-1063). A debounced GET /api/v1/link-preview?url=… renders a small card
  * for a reachable URL (reusing the pure normalisePreview view-model via {@link mapUrlPreviewState}), a
  * neutral "no rich preview" note when the URL is reachable but carries no OpenGraph data (e.g. a Google
@@ -2317,6 +2535,40 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // Render it near the bottom of the main fields (after the last body field, before the image + actions).
   layout.push(moreOptions);
 
+  // Repeat / recurrence control (TM-796): CREATE-only. OFF = the unchanged single-create path; ON turns
+  // the form into a recurring SERIES (the fields above become the template; the times become the first
+  // occurrence). Recurrence is create-only in v1 — an edit of a series occurrence is a plain event edit,
+  // so we never build the control in edit mode (the AC: "edit mode shows NO recurrence controls"). Sits
+  // just below "More options", above the image + actions. The submit handler branches on
+  // `recurrence?.isEnabled()` to POST /series vs the single-create POST.
+  let recurrence = null;
+  if (mode === "create") {
+    recurrence = buildRecurrenceControl(
+      () => {
+        // Toggling Repeat changes the Save gate (recurrence rules apply) and the Save button copy.
+        relabelSave();
+        revalidate();
+      },
+      () => {
+        // A recurrence field changed — re-run the recurrence validation so inline errors clear/appear.
+        if (recurrence && recurrence.isEnabled()) {
+          recurrence.paintErrors(validateSeriesDraft(readSeriesDraft()).errors);
+        }
+      },
+    );
+    layout.push(recurrence.node);
+    // Default the WEEKLY weekday to the chosen start's own weekday, and keep it in sync as the start
+    // changes (until the admin hand-picks a weekday). The start input already fires the schedule-chip
+    // refresh; add the weekday sync to the same edit.
+    recurrence.syncWeekdayDefault(startInput.value);
+    startInput.addEventListener("input", () => recurrence.syncWeekdayDefault(startInput.value));
+  }
+
+  // The combined draft a SERIES submit reads: the ordinary event draft (template + the start/window
+  // instants the recurrence rules cross-check) merged with the recurrence knobs. Only meaningful when
+  // Repeat is ON (recurrence exists + enabled); otherwise the single-create readDraft() is used.
+  const readSeriesDraft = () => ({ ...readDraft(), ...(recurrence ? recurrence.readRecurrence() : {}) });
+
   // Dirty-guard baseline (TM-1101): the values the form OPENED with, captured AFTER every control has
   // seeded its defaults (below, once the sub-controls exist) — the guessed timezone + age defaults + the
   // Free-price seed on create, or the toFormModel prefill on edit. `isDirty()` compares the LIVE draft to
@@ -2343,7 +2595,13 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     });
   };
 
-  const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, mode === "create" ? "Create event" : "Save changes");
+  // The Save button copy reflects what a submit will DO: on create it reads "Create series" when Repeat is
+  // ON (TM-796) so the admin knows they're about to create a whole series, "Create event" otherwise; edit
+  // is always "Save changes" (no recurrence in edit mode).
+  const saveLabel = () =>
+    mode === "create" ? (recurrence && recurrence.isEnabled() ? "Create series" : "Create event") : "Save changes";
+  const save = el("button", { class: "tm-btn tm-btn-primary", id: "event-save", type: "submit" }, saveLabel());
+  const relabelSave = () => { if (!busy) save.textContent = saveLabel(); };
   // Cancel returns to the list without saving (TM-426); the page's "← Events" back link does the same.
   // Both now gate on confirmExit so a dirty form warns before discarding (TM-1101).
   const cancel = el("button", { class: "tm-btn", id: "event-cancel", type: "button", onClick: async () => {
@@ -2377,7 +2635,7 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     save.disabled = on;
     cancel.disabled = on;
     reset.disabled = on;
-    save.textContent = on ? labelWhileBusy : mode === "create" ? "Create event" : "Save changes";
+    save.textContent = on ? labelWhileBusy : saveLabel();
   };
 
   const form = el("form", { class: "tm-event-form", id: "event-form", novalidate: true }, [
@@ -2430,12 +2688,21 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     e.preventDefault();
     if (busy) return;
     const errors = paintAllErrors();
-    if (Object.keys(errors).length) {
+    // Recurrence gate (TM-796): when Repeat is ON, ALSO validate the recurrence rule (mirrors the series
+    // API's edge — exactly-one-end, interval ≥ 1, WEEKLY weekday set & matches the start). Paint the
+    // inline recurrence errors and block Save if any, so the admin fixes bad combos before the POST.
+    const seriesOn = mode === "create" && recurrence && recurrence.isEnabled();
+    let seriesErrors = {};
+    if (seriesOn) {
+      seriesErrors = validateSeriesDraft(readSeriesDraft()).errors;
+      recurrence.paintErrors(seriesErrors);
+    }
+    if (Object.keys(errors).length || Object.keys(seriesErrors).length) {
       toast("Please fix the highlighted fields.", { type: "error" });
       return;
     }
 
-    setBusy(true, mode === "create" ? "Creating…" : "Saving…");
+    setBusy(true, seriesOn ? "Creating series…" : mode === "create" ? "Creating…" : "Saving…");
     image.setError("");
     try {
       const draft = readDraft();
@@ -2446,6 +2713,30 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
       // the server reads absent as "leave unchanged"), so clearing it silently no-ops. Surface it
       // rather than toast a false "saved" (TM-734).
       const stuckCleared = mode === "create" ? [] : clearedOptionalFields(event, draft);
+
+      if (seriesOn) {
+        // Repeat ON (TM-796): POST a CreateSeriesRequest to .../events/series instead of the single
+        // create. The template + first-occurrence anchor + recurrence rule come from buildSeriesPayload.
+        // On 201 the response carries the created series + its generated occurrences, which the list (via
+        // onDone → loadEvents) now shows. Image handling mirrors the single-create path: the id we PATCH
+        // the image onto is the FIRST occurrence's (occurrences[0]) — the template image for the batch.
+        const created = await eventApi("/api/v1/admin/events/series", { method: "POST", body: buildSeriesPayload(readSeriesDraft()) });
+        const firstOccurrence = Array.isArray(created?.occurrences) ? created.occurrences[0] : null;
+        if (pending && firstOccurrence?.id != null) {
+          try {
+            const { path } = await uploadEventImage(firstOccurrence.id, pending, image.setProgress);
+            await eventApi(`/api/v1/admin/events/${firstOccurrence.id}`, { method: "PATCH", body: { imagePath: path } });
+          } catch (imgErr) {
+            toast(`Series created, but the image didn't upload (${imgErr?.message || "upload failed"}). Open an occurrence to add one.`, { type: "error" });
+            onDone?.();
+            return;
+          }
+        }
+        const count = Number(created?.occurrenceBatchSize ?? created?.occurrences?.length) || 0;
+        toast(count > 0 ? `Series created — ${count} ${count === 1 ? "occurrence" : "occurrences"} scheduled.` : "Series created.", { type: "success" });
+        onDone?.();
+        return;
+      }
 
       if (mode === "create") {
         const createdEvent = await eventApi("/api/v1/admin/events", { method: "POST", body });
