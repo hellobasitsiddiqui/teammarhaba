@@ -50,16 +50,20 @@ appId: app.teammarhaba.webview
 # past Maestro's default 7s window (the prior boot screenshot showed the splash still up ~8s in). A
 # screenshot after each step gives step-by-step visual evidence the SPA came up.
 
-# 1) The app <h1>/<title> — proves the SPA document itself loaded (index.html line 33 <h1>TeamMarhaba</h1>).
+# 1) The app <h1>/<title> — proves the SPA document itself loaded (index.html <h1>Circle</h1>, post the
+#    TeamMarhaba→Circle rebrand — TM-1182; the old "TeamMarhaba" assertion here reddened this gate nightly).
 - extendedWaitUntil:
-    visible: "TeamMarhaba"
+    visible: "Circle"
     timeout: 60000
 - takeScreenshot: 01-spa-title-rendered
 
-# 2) The marketing tagline — static text under the <h1> (index.html line 34), further proof the shell
-#    rendered the hosted markup, not just a blank/splash frame.
+# 2) The marketing tagline — static text under the <h1> (index.html <p class="tagline">Find your people —
+#    complete the circle</p>), further proof the shell rendered the hosted markup, not just a blank/splash
+#    frame. Maestro `visible:` is an ANCHORED regex (full element match), so we can't assert a bare
+#    prefix — `.*` absorbs the rest of the line (and dodges the em-dash char). TM-1182 rebrand: the old
+#    "…Plan the meetup. Make it happen." tagline no longer exists.
 - extendedWaitUntil:
-    visible: "Find your people. Plan the meetup. Make it happen."
+    visible: "Find your people.*"
     timeout: 30000
 - takeScreenshot: 02-tagline-rendered
 
