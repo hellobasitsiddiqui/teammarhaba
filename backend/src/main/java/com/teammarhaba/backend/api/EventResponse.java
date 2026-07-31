@@ -71,6 +71,12 @@ import java.time.Instant;
  * @param goingCount                   number of {@code GOING} attendees ({@code null} = not computed
  *     on this path — the create/cancel responses, which aren't a count display) — TM-430
  * @param waitlistCount                number of {@code WAITLISTED} attendees ({@code null} as above) — TM-430
+ * @param seriesId                     id of the recurring {@code event_series} this event is an
+ *     occurrence of ({@code null} = a one-off event created directly, not part of a series) — TM-789/791
+ * @param occurrenceIndex              zero-based position of this occurrence within its series
+ *     ({@code null} for a one-off) — TM-789/791
+ * @param seriesDetached               whether this occurrence has been edited away from the series
+ *     template and no longer tracks template edits ({@code null} for a one-off) — TM-789
  */
 public record EventResponse(
         Long id,
@@ -108,7 +114,10 @@ public record EventResponse(
         Instant createdAt,
         Instant updatedAt,
         Long goingCount,
-        Long waitlistCount) {
+        Long waitlistCount,
+        Long seriesId,
+        Integer occurrenceIndex,
+        Boolean seriesDetached) {
 
     /**
      * Projection WITHOUT attendance counts — the create/cancel responses, which the console doesn't
@@ -179,6 +188,11 @@ public record EventResponse(
                 event.getCreatedAt(),
                 event.getUpdatedAt(),
                 goingCount,
-                waitlistCount);
+                waitlistCount,
+                event.getSeriesId(),
+                event.getOccurrenceIndex(),
+                // A one-off event (no series) reports null rather than a meaningless `false`, so
+                // clients can tell "not part of a series" apart from "a series occurrence, not detached".
+                event.getSeriesId() == null ? null : event.isSeriesDetached());
     }
 }

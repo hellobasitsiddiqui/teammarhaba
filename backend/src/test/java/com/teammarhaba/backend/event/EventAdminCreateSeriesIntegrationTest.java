@@ -111,21 +111,24 @@ class EventAdminCreateSeriesIntegrationTest extends AbstractIntegrationTest {
         assertThat(saved.getTemplateCapacity()).isEqualTo(25);
         assertThat(saved.getTemplatePricePence()).isEqualTo(700);
         assertThat(saved.getCreatedAt()).isNotNull(); // DB-authoritative DEFAULT now()
-        // Horizon watermark = the last generated start.
-        assertThat(saved.getHorizonGeneratedUntil()).isEqualTo(firstStart.plus(Duration.ofDays(6)));
+        // Horizon watermark = the last generated start. Computed the engine's way — stepping LOCAL
+        // wall-clock days, not by adding fixed 24h Durations to the anchor instant — so this holds on
+        // any calendar date, DST transitions included (TM-1183 de-flake; the TM-419 flake class).
+        assertThat(saved.getHorizonGeneratedUntil()).isEqualTo(plusLocalDays(firstStart, 6));
 
         // --- occurrences ---
         List<Event> occurrences = occurrencesOf(saved.getId());
         assertThat(occurrences).hasSize(4);
         // Zero-based, contiguous indices in order.
         assertThat(occurrences).extracting(Event::getOccurrenceIndex).containsExactly(0, 1, 2, 3);
-        // DAILY every-2-days steps: anchor, +2, +4, +6 days.
+        // DAILY every-2-days steps: anchor, +2, +4, +6 LOCAL days (wall-clock preserved across any DST
+        // boundary the window might straddle — see plusLocalDays).
         assertThat(occurrences).extracting(Event::getStartAt)
                 .containsExactly(
                         firstStart,
-                        firstStart.plus(Duration.ofDays(2)),
-                        firstStart.plus(Duration.ofDays(4)),
-                        firstStart.plus(Duration.ofDays(6)));
+                        plusLocalDays(firstStart, 2),
+                        plusLocalDays(firstStart, 4),
+                        plusLocalDays(firstStart, 6));
 
         Event first = occurrences.get(0);
         assertThat(first.getSeriesId()).isEqualTo(saved.getId());
@@ -142,8 +145,10 @@ class EventAdminCreateSeriesIntegrationTest extends AbstractIntegrationTest {
         assertThat(first.getVisibilityEnd()).isEqualTo(firstStart.plus(Duration.ofHours(3)));
 
         // A later occurrence keeps the same duration + visibility lead/lag relative to ITS own start.
+        // The offsets are fixed Durations off each occurrence's own (engine-computed) start, so the
+        // start uses plusLocalDays while the window deltas stay Duration-based.
         Event third = occurrences.get(2);
-        Instant thirdStart = firstStart.plus(Duration.ofDays(4));
+        Instant thirdStart = plusLocalDays(firstStart, 4);
         assertThat(third.getEndAt()).isEqualTo(thirdStart.plus(Duration.ofHours(2)));
         assertThat(third.getVisibilityStart()).isEqualTo(thirdStart.minus(Duration.ofDays(5)));
         assertThat(third.getVisibilityEnd()).isEqualTo(thirdStart.plus(Duration.ofHours(3)));
@@ -209,10 +214,9 @@ class EventAdminCreateSeriesIntegrationTest extends AbstractIntegrationTest {
         List<Event> occurrences = occurrencesOf(saved.getId());
         assertThat(occurrences).hasSize(3);
         assertThat(occurrences).extracting(Event::getOccurrenceIndex).containsExactly(0, 1, 2);
-        // 7-day steps, all on the anchor's weekday.
+        // 7-local-day steps, all on the anchor's weekday (wall-clock preserved across any DST boundary).
         assertThat(occurrences).extracting(Event::getStartAt)
-                .containsExactly(
-                        firstStart, firstStart.plus(Duration.ofDays(7)), firstStart.plus(Duration.ofDays(14)));
+                .containsExactly(firstStart, plusLocalDays(firstStart, 7), plusLocalDays(firstStart, 14));
         // Every occurrence is a Wednesday in London.
         assertThat(occurrences)
                 .allSatisfy(e -> assertThat(e.getStartAt().atZone(LONDON).getDayOfWeek())
@@ -225,6 +229,20 @@ class EventAdminCreateSeriesIntegrationTest extends AbstractIntegrationTest {
     }
 
     // ------------------------------------------------------------------ fixtures
+
+    /**
+     * The engine's own day-stepping: advance {@code anchor} by {@code days} LOCAL wall-clock days in
+     * {@link #LONDON}, preserving the time-of-day across any DST transition, then resolve back to an
+     * instant. This mirrors exactly how {@link com.teammarhaba.backend.event.recurrence.RecurrenceEngine}
+     * computes each occurrence ({@code ZonedDateTime.of(date.plusDays(n), timeOfDay, zone)}), so the
+     * assertions hold on ANY calendar date instead of reddening main on every spring-forward / fall-back
+     * (the old {@code anchor.plus(Duration.ofDays(n))} added fixed 24h chunks and drifted by an hour
+     * across a DST boundary — TM-1183 / the TM-419 flake class).
+     */
+    private static Instant plusLocalDays(Instant anchor, int days) {
+        ZonedDateTime z = anchor.atZone(LONDON);
+        return ZonedDateTime.of(z.toLocalDate().plusDays(days), z.toLocalTime(), LONDON).toInstant();
+    }
 
     /**
      * Occurrences of a series, ordered by occurrence_index. The id order comes from a scoped SQL query

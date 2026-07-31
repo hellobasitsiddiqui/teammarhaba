@@ -151,6 +151,33 @@ class RecurrenceEngineTest {
     }
 
     @Test
+    void anchorOnFallBackDoubledHourLaterOffsetKeepsOccurrenceZero() {
+        // UK fall-back: 2031-10-26 the 01:00→02:00 local hour occurs TWICE (BST offset then GMT offset).
+        // Anchor the series at 01:30 on that date on the LATER (GMT) offset — the second pass of the
+        // doubled hour. Re-resolving 01:30 from local date + time via ZonedDateTime.of picks the EARLIER
+        // (BST) offset by default, i.e. an instant one hour BEFORE the anchor. Before the fix the engine
+        // re-resolved occurrence #0 that way, landing it at/behind fromInstant (anchor minus a sliver) so
+        // #0 was silently dropped and the afterN count came up one short. Emitting #0 as the anchor's own
+        // instant keeps it present and the count correct.
+        ZonedDateTime anchor = ZonedDateTime.of(2031, 10, 26, 1, 30, 0, 0, LONDON).withLaterOffsetAtOverlap();
+        // Sanity: the anchor really is on the later (GMT, UTC+0) offset — the ambiguous-hour second pass.
+        assertThat(anchor.getOffset()).isEqualTo(ZoneOffset.UTC);
+
+        List<Instant> out = engine.nextOccurrences(
+                RecurrenceRule.daily(1, LONDON).count(3), anchor, justBefore(anchor));
+
+        // #0 is present and is exactly the anchor's own instant (not re-resolved to the earlier offset).
+        assertThat(out).hasSize(3);
+        assertThat(out.get(0)).isEqualTo(anchor.toInstant());
+        // afterN=3 is honoured in full — the count did not lose an occurrence to the overlap.
+        assertThat(out.get(1)).isEqualTo(Instant.parse("2031-10-27T01:30:00Z")); // next day, GMT
+        assertThat(out.get(2)).isEqualTo(Instant.parse("2031-10-28T01:30:00Z"));
+        // Every occurrence is still 01:30 wall-clock in London.
+        assertThat(out.stream().map(i -> i.atZone(LONDON).toLocalTime()))
+                .allMatch(t -> t.equals(java.time.LocalTime.of(1, 30)));
+    }
+
+    @Test
     void dstIsResolvedInTheSeriesZoneNotUtc() {
         // Same wall-clock rule in New York: spring-forward 2031-03-09 02:00→03:00.
         ZonedDateTime anchor = ZonedDateTime.of(2031, 3, 8, 9, 0, 0, 0, NEW_YORK);

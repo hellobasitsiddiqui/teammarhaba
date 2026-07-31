@@ -287,6 +287,16 @@ public class EventAdminService {
         User creator = users.provision(caller);
         ZoneId zone = ZoneId.of(draft.timezone());
 
+        // Venue reference (TM-519): validate the picked venue exists + is active BEFORE persisting the
+        // series row (TM-1183). The per-occurrence create() path already guards this, but a series whose
+        // in-horizon window is empty (a fully past afterN/until window) materialises zero occurrences and
+        // so would never reach that guard — leaving a series pointed at a deactivated/unknown venue. Guard
+        // it up front so a bad venue is always a clean 400, occurrences or not. `null` = a one-off
+        // free-text location; nothing to check.
+        if (draft.venueId() != null) {
+            requireActiveVenue(draft.venueId());
+        }
+
         // 1) Persist the series (ACTIVE) from the template + cadence.
         EventSeries s = new EventSeries(
                 draft.frequency(),
