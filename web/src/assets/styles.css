@@ -8735,3 +8735,76 @@ a.tm-pf-go:focus-visible {
     margin: 0;
     font-size: 0.85rem;
 }
+
+/* Collapsible form section (TM-1186) — the ONE reusable disclosure `buildFormSection()` (ui.js) builds,
+   which the admin event form + the retired "More options" fold regroup onto (TM-1187). A native
+   <details>/<summary>: keyboard toggle + aria-expanded are free, and folds are INDEPENDENT (several open
+   at once, no accordion). Reuses the TM-398 `.tm-event-calendar-toggle` disclosure look so the toggle
+   reads consistently with the rest of the events UI; the summary carries the section title plus an
+   optional one-line collapsed VALUE next to it (TM-1188 supplies real ones). APPENDED as its own block
+   (no unrelated rules reflowed) to minimise conflict with the parallel TM-1190. */
+.tm-form-section {
+    margin: 0.5rem 0 0.75rem;
+    border-top: var(--border-width, 1px) solid var(--line, rgba(0, 0, 0, 0.1));
+    padding-top: 0.6rem;
+}
+
+.tm-form-section-toggle {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.15rem 0;
+    cursor: pointer;
+    list-style: none;
+}
+
+/* Hide the native disclosure triangle — we draw our own ▸ (rotates open), matching TM-398. */
+.tm-form-section-toggle::-webkit-details-marker { display: none; }
+.tm-form-section-toggle::marker { content: ""; }
+
+.tm-form-section-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* The rotating ▸ sits before the title text (via the title span) so it tracks the heading, not the value. */
+.tm-form-section-title::before {
+    content: "\25B8"; /* ▸ */
+    font-size: 0.8em;
+    color: var(--accent);
+    transition: transform 0.15s ease;
+}
+
+.tm-form-section[open] .tm-form-section-title::before { transform: rotate(90deg); }
+
+/* The one-line collapsed value (e.g. "Sat 2 Aug, 7pm"): muted, ellipsised, pushed to the right of the
+   title. Empty by default (renders nothing until a summary is supplied). */
+.tm-form-section-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--muted, #6b7280);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The value is redundant noise once the section is open (the fields are visible) — hide it there. */
+.tm-form-section[open] .tm-form-section-value { display: none; }
+
+.tm-form-section-toggle:focus-visible {
+    outline: var(--border-width, 1px) solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius, 6px);
+}
+
+.tm-form-section-body { margin-top: 0.6rem; }
+
+@media (prefers-reduced-motion: reduce) {
+    .tm-form-section-title::before { transition: none; }
+}
