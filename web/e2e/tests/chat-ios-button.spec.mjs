@@ -1,29 +1,18 @@
 import { test, expect } from "@playwright/test";
-import { CHAT_SEED } from "../fixtures.mjs";
-
-// iOS "Coming soon" app badge — tap feedback on the Chat screen (TM-657).
+// iOS "Coming soon" app badge — tap feedback (TM-657).
 //
-// The reporter hit this on the Chat screen: the "Get the app" footer's iOS badge showed
-// "Coming soon" but a tap did NOTHING — it was a real `<button disabled>`, and a disabled button
-// emits no click, so the tap was a silent dead no-op that reads as broken. (The Android badge next to
-// it — a real /download link — works, which made the iOS one look extra broken by comparison.)
+// The reporter originally hit this on an in-app screen: the "Get the app" footer's iOS badge showed
+// "Coming soon" but a tap did NOTHING — it was a real `<button disabled>`, and a disabled button emits
+// no click, so the tap was a silent dead no-op. app-badges.js (TM-657) un-disables the iOS badge (on
+// mobile-web / desktop — NOT inside the native WebView) so it can answer a tap, keeps it announced
+// unavailable (aria-disabled="true" + the dimmed .store-badge-disabled look), and on click
+// preventDefaults + shows an honest "coming soon" toast instead of silence.
 //
-// The "Get the app" badges (TM-276) are a single static footer block in index.html (id
-// #app-store-badges) that footer.js does NOT scope away in-app — so it's present on EVERY signed-in
-// screen, including Chat. app-badges.js (TM-657) now, on mobile-web / desktop (i.e. NOT inside the
-// native WebView), un-disables the iOS badge so it can answer a tap, keeps it announced unavailable
-// (aria-disabled="true" + the dimmed .store-badge-disabled look, so it never reads as a live
-// download), and on click preventDefaults + shows an honest "coming soon" toast instead of silence.
-//
-// This spec drives the exact surface the ticket names — it signs in, opens the Chat screen, and taps
-// the iOS badge in that screen's footer. The load-bearing assertion is the one that FAILS before the
-// fix and PASSES after: the badge is no longer `disabled` and a tap produces the honest toast (a
-// disabled button would emit no click and no toast at all). It rides the existing main + manual
-// -dispatch e2e workflow (never the PR gate), like its siblings.
-//
-// CHAT_SEED is a seeded, un-gated account (provisioned onboarded + terms-accepted in global-setup), so
-// it lands straight in the app with no first-run gate to walk. We don't seed its chat — this test only
-// needs to REACH the Chat screen, not populate it — so no seed endpoint / shared change is required.
+// TM-1177 then moved the "Get the app" badges OFF the in-app screens — they now live ONLY on the
+// signed-out Sign-in screen and the Help page. So this TM-657 tap→toast check now runs on the signed-out
+// login screen (no sign-in needed), where the badge is present. Its RENDER is covered by
+// get-the-app-badges.spec.mjs; this spec owns the tap→toast BEHAVIOUR. Rides the main + manual-dispatch
+// e2e workflow (never the PR gate), like its siblings.
 
 // The exact copy the fix toasts on tap (app-badges.js) — asserting the string, not just "a toast",
 // proves the honest "iOS isn't out yet, get Android for now" message, not some other feedback.
@@ -43,34 +32,16 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** Sign in a seeded, un-gated account via the email+password ("Try another way") flow — the same path
- *  chat-foundation.spec.mjs / events.spec.mjs use. The account is provisioned onboarded + terms
- *  -accepted in global-setup, so it lands straight in the app (no first-run gate). */
-async function signIn(page, account) {
-  await page.goto("/#/login");
-  await expect(page.locator("#auth-signed-out")).toBeVisible();
-  await page.fill("#email", account.email);
-  await page.click("#try-another-btn");
-  await page.fill("#password", account.password);
-  await page.click("#signin-btn");
-  await expect(page.locator("#auth-signed-out")).toBeHidden();
-  await expect(page.locator("#auth-signed-in")).toBeVisible();
-}
-
-test.describe('@ios-badge Chat screen iOS "Coming soon" badge answers a tap (TM-657)', () => {
-  test('the Chat screen iOS badge is tappable and toasts "coming soon" instead of doing nothing', async ({
+test.describe('@ios-badge iOS "Coming soon" badge answers a tap — on its Sign-in/Help home (TM-657)', () => {
+  test('the iOS badge is tappable and toasts "coming soon" instead of doing nothing', async ({
     page,
   }) => {
-    await signIn(page, CHAT_SEED);
-
-    // Open the Chat screen — the exact surface the ticket names. Navigate straight to the (protected)
-    // #/chat route the same way chat-live-stream.spec.mjs does — viewport-independent, so it works under
-    // this spec's DESKTOP chromium project (the bottom #tab-chat nav is a mobile-width-only control). The
-    // "Get the app" footer (and its iOS badge) is a global block footer.js does NOT scope away in-app, so
-    // it's present on this screen.
-    await page.goto("/#/chat");
-    await expect(page.locator("#chat-view")).toBeVisible();
-    await expect(page).toHaveURL(/#\/chat$/);
+    // TM-1181 / TM-1177: the "Get the app" badges were REMOVED from the in-app screens (Chat included) —
+    // they now live ONLY on the signed-out Sign-in screen and the Help page. So this TM-657 tap→toast
+    // check runs on the signed-out login screen, where the iOS "Coming soon" placeholder is present.
+    // (get-the-app-badges.spec.mjs already covers its render there; this owns the tap→toast behaviour.)
+    await page.goto("/#/login");
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
 
     // The iOS badge (accessible name "iOS app coming soon"). It's the disabled-looking placeholder in
     // the footer's "Get the app" row — still announced unavailable, still dimmed.
