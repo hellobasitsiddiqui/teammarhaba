@@ -1750,6 +1750,10 @@
           "mapUrl" : {
             "type" : "string"
           },
+          "occurrenceIndex" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "onlineUrl" : {
             "type" : "string"
           },
@@ -1764,6 +1768,13 @@
           },
           "pricePence" : {
             "format" : "int32",
+            "type" : "integer"
+          },
+          "seriesDetached" : {
+            "type" : "boolean"
+          },
+          "seriesId" : {
+            "format" : "int64",
             "type" : "integer"
           },
           "startAt" : {
