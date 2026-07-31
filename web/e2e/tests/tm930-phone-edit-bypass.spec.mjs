@@ -69,7 +69,7 @@ async function fillGateProfile(page, { name, location = "London", age = 30, phon
   }).toPass({ timeout: 15_000 });
 }
 
-test("@tm930 editing the number after Send code drops the in-flight code — the edited number is NOT verified and the gate holds", async ({
+test("@profile @tm930 editing the number after Send code drops the in-flight code — the edited number is NOT verified and the gate holds", async ({
   page,
 }) => {
   const email = `e2e-tm930-editbypass-${Date.now()}@teammarhaba.test`;
@@ -111,7 +111,7 @@ test("@tm930 editing the number after Send code drops the in-flight code — the
   }
 });
 
-test("@tm930 a verified number can be changed: the Change-number button re-opens the field for editing", async ({
+test("@profile @tm930 a verified number can be changed: the Change-number button re-opens the field for editing", async ({
   page,
 }) => {
   const email = `e2e-tm930-change-${Date.now()}@teammarhaba.test`;

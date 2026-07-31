@@ -78,7 +78,7 @@ async function notificationCount(eventId, email) {
   });
 }
 
-test("Story 01 — Willen Lake Walk: RSVP → full → waitlist → cascade → re-RSVP", async ({ page }) => {
+test("@events @golden Story 01 — Willen Lake Walk: RSVP → full → waitlist → cascade → re-RSVP", async ({ page }) => {
   // --- Setup: Aisha creates the free, capacity-2 event -------------------------------------------
   // TODO(harness): drive the admin create-event flow (or a seed endpoint) as ADMIN and capture the id.
   //   e.g. sign in as ADMIN, open the admin events screen, create "Willen Lake Walk" price 0 capacity 2.
