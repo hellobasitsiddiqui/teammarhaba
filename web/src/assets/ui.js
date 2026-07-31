@@ -77,6 +77,61 @@ export function stackableTable(head, body) {
   return table;
 }
 
+// TM-1186 — the ONE reusable collapsible-section abstraction the admin event form (and the retired
+// "More options" fold, TM-1066) is regrouped onto (TM-1187 consumes it; TM-1188 supplies real summaries).
+//
+// WHY a native <details>/<summary>. It gives keyboard toggle + `aria-expanded` for FREE, and — the
+// headline requirement — folds are INDEPENDENT: a native <details> has no shared open-state, so several
+// sections can be open at once and there is no accordion/close-on-open logic to build (or to accidentally
+// introduce). It reuses the TM-398 `.tm-event-calendar` disclosure look via `.tm-form-section` so the
+// toggle reads consistently with the rest of the events UI (styles.css, appended block).
+//
+// The `summary` slot is the collapsed-header VALUE line (e.g. "Sat 2 Aug, 7pm") that renders next to the
+// title so a folded section still shows what it holds. TM-1188 supplies real ones; the slot is honoured
+// now and updatable later via the returned `setSummary()`.
+//
+// Returns a minimal, documented handle so the regroup (TM-1187/1189) can drive a section from outside:
+//   • `el`          — the <details> root (append it into the form layout)
+//   • `setOpen(bool)` — force the fold open/closed (used to reveal a section whose field is in error)
+//   • `setSummary(str)` — update the one-line collapsed value (used as fields change)
+//
+/**
+ * Build a collapsible form section over a native <details>/<summary>.
+ * @param {{title: string, open?: boolean, summary?: (() => string)|null,
+ *   children?: (Node|string|null)[]|Node|string}} cfg
+ *   `title` = the section heading; `open` = initial open state (default false); `summary` = optional fn
+ *   returning the one-line collapsed value; `children` = the section body nodes.
+ * @returns {{el: HTMLDetailsElement, setOpen: (open: boolean) => void, setSummary: (value: string) => void}}
+ */
+export function buildFormSection({ title, open = false, summary = null, children = [] } = {}) {
+  // The title + (optional) value share the <summary>; separate spans so the value can be re-rendered
+  // independently and the title text is never clobbered when the summary updates.
+  const titleNode = el("span", { class: "tm-form-section-title", text: title });
+  const valueNode = el("span", { class: "tm-form-section-value" });
+  const setSummary = (value) => {
+    // textContent (via el's text path) is the safe sink — the value is always inert text, never markup.
+    valueNode.textContent = value == null ? "" : String(value);
+  };
+  if (typeof summary === "function") setSummary(summary());
+
+  const summaryNode = el("summary", { class: "tm-form-section-toggle" }, [titleNode, valueNode]);
+  const body = el("div", { class: "tm-form-section-body" }, children);
+  const details = el("details", { class: "tm-form-section" }, [summaryNode, body]);
+  // Set the `open` PROPERTY (not the boolean attribute) so it's identical whether a caller later reads
+  // `.open` or the attribute — the native <details> reflects the property to the attribute for us.
+  details.open = !!open;
+
+  return {
+    el: details,
+    // Set the `open` property (reflects to the attribute) so callers get the same result whether they
+    // read the property or the attribute — mirrors how the More-options fold force-opens on error.
+    setOpen: (isOpen) => {
+      details.open = !!isOpen;
+    },
+    setSummary,
+  };
+}
+
 // The toast host id. Held in a constant because it is referenced in two places that MUST agree: the
 // lazy host builder below, and the modal-layer inert sweep (TM-947), which permanently exempts this
 // node so toasts sit ON the modal layer rather than being inerted behind it (item 1b).
