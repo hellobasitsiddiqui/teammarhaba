@@ -36,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       web: ${{ steps.filter.outputs.web }}
+      # TM-1180: the Playwright --grep for a surface-scoped run. Empty = run the FULL suite (nightly,
+      # any shared-core/unknown change, or a diff we couldn't resolve). Consumed by the e2e job below.
+      grep: ${{ steps.scope.outputs.grep }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -80,6 +83,34 @@ jobs:
               echo "This branch changes no \`web/\` files, so the Playwright suite can't exercise it."
               echo "The backend suite (ci.yml) covers it; the nightly full run is the coverage backstop."
             } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # TM-1180: for a web-surface branch dispatch, scope the run to the specs the change can affect
+      # (scope-e2e.mjs maps changed web/src files → surface @tags → a Playwright --grep). Any shared-core
+      # file, any non-web/src web change, or any unmapped path degrades to the FULL suite (empty grep).
+      # The nightly cron (and any non-dispatch) always runs FULL — grep stays empty. scope-e2e.mjs is
+      # dependency-free (node: builtins only), so the runner's preinstalled Node runs it without setup.
+      - name: Compute the surface-scoped grep (TM-1180)
+        id: scope
+        if: ${{ steps.filter.outputs.web == 'true' }}
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "Non-dispatch (nightly/backstop) → FULL suite."; echo "grep=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          FILES="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"
+          if [ -z "$FILES" ]; then
+            echo "No diff resolved → FULL suite (fail-safe)."; echo "grep=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          GREP="$(printf '%s\n' "$FILES" | node web/e2e/scope-e2e.mjs)" || GREP="FULL"
+          if [ "$GREP" = "FULL" ] || [ -z "$GREP" ]; then
+            echo "Scope → FULL suite."; echo "grep=" >> "$GITHUB_OUTPUT"
+            echo "### e2e: full suite (shared-core / unmapped change)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Scope → --grep '$GREP'"; echo "grep=$GREP" >> "$GITHUB_OUTPUT"
+            { echo "### e2e scoped (TM-1180)"; echo "Running only: \`--grep '$GREP'\`"; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   e2e:
@@ -161,6 +192,13 @@ jobs:
       - name: Assert every e2e spec carries a surface tag (TM-1179)
         working-directory: web/e2e
         run: npm run lint:tags
+
+      # TM-1180: unit-test the surface-scoping resolver (scope-e2e.mjs) before the browser suite — a
+      # broken map/resolver would silently under-scope a scoped run, so it must fail fast here. Pure
+      # node:test logic, no browser/emulator needed.
+      - name: Test the e2e surface-scoping resolver (TM-1180)
+        working-directory: web/e2e
+        run: npm run test:scope
 
       - name: Start Firebase Auth + Storage emulators
         working-directory: web/e2e
@@ -255,9 +293,21 @@ jobs:
           done
           curl -sf "http://127.0.0.1:8080/health" > /dev/null || { echo "backend failed to start"; tail -n 100 /tmp/backend.log; exit 1; }
 
+      # TM-1180: run the surface-scoped subset when the changes job resolved a grep; otherwise the FULL
+      # suite (nightly, shared-core/unmapped change, or a diff we couldn't resolve → empty grep). --grep
+      # applies across BOTH projects, so mobile-chromium stays in scoped per-PR runs (cheap once scoped).
       - name: Run Playwright walkthrough
         working-directory: web/e2e
-        run: npm test
+        env:
+          E2E_GREP: ${{ needs.changes.outputs.grep }}
+        run: |
+          if [ -n "$E2E_GREP" ]; then
+            echo "Scoped run (TM-1180): --grep '$E2E_GREP'"
+            npx playwright test --grep "$E2E_GREP"
+          else
+            echo "Full run."
+            npm test
+          fi
 
       - name: Upload Playwright report + screenshots (always — evidence)
         if: ${{ always() }}

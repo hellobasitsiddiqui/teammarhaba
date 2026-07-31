@@ -1,0 +1,43 @@
+{
+  "$comment": "TM-1180 path->tag e2e scoping map. scope-e2e.mjs (resolveScope) turns a WEB PR's changed files into a Playwright --grep so only the specs its change surface can affect run, instead of the full ~18-min matrix. SAFETY, by construction: (a) any file listed in forceFull, (b) any web/ file NOT under web/src/ (harness/e2e/assets), or (c) any web/src/ path that matches no map prefix => the FULL suite. `alwaysOn` tags are added to EVERY scoped run so the core path is never unguarded (they also guarantee the grep matches >=1 test, so Playwright never errors 'no tests found'). The nightly cron always runs FULL as the daily backstop, so an incomplete/imperfect map only costs speedup, never coverage. Every tag here must exist in the lint SURFACE set (lint-surface-tags.mjs). Playwright --grep is an UN-anchored regex over the full test title, so a shorter tag is a safe superset: `@notif` matches `@notifications`, `@venue` matches `@venues`, `@admin` matches `@admin-events`. Prefer over-inclusion (extra tags) to under-inclusion. Entries are matched in ORDER (first prefix wins) — keep the most specific prefixes first.",
+  "alwaysOn": ["@app-shell", "@auth"],
+  "forceFull": [
+    "web/src/index.html",
+    "web/src/assets/styles.css",
+    "web/src/assets/router.js",
+    "web/src/assets/api.js",
+    "web/src/assets/ui.js",
+    "web/src/assets/app.js",
+    "web/src/assets/auth.js",
+    "web/src/assets/avatar-events.js",
+    "web/src/assets/config.js"
+  ],
+  "map": [
+    { "prefix": "web/src/assets/admin-event",     "tags": ["@admin-events"] },
+    { "prefix": "web/src/assets/admin-hub",        "tags": ["@admin-hub"] },
+    { "prefix": "web/src/assets/admin-interests",  "tags": ["@admin-interests"] },
+    { "prefix": "web/src/assets/admin-venues",     "tags": ["@venue", "@admin"] },
+    { "prefix": "web/src/assets/admin-cities",     "tags": ["@venue", "@admin"] },
+    { "prefix": "web/src/assets/admin",            "tags": ["@admin"] },
+    { "prefix": "web/src/assets/membership",       "tags": ["@membership", "@payments", "@subscription"] },
+    { "prefix": "web/src/assets/chat",             "tags": ["@chat", "@badges"] },
+    { "prefix": "web/src/assets/event",            "tags": ["@events", "@event-image", "@golden"] },
+    { "prefix": "web/src/assets/home",             "tags": ["@app-shell", "@events", "@golden"] },
+    { "prefix": "web/src/assets/onboarding",       "tags": ["@onboarding", "@profile"] },
+    { "prefix": "web/src/assets/interests",        "tags": ["@onboarding", "@profile"] },
+    { "prefix": "web/src/assets/corner-bell",      "tags": ["@notif", "@profile"] },
+    { "prefix": "web/src/assets/notification-bell","tags": ["@notif", "@profile"] },
+    { "prefix": "web/src/assets/notification",     "tags": ["@notif"] },
+    { "prefix": "web/src/assets/profile",          "tags": ["@profile"] },
+    { "prefix": "web/src/assets/login",            "tags": ["@auth"] },
+    { "prefix": "web/src/assets/avatar",           "tags": ["@avatar", "@image-upload"] },
+    { "prefix": "web/src/assets/tabbar",           "tags": ["@app-shell", "@nav-races"] },
+    { "prefix": "web/src/assets/terms",            "tags": ["@terms"] },
+    { "prefix": "web/src/assets/help",             "tags": ["@help"] },
+    { "prefix": "web/src/assets/alert",            "tags": ["@alert"] },
+    { "prefix": "web/src/assets/appearance",       "tags": ["@theme", "@responsive"] },
+    { "prefix": "web/src/assets/broadcast",        "tags": ["@broadcast"] },
+    { "prefix": "web/src/assets/venue",            "tags": ["@venue", "@admin"] },
+    { "prefix": "web/src/assets/city-catalogue",   "tags": ["@venue", "@admin"] }
+  ]
+}
