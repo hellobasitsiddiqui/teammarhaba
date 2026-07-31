@@ -98,6 +98,8 @@ import {
   weekdayOfLocal,
   validateSeriesDraft,
   buildSeriesPayload,
+  whoCanJoinSummary,
+  bookingRulesSummary,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash, adminEventRosterHash } from "./admin-event-route.js";
 import {
@@ -2172,6 +2174,15 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // is TM-1197; here we at minimum keep timezone + booking-cutoff reachable on error.
   let whenSection = null;
   let bookingRulesSection = null;
+  // Collapsed-section value summaries (TM-1196): the two collapsed sections show a live one-line summary
+  // of their current field values on the header. These refs are set once the sections are built (below);
+  // `recomputeSummaries()` reads the current draft and pushes each section's line via `setSummary`.
+  let whoSection = null;
+  const recomputeSummaries = () => {
+    const draft = readDraft();
+    whoSection?.setSummary(whoCanJoinSummary(draft));
+    bookingRulesSection?.setSummary(bookingRulesSummary(draft));
+  };
   const sectionForField = (key) => {
     if (key === "timezone") return whenSection;
     if (key === "bookingCutoffHours") return bookingRulesSection;
@@ -2264,6 +2275,11 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
       const showing = !fields.get(f.key).error.hidden;
       if (f.key === changedKey || showing) setFieldError(f.key, errors[f.key] || "");
     }
+    // Live collapsed-section summaries (TM-1196): recompute the two collapsed sections' one-line value
+    // lines on every field change. Derived-display only — reuses the existing per-change revalidate hook
+    // (no extra listener layer) and reads the same draft, so it can never affect validation/payload. The
+    // section refs are null until the sections are built, so this is a safe no-op during early revalidates.
+    recomputeSummaries();
     return errors;
   };
   const paintAllErrors = () => {
@@ -2822,7 +2838,7 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   const basicsSection = buildFormSection({ title: "Basics", open: true, children: basicsChildren });
   whenSection = buildFormSection({ title: "When", open: true, children: whenChildren });
   const whereSection = buildFormSection({ title: "Where", open: true, children: whereChildren });
-  const whoSection = buildFormSection({ title: "Who can join", open: false, children: whoChildren });
+  whoSection = buildFormSection({ title: "Who can join", open: false, children: whoChildren });
   bookingRulesSection = buildFormSection({ title: "Booking rules", open: false, children: bookingChildren });
   // Stable ids so the e2e + a11y can target each section's toggle (mirrors the retired More-options id).
   const sectionHandles = [
@@ -2870,6 +2886,11 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // reads the venue picker + currentFormat, both set by this point. The venue picker's async initial echo
   // (create) re-selects the blank one-off option (no field change), so it never dirties this baseline.
   baselineDraft = readDraft();
+
+  // Collapsed-section value summaries (TM-1196): paint the initial one-line summaries once on mount/prefill
+  // now every sub-control has seeded its defaults (age/price/timezone) and the sections exist — so a
+  // freshly-opened create form and an edit prefill both show a correct summary before any field changes.
+  recomputeSummaries();
 
   const revealSummaryText = event ? revealSummary(event) : "";
   // Booking-cutoff note (TM-1157): mirrors the reveal note — a plain-English one-liner of when RSVPs stop

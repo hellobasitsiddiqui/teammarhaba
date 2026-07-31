@@ -95,6 +95,8 @@ import {
   validateSeriesDraft,
   buildSeriesPayload,
   SERIES_NON_TEMPLATE_KEYS,
+  whoCanJoinSummary,
+  bookingRulesSummary,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -1689,4 +1691,87 @@ test("buildSeriesPayload — an open-ended first occurrence (blank end) omits fi
   const body = buildSeriesPayload(seriesDraft({ endAt: "" }));
   assert.equal("firstEndAt" in body, false);
   assert.ok("firstStartAt" in body);
+});
+
+// --- collapsed-section value summaries (TM-1196) ----------------------------------------------
+// whoCanJoinSummary / bookingRulesSummary produce the terse one-line value string each COLLAPSED
+// section header shows so an admin sees what's in a fold without opening it. Pure — derived-display
+// only; they read the same draft readDraft() produces and never touch validate/payload/section state.
+
+test("whoCanJoinSummary: all-defaults draft reads public · no cap · all ages (TM-1196)", () => {
+  assert.equal(whoCanJoinSummary({}), "public · no cap · all ages");
+  // An explicitly blank draft (create defaults: blank visibility/capacity/age) is the same.
+  assert.equal(
+    whoCanJoinSummary({ visibilityStart: "", visibilityEnd: "", capacity: "", ageMin: "", ageMax: "" }),
+    "public · no cap · all ages",
+  );
+});
+
+test("whoCanJoinSummary: fully populated draft reads scheduled · cap 20 · 18-30 (TM-1196)", () => {
+  assert.equal(
+    whoCanJoinSummary({
+      visibilityStart: "2026-08-01T09:00",
+      visibilityEnd: "2026-08-10T09:00",
+      capacity: "20",
+      ageMin: "18",
+      ageMax: "30",
+    }),
+    "scheduled · cap 20 · 18-30",
+  );
+});
+
+test("whoCanJoinSummary: partial values (TM-1196)", () => {
+  // A visibility window on EITHER side → scheduled.
+  assert.equal(whoCanJoinSummary({ visibilityStart: "2026-08-01T09:00" }), "scheduled · no cap · all ages");
+  assert.equal(whoCanJoinSummary({ visibilityEnd: "2026-08-10T09:00" }), "scheduled · no cap · all ages");
+  // Capacity set, age open.
+  assert.equal(whoCanJoinSummary({ capacity: "5" }), "public · cap 5 · all ages");
+  // Age min only → "N+"; max only → "≤N".
+  assert.equal(whoCanJoinSummary({ ageMin: "30" }), "public · no cap · 30+");
+  assert.equal(whoCanJoinSummary({ ageMax: "40" }), "public · no cap · ≤40");
+});
+
+test("whoCanJoinSummary: never shows undefined / raw blanks (TM-1196)", () => {
+  const s = whoCanJoinSummary({ capacity: "abc", ageMin: "x" });
+  assert.equal(s.includes("undefined"), false);
+  assert.equal(s.includes("NaN"), false);
+  // Non-integer capacity/age fall back to the sensible default word, never a broken part.
+  assert.equal(s, "public · no cap · all ages");
+});
+
+test("bookingRulesSummary: all-defaults draft reads cutoff default · reveal default · Free (TM-1196)", () => {
+  assert.equal(bookingRulesSummary({}), "cutoff default · reveal default · Free");
+  assert.equal(
+    bookingRulesSummary({ bookingCutoffHours: "", locationRevealHours: "", price: "" }),
+    "cutoff default · reveal default · Free",
+  );
+});
+
+test("bookingRulesSummary: fully populated draft reads cutoff 1h · reveal 24h · £5 (TM-1196)", () => {
+  assert.equal(
+    bookingRulesSummary({ bookingCutoffHours: "1", locationRevealHours: "24", price: "5" }),
+    "cutoff 1h · reveal 24h · £5",
+  );
+  // A fractional £ amount keeps two places.
+  assert.equal(
+    bookingRulesSummary({ bookingCutoffHours: "2", locationRevealHours: "48", price: "7.50" }),
+    "cutoff 2h · reveal 48h · £7.50",
+  );
+});
+
+test("bookingRulesSummary: partial values + the 0-cutoff real value (TM-1196)", () => {
+  // Cutoff 0 is a REAL override (accept up to start), not the inherit default.
+  assert.equal(bookingRulesSummary({ bookingCutoffHours: "0" }), "cutoff 0h · reveal default · Free");
+  // Reveal set, cutoff inheriting, price Free.
+  assert.equal(bookingRulesSummary({ locationRevealHours: "12" }), "cutoff default · reveal 12h · Free");
+  // Price 0 → Free; a set price → the £ amount.
+  assert.equal(bookingRulesSummary({ price: "0" }), "cutoff default · reveal default · Free");
+  assert.equal(bookingRulesSummary({ price: "10" }), "cutoff default · reveal default · £10");
+});
+
+test("bookingRulesSummary: never shows undefined / raw blanks (TM-1196)", () => {
+  const s = bookingRulesSummary({ bookingCutoffHours: "x", locationRevealHours: "y", price: "abc" });
+  assert.equal(s.includes("undefined"), false);
+  assert.equal(s.includes("NaN"), false);
+  assert.equal(s, "cutoff default · reveal default · Free");
 });
