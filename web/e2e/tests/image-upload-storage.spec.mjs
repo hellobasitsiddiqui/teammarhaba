@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN } from "../fixtures.mjs";
+import { openAllEventFormSections } from "../helpers/event-form.mjs";
 
 // Event image upload round-trip through the ADMIN form — the BROWSER-level guard TM-704 needed.
 //
@@ -112,6 +113,7 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   await page.click("#admin-events-new");
   await expect(page).toHaveURL(/#\/admin\/events\/new$/);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
 
   // The event-image control must be ENABLED — Storage is configured (the emulator bucket is injected by
   // serve.mjs). If Storage were unconfigured the control disables + hints "…aren't available", so this
@@ -123,9 +125,7 @@ test("@admin @admin-events @image-upload admin uploads an event image; it stores
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "An event WITH an uploaded image — proves the Storage rules allow event-images/.");
   await page.fill("#event-location", "Marhaba Community Hall, 1 Test Street");
-  // TM-1066: the timezone selector moved under a collapsed "More options" <details>; open it first so
-  // the select is interactable.
-  await page.locator("#event-more-options-toggle").click();
+  // TM-1195: timezone lives in the "When" section (open by default) — select it directly.
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));

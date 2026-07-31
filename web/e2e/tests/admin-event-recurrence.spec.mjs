@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { ADMIN, dbConfig } from "../fixtures.mjs";
+import { openAllEventFormSections } from "../helpers/event-form.mjs";
 
 // Admin event RECURRENCE / "Repeat" picker e2e (TM-796, recurring events v1) — the automated-test gate for
 // the create-form recurrence picker. Drives the whole path through the real browser + full stack:
@@ -80,10 +81,10 @@ test("@admin @admin-events admin turns Repeat ON → a weekly series is created 
   // ── Open the New event form + fill the required fields. ──────────────────────────────────────────
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "Recurring series for the TM-796 e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));
@@ -181,10 +182,10 @@ test("@admin @admin-events recurrence validation blocks bad combos inline (no /s
 
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING_INVALID);
   await page.fill("#event-description", "Invalid recurrence combo for the TM-796 e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-visibility-start", localValue(visStart));
@@ -248,12 +249,12 @@ test("@admin @admin-events edit mode shows NO recurrence picker — #event-repea
   // Create a plain (non-recurring) event — Repeat stays OFF so this is the ordinary single-create path.
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   // The picker IS present on CREATE (the toggle exists) — sanity-check so the edit-mode absence is meaningful.
   await expect(page.locator("#event-repeat-toggle")).toBeVisible();
   await page.fill("#event-heading", EDIT_HEADING);
   await page.fill("#event-description", "Plain event for the TM-1183 edit-mode-no-picker e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));
@@ -275,6 +276,7 @@ test("@admin @admin-events edit mode shows NO recurrence picker — #event-repea
   await row.getByRole("button", { name: `Edit ${EDIT_HEADING}` }).click();
   await expect(page).toHaveURL(new RegExp(`#/admin/events/${created.id}/edit$`));
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-heading")).toHaveValue(EDIT_HEADING); // the form IS the edit form
 
   // The recurrence picker must be ABSENT in edit mode (create-only in v1).

@@ -23,7 +23,7 @@
 
 import { apiFetch, ApiError } from "./api.js";
 import { walkPages } from "./admin-page-walk-core.js";
-import { clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, modal, relativeTime, stackableTable, toast } from "./ui.js";
+import { buildFormSection, clear, confirmDialog, el, ensureZoneOption, fillTimeZoneOptions, guessTimeZone, modal, relativeTime, stackableTable, toast } from "./ui.js";
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
@@ -1055,7 +1055,7 @@ const FORM_FIELDS = [
   { key: "city", id: "event-city", label: "City (optional)", type: "select", options: [["", "Choose a city…"], ...CITY_OPTIONS.map((c) => [c, c])], hint: "The public pre-reveal hint + per-city reveal default (TM-408)." },
   { key: "mapUrl", id: "event-map-url", label: "Map URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
   { key: "onlineUrl", id: "event-online-url", label: "Online URL (optional)", type: "url", maxLength: URL_MAX, row: "links" },
-  { key: "timezone", id: "event-timezone", label: "Time zone", type: "timezone", required: true, hint: "Derived from the venue — change it under More options." },
+  { key: "timezone", id: "event-timezone", label: "Time zone", type: "timezone", required: true, hint: "Derived from the venue — change it here under When." },
   { key: "startAt", id: "event-start", label: "Starts", type: "datetime-local", required: true, row: "when" },
   { key: "endAt", id: "event-end", label: "Ends (optional)", type: "datetime-local", row: "when" },
   { key: "visibilityStart", id: "event-visibility-start", label: "Visible from", type: "datetime-local", required: true, row: "visibility" },
@@ -1063,10 +1063,10 @@ const FORM_FIELDS = [
   { key: "capacity", id: "event-capacity", label: "Capacity (optional)", type: "number", min: 1, row: "limits", hint: "Blank = unlimited." },
   { key: "locationRevealHours", id: "event-reveal-hours", label: "Location reveal hours (optional)", type: "number", min: REVEAL_HOURS_MIN, max: REVEAL_HOURS_MAX, row: "limits", hint: "Hours before the start the exact location is revealed. Blank = city / app default." },
   // Booking cutoff (TM-413, exposed by TM-1157): the "stop accepting RSVPs N hours before start" override.
-  // Lives under "More options" (spliced out of the main body below, like the timezone field) — it's a
-  // rarely-changed inherit-by-default control. Blank = inherit; 0 = accept up to start. The placeholder +
-  // helper text are FILLED with the event's resolved effective value after prefill (the booking-cutoff
-  // block in buildEventForm) so the admin sees exactly what applies if they leave it blank.
+  // Lives in the "Booking rules" section (TM-1195) — a rarely-changed inherit-by-default control. Blank =
+  // inherit; 0 = accept up to start. The placeholder + helper text are FILLED with the event's resolved
+  // effective value after prefill (the booking-cutoff block in buildEventForm) so the admin sees exactly
+  // what applies if they leave it blank.
   { key: "bookingCutoffHours", id: "event-booking-cutoff-hours", label: "Stop accepting RSVPs (hours before start, optional)", type: "number", min: BOOKING_CUTOFF_HOURS_MIN, max: BOOKING_CUTOFF_HOURS_MAX, hint: "Hours before the start that RSVPs, waitlist joins and claims stop. 0 = accept right up to the start. Blank = city / app default." },
   // Age band (TM-1065): the two number inputs are no longer laid out two-up. They stay in FORM_FIELDS
   // (so readDraft / validateEventDraft / server-error routing still key off them) but are RE-HOMED inside
@@ -2161,10 +2161,22 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   const image = buildImageControl(event);
   // The venue picker (TM-519) is built below (after revalidate exists); readDraft reads its value.
   let venuePicker = null;
-  // The "More options" <details> the timezone field lives under (TM-1066); a mutable ref so the submit
-  // error-paint can force it OPEN when the (required) timezone is in error — a hidden required error is
-  // otherwise invisible. Set once the disclosure is built (below).
-  let moreOptions = null;
+  // Collapsible form sections (TM-1195): the form is regrouped into 5 labelled <details> sections
+  // (Basics · When · Where · Who can join · Booking rules) via the buildFormSection component (TM-1186).
+  // These mutable refs let the error-paint force a section OPEN when a field inside a COLLAPSED section is
+  // in error — a hidden required error is otherwise invisible. `sectionForField` maps a FORM_FIELDS key to
+  // the section handle whose fold must open when that field errors. Set once the sections are built (below).
+  // This preserves + generalises the retired TM-1066 "More options" force-open: timezone now lives in
+  // "When" (open by default, so the common case is already visible), and booking-cutoff in "Booking rules"
+  // (collapsed) — both still force their section open on error. Full generalisation to every field/section
+  // is TM-1197; here we at minimum keep timezone + booking-cutoff reachable on error.
+  let whenSection = null;
+  let bookingRulesSection = null;
+  const sectionForField = (key) => {
+    if (key === "timezone") return whenSection;
+    if (key === "bookingCutoffHours") return bookingRulesSection;
+    return null;
+  };
   // TM-1066 derive-precedence: has the admin hand-edited the timezone since open? The event's zone is
   // DERIVED from the picked venue (deriveVenueTimezone) UNLESS this flips true — after that a manual
   // value is never clobbered by a later venue re-pick. Set only from a REAL user edit of the tz select
@@ -2222,10 +2234,13 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
       if (message) priceControl.revealForError(message);
       else priceControl.clearError();
     }
-    // Timezone (TM-1066) now lives under the "More options" <details>; a server OR live error on it force-
-    // opens the disclosure so it's never hidden behind a collapsed section. Clearing it leaves the
-    // disclosure as-is (don't slam it shut mid-edit). paintAllErrors additionally focuses on submit.
-    if (key === "timezone" && message && moreOptions) moreOptions.open = true;
+    // Section force-open (TM-1195, generalising TM-1066): a field whose home section is COLLAPSED would
+    // hide a server OR live error behind the fold, so force that section open. timezone lives in "When"
+    // (open by default → usually a no-op) and booking-cutoff in "Booking rules" (collapsed) — both are
+    // reachable on error. Clearing an error leaves the fold as-is (don't slam it shut mid-edit).
+    // paintAllErrors additionally focuses on submit.
+    const section = message ? sectionForField(key) : null;
+    if (section) section.setOpen(true);
   };
 
   const readDraft = () => {
@@ -2254,13 +2269,18 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   const paintAllErrors = () => {
     const { errors } = validateEventDraft(readDraft(), { requireForCreate: mode === "create" });
     for (const f of FORM_FIELDS) setFieldError(f.key, errors[f.key] || "");
-    // TM-1066: the (required) timezone now lives under the "More options" <details>. If it's in error on
-    // submit, force the disclosure OPEN and focus the field — a hidden required error is otherwise
-    // invisible, so the admin can't see or reach what's blocking Save.
-    if (errors.timezone && moreOptions) {
-      moreOptions.open = true;
-      const tzInput = fields.get("timezone").input;
-      if (tzInput) tzInput.focus();
+    // TM-1195 (generalising TM-1066): a field in error whose home section is COLLAPSED would hide the
+    // error behind the fold on submit, so force that section OPEN and focus the field — a hidden required
+    // error is otherwise invisible, so the admin can't see or reach what's blocking Save. setFieldError
+    // already force-opens the section for these keys; here we ALSO move focus to the first such field. In
+    // the default layout only "Booking rules" (booking-cutoff) is collapsed; timezone's "When" is open.
+    for (const key of ["timezone", "bookingCutoffHours"]) {
+      if (errors[key]) {
+        const section = sectionForField(key);
+        if (section) section.setOpen(true);
+        const input = fields.get(key)?.input;
+        if (input) { input.focus(); break; }
+      }
     }
     return errors;
   };
@@ -2575,40 +2595,19 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // Opening-message templates (TM-1065): generic tap-to-prefill starters above the opening-message textarea.
   mountTemplateChips("openingMessage", OPENING_MESSAGE_TEMPLATES, "Opening-message templates");
 
-  // "More options" (TM-1066): the timezone field is DERIVED from the picked venue, so its raw selector
-  // moves out of the main body into a native <details> disclosure near the form bottom — reachable for
-  // the override case but out of the way otherwise. The field is UNCHANGED (still required + validated +
-  // prefilled + "Use mine"); only its home in the layout moves. Reuse the TM-398 `.tm-event-calendar`
-  // disclosure styling (styles.css) so the toggle reads consistently with the events UI. The submit
-  // error-paint force-opens this (via `moreOptions`) so a hidden required-timezone error is never
-  // invisible. Capacity/reveal/age stay in the main body; the timezone and the booking-cutoff override
-  // (TM-1157) — both inherit-by-default / rarely-changed controls — live here.
-  const timezoneNode = byKey.get("timezone");
-  const tzIdx = layout.indexOf(timezoneNode);
-  if (tzIdx >= 0) layout.splice(tzIdx, 1);
-  // Booking cutoff (TM-1157): pull its field OUT of the main body into the More-options disclosure, next
-  // to the timezone — it MIRRORS the timezone/reveal three-tier "blank = inherit" idiom and belongs with
-  // the other override controls rather than in the main limits row.
-  const bookingCutoffNode = byKey.get("bookingCutoffHours");
-  const cutoffIdx = bookingCutoffNode ? layout.indexOf(bookingCutoffNode) : -1;
-  if (cutoffIdx >= 0) layout.splice(cutoffIdx, 1);
-  moreOptions = el(
-    "details",
-    { class: "tm-event-calendar tm-event-more-options", id: "event-more-options" },
-    [
-      el("summary", { class: "tm-event-calendar-toggle", id: "event-more-options-toggle" }, "More options"),
-      el("div", { class: "tm-event-more-options-body" }, [timezoneNode, bookingCutoffNode].filter(Boolean)),
-    ],
-  );
-  // Render it near the bottom of the main fields (after the last body field, before the image + actions).
-  layout.push(moreOptions);
+  // TM-1195: the standalone "More options" <details> (TM-1066) is RETIRED. The timezone field no longer
+  // moves out of the main body into a bottom disclosure — it now lives in the "When" section (open by
+  // default), and the booking-cutoff override (TM-1157) lives in "Booking rules". Both are placed by the
+  // section-grouping pass at the end of buildEventForm (sectioniseLayout), which reads FORM_FIELDS by key.
+  // Their nodes are still `byKey.get("timezone")` / `byKey.get("bookingCutoffHours")` and stay in the flat
+  // `layout` until that pass folds them into their sections. No More-options fold remains.
 
   // Repeat / recurrence control (TM-796): CREATE-only. OFF = the unchanged single-create path; ON turns
   // the form into a recurring SERIES (the fields above become the template; the times become the first
   // occurrence). Recurrence is create-only in v1 — an edit of a series occurrence is a plain event edit,
-  // so we never build the control in edit mode (the AC: "edit mode shows NO recurrence controls"). Sits
-  // just below "More options", above the image + actions. The submit handler branches on
-  // `recurrence?.isEnabled()` to POST /series vs the single-create POST.
+  // so we never build the control in edit mode (the AC: "edit mode shows NO recurrence controls"). It's
+  // grouped into the "When" section (TM-1195) by the section-grouping pass, above the image + actions. The
+  // submit handler branches on `recurrence?.isEnabled()` to POST /series vs the single-create POST.
   let recurrence = null;
   if (mode === "create") {
     // TM-1184: a series template has NO column for the non-template fields (Map URL, opening message, age
@@ -2764,17 +2763,83 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     save.textContent = on ? labelWhileBusy : saveLabel();
   };
 
+  // The Heading field gets a bespoke wrapper (chips + custom helper), distinct from buildField's output —
+  // it's the first control in the Basics section.
+  const headingField = el("div", { class: "tm-form-field" }, [
+    el("label", { class: "tm-field-label", for: "event-heading", text: "Heading" }),
+    buildChips(headingInput, () => revalidate("heading")),
+    // The heading field's input/hint/error were built above; re-home them under this custom label.
+    fields.get("heading").input,
+    el("p", { class: "tm-muted tm-field-hint", text: `Tap a suggestion or write your own. Up to ${HEADING_MAX} characters.` }),
+    fields.get("heading").error,
+  ]);
+
+  // --- Collapsible sections (TM-1195) -----------------------------------------------------------
+  //
+  // Regroup the one long single-column form into 5 labelled collapsible sections via buildFormSection
+  // (TM-1186 — native <details>, INDEPENDENT folds, no accordion). This is a LAYOUT-ONLY change: the
+  // FORM_FIELDS → readDraft / validateEventDraft / buildEventPayload / server-error-routing contract is
+  // untouched — every field node keeps its id + its `key` and only its GROUPING into the DOM moves. The
+  // section membership per key is fixed by the LOCKED decision (Basics · When · Where · Who can join ·
+  // Booking rules); Basics/When/Where open by default, Who-can-join/Booking-rules collapsed.
+  //
+  // The `summary` slot (TM-1196) is left OMITTED for now — this ticket is the regroup only; the folds are
+  // wired so TM-1196 can fill each section's collapsed value line without further plumbing.
+  //
+  // The "limits" row (capacity + reveal, two-up) is the one field-row that SPLITS across sections: capacity
+  // → "Who can join", reveal → "Booking rules". We take the two individual field wrappers (byKey) and place
+  // them one-per-section; the now-empty holder is dropped. Every other field-row stays intact within one
+  // section (when: start+end; visibility: visStart+visEnd; links: map+online+preview).
+  // openingMessage (the group-chat opening message, TM-710) isn't named in any of the 5 LOCKED sections;
+  // as a free-text content field it belongs with description in "Basics" (and MUST stay in the DOM — a
+  // dropped field would change readDraft/payload, breaking the layout-only invariant). Placed last so the
+  // primary Basics fields (heading/description/format/image) lead.
+  const basicsChildren = [headingField, byKey.get("description"), formatToggle.node, image.node, byKey.get("openingMessage")].filter(Boolean);
+  const whenChildren = [
+    rowGroups.get("when") || byKey.get("startAt"),
+    !rowGroups.get("when") ? byKey.get("endAt") : null,
+    recurrence ? recurrence.node : null,
+    byKey.get("timezone"),
+  ].filter(Boolean);
+  const whereChildren = [
+    byKey.get("locationText"),
+    venuePicker ? venuePicker.node : null,
+    byKey.get("city"),
+    rowGroups.get("links") || byKey.get("mapUrl"),
+  ].filter(Boolean);
+  const whoChildren = [
+    rowGroups.get("visibility") || byKey.get("visibilityStart"),
+    !rowGroups.get("visibility") ? byKey.get("visibilityEnd") : null,
+    byKey.get("capacity"),
+    ageBand ? ageBand.node : null,
+  ].filter(Boolean);
+  const bookingChildren = [
+    byKey.get("bookingCutoffHours"),
+    byKey.get("locationRevealHours"),
+    priceControl ? priceControl.node : null,
+  ].filter(Boolean);
+
+  const basicsSection = buildFormSection({ title: "Basics", open: true, children: basicsChildren });
+  whenSection = buildFormSection({ title: "When", open: true, children: whenChildren });
+  const whereSection = buildFormSection({ title: "Where", open: true, children: whereChildren });
+  const whoSection = buildFormSection({ title: "Who can join", open: false, children: whoChildren });
+  bookingRulesSection = buildFormSection({ title: "Booking rules", open: false, children: bookingChildren });
+  // Stable ids so the e2e + a11y can target each section's toggle (mirrors the retired More-options id).
+  const sectionHandles = [
+    ["event-section-basics", basicsSection],
+    ["event-section-when", whenSection],
+    ["event-section-where", whereSection],
+    ["event-section-who", whoSection],
+    ["event-section-booking", bookingRulesSection],
+  ];
+  for (const [id, handle] of sectionHandles) {
+    handle.el.id = id;
+    handle.el.querySelector("summary")?.setAttribute("id", `${id}-toggle`);
+  }
+  const sectionNodes = sectionHandles.map(([, h]) => h.el);
+
   const form = el("form", { class: "tm-event-form", id: "event-form", novalidate: true }, [
-    el("div", { class: "tm-form-field" }, [
-      el("label", { class: "tm-field-label", for: "event-heading", text: "Heading" }),
-      buildChips(headingInput, () => revalidate("heading")),
-      // The heading field's input/hint/error were built above; re-home them under this custom label.
-      fields.get("heading").input,
-      el("p", { class: "tm-muted tm-field-hint", text: `Tap a suggestion or write your own. Up to ${HEADING_MAX} characters.` }),
-      fields.get("heading").error,
-    ]),
-    ...layout.filter((node) => node !== byKey.get("heading")),
-    image.node,
+    ...sectionNodes,
     // Clone past-start warning (TM-1061) — non-blocking, sits just above the actions so it's next to Save.
     pastStartNote,
     // Sticky footer action bar (TM-1190): the reset/cancel/save row is UNCHANGED (same buttons, same ids,
