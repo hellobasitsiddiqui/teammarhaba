@@ -219,3 +219,67 @@ test("@admin @admin-events recurrence validation blocks bad combos inline (no /s
   await page.click("#event-save");
   expect((await seriesResponse).status()).toBe(201);
 });
+
+// Recurrence is CREATE-only in v1 (TM-1183 item 13): editing an EXISTING event is a plain event edit — the
+// "Repeat" picker must NOT appear. buildRecurrenceControl is only built when mode === "create", so the edit
+// form has no #event-repeat-toggle. This asserts that seam so a future change that leaks the picker into edit
+// (which would let an admin "re-series" a single occurrence) is caught. Create a plain event, open it for
+// edit, assert the toggle is absent (but the ordinary form IS there). FAIL-BEFORE (a regression that mounted
+// the picker in edit mode): the toggle would be visible on the edit form.
+test("@admin @admin-events edit mode shows NO recurrence picker — #event-repeat-toggle is absent (TM-1183)", async ({ page }) => {
+  const EDIT_HEADING = `E2E Edit No-Repeat ${Date.now()}`;
+  const now = Date.now();
+  const start = new Date(now + 30 * 864e5);
+  const end = new Date(now + 30 * 864e5 + 2 * 36e5);
+  const visStart = new Date(now - 864e5);
+  const visEnd = new Date(now + 120 * 864e5);
+
+  await page.goto("/#/login");
+  await expect(page.locator("#auth-signed-out")).toBeVisible();
+  await page.fill("#email", ADMIN.email);
+  await page.click("#try-another-btn");
+  await page.fill("#password", ADMIN.password);
+  await page.click("#signin-btn");
+  await expect(page.locator("#auth-signed-out")).toBeHidden();
+  await openAdminHub(page);
+  await page.click('.admin-hub-row[href="#/admin/events"]');
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+
+  // Create a plain (non-recurring) event — Repeat stays OFF so this is the ordinary single-create path.
+  await page.click("#admin-events-new");
+  await expect(page.locator("#event-form")).toBeVisible();
+  // The picker IS present on CREATE (the toggle exists) — sanity-check so the edit-mode absence is meaningful.
+  await expect(page.locator("#event-repeat-toggle")).toBeVisible();
+  await page.fill("#event-heading", EDIT_HEADING);
+  await page.fill("#event-description", "Plain event for the TM-1183 edit-mode-no-picker e2e.");
+  await page.fill("#event-location", "Marhaba Cafe, 12 High St");
+  await page.locator("#event-more-options-toggle").click();
+  await page.locator("#event-timezone").selectOption("UTC");
+  await page.fill("#event-start", localValue(start));
+  await page.fill("#event-end", localValue(end));
+  await page.fill("#event-visibility-start", localValue(visStart));
+  await page.fill("#event-visibility-end", localValue(visEnd));
+
+  const createResponse = page.waitForResponse(
+    (r) => r.url().endsWith("/api/v1/admin/events") && r.request().method() === "POST",
+  );
+  await page.click("#event-save");
+  const created = await (await createResponse).json();
+  expect(created.id).toBeTruthy();
+
+  // Back on the list; open the just-created event for EDIT.
+  await expect(page.locator("#admin-events-view")).toBeVisible();
+  await page.locator("#admin-events-lifecycle-all").click();
+  const row = page.locator(`tr[data-event-id="${created.id}"]`);
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: `Edit ${EDIT_HEADING}` }).click();
+  await expect(page).toHaveURL(new RegExp(`#/admin/events/${created.id}/edit$`));
+  await expect(page.locator("#event-form")).toBeVisible();
+  await expect(page.locator("#event-heading")).toHaveValue(EDIT_HEADING); // the form IS the edit form
+
+  // The recurrence picker must be ABSENT in edit mode (create-only in v1).
+  await expect(page.locator("#event-repeat-toggle")).toHaveCount(0);
+  await expect(page.locator("#event-repeat-body")).toHaveCount(0);
+  // Save is the plain edit copy, never "Create series".
+  await expect(page.locator("#event-save")).toHaveText("Save changes");
+});

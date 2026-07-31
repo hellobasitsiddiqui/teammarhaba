@@ -94,6 +94,7 @@ import {
   weekdayOfLocal,
   validateSeriesDraft,
   buildSeriesPayload,
+  SERIES_NON_TEMPLATE_KEYS,
 } from "../src/assets/event-form.js";
 
 // --- caps mirror the backend DTOs (Create/UpdateEventRequest) --------------------------------
@@ -1523,6 +1524,13 @@ test("pastStartWarning: blank/unparseable start is not this warning's concern (T
 // the start's weekday, DAILY forbids a weekday; and buildSeriesPayload emits the exact wire shape
 // (frequency/interval/[byWeekday]/(untilDate XOR afterN)/timezone/first*-anchor + template).
 
+// A fixed clock BEFORE the seriesDraft start (2026-07-10T17:00Z) so validateSeriesDraft's future-start rule
+// (TM-1183 item 8) is satisfied deterministically — the suite must not depend on the real wall-clock, which
+// long ago passed 2026-07-10. `vsd(draft)` = validateSeriesDraft pinned to that clock; only the dedicated
+// future-start test overrides `now`.
+const SERIES_NOW = Date.parse("2026-07-01T00:00:00.000Z");
+const vsd = (draft, opts = {}) => validateSeriesDraft(draft, { now: SERIES_NOW, ...opts });
+
 // A valid RECURRING draft (a Weekly-every-1, until, on the start's weekday). 2026-07-10 is a FRIDAY.
 function seriesDraft(over = {}) {
   return {
@@ -1559,46 +1567,60 @@ test("weekdayOfLocal maps a datetime-local value to its ISO weekday name (TM-796
 });
 
 test("validateSeriesDraft: a well-formed weekly (and daily) draft can save (TM-796)", () => {
-  assert.equal(validateSeriesDraft(seriesDraft()).canSave, true);
-  assert.deepEqual(validateSeriesDraft(seriesDraft()).errors, {});
+  assert.equal(vsd(seriesDraft()).canSave, true);
+  assert.deepEqual(vsd(seriesDraft()).errors, {});
   // Daily-every-2, afterN=6 (no weekday).
-  const daily = validateSeriesDraft(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "", interval: "2", endMode: SERIES_END_AFTER, untilDate: "", afterN: "6" }));
+  const daily = vsd(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "", interval: "2", endMode: SERIES_END_AFTER, untilDate: "", afterN: "6" }));
   assert.equal(daily.canSave, true);
   assert.deepEqual(daily.errors, {});
 });
 
 test("validateSeriesDraft: interval must be an integer ≥ 1 (mirrors @Min(1)) (TM-796)", () => {
-  assert.match(validateSeriesDraft(seriesDraft({ interval: "0" })).errors.interval, /1 or more/);
-  assert.match(validateSeriesDraft(seriesDraft({ interval: "" })).errors.interval, /1 or more/);
-  assert.match(validateSeriesDraft(seriesDraft({ interval: "2.5" })).errors.interval, /whole number/i);
-  assert.match(validateSeriesDraft(seriesDraft({ interval: "-1" })).errors.interval, /1 or more/);
+  assert.match(vsd(seriesDraft({ interval: "0" })).errors.interval, /1 or more/);
+  assert.match(vsd(seriesDraft({ interval: "" })).errors.interval, /1 or more/);
+  assert.match(vsd(seriesDraft({ interval: "2.5" })).errors.interval, /whole number/i);
+  assert.match(vsd(seriesDraft({ interval: "-1" })).errors.interval, /1 or more/);
 });
 
 test("validateSeriesDraft: EXACTLY ONE end condition — neither / both are errors (TM-796)", () => {
   // Neither: endMode isn't set → endMode error.
-  assert.match(validateSeriesDraft(seriesDraft({ endMode: "" })).errors.endMode, /how the series ends/i);
+  assert.match(vsd(seriesDraft({ endMode: "" })).errors.endMode, /how the series ends/i);
   // Until chosen but blank date → untilDate error.
-  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_UNTIL, untilDate: "" })).errors.untilDate, /end date/i);
+  assert.match(vsd(seriesDraft({ endMode: SERIES_END_UNTIL, untilDate: "" })).errors.untilDate, /end date/i);
   // After chosen but blank / zero → afterN error.
-  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "" })).errors.afterN, /1 or more/i);
-  assert.match(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "0" })).errors.afterN, /1 or more/i);
+  assert.match(vsd(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "" })).errors.afterN, /1 or more/i);
+  assert.match(vsd(seriesDraft({ endMode: SERIES_END_AFTER, untilDate: "", afterN: "0" })).errors.afterN, /1 or more/i);
   // A valid After (with the stray untilDate ignored because endMode=after) still saves — only the active
   // mode supplies the end, so buildSeriesPayload can never emit both.
-  assert.equal(validateSeriesDraft(seriesDraft({ endMode: SERIES_END_AFTER, afterN: "8" })).canSave, true);
+  assert.equal(vsd(seriesDraft({ endMode: SERIES_END_AFTER, afterN: "8" })).canSave, true);
 });
 
 test("validateSeriesDraft: WEEKLY requires a weekday that MATCHES the start's weekday (TM-796)", () => {
   // Blank weekday on WEEKLY.
-  assert.match(validateSeriesDraft(seriesDraft({ byWeekday: "" })).errors.byWeekday, /pick a weekday/i);
+  assert.match(vsd(seriesDraft({ byWeekday: "" })).errors.byWeekday, /pick a weekday/i);
   // A weekday that doesn't match the Friday start.
-  assert.match(validateSeriesDraft(seriesDraft({ byWeekday: "MONDAY" })).errors.byWeekday, /match the start/i);
+  assert.match(vsd(seriesDraft({ byWeekday: "MONDAY" })).errors.byWeekday, /match the start/i);
   // The matching weekday is fine.
-  assert.equal(validateSeriesDraft(seriesDraft({ byWeekday: "FRIDAY" })).canSave, true);
+  assert.equal(vsd(seriesDraft({ byWeekday: "FRIDAY" })).canSave, true);
 });
 
 test("validateSeriesDraft: DAILY must NOT carry a weekday (parity with the API edge) (TM-796)", () => {
-  const bad = validateSeriesDraft(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "MONDAY", endMode: SERIES_END_AFTER, untilDate: "", afterN: "4" }));
+  const bad = vsd(seriesDraft({ frequency: SERIES_FREQ_DAILY, byWeekday: "MONDAY", endMode: SERIES_END_AFTER, untilDate: "", afterN: "4" }));
   assert.match(bad.errors.byWeekday, /only applies to a weekly/i);
+});
+
+test("validateSeriesDraft: the first occurrence must start in the FUTURE (mirrors CreateSeriesRequest, TM-1183)", () => {
+  // The seriesDraft start resolves to 2026-07-10T17:00Z (BST). A `now` AFTER it → past-start error on startAt.
+  const past = validateSeriesDraft(seriesDraft(), { now: Date.parse("2026-07-10T17:00:01.000Z") });
+  assert.match(past.errors.startAt, /future/i);
+  assert.equal(past.canSave, false);
+  // A `now` a moment BEFORE the anchor → no future-start error (the rest of the draft is valid).
+  const future = validateSeriesDraft(seriesDraft(), { now: Date.parse("2026-07-10T16:59:59.000Z") });
+  assert.equal("startAt" in future.errors, false);
+  assert.equal(future.canSave, true);
+  // Missing/unparseable start or zone → the rule is skipped (validateEventDraft owns "start required").
+  const noStart = validateSeriesDraft(seriesDraft({ startAt: "" }), { now: Date.parse("2030-01-01T00:00:00.000Z") });
+  assert.equal("startAt" in noStart.errors, false);
 });
 
 test("buildSeriesPayload emits the CreateSeriesRequest wire shape: rule + first* anchor + template (TM-796)", () => {
@@ -1624,6 +1646,34 @@ test("buildSeriesPayload emits the CreateSeriesRequest wire shape: rule + first*
   assert.equal(body.locationRevealHours, 24);
   // The event's own instant keys must NOT leak onto the series body (only the first* anchor names).
   for (const k of ["startAt", "endAt", "visibilityStart", "visibilityEnd"]) assert.equal(k in body, false, `${k} must not be on the series body`);
+});
+
+test("buildSeriesPayload STRIPS the non-template keys the series DTO can't read (TM-1184)", () => {
+  // A draft that DOES carry every non-template field (onlineUrl / mapUrl / openingMessage / ageMin / ageMax).
+  // buildEventPayload would emit these; buildSeriesPayload must strip them so no occurrence is materialised
+  // with a field the series template has no column for (worst case: an Online series with no join link).
+  const body = buildSeriesPayload(
+    seriesDraft({ mapUrl: "https://maps.example/x", openingMessage: "Welcome all!", ageMin: "18", ageMax: "40" }),
+  );
+  for (const k of SERIES_NON_TEMPLATE_KEYS) assert.equal(k in body, false, `${k} must be stripped from the series body`);
+  assert.deepEqual(SERIES_NON_TEMPLATE_KEYS, ["onlineUrl", "mapUrl", "openingMessage", "ageMin", "ageMax"]);
+  // Sanity: the same fields WOULD ride a single-create body (so the strip is meaningful, not vacuous).
+  const single = buildEventPayload(seriesDraft({ mapUrl: "https://maps.example/x", openingMessage: "Welcome all!", ageMin: "18", ageMax: "40" }));
+  assert.equal(single.mapUrl, "https://maps.example/x");
+  assert.equal(single.openingMessage, "Welcome all!");
+  assert.equal(single.ageMin, 18);
+  // The template fields the series DTO DOES read still ride through.
+  assert.equal(body.heading, "Coffee & Code");
+  assert.equal(body.locationText, "Marhaba Cafe, 12 High St");
+  assert.equal(body.capacity, 20);
+});
+
+test("buildSeriesPayload — an Online draft still never carries onlineUrl onto the series (TM-1184 invariant)", () => {
+  // Even if a caller hands buildSeriesPayload an Online-format draft (the form prevents this, but the payload
+  // builder is the load-bearing guarantee), onlineUrl is stripped — an Online series can't materialise with a
+  // per-occurrence join link, so the invariant "no Online series with onlineUrl" holds at the payload layer.
+  const body = buildSeriesPayload(seriesDraft({ format: "online", onlineUrl: "https://meet.example/room", locationText: "" }));
+  assert.equal("onlineUrl" in body, false);
 });
 
 test("buildSeriesPayload — DAILY omits byWeekday and can carry afterN instead of untilDate (TM-796)", () => {
