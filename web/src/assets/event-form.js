@@ -673,6 +673,91 @@ export function revealHourChips() {
   ];
 }
 
+// --- collapsed-section value summaries (TM-1196) ----------------------------------------------
+//
+// One-line VALUE summaries for the collapsible form sections (TM-1195): each COLLAPSED section header
+// shows a terse " · "-joined line of its current field values so an admin sees what's inside a fold
+// without opening it. DERIVED-DISPLAY ONLY — these read the same draft `readDraft()` produces and never
+// touch readDraft / validateEventDraft / buildEventPayload / FORM_FIELDS / section membership. Kept pure
+// (of the DOM) here so `node --test` can assert the strings — the DOM caller (admin-events.js) just calls
+// each section's `setSummary(...)` (buildFormSection, TM-1186) with the result on every field change.
+//
+// Design: terse and defaults-aware. A field left at its default reads as a sensible word ("public",
+// "no cap", "all ages", "reveal default", "Free"), never "undefined" and never a raw blank. Parts join
+// with " · "; a whole summary is never empty (there's always at least the visibility / cutoff word).
+
+/** " · "-join the non-blank parts of a summary (drops empty/nullish parts so no stray separators). */
+function joinSummary(parts) {
+  return parts.filter((p) => typeof p === "string" && p !== "").join(" · ");
+}
+
+/**
+ * The "Who can join" collapsed-section summary (TM-1196): visibility + capacity + age band, e.g.
+ * "public · cap 20 · 18+" or the all-defaults "public · no cap · all ages". PURE — reads the draft's
+ * string fields (visibilityStart/visibilityEnd, capacity, ageMin/ageMax) exactly as they sit on the form.
+ *
+ *   - visibility: "scheduled" when EITHER visibility bound is set (the event's listing is time-boxed),
+ *     else "public" (visible whenever — the pre-window default read).
+ *   - capacity: "cap N" for a set capacity, else "no cap" (blank = unlimited, {@link capacityLabel}).
+ *   - age band: "N+" (min only), "≤N" (max only), "N-M" (both), or "all ages" (neither) — mirrors the
+ *     age-band presets' open/closed reads without inventing bounds.
+ *
+ * @param {object} draft the raw form values (as {@link readDraft}/{@link toFormModel} produce).
+ * @returns {string} a one-line " · "-joined summary (never empty).
+ */
+export function whoCanJoinSummary(draft = {}) {
+  const hasWindow = cleanText(draft.visibilityStart) !== "" || cleanText(draft.visibilityEnd) !== "";
+  const visibility = hasWindow ? "scheduled" : "public";
+
+  // parseIntOrNull returns NaN for a present-but-non-integer value (and NaN is a `number`), so use
+  // Number.isInteger — a mid-edit "abc"/"1x" reads as the sensible default word, never "cap NaN".
+  const cap = parseIntOrNull(draft.capacity);
+  const capacity = Number.isInteger(cap) ? `cap ${cap}` : "no cap";
+
+  const ageMin = parseIntOrNull(draft.ageMin);
+  const ageMax = parseIntOrNull(draft.ageMax);
+  const hasMin = Number.isInteger(ageMin);
+  const hasMax = Number.isInteger(ageMax);
+  let age;
+  if (hasMin && hasMax) age = `${ageMin}-${ageMax}`;
+  else if (hasMin) age = `${ageMin}+`;
+  else if (hasMax) age = `≤${ageMax}`;
+  else age = "all ages";
+
+  return joinSummary([visibility, capacity, age]);
+}
+
+/**
+ * The "Booking rules" collapsed-section summary (TM-1196): booking cutoff + location reveal + price, e.g.
+ * "cutoff 1h · reveal 24h · £5" or the all-defaults "cutoff default · reveal default · Free". PURE —
+ * reads the draft's string fields (bookingCutoffHours, locationRevealHours, price) as they sit on the form.
+ *
+ *   - cutoff: "cutoff Nh" for a set override (0 → "cutoff 0h" = up-to-start, a real value), else
+ *     "cutoff default" (blank = inherit — mirrors toFormModel's blank-means-inherit contract).
+ *   - reveal: "reveal Nh" for a set value, else "reveal default" (blank = the resolved default applies).
+ *   - price: "Free" for 0/blank (the create default is Free, TM-1076), else the £ amount ("£5", "£7.50").
+ *
+ * @param {object} draft the raw form values (as {@link readDraft}/{@link toFormModel} produce).
+ * @returns {string} a one-line " · "-joined summary (never empty).
+ */
+export function bookingRulesSummary(draft = {}) {
+  // Number.isInteger (not `typeof === "number"`) so a present-but-non-integer NaN reads as the default
+  // word, never "cutoff NaNh". `0` IS an integer → a real "cutoff 0h" override (accept up to start).
+  const cutoff = parseIntOrNull(draft.bookingCutoffHours);
+  const cutoffPart = Number.isInteger(cutoff) ? `cutoff ${cutoff}h` : "cutoff default";
+
+  const reveal = parseIntOrNull(draft.locationRevealHours);
+  const revealPart = Number.isInteger(reveal) ? `reveal ${reveal}h` : "reveal default";
+
+  // Price → the £ amount, or Free for 0 / blank / unparseable. penceToPounds gives the display amount;
+  // poundsToPence normalises the £-string the form carries back to pence so "0"/""/"5" all read right.
+  const pence = poundsToPence(draft.price);
+  const pricePart =
+    typeof pence === "number" && pence > 0 ? `£${penceToPounds(String(pence))}` : "Free";
+
+  return joinSummary([cutoffPart, revealPart, pricePart]);
+}
+
 // --- validation (mirrors the API's Bean Validation + cross-field rules) ------------------------
 
 /**
