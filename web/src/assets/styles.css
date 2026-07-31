@@ -8735,3 +8735,40 @@ a.tm-pf-go:focus-visible {
     margin: 0;
     font-size: 0.85rem;
 }
+
+/* ═══ Sticky Save action bar on the event form (TM-1190) ═════════════════════════════════════════
+ * The admin create/edit event form is a tall, scrolling page (.tm-event-form-page, TM-426) whose
+ * primary Save lived at the very bottom — as the form grows / sections expand (TM-1185) it gets buried
+ * and the admin has to scroll to the end to save. This pins the reset/cancel/save row (unchanged buttons,
+ * ids + handlers — see admin-events.js) into a sticky footer so Save stays reachable while scrolling.
+ *
+ * `position: sticky; bottom` keeps the bar within the normal page scroll flow (no fixed-overlay layout
+ * hacks): it scrolls with content until it reaches the bottom offset, then pins there. The page bg behind
+ * it (var(--page-bg), the same colour .app scrolls over) is opaque so passing content is hidden cleanly.
+ * A top border + soft shadow read it as a distinct bar lifting off the content.
+ */
+.tm-event-actions-bar {
+    position: sticky;
+    /* Sit above the fixed bottom tab bar (.app-tabbar, z-index 900, ~4.75rem + safe-area) when it's shown
+       for a signed-in admin — the body.tm-has-tabbar clearance below matches .app's own bottom padding so
+       Save never hides behind the tab bar. Overridden to bottom:0 when there is no tab bar. */
+    bottom: 0;
+    z-index: 4;                          /* above form content, below the tab bar (900) + toasts (1000) + modals (1100) */
+    margin-top: 0.5rem;
+    /* Bleed the bar to the page-column edges (cancel .app's horizontal padding) so the border/shadow spans
+       the full width like a real footer, then re-pad the buttons inside. Falls back gracefully if the pad
+       vars are absent. */
+    padding: 0.75rem 0 calc(0.75rem + env(safe-area-inset-bottom));
+    background: var(--page-bg);
+    border-top: var(--border-width) solid var(--border);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* When the bottom tab bar is present (signed-in, un-gated — the same condition .app pads for), lift the
+   sticky bar so it pins ABOVE the fixed tab bar rather than underneath it. Mirrors the tab-bar height +
+   safe-area used in body.tm-has-tabbar .app's padding-bottom. */
+body.tm-has-tabbar .tm-event-actions-bar {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    /* the tab bar already carries the home-indicator inset, so the bar's own bottom pad drops it. */
+    padding-bottom: 0.75rem;
+}

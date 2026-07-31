@@ -2777,7 +2777,15 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     image.node,
     // Clone past-start warning (TM-1061) — non-blocking, sits just above the actions so it's next to Save.
     pastStartNote,
-    el("div", { class: "tm-form-actions" }, [reset, cancel, save]),
+    // Sticky footer action bar (TM-1190): the reset/cancel/save row is UNCHANGED (same buttons, same ids,
+    // same click/submit handlers, same create/series/save label logic + disabled states) — it's just
+    // re-homed inside a pinned bar (styles.css `.tm-event-actions-bar`, position:sticky) so the primary
+    // Save stays reachable as the form grows / sections expand, instead of being buried at the very bottom
+    // of a tall form. The past-start warning stays ABOVE the bar (it's a per-Save note that belongs next to
+    // the action, not inside the pinned chrome).
+    el("div", { class: "tm-event-actions-bar", id: "event-actions-bar" }, [
+      el("div", { class: "tm-form-actions" }, [reset, cancel, save]),
+    ]),
   ]);
 
   // Clone (TM-1061): compute the initial past-start warning now the form is assembled — a clone can open
