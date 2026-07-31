@@ -106,6 +106,8 @@ test("@profile-shell the identity header is the FIRST visible content — corner
     const identity = rect(".tm-pf-id");
     const bell = rect("#nav-notif-bell");
     const gear = rect(".tm-pf-gear");
+    const topbar = rect("#app-topbar"); // TM-1175: the pinned app header (headline + bell)
+    const pftop = rect(".tm-pf-topbar"); // the profile's own header band (sr-only title + gear)
     return {
       titleW: title?.w,
       titleH: title?.h,
@@ -114,6 +116,8 @@ test("@profile-shell the identity header is the FIRST visible content — corner
       bellBottom: bell?.bottom,
       bellHeight: bell?.h,
       bellRight: bell?.right,
+      topbarBottom: topbar?.bottom,
+      pfTopbarBottom: pftop?.bottom,
       viewportWidth: window.innerWidth,
       bellGearOverlap: overlap(bell, gear),
     };
@@ -126,13 +130,15 @@ test("@profile-shell the identity header is the FIRST visible content — corner
   expect(geo.titleW).toBeLessThanOrEqual(2);
   expect(geo.titleH).toBeLessThanOrEqual(2);
 
-  // Content-first (AC1): the identity header — the topmost VISIBLE block now that the "Profile" word is
-  // sr-only — starts WITHIN the corner-bell's own band. Its top is above the bell's BOTTOM edge plus a
-  // small delta (a bell-height slack absorbs the topbar/gear band the identity sits under), i.e. it was
-  // NOT pushed a whole ~44px bell-row DOWN as on pre-fix main (bell in an in-flow row above → content
-  // one full bell-row below the band → identityTop > bellBottom + bellHeight). The corner-pinned bell is
-  // the highest point, so the content legitimately rides just below it but stays near the app content top.
-  expect(geo.identityTop).toBeLessThanOrEqual(geo.bellBottom + geo.bellHeight);
+  // Content-first (AC1), updated for the pinned top-bar header (TM-1175): the app now has ONE fixed
+  // header (#app-topbar — the per-screen headline "About you" + the bell), so profile content correctly
+  // starts BELOW it. The invariant is now (a) the identity header sits below that header (content-behind-
+  // header, not overlapping it), and (b) it is still the FIRST content — immediately below the profile's
+  // OWN header band (the gear band), NOT pushed an extra empty nav-row down (a bell-height slack absorbs
+  // normal spacing). Pre-TM-1175 this asserted identityTop <= bellBottom + bellHeight; the bell now lives
+  // INSIDE the top bar, so the anchor moved to the top bar + the profile header band.
+  expect(geo.identityTop).toBeGreaterThanOrEqual(geo.topbarBottom - 2);
+  expect(geo.identityTop).toBeLessThanOrEqual(geo.pfTopbarBottom + geo.bellHeight);
   // The bell is pinned to the top-right corner (right edge within 24px of the viewport right).
   expect(geo.bellRight).toBeGreaterThanOrEqual(geo.viewportWidth - 24);
   // The corner-clustered bell does not collide with the heading's own top-right gear control.
