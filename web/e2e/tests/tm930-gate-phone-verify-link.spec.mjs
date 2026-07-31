@@ -82,7 +82,7 @@ async function fillGateProfile(page, { name, location = "London", age = 30, phon
   }).toPass({ timeout: 15_000 });
 }
 
-test("@tm930 gate happy path: verify + link the phone, land in the app, GET /me phone = the verified E.164", async ({
+test("@profile @tm930gate happy path: verify + link the phone, land in the app, GET /me phone = the verified E.164", async ({
   page,
 }) => {
   const email = `e2e-tm930-happy-${Date.now()}@teammarhaba.test`;
@@ -151,7 +151,7 @@ test("@tm930 gate happy path: verify + link the phone, land in the app, GET /me 
   expect(me.phone).toBe(e164);
 });
 
-test("@tm930 collision: a number linked to another account HARD-BLOCKS with the exact copy, gate does not lift", async ({
+test("@profile @tm930collision: a number linked to another account HARD-BLOCKS with the exact copy, gate does not lift", async ({
   browser,
 }) => {
   // The shared number both accounts try to own — unique to this run (offset the seed so it can't

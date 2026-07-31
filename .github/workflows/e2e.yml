@@ -155,6 +155,13 @@ jobs:
         working-directory: web/e2e
         run: npx playwright install --with-deps chromium
 
+      # TM-1179: every spec must carry a product-surface @tag (on the test or an enclosing describe) so
+      # surface-scoped e2e (--grep, TM-1180) can't silently drop an untagged test. Runs here (Playwright
+      # is installed, no backend/emulator needed) so a new untagged spec fails the suite before it runs.
+      - name: Assert every e2e spec carries a surface tag (TM-1179)
+        working-directory: web/e2e
+        run: npm run lint:tags
+
       - name: Start Firebase Auth + Storage emulators
         working-directory: web/e2e
         # The Storage emulator (TM-166) loads the repo-root storage.rules via the root firebase.json
