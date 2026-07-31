@@ -1088,6 +1088,39 @@ function fieldLabel(key) {
   return FIELD_LABELS.get(key) || (key === "venueId" ? "Venue" : key);
 }
 
+// Series-create (POST /events/series) RFC-7807 field → the form input its error paints on (TM-1183 item 8).
+// A CreateSeriesRequest 400 keys its violations by the DTO's OWN names — the `first*` anchor fields and the
+// `@AssertTrue` cross-field getters (e.g. `firstStartInTheFuture`, `endConditionExactlyOne`,
+// `byWeekdayMatchingFirstStart`) — NONE of which is a FORM_FIELDS key or a recurrence-control key, so
+// without this alias map those errors fall straight through to the summary toast instead of painting inline
+// next to the offending input. Each entry maps a server field name to a local target:
+//   { form: "<FORM_FIELDS key>" }        → routed via setFieldError (paints on the event field)
+//   { recurrence: "<recurrence key>" }   → routed via recurrence.paintErrors (paints on the Repeat control)
+// The recurrence keys are the ones buildRecurrenceControl.paintErrors understands (frequency / interval /
+// byWeekday / endMode / untilDate / afterN). Only used when a series submit (Repeat ON) 400s.
+const SERIES_ERROR_FIELD_ALIASES = new Map([
+  // First-occurrence anchor instants + their ordering/future @AssertTrue getters → the event datetime fields.
+  ["firstStartAt", { form: "startAt" }],
+  ["firstStartInTheFuture", { form: "startAt" }],
+  ["firstEndAt", { form: "endAt" }],
+  ["firstEndAfterStart", { form: "endAt" }],
+  ["firstVisibilityStart", { form: "visibilityStart" }],
+  ["firstVisibilityEnd", { form: "visibilityEnd" }],
+  ["firstVisibilityWindowOrdered", { form: "visibilityEnd" }],
+  // Timezone (direct + the valid-IANA @AssertTrue getter).
+  ["timezone", { form: "timezone" }],
+  ["timezoneValid", { form: "timezone" }],
+  // Recurrence rule violations → the Repeat control's inline error nodes.
+  ["frequency", { recurrence: "frequency" }],
+  ["interval", { recurrence: "interval" }],
+  ["byWeekday", { recurrence: "byWeekday" }],
+  ["byWeekdayMatchingFirstStart", { recurrence: "byWeekday" }],
+  ["byWeekdayConsistentWithFrequency", { recurrence: "byWeekday" }],
+  ["endConditionExactlyOne", { recurrence: "endMode" }],
+  ["untilDate", { recurrence: "untilDate" }],
+  ["afterN", { recurrence: "afterN" }],
+]);
+
 /** Build one field control (label + input/select/textarea + hint + role=alert error), profile.js style. */
 function buildField(field, fields) {
   const errorId = `${field.id}-error`;
@@ -1520,16 +1553,36 @@ function buildFormatSelector(initial, onChange) {
     return el("label", { class: "tm-format-option", for: `event-format-${value}` }, [input, el("span", { text: label })]);
   });
 
+  // TM-1184: a note shown when the Online option is DISABLED because Repeat is ON (an Online recurring
+  // series would materialise occurrences with no join link — the invariant this closes). Hidden otherwise.
+  const onlineLockNote = el("p", {
+    class: "tm-muted tm-field-hint tm-format-online-lock-note",
+    id: "event-format-online-lock-note",
+    hidden: true,
+    text: "Online isn't available for a repeating series (v1) — each occurrence would have no join link. Turn Repeat off to make this an online event.",
+  });
+
   const node = el("div", { class: "tm-form-field", dataset: { field: "format" } }, [
     el("span", { class: "tm-field-label", id: "event-format-label", text: "Format" }),
     el("div", { class: "tm-format-choices", role: "radiogroup", "aria-labelledby": "event-format-label" }, options),
     el("p", { class: "tm-muted tm-field-hint", text: "In person shows the location + venue; Online asks only for a joining link." }),
+    onlineLockNote,
   ]);
 
   return {
     node,
     setActive: (format) => {
       for (const [value, input] of radios) input.checked = value === format;
+    },
+    // TM-1184: lock/unlock the Online choice. When Repeat is ON we disable Online (and show the note) so an
+    // Online recurring series — whose occurrences would carry onlineUrl=null — can never be created.
+    setOnlineDisabled: (disabled) => {
+      const online = radios.get(EVENT_FORMAT_ONLINE);
+      if (online) {
+        online.disabled = disabled;
+        online.setAttribute("aria-disabled", disabled ? "true" : "false");
+      }
+      onlineLockNote.hidden = !disabled;
     },
   };
 }
@@ -1556,6 +1609,13 @@ function buildFormatSelector(initial, onChange) {
  *   syncWeekdayDefault: (startLocal: string) => void,
  * }}
  */
+/** Today's local calendar date as "YYYY-MM-DD" — the `min` floor for the series end-date picker (TM-1183). */
+function todayLocalDate() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function buildRecurrenceControl(onToggle, onChange) {
   // The ON/OFF toggle. A plain checkbox styled as a switch — accessible, and its checked state is the
   // single source of "is this a series?". Its id is stable so the e2e / capture can target it.
@@ -1609,6 +1669,12 @@ function buildRecurrenceControl(onToggle, onChange) {
     id: "event-repeat-until",
     class: "tm-input",
     type: "date",
+    // TM-1183 item 8: floor the date picker at today so a past end date can't even be chosen (mirrors the
+    // server's untilDate ≥ start + future-start guards; the full cross-check stays in validateSeriesDraft).
+    min: todayLocalDate(),
+    // TM-1183 item 10: the wrapping <label> names the "Until" RADIO, not this input — so give the date field
+    // its own accessible name (a screen reader otherwise reads the field as unlabelled).
+    "aria-label": "Series end date",
     "aria-describedby": "event-repeat-end-error",
   });
   const afterInput = el("input", {
@@ -1618,6 +1684,8 @@ function buildRecurrenceControl(onToggle, onChange) {
     min: 1,
     inputmode: "numeric",
     placeholder: "e.g. 8",
+    // TM-1183 item 10: name the number field itself (the <label> names the "After" radio).
+    "aria-label": "Number of occurrences",
     "aria-describedby": "event-repeat-end-error",
   });
   const endError = el("p", { id: "event-repeat-end-error", class: "tm-field-error", role: "alert", hidden: true });
@@ -2543,9 +2611,57 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // `recurrence?.isEnabled()` to POST /series vs the single-create POST.
   let recurrence = null;
   if (mode === "create") {
+    // TM-1184: a series template has NO column for the non-template fields (Map URL, opening message, age
+    // band) and the series engine drops them per occurrence — so while Repeat is ON we HIDE those fields
+    // (each carries an inline "not carried onto a recurring series (v1)" note) so the admin can't fill a
+    // field that would be silently dropped. We also LOCK the format to In-person + disable Online: an
+    // Online recurring series would materialise occurrences with onlineUrl=null (no join link) — the
+    // invariant this closes. The fields' VALUES are left intact (not cleared), so turning Repeat back OFF
+    // restores the single-create form exactly; buildSeriesPayload strips these keys regardless as the
+    // load-bearing guarantee. The note text (one line) is appended to each field's wrapper.
+    const NON_TEMPLATE_NOTE = "Not carried onto a recurring series (v1).";
+    const nonTemplateFieldKeys = ["mapUrl", "openingMessage"];
+    const nonTemplateNotes = new Map();
+    const noteFor = (host) => {
+      let note = nonTemplateNotes.get(host);
+      if (!note) {
+        note = el("p", { class: "tm-muted tm-field-hint tm-repeat-omitted-note", hidden: true, text: NON_TEMPLATE_NOTE });
+        host.append(note);
+        nonTemplateNotes.set(host, note);
+      }
+      return note;
+    };
+    // The age-band control is built (ageBand.node) — its own wrapper hosts the age note. The two field
+    // wrappers (mapUrl / openingMessage) come from byKey. Map URL's preview slot rides with its field.
+    const applyRepeatTemplateView = (on) => {
+      // Non-template FIELDS: hide + note while Repeat is ON, and clear any stale error so a now-hidden field
+      // can't block Save. Values are retained for a toggle round-trip.
+      for (const key of nonTemplateFieldKeys) {
+        const wrapper = byKey.get(key);
+        if (!wrapper) continue;
+        wrapper.hidden = on;
+        noteFor(wrapper).hidden = !on;
+        if (on) setFieldError(key, "");
+      }
+      // Age band control (its own composite node) — hide + note (the note lives on the control's node).
+      if (ageBand?.node) {
+        ageBand.node.hidden = on;
+        noteFor(ageBand.node).hidden = !on;
+      }
+      // The Map URL live-preview slot tracks the Map URL field — hide it too so a stale preview card can't
+      // linger while the field is omitted from the series template.
+      if (mapPreviewRef?.node) mapPreviewRef.node.hidden = on || currentFormat === EVENT_FORMAT_ONLINE;
+      // Format lock: Repeat ON forces In-person and disables Online (the no-join-link invariant). Turning
+      // Repeat OFF re-enables Online but leaves the current (In-person) choice — the admin re-picks Online.
+      if (on && currentFormat === EVENT_FORMAT_ONLINE) setFormat(EVENT_FORMAT_INPERSON);
+      formatToggle.setOnlineDisabled(on);
+    };
+
     recurrence = buildRecurrenceControl(
       () => {
-        // Toggling Repeat changes the Save gate (recurrence rules apply) and the Save button copy.
+        // Toggling Repeat changes the Save gate (recurrence rules apply) and the Save button copy, AND
+        // (TM-1184) hides the non-template fields + locks the format when ON.
+        applyRepeatTemplateView(recurrence.isEnabled());
         relabelSave();
         revalidate();
       },
@@ -2559,9 +2675,14 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     layout.push(recurrence.node);
     // Default the WEEKLY weekday to the chosen start's own weekday, and keep it in sync as the start
     // changes (until the admin hand-picks a weekday). The start input already fires the schedule-chip
-    // refresh; add the weekday sync to the same edit.
+    // refresh; add the weekday sync to the same edit. TM-1183 item 12: a start-date change while Repeat is
+    // ON also re-runs the recurrence validation so a stale "weekday must match the start" error clears
+    // (syncWeekdayDefault realigns the weekday, but only re-validating repaints the cleared error).
     recurrence.syncWeekdayDefault(startInput.value);
-    startInput.addEventListener("input", () => recurrence.syncWeekdayDefault(startInput.value));
+    startInput.addEventListener("input", () => {
+      recurrence.syncWeekdayDefault(startInput.value);
+      if (recurrence.isEnabled()) recurrence.paintErrors(validateSeriesDraft(readSeriesDraft()).errors);
+    });
   }
 
   // The combined draft a SERIES submit reads: the ordinary event draft (template + the start/window
@@ -2579,7 +2700,12 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   const isDirty = () => {
     // Before the baseline snapshot exists (during construction) nothing is dirty yet.
     if (!baselineDraft) return false;
-    return isDirtyDraft(readDraft(), baselineDraft) || image.getFile() != null;
+    // TM-1183 item 11: the recurrence state lives OUTSIDE readDraft (the Repeat toggle + its rule fields are
+    // in the recurrence control, not FORM_FIELDS), so a Repeat-ON configured form would otherwise read as
+    // pristine and skip the TM-1101 discard confirm on exit. Fold it in: Repeat being ON is a real change to
+    // what a submit would do (a series vs a single event), so treat an enabled Repeat as dirty.
+    const repeatOn = mode === "create" && recurrence != null && recurrence.isEnabled();
+    return isDirtyDraft(readDraft(), baselineDraft) || image.getFile() != null || repeatOn;
   };
   // Confirm-on-exit (TM-1101): a DIRTY form warns before discarding; a PRISTINE form leaves silently.
   // Returns true when it's safe to leave (pristine, or the admin confirmed the discard). Shared by the
@@ -2718,14 +2844,19 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
         // Repeat ON (TM-796): POST a CreateSeriesRequest to .../events/series instead of the single
         // create. The template + first-occurrence anchor + recurrence rule come from buildSeriesPayload.
         // On 201 the response carries the created series + its generated occurrences, which the list (via
-        // onDone → loadEvents) now shows. Image handling mirrors the single-create path: the id we PATCH
-        // the image onto is the FIRST occurrence's (occurrences[0]) — the template image for the batch.
+        // onDone → loadEvents) now shows.
         const created = await eventApi("/api/v1/admin/events/series", { method: "POST", body: buildSeriesPayload(readSeriesDraft()) });
-        const firstOccurrence = Array.isArray(created?.occurrences) ? created.occurrences[0] : null;
-        if (pending && firstOccurrence?.id != null) {
+        const occurrences = Array.isArray(created?.occurrences) ? created.occurrences.filter((o) => o?.id != null) : [];
+        // Image handling (TM-1183 item 5): upload the picked image ONCE (to the first occurrence's object),
+        // then PATCH the resulting imagePath onto EVERY occurrence — not just occurrences[0]. Otherwise only
+        // the first materialised event shows the image and the rest of the series has none. The upload is a
+        // single storage object shared by the batch; each occurrence just references the same path.
+        if (pending && occurrences.length) {
           try {
-            const { path } = await uploadEventImage(firstOccurrence.id, pending, image.setProgress);
-            await eventApi(`/api/v1/admin/events/${firstOccurrence.id}`, { method: "PATCH", body: { imagePath: path } });
+            const { path } = await uploadEventImage(occurrences[0].id, pending, image.setProgress);
+            await Promise.all(
+              occurrences.map((o) => eventApi(`/api/v1/admin/events/${o.id}`, { method: "PATCH", body: { imagePath: path } })),
+            );
           } catch (imgErr) {
             toast(`Series created, but the image didn't upload (${imgErr?.message || "upload failed"}). Open an occurrence to add one.`, { type: "error" });
             onDone?.();
@@ -2791,13 +2922,27 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     } catch (err) {
       image.resetProgress();
       if (err instanceof ApiError && err.fieldErrors?.length) {
-        // Backend RFC-7807 validation: attach each message to its field (field names match FORM_FIELDS
-        // keys); anything unmapped goes to a summary toast.
+        // Backend RFC-7807 validation: attach each message to its field and paint it inline; anything
+        // unmapped goes to a summary toast. Single-create/edit field names match FORM_FIELDS keys directly.
+        // A SERIES create (Repeat ON, TM-1183 item 8) keys its 400 by the CreateSeriesRequest DTO's own
+        // `first*`/@AssertTrue names, which aren't FORM_FIELDS keys — SERIES_ERROR_FIELD_ALIASES maps those
+        // onto the right event field (setFieldError) or the Repeat control's inline node (paintErrors) so a
+        // past-start / bad-end-condition / weekday-mismatch 400 paints next to its input instead of a toast.
         const leftover = [];
+        const recurrenceErrors = {};
         for (const fe of err.fieldErrors) {
-          if (fields.has(fe.field)) setFieldError(fe.field, fe.message);
-          else leftover.push(fe.message);
+          const alias = SERIES_ERROR_FIELD_ALIASES.get(fe.field);
+          if (fields.has(fe.field)) {
+            setFieldError(fe.field, fe.message);
+          } else if (seriesOn && alias?.form && fields.has(alias.form)) {
+            setFieldError(alias.form, fe.message);
+          } else if (seriesOn && alias?.recurrence) {
+            recurrenceErrors[alias.recurrence] = fe.message;
+          } else {
+            leftover.push(fe.message);
+          }
         }
+        if (recurrence && Object.keys(recurrenceErrors).length) recurrence.paintErrors(recurrenceErrors);
         toast(leftover.length ? leftover.join(" ") : "Please fix the highlighted fields.", { type: "error" });
       } else {
         toast(err instanceof ApiError ? err.message : "Couldn't save the event.", { type: "error" });

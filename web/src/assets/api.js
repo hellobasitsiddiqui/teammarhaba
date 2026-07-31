@@ -581,36 +581,9 @@ export async function checkout(eventId) {
   return response.json();
 }
 
-/**
- * POST /api/v1/admin/events/series — create a RECURRING event series (TM-796, recurring events v1). The
- * admin-only sibling of the single-create POST: it takes a `CreateSeriesRequest` (the recurrence rule +
- * the first occurrence's anchor + the template snapshot — see event-form.js `buildSeriesPayload`) and, on
- * a 201, returns the created series plus the batch of generated occurrences it materialised
- * (`CreateSeriesResponse` — `{ id, frequency, interval, byWeekday, untilDate, occurrenceCount, timezone,
- * firstStartAt, …, occurrenceBatchSize, occurrences: EventResponse[] }`). Mirrors the single-create call's
- * error contract: a non-2xx is parsed as RFC-7807 and thrown as an {@link ApiError} carrying `.status` and
- * (for a 400 — two/zero end conditions, interval < 1, WEEKLY weekday mismatch, past start, bad window/tz)
- * the per-field `errors` so the form can paint them next to the offending inputs. A 401 will already have
- * refreshed/redirected via {@link apiFetch}.
- *
- * @param {object} body a `CreateSeriesRequest` (from `buildSeriesPayload`).
- * @returns {Promise<object>} the `CreateSeriesResponse` (the series + its generated occurrences).
- * @throws {ApiError} on a non-2xx response (a 403 = the caller lacks the admin role).
- */
-export async function createSeries(body) {
-  const response = await apiFetch("/api/v1/admin/events/series", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({}));
-    const fieldErrors = Array.isArray(problem.errors) ? problem.errors : [];
-    const message = problem.detail || problem.title || `Create series failed (${response.status})`;
-    throw new ApiError(response.status, message, fieldErrors);
-  }
-  return response.json();
-}
+// TM-1183 item 9: the standalone `createSeries()` export was DEAD — the series submit posts via the shared
+// `eventApi` helper (admin-events.js: `eventApi("/api/v1/admin/events/series", …)`), which already carries
+// the RFC-7807 field-error contract, and nothing imported this duplicate. Removed to keep one code path.
 
 /**
  * POST /api/v1/me/devices — register (idempotent upsert) one of the caller's push devices by its
@@ -1648,7 +1621,6 @@ if (typeof window !== "undefined") {
     adminGetUserSubscription,
     getMyOrders,
     checkout,
-    createSeries,
     resendVerification,
     requestEmailCode,
     verifyEmailCode,

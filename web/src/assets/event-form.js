@@ -1559,10 +1559,14 @@ function localDateOf(localValue) {
  * The instant/future-start/window checks stay in {@link validateEventDraft}; this only owns the rule.
  *
  * @param {object} draft the raw recurrence + start values (all strings): `frequency`, `interval`,
- *   `byWeekday`, `endMode` ("until"|"after"), `untilDate`, `afterN`, and `startAt` (to cross-check weekday).
+ *   `byWeekday`, `endMode` ("until"|"after"), `untilDate`, `afterN`, `startAt` (to cross-check weekday +
+ *   the future-start rule), and `timezone` (to resolve startAt's absolute instant for the future check).
+ * @param {object} [opts]
+ * @param {Date|number|string} [opts.now] the clock the future-start check compares against (default
+ *   `Date.now()`; injectable so tests are deterministic — mirrors the scheduling-chip helpers).
  * @returns {{errors: Record<string,string>, canSave: boolean}}
  */
-export function validateSeriesDraft(draft = {}) {
+export function validateSeriesDraft(draft = {}, { now = Date.now() } = {}) {
   const errors = {};
   const frequency = cleanText(draft.frequency).toUpperCase();
 
@@ -1607,17 +1611,40 @@ export function validateSeriesDraft(draft = {}) {
     errors.endMode = "Choose how the series ends.";
   }
 
+  // Future start (TM-1183 item 8): the series anchor `firstStartAt` must be in the FUTURE — the server
+  // 400s a past anchor (CreateSeriesRequest.isFirstStartInFuture). We mirror it client-side so the admin
+  // sees it inline before the POST rather than as a raw server 400. The startAt is a wall-clock in the
+  // event's own zone → resolve it to an absolute instant via zonedToUtcIso and compare to `now`. Only
+  // checked when a start + a real zone are present (validateEventDraft owns the "start required" edge);
+  // an unparseable start/zone just skips this rule (that field's own error already blocks Save).
+  const startInstant = zonedToUtcIso(draft.startAt, cleanText(draft.timezone));
+  if (startInstant && Date.parse(startInstant) <= toEpochMs(now)) {
+    errors.startAt = "The first occurrence must start in the future.";
+  }
+
   return { errors, canSave: Object.keys(errors).length === 0 };
 }
+
+/**
+ * The event-payload keys the series DTO (`CreateSeriesRequest`, TM-795) does NOT read — the "non-template"
+ * fields. {@link buildEventPayload} emits these for a single event, but the series template has NO column
+ * for them, so an occurrence materialised by the series engine would carry NONE of them (worst case: an
+ * Online series whose occurrences have `onlineUrl=null` — no join link). We STRIP them from the series body
+ * EXPLICITLY (TM-1184) rather than relying on Jackson to silently drop unknown fields. The create form also
+ * hides/disables these when Repeat is ON (and prevents the Online+Repeat combo), but stripping here is the
+ * load-bearing guarantee that they never ride the series wire regardless of what the form sent.
+ */
+export const SERIES_NON_TEMPLATE_KEYS = Object.freeze(["onlineUrl", "mapUrl", "openingMessage", "ageMin", "ageMax"]);
 
 /**
  * Turn a validated RECURRING draft into the `CreateSeriesRequest` body (TM-795) the series API accepts —
  * the recurrence rule + the first-occurrence anchor + the template snapshot, all in ONE object. It REUSES
  * {@link buildEventPayload} for the template + instant fields (so the template stays 1:1 with the single-
- * create body — heading/description/location/timezone/capacity/reveal/cutoff/age/price/venue and the UTC
+ * create body — heading/description/location/timezone/capacity/reveal/cutoff/price/venue and the UTC
  * instants), then RE-KEYS the four instant fields onto the DTO's `first*` anchor names and appends the
  * recurrence rule. The end condition is EXACTLY ONE of untilDate / afterN (per `endMode`); the other is
- * omitted. `byWeekday` is sent (uppercase `DayOfWeek` name) only for WEEKLY. Pure — no DOM, no fetch.
+ * omitted. `byWeekday` is sent (uppercase `DayOfWeek` name) only for WEEKLY. The non-template keys the
+ * series DTO doesn't read ({@link SERIES_NON_TEMPLATE_KEYS}) are STRIPPED explicitly. Pure — no DOM, no fetch.
  *
  * Wire shape (CreateSeriesRequest):
  *   frequency, interval, [byWeekday], (untilDate XOR afterN), timezone,
@@ -1662,13 +1689,15 @@ export function buildSeriesPayload(draft = {}) {
   if (base.visibilityStart != null) body.firstVisibilityStart = base.visibilityStart;
   if (base.visibilityEnd != null) body.firstVisibilityEnd = base.visibilityEnd;
 
-  // Template snapshot — every non-instant, non-timezone field the base payload carried (heading,
-  // description, locationText, city, venueId, capacity, locationRevealHours, bookingCutoffHours, ageMin/
-  // ageMax [forward-compat], pricePence, onlineUrl/mapUrl…). Copied through so the template stays 1:1 with
-  // a single create; the series API ignores any field it doesn't read (Spring default), so this is safe.
-  const ANCHOR_KEYS = new Set(["timezone", "startAt", "endAt", "visibilityStart", "visibilityEnd"]);
+  // Template snapshot — every field the base payload carried that IS a series-template column (heading,
+  // description, locationText, city, venueId, capacity, locationRevealHours, bookingCutoffHours, pricePence).
+  // We SKIP two groups: the instant/timezone fields (ANCHOR_KEYS — re-keyed onto first*/timezone above) AND
+  // the non-template keys the series DTO has no column for (SERIES_NON_TEMPLATE_KEYS — onlineUrl/mapUrl/
+  // openingMessage/ageMin/ageMax). Stripping the latter EXPLICITLY (TM-1184) is what stops an Online series
+  // from materialising occurrences with no join link; we do NOT lean on the server dropping unknown fields.
+  const SKIP_KEYS = new Set(["timezone", "startAt", "endAt", "visibilityStart", "visibilityEnd", ...SERIES_NON_TEMPLATE_KEYS]);
   for (const [key, value] of Object.entries(base)) {
-    if (!ANCHOR_KEYS.has(key)) body[key] = value;
+    if (!SKIP_KEYS.has(key)) body[key] = value;
   }
 
   return body;
