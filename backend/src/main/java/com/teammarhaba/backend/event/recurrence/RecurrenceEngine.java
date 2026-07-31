@@ -90,8 +90,17 @@ public final class RecurrenceEngine {
                 break; // past the inclusive until-date
             }
 
-            // Resolve this candidate's start instant in the series zone (DST-correct).
-            Instant occurrence = ZonedDateTime.of(cursorDate, timeOfDay, zone).toInstant();
+            // Resolve this candidate's start instant in the series zone (DST-correct). The anchor
+            // occurrence (index 1, cursor still on the anchor's own date) is emitted as the anchor's
+            // OWN instant rather than re-resolved from local date + time-of-day: on the fall-back
+            // doubled hour ZonedDateTime.of picks the EARLIER offset, so an anchor created on the later
+            // offset would be re-resolved an hour early — landing at or before fromInstant (the anchor
+            // minus a sliver) and being dropped, silently losing occurrence #0. Using the anchor's own
+            // instant preserves exactly what the caller anchored on. Later candidates keep the
+            // wall-clock-preserving local resolution (that IS the intended DST behaviour for them).
+            Instant occurrence = (index == 1 && cursorDate.equals(seriesStart.toLocalDate()))
+                    ? seriesStart.toInstant()
+                    : ZonedDateTime.of(cursorDate, timeOfDay, zone).toInstant();
 
             if (!occurrence.isBefore(horizonEnd)) {
                 break; // beyond the 90-day horizon; later candidates are only further out

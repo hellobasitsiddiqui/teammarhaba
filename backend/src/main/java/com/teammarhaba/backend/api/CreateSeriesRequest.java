@@ -171,6 +171,24 @@ public record CreateSeriesRequest(
         return firstStartAt == null || firstStartAt.isAfter(Instant.now());
     }
 
+    /**
+     * When an {@link #untilDate} end condition is given, it must not fall before the anchor's own local
+     * calendar date — an until-date earlier than the first occurrence yields a zero-occurrence series,
+     * which is almost certainly a client mistake and should be a clean 400 rather than a silently empty
+     * series. Compared in {@link #timezone} (the zone the recurrence is computed in) so the local
+     * calendar comparison matches how the engine steps dates. Skipped when the timezone is invalid (the
+     * timezone rule reports that) so this never throws on a bad zone id.
+     */
+    @JsonIgnore
+    @AssertTrue(message = "untilDate must not be before the first occurrence's date")
+    public boolean isUntilDateNotBeforeFirstStart() {
+        if (untilDate == null || firstStartAt == null || !isTimezoneValid()) {
+            return true; // other rules report the real problem; nothing to cross-check here
+        }
+        LocalDate firstStartDate = firstStartAt.atZone(ZoneId.of(timezone)).toLocalDate();
+        return !untilDate.isBefore(firstStartDate);
+    }
+
     /** Map onto the domain-side command object ({@code event} package stays free of api DTOs). */
     SeriesDraft toDraft() {
         return new SeriesDraft(

@@ -16,6 +16,10 @@ import com.teammarhaba.backend.auth.VerifiedUser;
 import com.teammarhaba.backend.event.Event;
 import com.teammarhaba.backend.event.EventRepository;
 import com.teammarhaba.backend.event.EventStatus;
+import com.teammarhaba.backend.event.Venue;
+import com.teammarhaba.backend.event.VenueRepository;
+import com.teammarhaba.backend.user.User;
+import com.teammarhaba.backend.user.UserRepository;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
@@ -67,6 +72,15 @@ class EventAdminCreateSeriesControllerIntegrationTest extends AbstractIntegratio
 
     @Autowired
     private AuditService audit;
+
+    @Autowired
+    private VenueRepository venues;
+
+    @Autowired
+    private UserRepository users;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private static RequestPostProcessor admin(String uid) {
         return principal(uid, "ROLE_ADMIN");
@@ -143,6 +157,30 @@ class EventAdminCreateSeriesControllerIntegrationTest extends AbstractIntegratio
         return audit.search(null, "EventSeries", String.valueOf(seriesId), PageRequest.of(0, 20)).getContent().stream()
                 .map(AuditEvent::getAction)
                 .toList();
+    }
+
+    /** How many series rows carry this (unique-per-call) template heading — scopes counts to one request. */
+    private long seriesCountByHeading(String heading) {
+        Long n = jdbc.queryForObject(
+                "select count(*) from event_series where template_heading = ?", Long.class, heading);
+        return n == null ? 0 : n;
+    }
+
+    /** How many occurrence rows (events) carry this (unique-per-call) heading. */
+    private long occurrenceCountByHeading(String heading) {
+        Long n = jdbc.queryForObject("select count(*) from events where heading = ?", Long.class, heading);
+        return n == null ? 0 : n;
+    }
+
+    /** Seed a DEACTIVATED venue directly (needs a creator row for the FK), returning its id. */
+    private long seedDeactivatedVenue() {
+        Long creatorId = users.findByFirebaseUid("series-venue-seed-uid")
+                .orElseGet(() ->
+                        users.saveAndFlush(new User("series-venue-seed-uid", "series-vseed@example.com", "Seeder")))
+                .getId();
+        Venue venue = new Venue("Series Dead Venue " + UUID.randomUUID(), "1 Old St", creatorId, Instant.now());
+        venue.setActive(false);
+        return venues.saveAndFlush(venue).getId();
     }
 
     // --- Happy path ---
@@ -233,14 +271,164 @@ class EventAdminCreateSeriesControllerIntegrationTest extends AbstractIntegratio
 
     @Test
     void nonAdminCannotCreateSeries() throws Exception {
+        // A heading unique to this call so the DB-count assertion below scopes to exactly this request's
+        // (non-)effect on the shared Postgres.
+        String heading = "Should not be created " + UUID.randomUUID();
         mockMvc.perform(post("/api/v1/admin/events/series")
                         .with(regularUser("series-plain-user"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(dailyBody("Should not be created " + UUID.randomUUID())))
+                        .content(dailyBody(heading)))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.title").value("Forbidden"))
                 .andExpect(jsonPath("$.status").value(403));
+
+        // 403 must leave NO trace — the method-security gate rejects before the service transaction runs,
+        // so neither the series row nor any occurrence is created (TM-1183 test-gap fix; @PreAuthorize
+        // throws before createSeries, but assert it rather than trust it).
+        assertThat(seriesCountByHeading(heading)).isZero();
+        assertThat(occurrenceCountByHeading(heading)).isZero();
+    }
+
+    // --- Column-cap alignment (TM-1183 item 1) ---
+
+    /**
+     * A 4001..5000-char description is valid per {@code CreateSeriesRequest} (@Size(max = 5000)) and must
+     * now persist (201). Before V59, event_series.template_description was VARCHAR(4000), so a description
+     * in this band passed bean validation and then blew up at INSERT (500). Fail-before / pass-after gate
+     * for the column widen — this asserts 201 (was 500) with a ~4500-char description.
+     */
+    @Test
+    void acceptsDescriptionBetweenFourAndFiveThousandChars() throws Exception {
+        Instant start = futureAnchor();
+        String heading = "Long description " + UUID.randomUUID();
+        String longDescription = "x".repeat(4500); // > 4000 (old column cap), <= 5000 (DTO cap)
+        String body = String.format(
+                """
+                {
+                  "frequency": "DAILY",
+                  "interval": 1,
+                  "afterN": 2,
+                  "timezone": "Europe/London",
+                  "firstStartAt": "%s",
+                  "firstEndAt": "%s",
+                  "firstVisibilityStart": "%s",
+                  "firstVisibilityEnd": "%s",
+                  "heading": "%s",
+                  "description": "%s",
+                  "locationText": "Marhaba Cafe"
+                }
+                """,
+                start,
+                start.plus(Duration.ofHours(2)),
+                start.minus(Duration.ofDays(5)),
+                start.plus(Duration.ofHours(3)),
+                heading,
+                longDescription);
+
+        mockMvc.perform(post("/api/v1/admin/events/series")
+                        .with(admin("series-admin-longdesc"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.heading").value(heading));
+
+        // The template + every occurrence actually stored the full 4500-char body.
+        assertThat(seriesCountByHeading(heading)).isEqualTo(1);
+        assertThat(occurrenceCountByHeading(heading)).isEqualTo(2);
+    }
+
+    // --- untilDate-before-anchor + up-front venue guard (TM-1183 item 3) ---
+
+    /**
+     * An {@code untilDate} earlier than the anchor's local date yields a zero-occurrence series — a client
+     * mistake that must be a clean 400 (the new {@code @AssertTrue}) rather than a silently empty series.
+     */
+    @Test
+    void rejectsUntilDateBeforeFirstStart() throws Exception {
+        Instant start = futureAnchor();
+        // until-date one day BEFORE the anchor's London calendar date.
+        String until = start.atZone(LONDON).toLocalDate().minusDays(1).toString();
+        String heading = "Until before start " + UUID.randomUUID();
+        String body = String.format(
+                """
+                {
+                  "frequency": "DAILY",
+                  "interval": 1,
+                  "untilDate": "%s",
+                  "timezone": "Europe/London",
+                  "firstStartAt": "%s",
+                  "firstEndAt": "%s",
+                  "firstVisibilityStart": "%s",
+                  "firstVisibilityEnd": "%s",
+                  "heading": "%s",
+                  "description": "Zero occurrences.",
+                  "locationText": "Nowhere"
+                }
+                """,
+                until,
+                start,
+                start.plus(Duration.ofHours(2)),
+                start.minus(Duration.ofDays(5)),
+                start.plus(Duration.ofHours(3)),
+                heading);
+
+        mockMvc.perform(post("/api/v1/admin/events/series")
+                        .with(admin("series-admin-until-before"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"));
+
+        // Nothing persisted on the reject.
+        assertThat(seriesCountByHeading(heading)).isZero();
+    }
+
+    /**
+     * A deactivated venue must be rejected UP FRONT (400), before the series row is persisted — the same
+     * guard the per-occurrence create path applies. Before TM-1183, createSeries only checked the venue
+     * per occurrence, so a series whose in-horizon window materialises zero occurrences could point at a
+     * deactivated venue undetected. Here occurrences DO materialise, but the guard now runs before any
+     * write, so the whole request is a clean 400 and no series/occurrence rows are left behind.
+     */
+    @Test
+    void rejectsDeactivatedVenueUpFront() throws Exception {
+        long venueId = seedDeactivatedVenue();
+        Instant start = futureAnchor();
+        String heading = "Dead venue " + UUID.randomUUID();
+        String body = String.format(
+                """
+                {
+                  "frequency": "DAILY",
+                  "interval": 1,
+                  "afterN": 3,
+                  "timezone": "Europe/London",
+                  "firstStartAt": "%s",
+                  "firstEndAt": "%s",
+                  "firstVisibilityStart": "%s",
+                  "firstVisibilityEnd": "%s",
+                  "heading": "%s",
+                  "description": "Points at a deactivated venue.",
+                  "locationText": "Old Hall",
+                  "venueId": %d
+                }
+                """,
+                start,
+                start.plus(Duration.ofHours(2)),
+                start.minus(Duration.ofDays(5)),
+                start.plus(Duration.ofHours(3)),
+                heading,
+                venueId);
+
+        mockMvc.perform(post("/api/v1/admin/events/series")
+                        .with(admin("series-admin-dead-venue"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        // Rejected before any write — no series, no occurrences.
+        assertThat(seriesCountByHeading(heading)).isZero();
+        assertThat(occurrenceCountByHeading(heading)).isZero();
     }
 
     // --- Edge validation (RFC-7807 400) ---
