@@ -59,10 +59,11 @@ appId: app.teammarhaba.webview
 
 # 2) The marketing tagline — static text under the <h1> (index.html <p class="tagline">Find your people —
 #    complete the circle</p>), further proof the shell rendered the hosted markup, not just a blank/splash
-#    frame. Assert the stable prefix (avoids the em-dash) — TM-1182 rebrand: the old "…Plan the meetup…"
-#    tagline no longer exists.
+#    frame. Maestro `visible:` is an ANCHORED regex (full element match), so we can't assert a bare
+#    prefix — `.*` absorbs the rest of the line (and dodges the em-dash char). TM-1182 rebrand: the old
+#    "…Plan the meetup. Make it happen." tagline no longer exists.
 - extendedWaitUntil:
-    visible: "Find your people"
+    visible: "Find your people.*"
     timeout: 30000
 - takeScreenshot: 02-tagline-rendered
 
