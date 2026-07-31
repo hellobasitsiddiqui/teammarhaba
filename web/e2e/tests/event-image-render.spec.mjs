@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { ADMIN, dbConfig } from "../fixtures.mjs";
+import { openAllEventFormSections } from "../helpers/event-form.mjs";
 
 // Event-image RENDER round-trip (TM-708) — the behavioural gate for the "uploaded event images never
 // showed" bug. The defect: the admin upload persists a Firebase Storage OBJECT PATH as the event's
@@ -102,15 +103,14 @@ test("@events @event-image an uploaded event image renders on the detail page (T
   await page.click("#admin-events-new");
   await expect(page).toHaveURL(/#\/admin\/events\/new$/);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
 
   // ── STEP 3: fill the form (a minimal visible-now event) AND pick an image. ───────────────────────
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "An event whose uploaded image must actually render.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
   await page.locator("#event-city").selectOption("London"); // City is now a dropdown (TM-1063)
-  // TM-1066: the timezone selector moved under a collapsed "More options" <details>; open it first so
-  // the select is interactable.
-  await page.locator("#event-more-options-toggle").click();
+  // TM-1195: timezone lives in the "When" section (open by default) — select it directly.
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));

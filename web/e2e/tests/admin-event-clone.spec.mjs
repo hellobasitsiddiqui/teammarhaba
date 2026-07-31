@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN } from "../fixtures.mjs";
+import { openAllEventFormSections } from "../helpers/event-form.mjs";
 
 // Admin event CLONE/DUPLICATE e2e (TM-1061, absorbing TM-796) — the automated-test gate for the clone
 // flow. Drives the whole path through the real browser + full stack:
@@ -82,10 +83,10 @@ test("@admin @admin-events admin clones an event into a pre-filled draft with a 
   // ── Create the SOURCE event (heading + an opening message we'll assert is blanked on clone). ─────
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING);
   await page.fill("#event-description", "Source event for the TM-1061 clone e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", startLocal);
   await page.fill("#event-visibility-start", localValue(visStart));
@@ -122,6 +123,7 @@ test("@admin @admin-events admin clones an event into a pre-filled draft with a 
   // ── The pre-filled CREATE draft: create route, heading copied, start shifted +7d, opening BLANK. ─
   await expect(page).toHaveURL(/#\/admin\/events\/new$/);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-heading")).toHaveValue(HEADING);
   // Opening message blanked (LOCKED decision) — never carry stale text.
   await expect(page.locator("#event-opening-message")).toHaveValue("");

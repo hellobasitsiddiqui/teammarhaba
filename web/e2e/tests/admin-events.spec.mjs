@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
 import { ADMIN, dbConfig } from "../fixtures.mjs";
+import { openAllEventFormSections } from "../helpers/event-form.mjs";
 
 // Admin events console create → edit → cancel e2e (TM-395, epic TM-390) — the automated-test gate for
 // the admin events UI. Drives the whole admin flow through the real browser + full stack and asserts
@@ -112,6 +113,10 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await expect(page.locator("#admin-event-form-back")).toBeVisible();
   const form = page.locator("#event-form");
   await expect(form).toBeVisible();
+  // TM-1195: the form is regrouped into 5 collapsible sections; "Who can join" (visibility/capacity/age)
+  // + "Booking rules" (reveal/price) are COLLAPSED by default. Expand every section so all fields below
+  // are visible + interactable (the pre-regroup single-column behaviour this spec was written against).
+  await openAllEventFormSections(page);
   // Tap a Coffee & X suggestion chip — it prefills the heading, still editable (TM-382).
   await page.click('.tm-chip[data-chip="Coffee & Code"]');
   await expect(page.locator("#event-heading")).toHaveValue("Coffee & Code");
@@ -128,9 +133,8 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await page.fill("#event-description", "Bring a laptop and a mug — we pair on the app.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
   await page.locator("#event-city").selectOption("London"); // City is now a dropdown (TM-1063)
-  // TM-1066: the timezone selector moved under a collapsed "More options" <details>; open it first so
-  // the select is interactable (an override — the derived venue-timezone case doesn't need this).
-  await page.locator("#event-more-options-toggle").click();
+  // TM-1195: the timezone selector now lives in the "When" section, which is OPEN by default — so the
+  // select is directly interactable (no More-options fold to open first; that fold was retired).
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-end", localValue(end));
@@ -191,6 +195,7 @@ test("@admin @admin-events admin creates, edits and cancels an event; it persist
   await row.getByRole("button", { name: `Edit ${HEADING}` }).click();
   await expect(page).toHaveURL(new RegExp(`#/admin/events/${created.id}/edit$`));
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-heading")).toHaveValue(HEADING); // prefilled from the event
   await page.fill("#event-heading", EDITED_HEADING);
   const patchResponse = page.waitForResponse(
@@ -262,10 +267,11 @@ test("@admin @admin-events event price: presets + a custom amount persist and re
   // New event — fill the minimum required fields + pick the £10 price preset.
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING_PRICE);
   await page.fill("#event-description", "Priced event for the TM-1076 e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
+  // TM-1195: timezone lives in the "When" section (open by default) — select it directly.
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-visibility-start", localValue(visStart));
@@ -284,6 +290,7 @@ test("@admin @admin-events event price: presets + a custom amount persist and re
   // Re-open the edit form → the £10 chip is reflected as active (the saved price re-opens).
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator('.tm-price-band .tm-chip[data-chip="£10"]')).toHaveAttribute("aria-pressed", "true");
 
   // Change to a Custom £7.50 → save → assert 750 pence persisted.
@@ -302,6 +309,7 @@ test("@admin @admin-events event price: presets + a custom amount persist and re
   // Re-open once more → a non-preset amount opens on Custom with the exact £ value prefilled.
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator('.tm-price-band .tm-chip[data-chip="Custom"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#event-price")).toHaveValue("7.50");
 
@@ -342,19 +350,21 @@ test("@admin @admin-events booking cutoff: an explicit override persists on crea
   await page.click('.admin-hub-row[href="#/admin/events"]');
   await expect(page.locator("#admin-events-view")).toBeVisible();
 
-  // New event — fill the minimum required fields. Open "More options" for the timezone AND the new
-  // booking-cutoff override (both live there).
+  // New event — fill the minimum required fields. TM-1195: the timezone now lives in the "When" section
+  // (open by default) and the booking-cutoff override in the "Booking rules" section (collapsed) — open
+  // Booking rules to reach the cutoff field.
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING_CUTOFF);
   await page.fill("#event-description", "Booking-cutoff event for the TM-1157 e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-visibility-start", localValue(visStart));
   await page.fill("#event-visibility-end", localValue(visEnd));
-  // The placeholder shows the effective inherited default (1h) BEFORE any value is entered.
+  // The placeholder shows the effective inherited default (1h) BEFORE any value is entered. The cutoff
+  // field lives in the collapsed "Booking rules" section — openAllEventFormSections opened it above.
   await expect(page.locator("#event-booking-cutoff-hours")).toHaveAttribute("placeholder", "1");
   // Set an explicit 6-hour cutoff override.
   await page.fill("#event-booking-cutoff-hours", "6");
@@ -371,7 +381,8 @@ test("@admin @admin-events booking cutoff: an explicit override persists on crea
   // Re-open the edit form → the SAVED raw override prefills the field (null-safe: an explicit value shows).
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
-  await page.locator("#event-more-options-toggle").click();
+  // The cutoff field lives in the collapsed "Booking rules" section (TM-1195) — expand all sections.
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-booking-cutoff-hours")).toHaveValue("6");
 
   // DB check: the persisted row carries the 6-hour override (not null/inherit).
@@ -416,10 +427,11 @@ test("@admin @admin-events edit-mode dirty-guard: Reset restores saved values; d
   // Create a minimal event to edit.
   await page.click("#admin-events-new");
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await page.fill("#event-heading", HEADING_RESET);
   await page.fill("#event-description", "Reset-guard event for the TM-1101 e2e.");
   await page.fill("#event-location", "Marhaba Cafe, 12 High St");
-  await page.locator("#event-more-options-toggle").click();
+  // TM-1195: timezone lives in the "When" section (open by default) — select it directly.
   await page.locator("#event-timezone").selectOption("UTC");
   await page.fill("#event-start", localValue(start));
   await page.fill("#event-visibility-start", localValue(visStart));
@@ -434,6 +446,7 @@ test("@admin @admin-events edit-mode dirty-guard: Reset restores saved values; d
   // ── Re-open the edit form. Pristine on open: the heading is the SAVED value. ────────────────────
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET);
   // The Clear/Reset button exists in edit mode (labelled "Reset").
   const reset = page.locator("#event-reset");
@@ -472,6 +485,7 @@ test("@admin @admin-events edit-mode dirty-guard: Reset restores saved values; d
   await expect(page.locator("#admin-events-view")).toBeVisible();
   await page.goto(`/#/admin/events/${created.id}/edit`);
   await expect(page.locator("#event-form")).toBeVisible();
+  await openAllEventFormSections(page);
   await expect(page.locator("#event-heading")).toHaveValue(HEADING_RESET); // saved value (the DIRTY edit was never saved)
   await page.locator("#admin-event-form-back").click();
   // No confirm dialog on a pristine exit; it navigates straight back to the list.
