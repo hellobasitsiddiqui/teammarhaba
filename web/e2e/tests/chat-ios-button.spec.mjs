@@ -79,8 +79,8 @@ test.describe('@ios-badge iOS "Coming soon" badge answers a tap — on its Sign-
     const toasts = page.locator("#tm-toasts");
     await expect(toasts).toContainText(IOS_TOAST_TEXT);
 
-    // The tap preventDefaults — it stays on the Chat screen, never navigating off to a broken target.
-    await expect(page).toHaveURL(/#\/chat$/);
-    await expect(page.locator("#chat-view")).toBeVisible();
+    // The tap preventDefaults — it stays on the login screen, never navigating off to a broken target.
+    await expect(page).toHaveURL(/#\/login$/);
+    await expect(page.locator("#auth-signed-out")).toBeVisible();
   });
 });
