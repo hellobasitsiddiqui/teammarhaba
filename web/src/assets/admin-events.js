@@ -27,6 +27,7 @@ import { buildFormSection, clear, confirmDialog, el, ensureZoneOption, fillTimeZ
 import { doodle } from "./doodles.js";
 import { isStorageConfigured, uploadEventImage, validateEventImageFile, MAX_EVENT_IMAGE_BYTES, downloadUrlForPath } from "./storage.js";
 import { eventImageRef } from "./events-core.js";
+import { revealFirstError } from "./event-form-error-reveal-core.js";
 import {
   HEADING_MAX,
   DESCRIPTION_MAX,
@@ -2282,22 +2283,25 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     recomputeSummaries();
     return errors;
   };
+  // Generalised error-force-open (TM-1197, generalising TM-1066/TM-1195). After a FAILED submit — client
+  // (paintAllErrors) OR server (RFC-7807 catch) — NO error may hide behind a collapsed section. setFieldError
+  // marks each errored input `aria-invalid="true"` regardless of which section it lives in, so the shared pure
+  // core `revealFirstError` drives purely off the live DOM: open EVERY <details> that contains an invalid field
+  // (native ancestor-walk covers all 5 sections AND the ageBand/priceControl reveals with no per-key map), then
+  // scroll the first errored field's section into view + focus that first invalid field (DOM order = reading
+  // order). Display-only — it reads the painted DOM, never readDraft/validate/payload.
+  const revealErrorsInDom = () => {
+    const formEl = fields.get("heading")?.input?.closest("form");
+    if (formEl) revealFirstError(formEl);
+  };
   const paintAllErrors = () => {
     const { errors } = validateEventDraft(readDraft(), { requireForCreate: mode === "create" });
     for (const f of FORM_FIELDS) setFieldError(f.key, errors[f.key] || "");
-    // TM-1195 (generalising TM-1066): a field in error whose home section is COLLAPSED would hide the
-    // error behind the fold on submit, so force that section OPEN and focus the field — a hidden required
-    // error is otherwise invisible, so the admin can't see or reach what's blocking Save. setFieldError
-    // already force-opens the section for these keys; here we ALSO move focus to the first such field. In
-    // the default layout only "Booking rules" (booking-cutoff) is collapsed; timezone's "When" is open.
-    for (const key of ["timezone", "bookingCutoffHours"]) {
-      if (errors[key]) {
-        const section = sectionForField(key);
-        if (section) section.setOpen(true);
-        const input = fields.get(key)?.input;
-        if (input) { input.focus(); break; }
-      }
-    }
+    // TM-1197 (generalising TM-1066/TM-1195): a field in error whose home section is COLLAPSED would hide the
+    // error behind the fold on submit — a hidden required error is otherwise invisible, so the admin can't see
+    // or reach what's blocking Save. setFieldError force-opens the section for timezone/booking-cutoff; this
+    // generalises it to EVERY section + focuses the first invalid field (DOM order), on create AND edit.
+    revealErrorsInDom();
     return errors;
   };
 
@@ -3037,6 +3041,11 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
           }
         }
         if (recurrence && Object.keys(recurrenceErrors).length) recurrence.paintErrors(recurrenceErrors);
+        // TM-1197: a SERVER (RFC-7807) field error can also land on a field in a COLLAPSED section, so apply
+        // the same generalised force-open + scroll-into-view + focus-first-invalid as the client path — no
+        // server error may hide behind a fold either (create AND edit). setFieldError above marked each
+        // routed field aria-invalid; revealErrorsInDom drives off that live DOM state.
+        revealErrorsInDom();
         toast(leftover.length ? leftover.join(" ") : "Please fix the highlighted fields.", { type: "error" });
       } else {
         toast(err instanceof ApiError ? err.message : "Couldn't save the event.", { type: "error" });
