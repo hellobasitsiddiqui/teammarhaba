@@ -313,3 +313,44 @@ test("@admin @admin-events edit form: collapsed-section header summaries update 
   await openEditForm(page, event.id);
   await expectLiveSummariesUpdate(page);
 });
+
+// ── SCENARIO 5: sticky action bar lays its buttons out as a compact single ROW (TM-1210) ──────────────────
+//
+// Regression guard for TM-1210: the pinned action bar's `.tm-form-actions` used to inherit the shared
+// mobile profile-form rule (`flex-direction: column; width: 100%`), stacking Clear all / Cancel / Save as
+// three oversized full-width buttons that read as "floating" chrome. The fix pins the bar's own row layout.
+// This asserts the three buttons sit on ONE row (near-equal top Y) at the 390px mobile width — which FAILS
+// against the old stacked layout (each button ~52px lower than the last) and PASSES with the row fix.
+async function expectActionsOnOneRow(page) {
+  const bar = page.locator("#event-actions-bar");
+  await expect(bar).toBeVisible();
+  const buttons = ["#event-reset", "#event-cancel", "#event-save"];
+  const tops = [];
+  for (const sel of buttons) {
+    const box = await page.locator(sel).boundingBox();
+    expect(box, `${sel} should have a layout box`).not.toBeNull();
+    tops.push(box.y);
+  }
+  // All three tops within a small tolerance ⇒ one row (stacked layout would differ by a full button height).
+  const spread = Math.max(...tops) - Math.min(...tops);
+  expect(spread, `action buttons should share one row (top-Y spread=${spread}px)`).toBeLessThan(8);
+  // And the bar stays compact — a single 44px button row + padding, not a ~174px three-high stack.
+  const barBox = await bar.boundingBox();
+  expect(barBox.height, `action bar should be a single compact row (h=${barBox.height}px)`).toBeLessThan(110);
+}
+
+test("@admin @admin-events create form: action-bar buttons lay out as one compact row, not a full-width stack (TM-1210)", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInAdminAndOpenConsole(page);
+  await openCreateForm(page);
+  await expectActionsOnOneRow(page);
+});
+
+test("@admin @admin-events edit form: action-bar buttons lay out as one compact row, not a full-width stack (TM-1210)", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const headers = await authHeadersFor(ADMIN);
+  const event = await createEvent(headers, { heading: `E2E Actions Edit ${Date.now()}` });
+  await signInAdminAndOpenConsole(page);
+  await openEditForm(page, event.id);
+  await expectActionsOnOneRow(page);
+});
