@@ -758,6 +758,63 @@ export function bookingRulesSummary(draft = {}) {
   return joinSummary([cutoffPart, revealPart, pricePart]);
 }
 
+/**
+ * The "Basics" collapsed-section summary (TM-1209): the event's identity — its name + format, e.g.
+ * "Coffee Morning · in person" or just "in person" before it's named. PURE — reads draft.heading + the
+ * client-only format view-state.
+ *
+ * @param {object} draft the raw form values.
+ * @returns {string} a one-line summary (never empty — the format word is always present).
+ */
+export function basicsSummary(draft = {}) {
+  const heading = cleanText(draft.heading);
+  const format = isOnlineFormat(draft.format) ? "online" : "in person";
+  return joinSummary([heading, format]);
+}
+
+// Month abbreviations for the terse When summary (locale-independent, matches the app's compact style).
+const SUMMARY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A datetime-local "YYYY-MM-DDTHH:mm" → { date: "2 Aug", time: "18:30" }, or null if blank/unparseable. */
+function parseWhenParts(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(value || ""));
+  if (!m) return null;
+  return { date: `${Number(m[3])} ${SUMMARY_MONTHS[Number(m[2]) - 1]}`, time: `${m[4]}:${m[5]}` };
+}
+
+/**
+ * The "When" collapsed-section summary (TM-1209): the date + time range, e.g. "2 Aug, 18:30–20:30" (same
+ * day), "2 Aug, 18:30 → 3 Aug, 01:00" (crosses a day), or "2 Aug, 18:30" (no end), or "no date set" before
+ * a Start is picked. PURE — reads the datetime-local wall-clock strings (draft.startAt/endAt) as they sit
+ * on the form. Recurrence isn't part of readDraft (it's a separate control) so it's not shown here — the
+ * Repeat toggle itself lives in the section.
+ *
+ * @param {object} draft the raw form values.
+ * @returns {string} a one-line summary (never empty).
+ */
+export function whenSummary(draft = {}) {
+  const start = parseWhenParts(draft.startAt);
+  if (!start) return "no date set";
+  const end = parseWhenParts(draft.endAt);
+  let when = `${start.date}, ${start.time}`;
+  if (end) when += end.date === start.date ? `–${end.time}` : ` → ${end.date}, ${end.time}`;
+  return when;
+}
+
+/**
+ * The "Where" collapsed-section summary (TM-1209): "Online" for an online event, else the location text
+ * (falling back to the city), else "no location". PURE — reads the client-only format + draft.locationText
+ * / draft.city.
+ *
+ * @param {object} draft the raw form values.
+ * @returns {string} a one-line summary (never empty).
+ */
+export function whereSummary(draft = {}) {
+  if (isOnlineFormat(draft.format)) return "Online";
+  const location = cleanText(draft.locationText) || cleanText(draft.city);
+  return location || "no location";
+}
+
 // --- validation (mirrors the API's Bean Validation + cross-field rules) ------------------------
 
 /**

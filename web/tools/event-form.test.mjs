@@ -14,6 +14,9 @@ import { test } from "node:test";
 
 import {
   shiftEndPreservingDuration,
+  basicsSummary,
+  whenSummary,
+  whereSummary,
   HEADING_MAX,
   DESCRIPTION_MAX,
   LOCATION_MAX,
@@ -1830,4 +1833,44 @@ test("shiftEndPreservingDuration: End not after Start (no positive duration) →
   // End equals Start (0-length) or End before Start (already invalid) — don't shift it further.
   assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", "2026-08-02T18:30"), null);
   assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", "2026-08-02T17:00"), null);
+});
+
+// --- all-section collapsed summaries (TM-1209) --------------------------------------------------
+// Basics / When / Where now carry a collapsed-header summary too (previously only Who-can-join /
+// Booking-rules did). Pure + defaults-aware, same " · " style.
+
+test("basicsSummary: names the event + its format", () => {
+  assert.equal(basicsSummary({ heading: "Coffee Morning", format: "in-person" }), "Coffee Morning · in person");
+});
+test("basicsSummary: an online event reads 'online'", () => {
+  assert.equal(basicsSummary({ heading: "Virtual Standup", format: "online" }), "Virtual Standup · online");
+});
+test("basicsSummary: unnamed event falls back to the format word alone (never empty/undefined)", () => {
+  assert.equal(basicsSummary({ heading: "", format: "in-person" }), "in person");
+  assert.equal(basicsSummary({}), "in person");
+});
+
+test("whenSummary: same-day event shows a compact date + time range", () => {
+  assert.equal(whenSummary({ startAt: "2026-08-02T18:30", endAt: "2026-08-02T20:30" }), "2 Aug, 18:30–20:30");
+});
+test("whenSummary: no end → just the start", () => {
+  assert.equal(whenSummary({ startAt: "2026-08-02T18:30" }), "2 Aug, 18:30");
+});
+test("whenSummary: an event crossing into the next day spells out the end date", () => {
+  assert.equal(whenSummary({ startAt: "2026-08-02T23:00", endAt: "2026-08-03T01:00" }), "2 Aug, 23:00 → 3 Aug, 01:00");
+});
+test("whenSummary: no start set → 'no date set' (never a raw blank / undefined)", () => {
+  assert.equal(whenSummary({}), "no date set");
+  assert.equal(whenSummary({ startAt: "" }), "no date set");
+});
+
+test("whereSummary: online event reads 'Online' regardless of any stale location text", () => {
+  assert.equal(whereSummary({ format: "online", locationText: "old hall" }), "Online");
+});
+test("whereSummary: in-person shows the location, falling back to the city", () => {
+  assert.equal(whereSummary({ format: "in-person", locationText: "Community Hall" }), "Community Hall");
+  assert.equal(whereSummary({ format: "in-person", locationText: "", city: "London" }), "London");
+});
+test("whereSummary: nothing set → 'no location' (never empty)", () => {
+  assert.equal(whereSummary({ format: "in-person" }), "no location");
 });

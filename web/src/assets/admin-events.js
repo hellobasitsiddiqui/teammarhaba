@@ -102,6 +102,9 @@ import {
   buildSeriesPayload,
   whoCanJoinSummary,
   bookingRulesSummary,
+  basicsSummary,
+  whenSummary,
+  whereSummary,
 } from "./event-form.js";
 import { ADMIN_EVENTS_ROUTE, adminEventNewHash, adminEventEditHash, adminEventRosterHash } from "./admin-event-route.js";
 import {
@@ -2174,7 +2177,9 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // "When" (open by default, so the common case is already visible), and booking-cutoff in "Booking rules"
   // (collapsed) — both still force their section open on error. Full generalisation to every field/section
   // is TM-1197; here we at minimum keep timezone + booking-cutoff reachable on error.
+  let basicsSection = null;
   let whenSection = null;
+  let whereSection = null;
   let bookingRulesSection = null;
   // Collapsed-section value summaries (TM-1196): the two collapsed sections show a live one-line summary
   // of their current field values on the header. These refs are set once the sections are built (below);
@@ -2182,6 +2187,12 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   let whoSection = null;
   const recomputeSummaries = () => {
     const draft = readDraft();
+    // TM-1209: every section carries a live one-line summary so a fully-collapsed form stays scannable.
+    // The summary only shows while the section is COLLAPSED (styles.css hides it on details[open]), so the
+    // three default-open sections (Basics/When/Where) get one too — visible the moment the admin folds them.
+    basicsSection?.setSummary(basicsSummary(draft));
+    whenSection?.setSummary(whenSummary(draft));
+    whereSection?.setSummary(whereSummary(draft));
     whoSection?.setSummary(whoCanJoinSummary(draft));
     bookingRulesSection?.setSummary(bookingRulesSummary(draft));
   };
@@ -2858,9 +2869,9 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
     priceControl ? priceControl.node : null,
   ].filter(Boolean);
 
-  const basicsSection = buildFormSection({ title: "Basics", open: true, children: basicsChildren });
+  basicsSection = buildFormSection({ title: "Basics", open: true, children: basicsChildren });
   whenSection = buildFormSection({ title: "When", open: true, children: whenChildren });
-  const whereSection = buildFormSection({ title: "Where", open: true, children: whereChildren });
+  whereSection = buildFormSection({ title: "Where", open: true, children: whereChildren });
   whoSection = buildFormSection({ title: "Who can join", open: false, children: whoChildren });
   bookingRulesSection = buildFormSection({ title: "Booking rules", open: false, children: bookingChildren });
   // Stable ids so the e2e + a11y can target each section's toggle (mirrors the retired More-options id).
