@@ -1787,3 +1787,54 @@ export function buildSeriesPayload(draft = {}) {
 
   return body;
 }
+
+// --- Start→End duration preservation (TM-1208) --------------------------------------------------
+//
+// When the admin moves the event Start, the End should slide with it to keep the event's length —
+// otherwise pushing Start later strands End before Start (an invalid event the admin must hand-fix).
+// This is the standard calendar-app behaviour. Pure + display-only: it only proposes a new End string
+// from the datetime-local wall-clock values; it never touches readDraft / validate / payload.
+//
+// Values are `<input type="datetime-local">` strings ("YYYY-MM-DDTHH:mm", no zone). We parse both
+// endpoints via Date.UTC (treating the wall clock AS UTC) so the delta is pure wall-clock minutes —
+// DST-agnostic, and independent of the runtime's local timezone. Preserving the WALL-CLOCK length is
+// what an admin expects (18:30–20:30 is "2 hours" regardless of any real zone/DST).
+
+/** Parse a datetime-local "YYYY-MM-DDTHH:mm[:ss]" as a wall-clock epoch (via Date.UTC). null if unparseable. */
+function parseLocalWallClock(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(value || ""));
+  if (!m) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+}
+
+/** Format a wall-clock epoch (from Date.UTC) back to a datetime-local "YYYY-MM-DDTHH:mm" string. */
+function formatLocalWallClock(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+/**
+ * Given the PREVIOUS Start, the NEW Start, and the CURRENT End (all datetime-local strings), return the
+ * End shifted by the same delta as Start so the event's wall-clock length is preserved — or `null` when
+ * there's nothing to do:
+ *   - End is blank / unparseable (End is optional — never invent one),
+ *   - either Start is blank / unparseable (no delta to apply),
+ *   - Start didn't actually move,
+ *   - the current End is not strictly after the previous Start (no positive duration to preserve — leave
+ *     an already-invalid or zero-length End alone rather than shifting it further).
+ * @param {string} prevStart  the Start value BEFORE this change ("YYYY-MM-DDTHH:mm")
+ * @param {string} newStart   the Start value AFTER this change
+ * @param {string} currentEnd the End value right now
+ * @returns {string|null} the new End string, or null for "leave End as-is"
+ */
+export function shiftEndPreservingDuration(prevStart, newStart, currentEnd) {
+  const ps = parseLocalWallClock(prevStart);
+  const ns = parseLocalWallClock(newStart);
+  const ce = parseLocalWallClock(currentEnd);
+  if (ps === null || ns === null || ce === null) return null;
+  if (ns === ps) return null; // Start didn't move
+  const durationMs = ce - ps;
+  if (durationMs <= 0) return null; // no positive duration to preserve
+  return formatLocalWallClock(ns + durationMs);
+}
