@@ -180,15 +180,22 @@ test("isHappeningNow: API signal wins; else derived from the instants", () => {
   );
   // Not started yet → not live.
   assert.equal(isHappeningNow({ startAt: "2026-07-05T18:00:00Z" }, NOON_UTC), false);
-  // Started, open-ended, still listed → treated as live.
-  assert.equal(isHappeningNow({ startAt: "2026-07-05T11:00:00Z", endAt: null }, NOON_UTC), true);
+  // Started, open-ended, within the assumed 3h duration → live (TM-1221).
+  assert.equal(isHappeningNow({ startAt: "2026-07-05T11:00:00Z", endAt: null }, NOON_UTC), true, "1h in (< 3h) → live");
+  // Open-ended PAST its 3h duration → no longer live (was: treated as live forever).
+  assert.equal(isHappeningNow({ startAt: "2026-07-05T08:00:00Z", endAt: null }, NOON_UTC), false, "4h in (> 3h) → not live (TM-1221)");
 });
 
-test("isFinished: status or a past end; open-ended is never client-side finished", () => {
+test("isFinished: status, a past end, or an open-ended event past its assumed 3h duration (TM-1221)", () => {
   assert.equal(isFinished({ status: "FINISHED" }), true);
   assert.equal(isFinished({ endAt: "2026-07-05T11:00:00Z" }, NOON_UTC), true);
   assert.equal(isFinished({ endAt: "2026-07-05T13:00:00Z" }, NOON_UTC), false);
-  assert.equal(isFinished({ startAt: "2000-01-01T00:00:00Z", endAt: null }, NOON_UTC), false);
+  // Open-ended (no endAt): finished once now is past startAt + 3h (the default duration) — mirrors the
+  // server, so a stale/missing FINISHED tag can't strand it as live forever (TM-1221).
+  assert.equal(isFinished({ startAt: "2000-01-01T00:00:00Z", endAt: null }, NOON_UTC), true, "long-past open-ended is finished");
+  assert.equal(isFinished({ startAt: "2026-07-05T08:00:00Z", endAt: null }, NOON_UTC), true, "open-ended started 4h ago (past the 3h window) is finished");
+  assert.equal(isFinished({ startAt: "2026-07-05T10:00:00Z", endAt: null }, NOON_UTC), false, "open-ended started 2h ago (within the 3h window) is still live");
+  assert.equal(isFinished({ startAt: "2026-07-05T18:00:00Z", endAt: null }, NOON_UTC), false, "not-yet-started open-ended is not finished");
 });
 
 test("listingBuckets: splits happening-now vs upcoming vs past (TM-518), preserves order, tolerates junk", () => {

@@ -1271,21 +1271,40 @@ export function isDirtyDraft(draft = {}, baseline = {}) {
  * @param {Date|number|string} [now]
  * @returns {{label: string, tone: "ok"|"off"|"muted"|"info"}}
  */
+/**
+ * The assumed run-length (ms) of an OPEN-ENDED event (no `endAt`) — mirrors the backend
+ * EVENT_DEFAULT_DURATION_HOURS (default 3h), read from the deploy-time config with a safe 3h fallback
+ * (and 3h in a non-browser test context, where there's no `window`). Gives an end-less event a
+ * client-side effective end so its lifecycle label self-corrects on the wall clock (TM-1221).
+ */
+export function openEndedDurationMs() {
+  const cfg = typeof window !== "undefined" ? window.TEAMMARHABA_CONFIG : null;
+  const h = cfg && Number.isFinite(cfg.eventDefaultDurationHours) && cfg.eventDefaultDurationHours > 0
+    ? cfg.eventDefaultDurationHours
+    : 3;
+  return h * 60 * 60 * 1000;
+}
+
 export function eventLifecycle(event = {}, now = Date.now()) {
   if (String(event.status).toUpperCase() === "CANCELLED") return { label: "Cancelled", tone: "off" };
   const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const visStart = new Date(event.visibilityStart).getTime();
   const visEnd = new Date(event.visibilityEnd).getTime();
-  // Finished: trust the server's `past` flag when present; else fall back to endAt ONLY (a null endAt =
-  // open-ended = not client-side finished, matching the member UI + server assumed-duration rule).
-  const finished =
-    typeof event.past === "boolean"
-      ? event.past
-      : event.endAt != null && Number.isFinite(new Date(event.endAt).getTime()) && t >= new Date(event.endAt).getTime();
+  // Client-side effective end (TM-1221): endAt when set, else startAt + the assumed open-ended duration
+  // (mirrors the server's EventPhasePolicy). An event is finished once now is past it — OR'd with the
+  // server's `past` flag so a stale/false `past` on an END-LESS event can no longer strand it on
+  // "Happening" forever (the old fallback finished only when endAt was set, so an open-ended event never
+  // client-finished and stayed "Happening" whenever `past` wasn't fresh).
+  const startAt = new Date(event.startAt).getTime();
+  const endMs = event.endAt != null ? new Date(event.endAt).getTime() : NaN;
+  const effectiveEnd = Number.isFinite(endMs)
+    ? endMs
+    : Number.isFinite(startAt) ? startAt + openEndedDurationMs() : NaN;
+  const clientFinished = Number.isFinite(effectiveEnd) && t >= effectiveEnd;
+  const finished = typeof event.past === "boolean" ? event.past || clientFinished : clientFinished;
   if (finished) return { label: "Finished", tone: "muted" };
   // Happening (TM-1096): started (now ≥ startAt) and not finished ⇒ live right now. `>=` so exactly at
-  // startAt reads Happening; the Finished branch above already claimed anything at/after its end.
-  const startAt = new Date(event.startAt).getTime();
+  // startAt reads Happening; the Finished branch above already claimed anything at/after its effective end.
   if (Number.isFinite(startAt) && t >= startAt) return { label: "Happening", tone: "ok" };
   if (Number.isFinite(visStart) && t < visStart) return { label: "Hidden", tone: "info" };
   if (Number.isFinite(visEnd) && t > visEnd) return { label: "Unlisted", tone: "muted" };
@@ -1309,7 +1328,12 @@ export function isPastEvent(event = {}, now = Date.now()) {
   if (typeof event.past === "boolean") return event.past;
   const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const startMs = new Date(event.startAt).getTime();
-  const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs;
+  // Open-ended (no endAt) is past once now ≥ startAt + the assumed default duration (TM-1221), NOT the
+  // instant it starts — mirrors the server's EventPhasePolicy so the console's edit/cancel gating stays
+  // in lock-step with the server-side edit/cancel reject (which allows both until the effective end).
+  const endMs = event.endAt
+    ? new Date(event.endAt).getTime()
+    : Number.isFinite(startMs) ? startMs + openEndedDurationMs() : NaN;
   return Number.isFinite(endMs) && Number.isFinite(t) && t >= endMs;
 }
 
