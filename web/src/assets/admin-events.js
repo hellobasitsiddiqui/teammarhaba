@@ -47,6 +47,7 @@ import {
   validateEventDraft,
   buildEventPayload,
   shiftEndPreservingDuration,
+  humaniseSeriesErrorMessage,
   clearedOptionalFields,
   toFormModel,
   eventLifecycle,
@@ -3060,14 +3061,18 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
         const recurrenceErrors = {};
         for (const fe of err.fieldErrors) {
           const alias = SERIES_ERROR_FIELD_ALIASES.get(fe.field);
+          // TM-1225: a SERIES 400's @AssertTrue text carries the raw CreateSeriesRequest DTO names
+          // ("firstVisibilityStart must be at or before firstStartAt …"); rewrite them to the form's own
+          // field labels so the inline error reads in plain language. A no-op for messages with no DTO term.
+          const message = seriesOn ? humaniseSeriesErrorMessage(fe.message) : fe.message;
           if (fields.has(fe.field)) {
-            setFieldError(fe.field, fe.message);
+            setFieldError(fe.field, message);
           } else if (seriesOn && alias?.form && fields.has(alias.form)) {
-            setFieldError(alias.form, fe.message);
+            setFieldError(alias.form, message);
           } else if (seriesOn && alias?.recurrence) {
-            recurrenceErrors[alias.recurrence] = fe.message;
+            recurrenceErrors[alias.recurrence] = message;
           } else {
-            leftover.push(fe.message);
+            leftover.push(message);
           }
         }
         if (recurrence && Object.keys(recurrenceErrors).length) recurrence.paintErrors(recurrenceErrors);
