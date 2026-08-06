@@ -650,15 +650,48 @@ export function visibleFromChips(startLocal, timeZone, now = Date.now()) {
 }
 
 /**
- * "Visible until" preset chips: **1h before start** — a single chip that tracks the CURRENT start draft
- * (real-hour shift, DST-correct). "" (disabled) when start is blank. This is a chip-only convenience, NOT
- * a create default (blank visibility-end is still required from the admin unless they tap it).
+ * "Visible until" preset chips: **At start**, **1 day after**, **1 week after** — all relative to the
+ * CURRENT start draft, KEEPING the start's time of day (a valid listing-end must be AT or after the start:
+ * validateEventDraft/CreateSeriesRequest require `visibilityStart ≤ startAt ≤ visibilityEnd`). The old
+ * single "1h before start" chip (TM-1225 bug) produced `start − 1h`, which is BEFORE the start — always
+ * rejected, and semantically backwards (the listing would vanish before the event began). All chips are ""
+ * (disabled) when start is blank. Chip-only convenience — a blank visibility-end is still required from the
+ * admin unless they tap one.
  * @param {string} startLocal the startAt field's current value (may be "")
  * @param {string} timeZone IANA id
  * @returns {{label: string, value: string}[]}
  */
 export function visibleUntilChips(startLocal, timeZone) {
-  return [{ label: "1h before start", value: shiftZonedLocal(startLocal, -1 * MS_PER_HOUR, timeZone) }];
+  return [
+    { label: "At start", value: cleanText(startLocal) },
+    { label: "1 day after", value: shiftLocalDays(startLocal, 1) },
+    { label: "1 week after", value: shiftLocalDays(startLocal, 7) },
+  ];
+}
+
+// The CreateSeriesRequest DTO field names (used verbatim in the server's @AssertTrue messages) → the
+// form's own field labels, so a series 400 reads in plain language instead of DTO-speak (TM-1225).
+// Longest-first so "firstVisibilityStart"/"firstVisibilityEnd" are replaced before "firstStartAt" etc.
+const SERIES_ERROR_MESSAGE_TERMS = [
+  ["firstVisibilityStart", "Visible from"],
+  ["firstVisibilityEnd", "Visible until"],
+  ["firstStartAt", "Start"],
+  ["firstEndAt", "End"],
+];
+
+/**
+ * Rewrite the raw `first*` DTO field names inside a server error message into the form's field labels
+ * (TM-1225) — e.g. "firstVisibilityStart must be at or before firstStartAt, which must be at or before
+ * firstVisibilityEnd" → "Visible from must be at or before Start, which must be at or before Visible
+ * until". Pure string replace; leaves any message with no DTO term untouched. Applied to series (Repeat
+ * ON) field errors before they're painted inline.
+ * @param {string} message the raw server message
+ * @returns {string} the humanised message
+ */
+export function humaniseSeriesErrorMessage(message) {
+  let out = String(message == null ? "" : message);
+  for (const [dto, label] of SERIES_ERROR_MESSAGE_TERMS) out = out.split(dto).join(label);
+  return out;
 }
 
 /**

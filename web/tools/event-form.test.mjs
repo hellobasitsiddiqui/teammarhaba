@@ -63,6 +63,7 @@ import {
   endChips,
   visibleFromChips,
   visibleUntilChips,
+  humaniseSeriesErrorMessage,
   revealHourChips,
   shiftZonedLocal,
   AGE_DEFAULT_MIN,
@@ -1059,18 +1060,17 @@ test("visibleFromChips '1 week before' keeps the wall clock across a DST change 
   assert.equal(chips[3].value, "2026-03-29T10:00");
 });
 
-test("visibleUntilChips: single '1h before start', tracks the current start (TM-1064)", () => {
+test("visibleUntilChips: At start / 1 day after / 1 week after, all AT-or-after the start (TM-1225)", () => {
   const chips = visibleUntilChips("2026-07-10T18:00", "Europe/London");
-  assert.equal(chips.length, 1);
-  assert.equal(chips[0].label, "1h before start");
-  assert.equal(chips[0].value, "2026-07-10T17:00");
-  // Blank start → '' (no-op).
-  assert.equal(visibleUntilChips("", "Europe/London")[0].value, "");
-  // A seeded visibility-end 1h before start passes validation (visStart < visEnd, before start).
-  const { errors } = validateEventDraft(
-    validDraft({ timezone: "Europe/London", startAt: "2026-07-10T18:00", visibilityStart: "2026-07-01T09:00", visibilityEnd: chips[0].value }),
-  );
-  assert.equal(errors.visibilityEnd, undefined);
+  assert.deepEqual(chips.map((c) => c.label), ["At start", "1 day after", "1 week after"]);
+  assert.equal(chips[0].value, "2026-07-10T18:00", "At start = the start itself");
+  assert.equal(chips[1].value, "2026-07-11T18:00", "1 day after keeps the wall-clock time");
+  assert.equal(chips[2].value, "2026-07-17T18:00", "1 week after keeps the wall-clock time");
+  // Every chip value is >= the start (server requires startAt <= visibilityEnd) — the old
+  // "1h before start" chip (start - 1h) violated exactly that and 400'd on submit.
+  for (const c of chips) assert.ok(c.value >= "2026-07-10T18:00", `${c.label} is at/after the start`);
+  // Blank start → '' (no-op) for the relative chips.
+  assert.deepEqual(visibleUntilChips("", "Europe/London").map((c) => c.value), ["", "", ""]);
 });
 
 test("revealHourChips: 1h / 24h, both within the API bounds (TM-1064)", () => {
@@ -1886,4 +1886,33 @@ test("whereSummary: in-person shows the location, falling back to the city", () 
 });
 test("whereSummary: nothing set → 'no location' (never empty)", () => {
   assert.equal(whereSummary({ format: "in-person" }), "no location");
+});
+
+// --- humaniseSeriesErrorMessage (TM-1225) -------------------------------------------------------
+// A series 400's @AssertTrue text carries the raw CreateSeriesRequest DTO names; rewrite them to the
+// form's field labels so the inline error reads in plain language.
+
+test("humaniseSeriesErrorMessage: the visibility-window ordering message reads in plain labels", () => {
+  assert.equal(
+    humaniseSeriesErrorMessage("firstVisibilityStart must be at or before firstStartAt, which must be at or before firstVisibilityEnd"),
+    "Visible from must be at or before Start, which must be at or before Visible until",
+  );
+});
+
+test("humaniseSeriesErrorMessage: end-after-start + future-start messages too", () => {
+  assert.equal(humaniseSeriesErrorMessage("firstEndAt must be after firstStartAt"), "End must be after Start");
+  assert.equal(humaniseSeriesErrorMessage("firstStartAt must be in the future"), "Start must be in the future");
+});
+
+test("humaniseSeriesErrorMessage: longest term wins (VisibilityStart not mangled by StartAt)", () => {
+  // firstVisibilityStart must map to "Visible from", NOT "Visible " + (firstStartAt→Start) fragments.
+  assert.equal(humaniseSeriesErrorMessage("firstVisibilityStart is bad"), "Visible from is bad");
+  assert.equal(humaniseSeriesErrorMessage("firstVisibilityEnd is bad"), "Visible until is bad");
+});
+
+test("humaniseSeriesErrorMessage: a message with no DTO term is left untouched; null/blank safe", () => {
+  assert.equal(humaniseSeriesErrorMessage("provide exactly one end condition"), "provide exactly one end condition");
+  assert.equal(humaniseSeriesErrorMessage(""), "");
+  assert.equal(humaniseSeriesErrorMessage(null), "");
+  assert.equal(humaniseSeriesErrorMessage(undefined), "");
 });
