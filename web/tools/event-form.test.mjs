@@ -588,6 +588,18 @@ test("eventLifecycle derives the admin status pill from status + window + now", 
     "Finished",
     "server past flag finishes it",
   );
+  // TM-1221: once an open-ended event is past its assumed 3h duration it reads Finished — even with a
+  // STALE `past: false`. The bug: it stayed "Happening" forever because the client never client-side-
+  // finished an end-less event, so a cached/stale `past` pinned it live indefinitely.
+  const wellAfterStart = "2026-07-11T00:00:00Z"; // ~30h after the 18:00 start, well past the 3h window
+  assert.equal(eventLifecycle(openEndedStarted, wellAfterStart).label, "Finished", "open-ended past 3h → Finished (was stuck Happening)");
+  assert.equal(
+    eventLifecycle({ ...openEndedStarted, past: false }, wellAfterStart).label,
+    "Finished",
+    "a stale past:false no longer strands an open-ended event on Happening",
+  );
+  // Still live within the window.
+  assert.equal(eventLifecycle(openEndedStarted, "2026-07-10T20:00:00Z").label, "Happening", "open-ended 2h in (< 3h) still Happening");
 });
 
 test("isPastEvent prefers the server `past` flag, falls back to the instants (TM-518)", () => {
@@ -595,11 +607,12 @@ test("isPastEvent prefers the server `past` flag, falls back to the instants (TM
   assert.equal(isPastEvent({ past: true, startAt: "2999-01-01T00:00:00Z" }), true, "flag wins over a future start");
   assert.equal(isPastEvent({ past: false, endAt: "2000-01-01T00:00:00Z" }), false, "flag wins over a past end");
 
-  // Fallback (no flag): ended once now ≥ endAt; open-ended uses startAt.
+  // Fallback (no flag): ended once now ≥ endAt; open-ended uses startAt + the assumed 3h duration (TM-1221).
   const now = "2026-07-11T00:00:00Z";
   assert.equal(isPastEvent({ startAt: "2026-07-10T18:00:00Z", endAt: "2026-07-10T20:00:00Z" }, now), true);
   assert.equal(isPastEvent({ startAt: "2026-07-20T18:00:00Z", endAt: "2026-07-20T20:00:00Z" }, now), false);
-  assert.equal(isPastEvent({ startAt: "2026-07-10T18:00:00Z", endAt: null }, now), true, "open-ended: past its start");
+  assert.equal(isPastEvent({ startAt: "2026-07-10T18:00:00Z", endAt: null }, now), true, "open-ended 6h past start (> 3h) is past");
+  assert.equal(isPastEvent({ startAt: "2026-07-10T22:00:00Z", endAt: null }, now), false, "open-ended 2h past start (< 3h) is NOT yet past (TM-1221)");
   assert.equal(isPastEvent({}, now), false, "no dates → not past, never throws");
 });
 

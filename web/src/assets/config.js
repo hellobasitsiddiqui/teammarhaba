@@ -45,6 +45,11 @@ window.TEAMMARHABA_CONFIG = Object.freeze({
     authEmulatorHost: null,
     storageEmulatorHost: null,
     buildVersion: "dev",
+    // Assumed run-length (hours) of an OPEN-ENDED event — mirrors the backend EVENT_DEFAULT_DURATION_HOURS
+    // (EventListingProperties, default 3). Lets the client finish an end-less event at startAt + this, so a
+    // "Happening" chip self-corrects on the wall clock instead of relying on a possibly-stale `past` flag
+    // (TM-1221). Deploy can inject a different value the same sed way as apiBaseUrl / buildVersion.
+    eventDefaultDurationHours: 3,
     opsProject: "teammarhaba",
     opsRegion: "europe-west2",
     opsService: "teammarhaba-backend",

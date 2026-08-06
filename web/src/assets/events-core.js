@@ -241,9 +241,35 @@ function statusOf(item) {
 }
 
 /**
+/**
+ * The assumed run-length (ms) of an OPEN-ENDED event (no `endAt`) — mirrors the backend
+ * EVENT_DEFAULT_DURATION_HOURS (EventListingProperties, default 3h). Read from the deploy-time config
+ * (config.js `eventDefaultDurationHours`) with a safe 3-hour fallback; in a non-browser test context
+ * there's no `window`, so it falls back to 3h. Used to give an end-less event a client-side effective
+ * end (startAt + this) so its live/finished state self-corrects on the wall clock (TM-1221).
+ */
+export function openEndedDurationMs() {
+  const cfg = typeof window !== "undefined" ? window.TEAMMARHABA_CONFIG : null;
+  const h = cfg && Number.isFinite(cfg.eventDefaultDurationHours) && cfg.eventDefaultDurationHours > 0
+    ? cfg.eventDefaultDurationHours
+    : 3;
+  return h * 60 * 60 * 1000;
+}
+
+/** The client-side effective end (ms) of an event: `endAt` when set, else `startAt + openEndedDuration`
+ *  (TM-1221). NaN when the start is unknown and there's no end. Mirrors the server's EventPhasePolicy. */
+export function effectiveEndMs(item) {
+  const end = toMs(item?.endAt);
+  if (!Number.isNaN(end)) return end;
+  const start = toMs(item?.startAt);
+  return Number.isNaN(start) ? NaN : start + openEndedDurationMs();
+}
+
+/**
  * Is this event live right now? Prefers the API's own signal (TM-412: `happeningNow` / `status`)
  * and derives from the instants only as a fallback (defensive: those fields may not exist yet).
- * An open-ended event that has started and is still in the listing is treated as live.
+ * An open-ended event that has started is live until its assumed effective end (startAt + default
+ * duration, TM-1221) — not indefinitely.
  */
 export function isHappeningNow(item, nowMs = Date.now()) {
   // The API field is `happeningNow` (EventCard/EventDetail), not `isHappeningNow` — read the real name
@@ -254,9 +280,9 @@ export function isHappeningNow(item, nowMs = Date.now()) {
   if (status === "UPCOMING" || status === "SCHEDULED" || status === "PUBLISHED") return false;
   const start = toMs(item?.startAt);
   if (Number.isNaN(start) || nowMs < start) return false; // not started (or unknown) → not live
-  const end = toMs(item?.endAt);
-  if (!Number.isNaN(end)) return nowMs < end; // started and not yet ended
-  return true; // started, open-ended, still listed → treat as live
+  // Live from start up to the effective end — for an open-ended event that's startAt + the assumed
+  // default duration (TM-1221), so it stops reading "live" instead of being treated as live forever.
+  return nowMs < effectiveEndMs(item);
 }
 
 /**
@@ -271,7 +297,12 @@ export function isFinished(item, nowMs = Date.now()) {
   if (status === "FINISHED" || status === "ENDED" || status === "PAST" || status === "CANCELLED") return true;
   const end = toMs(item?.endAt);
   if (!Number.isNaN(end)) return nowMs >= end;
-  return false;
+  // Open-ended (no endAt): finished once past the assumed effective end (startAt + default duration,
+  // TM-1221) — mirrors the server's EventPhasePolicy so the client self-finishes even when the FINISHED
+  // status tag is stale, instead of treating an end-less event as live forever.
+  const start = toMs(item?.startAt);
+  if (Number.isNaN(start)) return false; // unknown start → can't decide → not finished
+  return nowMs >= effectiveEndMs(item);
 }
 
 /**
