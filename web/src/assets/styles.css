@@ -8845,3 +8845,20 @@ body.tm-has-tabbar .tm-event-actions-bar {
     /* the tab bar already carries the home-indicator inset, so the bar's own bottom pad drops it. */
     padding-bottom: 0.75rem;
 }
+
+/* The pinned bar's button row stays a compact horizontal row at EVERY width (TM-1210). Without this it
+   inherits the shared `.tm-form-actions` mobile rule — the profile form's `flex-direction: column` +
+   `width: 100%` — which stacks Clear all / Cancel / Save(=Create series) as three oversized full-width
+   buttons that read as "floating" chrome on the pinned bar. Right-align so the primary Save sits at the
+   end (reset · cancel · save); wrap only if genuinely out of room on a very narrow screen. */
+.tm-event-actions-bar .tm-form-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+}
+.tm-event-actions-bar .tm-form-actions .tm-btn {
+    width: auto;
+    flex: 0 0 auto;
+}
