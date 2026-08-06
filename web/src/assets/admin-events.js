@@ -46,6 +46,7 @@ import {
   deriveVenueTimezone,
   validateEventDraft,
   buildEventPayload,
+  shiftEndPreservingDuration,
   clearedOptionalFields,
   toFormModel,
   eventLifecycle,
@@ -2544,6 +2545,21 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // whose value is blank (e.g. "Ends +2h" before a Start is set) renders disabled (a harmless no-op).
   const tzInput = fields.get("timezone").input;
   const startInput = fields.get("startAt").input;
+  const endInput = fields.get("endAt").input;
+  // Start→End duration preservation (TM-1208): when Start moves, slide End by the same delta so the event
+  // keeps its length and End never lands before Start (standard calendar UX). We track the Start value we
+  // last saw so each change yields a clean delta; the pure shiftEndPreservingDuration decides the new End
+  // (or null = leave End as-is: blank/unparseable End, Start unmoved, or no positive duration to preserve).
+  // Display-only — it just proposes an End string; validate/payload are untouched.
+  let prevStartValue = startInput.value;
+  const preserveEndDuration = () => {
+    const shifted = shiftEndPreservingDuration(prevStartValue, startInput.value, endInput.value);
+    if (shifted !== null && shifted !== endInput.value) {
+      endInput.value = shifted;
+      revalidate("endAt");
+    }
+    prevStartValue = startInput.value;
+  };
   const scheduleChipRows = []; // { rebuild } per row — recomputed on tz/start change
   const refreshScheduleChips = () => scheduleChipRows.forEach((r) => r.rebuild());
   const mountChipsFor = (fieldKey, compute) => {
@@ -2555,6 +2571,9 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
         if (value === "") return; // defensive: disabled chips don't fire, but never seed a blank
         input.value = value;
         revalidate(fieldKey);
+        // Seeding Start slides End to keep the event's length (TM-1208), same as a manual Start edit — and
+        // keeps prevStartValue in sync so a later manual edit computes the delta from the seeded value.
+        if (fieldKey === "startAt") preserveEndDuration();
         // Seeding Start makes the Ends / Visible-from / Visible-until chips live (they read Start), and a
         // reseed of any field can flip an ordering error — recompute EVERY row so they all stay current.
         refreshScheduleChips();
@@ -2577,7 +2596,7 @@ function buildEventForm({ mode, event = null, cloneDraft = null, onDone, onCance
   // chips are constant, but rebuilding every row is cheap and keeps a single code path). The clone
   // past-start warning (TM-1061) reads Start + timezone too, so refresh it on the same edits.
   tzInput.addEventListener("change", () => { refreshScheduleChips(); refreshPastStartWarning(); });
-  startInput.addEventListener("input", () => { refreshScheduleChips(); refreshPastStartWarning(); });
+  startInput.addEventListener("input", () => { preserveEndDuration(); refreshScheduleChips(); refreshPastStartWarning(); });
 
   // Tap-to-prefill sample templates ABOVE a textarea (TM-1065 opening message + TM-1113 description). Both
   // work identically: tapping a chip SEEDS the textarea (free text after — the TM-382 seeding contract),

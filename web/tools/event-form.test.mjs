@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  shiftEndPreservingDuration,
   HEADING_MAX,
   DESCRIPTION_MAX,
   LOCATION_MAX,
@@ -1774,4 +1775,59 @@ test("bookingRulesSummary: never shows undefined / raw blanks (TM-1196)", () => 
   assert.equal(s.includes("undefined"), false);
   assert.equal(s.includes("NaN"), false);
   assert.equal(s, "cutoff default · reveal default · Free");
+});
+
+// --- shiftEndPreservingDuration (TM-1208) -------------------------------------------------------
+// When Start moves, End slides by the same delta so the event keeps its length (and never ends before it
+// starts). Pure wall-clock math on datetime-local strings; null = "leave End as-is".
+
+test("shiftEndPreservingDuration: pushing Start later slides End by the same delta (the reported bug)", () => {
+  // 18:30–20:30 (2h). Move Start to 21:00 → End becomes 23:00, still 2h.
+  assert.equal(
+    shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", "2026-08-02T20:30"),
+    "2026-08-02T23:00",
+  );
+});
+
+test("shiftEndPreservingDuration: moving Start earlier slides End earlier too, preserving length", () => {
+  // 18:00–19:30 (1.5h). Move Start to 16:00 → End 17:30.
+  assert.equal(
+    shiftEndPreservingDuration("2026-08-02T18:00", "2026-08-02T16:00", "2026-08-02T19:30"),
+    "2026-08-02T17:30",
+  );
+});
+
+test("shiftEndPreservingDuration: a multi-day duration rolls the date correctly", () => {
+  // 2h event on the 2nd, move Start forward by 1 day + 3h → End rolls the date with it.
+  assert.equal(
+    shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-03T21:30", "2026-08-02T20:30"),
+    "2026-08-03T23:30",
+  );
+});
+
+test("shiftEndPreservingDuration: crossing midnight keeps the 2h length onto the next day", () => {
+  // 23:00–01:00 next day (2h). Move Start to 23:30 → End 01:30 next day.
+  assert.equal(
+    shiftEndPreservingDuration("2026-08-02T23:00", "2026-08-02T23:30", "2026-08-03T01:00"),
+    "2026-08-03T01:30",
+  );
+});
+
+test("shiftEndPreservingDuration: blank End → null (End is optional, never invent one)", () => {
+  assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", ""), null);
+});
+
+test("shiftEndPreservingDuration: blank / unparseable Start → null (no delta to apply)", () => {
+  assert.equal(shiftEndPreservingDuration("", "2026-08-02T21:00", "2026-08-02T20:30"), null);
+  assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "not-a-date", "2026-08-02T20:30"), null);
+});
+
+test("shiftEndPreservingDuration: Start unchanged → null (nothing to do)", () => {
+  assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T18:30", "2026-08-02T20:30"), null);
+});
+
+test("shiftEndPreservingDuration: End not after Start (no positive duration) → null (leave it alone)", () => {
+  // End equals Start (0-length) or End before Start (already invalid) — don't shift it further.
+  assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", "2026-08-02T18:30"), null);
+  assert.equal(shiftEndPreservingDuration("2026-08-02T18:30", "2026-08-02T21:00", "2026-08-02T17:00"), null);
 });
