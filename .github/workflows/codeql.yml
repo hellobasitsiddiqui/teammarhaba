@@ -32,12 +32,12 @@ jobs:
       # build-mode: none analyses source directly — no compile needed, so the analysis
       # doesn't depend on the Maven build (or Docker/Testcontainers).
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        uses: github/codeql-action/init@a2983b8bed1923f44751c5c43237f479442827b3 # v3
         with:
           languages: java-kotlin
           build-mode: none
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        uses: github/codeql-action/analyze@a2983b8bed1923f44751c5c43237f479442827b3 # v3
         with:
           category: "/language:java-kotlin"
